@@ -16,6 +16,9 @@
  */
 import { OverlayElement, drawOverlays } from './overlayEngine';
 import type { AnalysisInsight } from './overlayEngine';
+import type { CaptionSegment } from './enhancerCore';
+import { drawCaptionOverlay } from './captionSuite';
+import type { CaptionStyleId } from './captionSuite';
 
 function msg(e: unknown): string { return e instanceof Error ? e.message : String(e); }
 export function clamp(v: number, lo: number, hi: number): number { return Math.min(hi, Math.max(lo, v)); }
@@ -302,6 +305,8 @@ export function pickExportMime(format: ExportFormat): { mime: string; extension:
 // Unified export engine
 // ---------------------------------------------------------------------------
 
+export interface SfxExportCue { id: string; at: number; volume: number; blob: Blob }
+
 export interface RenderJobOptions {
   /** Kept segments, sorted, non-overlapping, in original-timeline seconds. */
   segments: { start: number; end: number }[];
@@ -314,6 +319,10 @@ export interface RenderJobOptions {
   originalVolume: number;
   /** Optional generated music bed — mixed under/over the original audio. */
   music: { blob: Blob; volume: number } | null;
+  /** Optional auto-generated captions — burned in at the same position as the live preview. */
+  captions: { segments: CaptionSegment[]; styleId: CaptionStyleId } | null;
+  /** One-shot sound-effect cues, fired the instant playback crosses their moment. */
+  sfx: SfxExportCue[];
   format: ExportFormat;
   quality: ExportQuality;
 }
@@ -383,17 +392,21 @@ export async function renderEditedVideo(
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Could not create the export canvas.');
 
-    // ---- Audio graph: original (gain) + optional looping music bed ----
+    // ---- Audio graph: original (gain), optional music bed, optional SFX cues ----
     const audioTracks: MediaStreamTrack[] = [];
     let musicSrc: AudioBufferSourceNode | null = null;
+    let dest: any = null;
+    const sfxBuffers = new Map<string, AudioBuffer>();
+    const sfxFired = new Set<string>();
     const wantsOriginal = !opts.muteOriginal && opts.originalVolume > 0.001;
     const wantsMusic = !!opts.music;
-    if (wantsOriginal || wantsMusic) {
+    const wantsSfx = Array.isArray(opts.sfx) && opts.sfx.length > 0;
+    if (wantsOriginal || wantsMusic || wantsSfx) {
       try {
         const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
         if (AC) {
           acx = new AC();
-          const dest = acx.createMediaStreamDestination();
+          dest = acx.createMediaStreamDestination();
           if (wantsOriginal) {
             const srcNode = acx.createMediaElementSource(video);
             const gOrig = acx.createGain();
@@ -413,6 +426,13 @@ export async function renderEditedVideo(
             gMusic.gain.value = clamp(opts.music.volume, 0, 1);
             musicSrc.connect(gMusic);
             gMusic.connect(dest);
+          }
+          if (wantsSfx) {
+            onNote?.('Decoding sound effects…');
+            for (const cue of opts.sfx) {
+              try { sfxBuffers.set(cue.id, await acx.decodeAudioData(await cue.blob.arrayBuffer())); }
+              catch { /* a broken clip is simply skipped */ }
+            }
           }
           for (const tr of dest.stream.getAudioTracks()) audioTracks.push(tr);
           if (acx.state === 'suspended') await acx.resume();
@@ -452,6 +472,30 @@ export async function renderEditedVideo(
       drawOverlays(ctx, fullW, fullH, video.currentTime, activeOverlays);
       drawTextOverlays(ctx, fullW, fullH, video.currentTime, opts.texts);
       ctx.restore();
+      if (opts.captions && opts.captions.segments.length) {
+        drawCaptionOverlay(ctx, W, H, video.currentTime, opts.captions.segments, opts.captions.styleId);
+      }
+    };
+
+    // One-shot SFX cues fire the instant real-time playback crosses their moment —
+    // this mirrors the live preview exactly, so export timing always matches.
+    const fireSfxAt = (time: number) => {
+      if (!wantsSfx || !dest || !acx) return;
+      for (const cue of opts.sfx) {
+        if (sfxFired.has(cue.id) || time < cue.at) continue;
+        sfxFired.add(cue.id);
+        const buf = sfxBuffers.get(cue.id);
+        if (!buf) continue;
+        try {
+          const src = acx.createBufferSource();
+          src.buffer = buf;
+          const g = acx.createGain();
+          g.gain.value = clamp(cue.volume, 0, 1);
+          src.connect(g);
+          g.connect(dest);
+          src.start();
+        } catch { /* a failed one-shot must never interrupt the export */ }
+      }
     };
 
     let segIdx = 0;
@@ -466,6 +510,7 @@ export async function renderEditedVideo(
       if (finished) return;
       const seg = kept[segIdx];
       const t = video.currentTime;
+      fireSfxAt(t);
       if (!seeking && seg && t >= seg.end - 0.04) {
         doneTime += seg.end - seg.start;
         segIdx++;

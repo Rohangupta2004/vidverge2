@@ -49,7 +49,7 @@ export function ErrLine({ children }: { children: ReactNode }) {
   );
 }
 
-function PanelHeader({ icon, color, title, right }: { icon: ReactNode; color: string; title: string; right?: ReactNode }) {
+export function PanelHeader({ icon, color, title, right }: { icon: ReactNode; color: string; title: string; right?: ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
       <span style={{ color, display: 'flex' }}>{icon}</span>
@@ -59,7 +59,7 @@ function PanelHeader({ icon, color, title, right }: { icon: ReactNode; color: st
   );
 }
 
-function Chip({ active, disabled, onClick, title, color, children }: {
+export function Chip({ active, disabled, onClick, title, color, children }: {
   active?: boolean; disabled?: boolean; onClick?: () => void; title?: string; color?: string; children: ReactNode;
 }) {
   const accent = color || P.blue;
@@ -84,7 +84,7 @@ function Chip({ active, disabled, onClick, title, color, children }: {
   );
 }
 
-function SliderRow({ label, value, min, max, step, display, accent, disabled, onChange }: {
+export function SliderRow({ label, value, min, max, step, display, accent, disabled, onChange }: {
   label: string; value: number; min: number; max: number; step: number;
   display: string; accent: string; disabled?: boolean; onChange: (v: number) => void;
 }) {
@@ -108,7 +108,7 @@ function SliderRow({ label, value, min, max, step, display, accent, disabled, on
   );
 }
 
-function PrimaryButton({ onClick, disabled, busy, gradient, shadow, children }: {
+export function PrimaryButton({ onClick, disabled, busy, gradient, shadow, children }: {
   onClick: () => void; disabled?: boolean; busy?: boolean; gradient: string; shadow: string; children: ReactNode;
 }) {
   const off = disabled || busy;
@@ -765,12 +765,14 @@ export function MusicPanel({
 export function ExportPanel({
   format, quality, exporting, progress, note, err, outputUrl, canExport, disabled,
   keptSeconds, speed, overlayCount, textCount, hasMusic, aspect, downloadExt,
+  hasCaptions, sfxCount,
   onFormat, onQuality, onExport,
 }: {
   format: ExportFormat; quality: ExportQuality; exporting: boolean; progress: number;
   note: string; err: string; outputUrl: string; canExport: boolean; disabled: boolean;
   keptSeconds: number; speed: number; overlayCount: number; textCount: number;
   hasMusic: boolean; aspect: AspectPreset; downloadExt: string;
+  hasCaptions: boolean; sfxCount: number;
   onFormat: (f: ExportFormat) => void; onQuality: (q: ExportQuality) => void; onExport: () => void;
 }) {
   const [mp4Ok] = useState(() => mp4Supported());
@@ -801,7 +803,9 @@ export function ExportPanel({
           · <b style={{ color: P.sub }}>{aspect === 'original' ? 'original frame' : aspect}</b>
           · {overlayCount} AI overlay{overlayCount === 1 ? '' : 's'}
           · {textCount} text{textCount === 1 ? '' : 's'}
+          · {hasCaptions ? 'captions burned in' : 'no captions'}
           · {hasMusic ? 'music bed mixed in' : 'no music bed'}
+          · {sfxCount} sound effect{sfxCount === 1 ? '' : 's'}
         </div>
         <PrimaryButton
           onClick={onExport}

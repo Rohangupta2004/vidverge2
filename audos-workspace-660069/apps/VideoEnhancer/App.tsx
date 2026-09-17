@@ -28,10 +28,14 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState } from 're
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   UploadCloud, Loader2, Check, AlertCircle, Sparkles, Film, RefreshCw, Wand2,
-  Play, Pause, Scissors, SlidersHorizontal, Type, Crop, Music, Download,
+  Play, Pause, Scissors, SlidersHorizontal, Type, Crop, Music, Download, Captions, Zap,
 } from 'lucide-react';
 import { useSpaceRuntime } from '../../SpaceRuntimeContext';
-import { MAX_UPLOAD_BYTES, uploadVideo, fetchVideoAsFile, workspaceToken, formatTime } from './enhancerCore';
+import {
+  MAX_UPLOAD_BYTES, uploadVideo, fetchVideoAsFile, workspaceToken, formatTime,
+  transcribeVideo, buildCaptionSegments, retimeSegmentText,
+} from './enhancerCore';
+import type { CaptionSegment } from './enhancerCore';
 import { createEnhancerJob, fetchLatestEnhancerJob, updateEnhancerJob } from './jobStore';
 import { OverlayElement, extractFrames, analyzeFrames, drawOverlays } from './overlayEngine';
 import type { AnalysisInsight } from './overlayEngine';
@@ -43,7 +47,13 @@ import {
 } from './editSuite';
 import { generateMusicBed } from './musicSuite';
 import type { GeneratedMusic } from './musicSuite';
+import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE, drawCaptionOverlay, BRAND_CORAL } from './captionSuite';
+import type { CaptionStyleId } from './captionSuite';
+import { generateSfxClip, newSfxId } from './sfxSuite';
+import type { SfxCue } from './sfxSuite';
 import { AnalyzePanel, TrimPanel, EffectsPanel, TextPanel, FramePanel, MusicPanel, ExportPanel, ErrLine } from './editorPanels';
+import { CaptionsPanel } from './captionsPanel';
+import { SfxPanel } from './sfxPanel';
 
 function msg(e: unknown): string { return e instanceof Error ? e.message : String(e); }
 
@@ -82,15 +92,17 @@ const cardStyle: CSSProperties = {
   boxShadow: '0 22px 50px -38px rgba(0,0,0,0.9)',
 };
 
-type ToolId = 'analyze' | 'trim' | 'effects' | 'text' | 'frame' | 'music' | 'export';
+type ToolId = 'analyze' | 'trim' | 'effects' | 'text' | 'captions' | 'frame' | 'music' | 'sfx' | 'export';
 
 const TOOLS: { id: ToolId; label: string; icon: any; color: string }[] = [
   { id: 'analyze', label: 'Analyze', icon: Sparkles, color: P.blue },
   { id: 'trim', label: 'Trim', icon: Scissors, color: P.amber },
   { id: 'effects', label: 'Effects', icon: SlidersHorizontal, color: P.coral },
   { id: 'text', label: 'Text', icon: Type, color: P.violet },
+  { id: 'captions', label: 'Captions', icon: Captions, color: BRAND_CORAL },
   { id: 'frame', label: 'Frame', icon: Crop, color: P.cyan },
   { id: 'music', label: 'Music', icon: Music, color: P.mint },
+  { id: 'sfx', label: 'Sound FX', icon: Zap, color: BRAND_CORAL },
   { id: 'export', label: 'Download', icon: Download, color: P.mint },
 ];
 
@@ -140,6 +152,7 @@ interface EditSnapshot {
   effects?: EffectsState; texts?: TextOverlayItem[]; aspect?: AspectPreset;
   muteOriginal?: boolean; originalVolume?: number; musicVolume?: number;
   format?: ExportFormat; quality?: ExportQuality;
+  captionsOn?: boolean; captionStyleId?: CaptionStyleId;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +224,29 @@ function VideoEnhancerApp() {
   const [musicTrack, setMusicTrack] = useState<GeneratedMusic | null>(null);
   const [musicUrl, setMusicUrl] = useState('');
   const [musicVolume, setMusicVolume] = useState(0.35);
+
+  // ---- Captions ----
+  const [captionSegments, setCaptionSegments] = useState<CaptionSegment[]>([]);
+  const captionSegmentsRef = useRef<CaptionSegment[]>([]);
+  useEffect(() => { captionSegmentsRef.current = captionSegments; }, [captionSegments]);
+  const [captionsOn, setCaptionsOn] = useState(false);
+  const captionsOnRef = useRef(false);
+  useEffect(() => { captionsOnRef.current = captionsOn; }, [captionsOn]);
+  const [captionStyleId, setCaptionStyleId] = useState<CaptionStyleId>(DEFAULT_CAPTION_STYLE);
+  const captionStyleIdRef = useRef<CaptionStyleId>(DEFAULT_CAPTION_STYLE);
+  useEffect(() => { captionStyleIdRef.current = captionStyleId; }, [captionStyleId]);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribeNote, setTranscribeNote] = useState('');
+  const [transcribeErr, setTranscribeErr] = useState('');
+
+  // ---- Sound effects ----
+  const [sfxCues, setSfxCues] = useState<SfxCue[]>([]);
+  const sfxCuesRef = useRef<SfxCue[]>([]);
+  useEffect(() => { sfxCuesRef.current = sfxCues; }, [sfxCues]);
+  const [sfxBusy, setSfxBusy] = useState(false);
+  const [sfxNote, setSfxNote] = useState('');
+  const [sfxErr, setSfxErr] = useState('');
+  const prevSfxTRef = useRef(0);
 
   // ---- Export ----
   const [format, setFormat] = useState<ExportFormat>('auto');
@@ -358,6 +394,8 @@ function VideoEnhancerApp() {
         if (Number.isFinite(ed.musicVolume)) setMusicVolume(clamp(Number(ed.musicVolume), 0, 1));
         if (ed.format === 'auto' || ed.format === 'mp4' || ed.format === 'webm') setFormat(ed.format);
         if (ed.quality === 'high' || ed.quality === 'standard' || ed.quality === 'compact') setQuality(ed.quality);
+        if (typeof ed.captionsOn === 'boolean') setCaptionsOn(ed.captionsOn);
+        if (ed.captionStyleId && CAPTION_STYLES.some((s) => s.id === ed.captionStyleId)) setCaptionStyleId(ed.captionStyleId);
       }
     } catch { /* localStorage unavailable — the DB restore still runs */ }
   }, []);
@@ -365,10 +403,10 @@ function VideoEnhancerApp() {
   useEffect(() => {
     if (!uploadedUrl && !outputUrl && !elements.length && !texts.length) return;
     try {
-      const edit: EditSnapshot = { inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality };
+      const edit: EditSnapshot = { inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality, captionsOn, captionStyleId };
       window.localStorage.setItem(VE_SNAPSHOT_KEY, JSON.stringify({ uploadedUrl, outputUrl, summary, elements, insights, edit, updatedAt: Date.now() }));
     } catch { /* no-op */ }
-  }, [uploadedUrl, outputUrl, summary, elements, insights, inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality]);
+  }, [uploadedUrl, outputUrl, summary, elements, insights, inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality, captionsOn, captionStyleId]);
 
   useEffect(() => {
     if (!accountUserId) return;
@@ -446,6 +484,9 @@ function VideoEnhancerApp() {
             ctx.translate(ox, oy);
             drawOverlays(ctx, cw, ch, v.currentTime, elementsRef.current.filter((e) => e.enabled));
             drawTextOverlays(ctx, cw, ch, v.currentTime, textsRef.current, hitRectsRef.current, selectedTextIdRef.current);
+            if (captionsOnRef.current && captionSegmentsRef.current.length) {
+              drawCaptionOverlay(ctx, cw, ch, v.currentTime, captionSegmentsRef.current, captionStyleIdRef.current);
+            }
             ctx.restore();
           }
         }
@@ -469,6 +510,21 @@ function VideoEnhancerApp() {
               v.pause();
             }
           }
+        }
+        // One-shot sound-effect cues: fire the instant playback crosses their moment.
+        if (!showingOutput && !v.paused && !v.seeking) {
+          const t = v.currentTime;
+          const prevT = prevSfxTRef.current;
+          if (prevT <= t) {
+            for (const cue of sfxCuesRef.current) {
+              if (cue.status === 'ready' && cue.url && prevT < cue.at && t >= cue.at) {
+                try { const a = new Audio(cue.url); a.volume = clamp(cue.volume, 0, 1); void a.play().catch(() => undefined); } catch { /* no-op */ }
+              }
+            }
+          }
+          prevSfxTRef.current = t;
+        } else {
+          prevSfxTRef.current = v.currentTime;
         }
         setPlayheadT((prev) => (Math.abs(prev - v.currentTime) > 0.08 ? v.currentTime : prev));
         setIsPlaying((prev) => (prev === !v.paused ? prev : !v.paused));
@@ -547,6 +603,9 @@ function VideoEnhancerApp() {
     setElements([]); setInsights([]); setSummary(''); setAnalyzeErr(''); setExportErr(''); setExportProgress(0); setExportNote('');
     setInPoint(0); setOutPointRaw(0); setSplits([]); setRemovedKeys([]);
     setTexts([]); setSelectedTextId(null);
+    setCaptionSegments([]); setCaptionsOn(false); setTranscribeErr(''); setTranscribeNote('');
+    setSfxCues((cur) => { cur.forEach((c) => { if (c.url) { try { URL.revokeObjectURL(c.url); } catch { /* no-op */ } } }); return []; });
+    setSfxErr(''); setSfxNote('');
     setActiveTool('analyze');
     setFile(f);
     setLocalUrl(URL.createObjectURL(f));
@@ -564,6 +623,10 @@ function VideoEnhancerApp() {
     setAspect('original'); setMuteOriginal(false); setOriginalVolume(1);
     setMusicTrack(null); setMusicErr(''); setMusicNote(''); setMusicPrompt('');
     setMusicUrl((prev) => { if (prev) { try { URL.revokeObjectURL(prev); } catch { /* no-op */ } } return ''; });
+    setCaptionSegments([]); setCaptionsOn(false);
+    setCaptionStyleId(DEFAULT_CAPTION_STYLE); setTranscribing(false); setTranscribeNote(''); setTranscribeErr('');
+    setSfxCues((cur) => { cur.forEach((c) => { if (c.url) { try { URL.revokeObjectURL(c.url); } catch { /* no-op */ } } }); return []; });
+    setSfxBusy(false); setSfxNote(''); setSfxErr('');
     setActiveTool('analyze');
     try { window.localStorage.removeItem(VE_SNAPSHOT_KEY); } catch { /* no-op */ }
   }, []);
@@ -612,6 +675,7 @@ function VideoEnhancerApp() {
       const src = await ensureSourceFile((n) => { if (aliveRef.current) setExportNote(n); });
       const segs = segmentsRef.current.length ? keptRanges(segmentsRef.current) : [{ start: 0, end: duration || 1 }];
       setExportNote('Compositing your edit — the video plays through once…');
+      const readySfx = sfxCuesRef.current.filter((c) => c.status === 'ready' && c.blob);
       const result = await renderEditedVideo(
         src,
         {
@@ -623,6 +687,8 @@ function VideoEnhancerApp() {
           muteOriginal,
           originalVolume,
           music: musicTrack ? { blob: musicTrack.blob, volume: musicVolume } : null,
+          captions: captionsOn && captionSegmentsRef.current.length ? { segments: captionSegmentsRef.current.filter((s) => s.enabled), styleId: captionStyleId } : null,
+          sfx: readySfx.map((c) => ({ id: c.id, at: c.at, volume: c.volume, blob: c.blob as Blob })),
           format,
           quality,
         },
@@ -655,7 +721,7 @@ function VideoEnhancerApp() {
       if (aliveRef.current) setExportErr(msg(e));
     }
     if (aliveRef.current) setExporting(false);
-  }, [exporting, analyzing, ensureSourceFile, duration, muteOriginal, originalVolume, musicTrack, musicVolume, format, quality]);
+  }, [exporting, analyzing, ensureSourceFile, duration, muteOriginal, originalVolume, musicTrack, musicVolume, format, quality, captionsOn, captionStyleId]);
 
   // ---- Music ----
   const runMusic = useCallback(async () => {
@@ -675,6 +741,77 @@ function VideoEnhancerApp() {
   const removeMusic = useCallback(() => {
     setMusicTrack(null);
     setMusicUrl((prev) => { if (prev) { try { URL.revokeObjectURL(prev); } catch { /* no-op */ } } return ''; });
+  }, []);
+
+  // ---- Captions ----
+  const runGenerateCaptions = useCallback(async () => {
+    if (transcribing || exporting) return;
+    setTranscribing(true); setTranscribeErr(''); setTranscribeNote('Preparing the audio…');
+    try {
+      const src = await ensureSourceFile((n) => { if (aliveRef.current) setTranscribeNote(n); });
+      const result = await transcribeVideo(src, (n) => { if (aliveRef.current) setTranscribeNote(n); });
+      if (!aliveRef.current) return;
+      if (result.words.length) {
+        const segs = buildCaptionSegments(result.words);
+        setCaptionSegments(segs);
+        setCaptionsOn(true);
+        setTranscribeNote(segs.length + ' caption line' + (segs.length === 1 ? '' : 's') + ' ready.');
+      } else if (result.transcript.trim()) {
+        setCaptionSegments([]);
+        setTranscribeNote('Transcribed, but without word timings captions can\u2019t be timed to the video — try again.');
+      } else {
+        setCaptionSegments([]);
+        setTranscribeNote('No speech was detected in this video.');
+      }
+    } catch (e) {
+      if (aliveRef.current) setTranscribeErr(msg(e));
+    }
+    if (aliveRef.current) setTranscribing(false);
+  }, [transcribing, exporting, ensureSourceFile]);
+
+  const toggleCaptionSegment = useCallback((id: string) => {
+    setCaptionSegments((cur) => cur.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)));
+  }, []);
+  const deleteCaptionSegment = useCallback((id: string) => {
+    setCaptionSegments((cur) => cur.filter((s) => s.id !== id));
+  }, []);
+  const editCaptionSegment = useCallback((id: string, text: string) => {
+    setCaptionSegments((cur) => cur.map((s) => (s.id === id ? retimeSegmentText(s, text) : s)));
+  }, []);
+
+  // ---- Sound effects ----
+  const addSfxCue = useCallback(async (label: string, prompt: string, seconds: number) => {
+    if (sfxBusy) return;
+    setSfxBusy(true); setSfxErr(''); setSfxNote('Generating \u201c' + label + '\u201d\u2026');
+    const id = newSfxId();
+    const at = clamp(Math.round(playheadT * 10) / 10, 0, Math.max(0, (duration || playheadT) - 0.05));
+    const placeholder: SfxCue = { id, label, prompt, at, duration: seconds, volume: 0.85, blob: null, url: '', status: 'generating' };
+    setSfxCues((cur) => [...cur, placeholder]);
+    try {
+      const res = await generateSfxClip(prompt, seconds, (n) => { if (aliveRef.current) setSfxNote(n); });
+      if (!aliveRef.current) return;
+      const url = URL.createObjectURL(res.blob);
+      setSfxCues((cur) => cur.map((c) => (c.id === id ? { ...c, blob: res.blob, url, status: 'ready', source: res.source } : c)));
+      setSfxNote(res.note);
+    } catch (e) {
+      if (aliveRef.current) {
+        setSfxCues((cur) => cur.map((c) => (c.id === id ? { ...c, status: 'error', error: msg(e) } : c)));
+        setSfxErr(msg(e));
+        setSfxNote('');
+      }
+    }
+    if (aliveRef.current) setSfxBusy(false);
+  }, [sfxBusy, playheadT, duration]);
+
+  const updateSfxCue = useCallback((id: string, patch: Partial<SfxCue>) => {
+    setSfxCues((cur) => cur.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }, []);
+  const removeSfxCue = useCallback((id: string) => {
+    setSfxCues((cur) => {
+      const target = cur.find((c) => c.id === id);
+      if (target?.url) { try { URL.revokeObjectURL(target.url); } catch { /* no-op */ } }
+      return cur.filter((c) => c.id !== id);
+    });
   }, []);
 
   // ---- Element / text / trim actions ----
@@ -797,7 +934,7 @@ function VideoEnhancerApp() {
             <div style={{ minWidth: 0 }}>
               <div className="ve-gradient-text" style={{ fontSize: 'clamp(18px, 2.4vw, 22px)', fontWeight: 850, letterSpacing: -0.4 }}>Video Enhancer</div>
               <div style={{ fontSize: 12, color: P.sub, marginTop: 2 }}>
-                AI analysis · trim & cut · effects · text · aspect ratios · AI music · one-click download
+                AI analysis · trim & cut · effects · text · auto captions · aspect ratios · AI music & sound effects · one-click download
               </div>
             </div>
           </div>
@@ -1128,6 +1265,16 @@ function VideoEnhancerApp() {
                   onUpdate={updateText} onRemove={removeText}
                 />
               )}
+              {activeTool === 'captions' && (
+                <CaptionsPanel
+                  captionsOn={captionsOn} styleId={captionStyleId} segments={captionSegments}
+                  transcribing={transcribing} note={transcribeNote} err={transcribeErr}
+                  hasVideo={!!file || !!uploadedUrl} disabled={exporting}
+                  onToggleOn={setCaptionsOn} onStyle={setCaptionStyleId} onGenerate={() => { void runGenerateCaptions(); }}
+                  onToggleSegment={toggleCaptionSegment} onDeleteSegment={deleteCaptionSegment}
+                  onEditSegment={editCaptionSegment} onSeek={seekTo}
+                />
+              )}
               {activeTool === 'frame' && (
                 <FramePanel
                   aspect={aspect} muteOriginal={muteOriginal} originalVolume={originalVolume}
@@ -1143,6 +1290,14 @@ function VideoEnhancerApp() {
                   onVolume={setMusicVolume} onRemove={removeMusic}
                 />
               )}
+              {activeTool === 'sfx' && (
+                <SfxPanel
+                  cues={sfxCues} busy={sfxBusy} note={sfxNote} err={sfxErr}
+                  playheadT={playheadT} duration={timelineDur} disabled={exporting}
+                  onAdd={(label, prompt, secs) => { void addSfxCue(label, prompt, secs); }}
+                  onUpdate={updateSfxCue} onRemove={removeSfxCue} onSeek={seekTo}
+                />
+              )}
               {activeTool === 'export' && (
                 <ExportPanel
                   format={format} quality={quality} exporting={exporting} progress={exportProgress}
@@ -1151,6 +1306,8 @@ function VideoEnhancerApp() {
                   keptSeconds={keptSecs || timelineDur} speed={effects.speed}
                   overlayCount={elements.filter((e) => e.enabled).length} textCount={texts.length}
                   hasMusic={!!musicTrack} aspect={aspect} downloadExt={outputExt}
+                  hasCaptions={captionsOn && captionSegments.some((s) => s.enabled)}
+                  sfxCount={sfxCues.filter((c) => c.status === 'ready').length}
                   onFormat={setFormat} onQuality={setQuality} onExport={() => { void runExport(); }}
                 />
               )}
