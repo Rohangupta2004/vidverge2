@@ -1,0 +1,21 @@
+{
+  "name": "@vidverge/track-b",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VidVerge Track B — Product Video module (HyperFrames). 8-stage file-based pipeline: intake → plan → assets → build → validate → render → qa → deliver. Orchestrator-agnostic, no MCP, offline-capable rendering once assets are frozen.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "pipeline": "node pipeline/run.js",
+    "intake": "node pipeline/intake/run.js",
+    "plan": "node pipeline/plan/run.js",
+    "assets": "node pipeline/assets/run.js",
+    "build": "node pipeline/build/run.js",
+    "validate": "node pipeline/validate/run.js",
+    "render": "node pipeline/render/run.js",
+    "qa": "node pipeline/qa/run.js",
+    "deliver": "node pipeline/deliver/run.js",
+    "doctor": "npx -y hyperframes doctor"
+  },
+  "$comment": "No runtime npm dependencies by design: Node built-ins + the hyperframes CLI via npx + direct HTTPS to model APIs. Keys expected in the environment: ANTHROPIC_API_KEY (plan/build/qa), and GEMINI_API_KEY or OPENAI_API_KEY (asset generation)."
+}

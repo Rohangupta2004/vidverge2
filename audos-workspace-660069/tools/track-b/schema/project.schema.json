@@ -1,0 +1,108 @@
+{
+  "$comment": "HyperFrames Project — the single source of truth for Track B (PRD §20). Studio, Product Editor, Agent, and Player all read/write ONE project shaped like this. The in-space editor mirror of the ownership map lives in lib/trackB/schema.ts and MUST stay in sync with this file (this file is canonical).",
+  "schema_version": "1.1.0",
+  "field_ownership": {
+    "$comment": "Who may write each field. PLANNER = creative structure (Opus). BUILDER = implementation (Sonnet). USER = customer-editable. SYSTEM = runtime/version/render metadata. Customer mutations touching non-USER fields are rejected, never silently applied.",
+    "PLANNER": [
+      "route",
+      "scenes[].intent",
+      "scenes[].motion",
+      "scenes[].timing_range",
+      "scenes[].asset_refs",
+      "voice.plan",
+      "checklist"
+    ],
+    "BUILDER": [
+      "scenes[].composition_file",
+      "scenes[].implementation_notes"
+    ],
+    "USER": [
+      "title",
+      "scenes[].headline",
+      "scenes[].caption",
+      "scenes[].duration_s",
+      "music.track",
+      "music.volume",
+      "brand.primary_token",
+      "brand.accent_token"
+    ],
+    "SYSTEM": [
+      "id",
+      "version",
+      "schema_version",
+      "updated_at",
+      "last_render_version",
+      "track",
+      "status",
+      "scenes[].state",
+      "scenes[].version",
+      "asset_manifest_version",
+      "composition_version",
+      "audio_version",
+      "voice.voice_id",
+      "voice.seed",
+      "voice.stability",
+      "renders",
+      "hashes"
+    ]
+  },
+  "scene_states": ["EDITABLE", "BAKED", "REGENERATING", "ERROR", "LOCKED"],
+  "$comment_states": "Track B product scenes default to EDITABLE. Track A footage embedded in a project is always BAKED. The UI must explain WHY a control is unavailable for non-EDITABLE scenes.",
+  "project_shape": {
+    "id": "string (uuid)",
+    "schema_version": "string — this file's schema_version at creation",
+    "version": "integer — bumped on EVERY successful mutation, never reused",
+    "updated_at": "ISO timestamp",
+    "last_render_version": "integer|null — project.version captured by the most recent successful render",
+    "track": "'product' (Track B) — the explicit track selection, persisted at creation, never auto-routed",
+    "status": "draft | planned | building | validated | rendered | qa_passed | delivered | error",
+    "title": "string (USER)",
+    "route": "product_launch | feature_update | product_tour | comparison | announcement (PLANNER)",
+    "source": { "kind": "url | upload | apify", "url": "string|null", "captured_at": "ISO|null" },
+    "brand": { "tokens": { "primary": "css color", "accent": "css color", "surface": "css color", "text": "css color" }, "primary_token": "token name (USER)", "accent_token": "token name (USER)" },
+    "scenes": [
+      {
+        "id": "scene-01",
+        "state": "EDITABLE",
+        "version": 1,
+        "intent": "PLANNER — what this scene must communicate",
+        "motion": "PLANNER — motion strategy (ease families, direction, ambient treatment)",
+        "timing_range": { "min_s": 2, "max_s": 8 },
+        "duration_s": 4.0,
+        "headline": "USER text — always a coded overlay, never baked into visuals",
+        "caption": "USER text",
+        "asset_refs": ["ledger ids"],
+        "composition_file": "compositions/scene-01.html (BUILDER)",
+        "implementation_notes": "BUILDER"
+      }
+    ],
+    "voice": {
+      "plan": "PLANNER voice_plan: { tone, pace, energy, accent, gender, age_range, emotional_arc, lines: [{scene_id, text}] }",
+      "voice_id": "SYSTEM — ONE voice identity per film; line regeneration MUST reuse this id",
+      "seed": "SYSTEM — reused on regeneration",
+      "stability": "SYSTEM — reused on regeneration"
+    },
+    "music": { "track": "ledger id of a frozen audio asset (USER)", "volume": "0..1 (USER)" },
+    "asset_manifest_version": "integer",
+    "composition_version": "integer",
+    "audio_version": "integer",
+    "renders": [
+      {
+        "$comment": "Every render records the exact versions it was produced from (PRD §20.2).",
+        "render_id": "string",
+        "project_version": "integer",
+        "schema_version": "string",
+        "asset_manifest_version": "integer",
+        "composition_version": "integer",
+        "audio_version": "integer",
+        "voice_version": "integer",
+        "docker": "boolean",
+        "output": "renders/<id>.mp4",
+        "sha256": "content hash of the output file",
+        "rendered_at": "ISO"
+      }
+    ],
+    "checklist": "PLANNER — the §24 Definition-of-Done checklist instantiated for this film",
+    "hashes": { "plan": "sha256", "manifest": "sha256", "compositions": "sha256" }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$comment": "Track B route catalog (PRD §routes). The planner MUST pick exactly one route; timing envelopes are enforced when validating plan.json and when the editor validates a customer's scene-duration edit.",
+  "schema_version": "1.0.0",
+  "routes": {
+    "product_launch": {
+      "label": "Product Launch",
+      "duration_s": { "min": 20, "max": 40 },
+      "arc": ["anticipation", "product_reveal", "key_value", "cta"],
+      "notes": "Build anticipation before the reveal. The reveal is the single most important beat — give it the slowest, heaviest motion. End on one unmistakable CTA."
+    },
+    "feature_update": {
+      "label": "Feature Update",
+      "duration_s": { "min": 10, "max": 20 },
+      "arc": ["before", "change", "benefit"],
+      "notes": "Show the old state honestly, cut hard on the change, land the benefit in plain words."
+    },
+    "product_tour": {
+      "label": "Product Tour",
+      "duration_s": { "min": 45, "max": 90 },
+      "arc": ["orientation", "guided_sections", "recap"],
+      "notes": "Generous pacing. Guide attention with zooms and annotations anchored to real UI regions — never a wall of screens. Scene durations vary deliberately; uniform pacing is an anti-goal."
+    },
+    "comparison": {
+      "label": "Comparison",
+      "duration_s": { "min": 15, "max": 60 },
+      "arc": ["setup", "side_by_side", "verdict"],
+      "notes": "Two-column or before/after. Fair presentation: both sides get equal visual weight until the verdict beat."
+    },
+    "announcement": {
+      "label": "Announcement",
+      "duration_s": { "min": 8, "max": 15 },
+      "arc": ["hook", "statement", "signoff"],
+      "notes": "Text-forward and typography-driven. Motion carries the emotion; imagery is secondary."
+    }
+  },
+  "scene_duration_bounds_s": { "min": 1.5, "max": 20 },
+  "$comment_bounds": "Hard per-scene bounds the Product Editor enforces on customer timing edits, in addition to the planner's per-scene timing_range."
+}

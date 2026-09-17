@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "screen-analysis.schema.json",
+  "title": "ScreenAnalysis",
+  "description": "Stage 2 output: one vision-model analysis per screenshot. Same schema serves Claude and GPT structured outputs. All geometry normalised 0-1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["screenId", "kind", "summary", "palette", "regions", "scrollable", "safeCrops"],
+  "properties": {
+    "screenId": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "enum": ["dashboard", "list", "detail", "form", "empty", "marketing", "settings"] },
+    "summary": { "type": "string", "minLength": 8, "maxLength": 300 },
+    "palette": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dominant", "ink", "accent", "isDark"],
+      "properties": {
+        "dominant": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "ink": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "accent": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "isDark": { "type": "boolean" }
+      }
+    },
+    "regions": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "role", "bbox", "text", "salience"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "role": { "type": "string", "enum": ["headline", "nav", "metric", "chart", "media", "panel", "row", "card", "cta", "form", "table", "badge", "other"] },
+          "bbox": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "number", "minimum": 0, "maximum": 1 } },
+          "text": { "type": ["string", "null"], "maxLength": 400, "description": "Transcription only - never generated. null when illegible." },
+          "salience": { "type": "number", "minimum": 0, "maximum": 1 },
+          "plateColor": { "type": ["string", "null"], "pattern": "^#[0-9a-fA-F]{6}$" }
+        }
+      }
+    },
+    "scrollable": { "type": "boolean" },
+    "safeCrops": {
+      "type": "array",
+      "maxItems": 6,
+      "items": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "number", "minimum": 0, "maximum": 1 } }
+    }
+  }
+}

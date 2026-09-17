@@ -1,0 +1,20 @@
+{
+  "$comment": "Approved music catalog for the PLATFORM orchestrator path (the trackb-orchestrator server function + trackb-render). The Product Editor's music picker and the render stage only accept tracks that appear in a project's frozen_audio, and the orchestrator freezes exactly the tracks listed here. The durable public MP3 URLs are minted ONCE via the platform's elevenlabs-audio integration (AI-generated, workspace-licensed \u2014 cleared for Track B renders, never sourced from the open web) and stored in the trackb_config row with config_key 'music_catalog'; this file is the module-side manifest of that catalog. For the file-based CLI pipeline, drop the same tracks here as <id>.mp3 next to this manifest.",
+  "version": 1,
+  "storage": "trackb_config key 'music_catalog' holds { tracks: [{ id, label, url, preset, duration_ms, license, created_at }] }",
+  "minted_by": "trackb-orchestrator ensureMusicCatalog() \u2014 one-time, on the first app tick that carries a workspace session token",
+  "tracks": [
+    {
+      "id": "music-tech-pulse",
+      "label": "Tech Pulse",
+      "source": "elevenlabs-audio integration, preset 'tech' (electronic ambient, futuristic synths), 60s loop",
+      "license": "AI-generated via the platform's ElevenLabs integration \u2014 workspace-licensed, cleared for Track B renders"
+    },
+    {
+      "id": "music-uplifting-lift",
+      "label": "Uplifting Lift",
+      "source": "elevenlabs-audio integration, preset 'uplifting' (acoustic guitar, warm and friendly), 60s loop",
+      "license": "AI-generated via the platform's ElevenLabs integration \u2014 workspace-licensed, cleared for Track B renders"
+    }
+  ]
+}

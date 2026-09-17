@@ -1,0 +1,27 @@
+{
+  "$comment": "Track B credit tiers (PRD §credit system). Configurable — the platform copy of this config lives in the trackb_config WorkspaceDB row 'credits' and overrides these defaults at runtime. Costs are per operation; ranges express the configurable envelope, 'default' is what is charged until the founder tunes it.",
+  "schema_version": "1.0.0",
+  "tiers": {
+    "text_edit":            { "min": 1,  "max": 2,   "default": 1,  "label": "Text edit (headline / caption)" },
+    "colour_edit":          { "min": 1,  "max": 2,   "default": 1,  "label": "Colour change (brand token)" },
+    "timing_edit":          { "min": 1,  "max": 2,   "default": 1,  "label": "Scene timing change" },
+    "font_style_edit":      { "min": 2,  "max": 5,   "default": 3,  "label": "Font / style change" },
+    "music_change":         { "min": 3,  "max": 5,   "default": 4,  "label": "Music track or volume change" },
+    "ai_copy_rewrite":      { "min": 3,  "max": 8,   "default": 5,  "label": "AI copy rewrite" },
+    "ai_motion_adjustment": { "min": 5,  "max": 15,  "default": 10, "label": "AI motion adjustment" },
+    "scene_regeneration":   { "min": 15, "max": 30,  "default": 20, "label": "Scene regeneration" },
+    "full_regeneration":    { "min": 40, "max": 100, "default": 60, "label": "Full film regeneration" }
+  },
+  "expensive_threshold": 5,
+  "$comment_expensive": "Any operation with cost >= expensive_threshold must show its credit cost to the customer BEFORE execution.",
+  "undo_redo_cost": 0,
+  "failed_operation_cost": 0,
+  "$comment_failed": "A failed operation that produces no billable work must never deduct credits. Deductions settle only on confirmed success; failures void the reservation.",
+  "regeneration_budget": {
+    "max_attempts_per_scene": 3,
+    "max_credits_per_scene": 90,
+    "max_credits_per_project": 300,
+    "escalation_threshold": 2,
+    "$comment": "escalation_threshold = consecutive failed regeneration attempts after which the agent must stop and escalate to a human instead of looping."
+  }
+}

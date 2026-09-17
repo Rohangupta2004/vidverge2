@@ -1,0 +1,147 @@
+{
+  "workspaceId": "f24710e5-7c6d-4db4-92b4-c2c235877575",
+  "configId": 660069,
+  "name": "VidVerge",
+  "tagline": "Turn any idea into a publish-ready video — brief to video in one shot",
+  "logoUrl": "https://storage.googleapis.com/audos-images/workspace-media/f24710e5-7c6d-4db4-92b4-c2c235877575/ef2cc460-58a5-4d2b-bb2d-0d335cadb423.png",
+  "iconUrl": "https://storage.googleapis.com/audos-images/workspace-media/f24710e5-7c6d-4db4-92b4-c2c235877575/ef2cc460-58a5-4d2b-bb2d-0d335cadb423.png",
+  "logoOnDarkUrl": "https://storage.googleapis.com/audos-images/workspace-media/f24710e5-7c6d-4db4-92b4-c2c235877575/ef2cc460-58a5-4d2b-bb2d-0d335cadb423.png",
+  "colors": {
+    "primary": "#3b82f6",
+    "highlight": "#60a5fa",
+    "contrast": "#ffffff",
+    "secondary": "#3b82f6",
+    "accent": "#ffffff",
+    "primaryScale": {
+      "50": "#eff6ff",
+      "100": "#dbeafe",
+      "200": "#bfdbfe",
+      "500": "#3b82f6",
+      "600": "#2563eb",
+      "700": "#1d4ed8",
+      "900": "#1e3a8a"
+    },
+    "highlightScale": {
+      "50": "#eff6ff",
+      "100": "#dbeafe",
+      "200": "#bfdbfe",
+      "500": "#60a5fa",
+      "600": "#3b82f6",
+      "700": "#2563eb",
+      "900": "#1e40af"
+    },
+    "surfaces": {
+      "page": "#0A0F1E",
+      "pageAlt": "#0D1528",
+      "gradientFrom": "#101A30",
+      "gradientVia": "#0A0F1E",
+      "gradientTo": "#0D1528",
+      "card": "#10182A",
+      "cardHover": "#15213A",
+      "panel": "#121C30",
+      "panelStrong": "#18243A",
+      "muted": "#111B2E",
+      "accentSoft": "#132A50",
+      "border": "#263650",
+      "borderStrong": "#3A4B68"
+    },
+    "text": {
+      "primary": "#F8FAFC",
+      "secondary": "#CBD5E1",
+      "brand": "#60A5FA",
+      "accent": "#93C5FD",
+      "muted": "#94A3B8",
+      "onPrimary": "#FFFFFF",
+      "onHighlight": "#FFFFFF",
+      "onContrast": "#3B82F6"
+    },
+    "semantic": {
+      "success": "#16a34a",
+      "warning": "#d97706",
+      "danger": "#dc2626"
+    },
+    "shell": {
+      "buttonText": "#FFFFFF",
+      "accentButtonText": "#FFFFFF",
+      "dockText": "#FFFFFF",
+      "icon": "#60A5FA",
+      "shadow": "#050814",
+      "shadowStrong": "#02040A"
+    }
+  },
+  "palette": {
+    "primary": "#3b82f6",
+    "highlight": "#60a5fa",
+    "contrast": "#ffffff",
+    "secondary": "#3b82f6",
+    "accent": "#ffffff",
+    "primaryScale": {
+      "50": "#eff6ff",
+      "100": "#dbeafe",
+      "200": "#bfdbfe",
+      "500": "#3b82f6",
+      "600": "#2563eb",
+      "700": "#1d4ed8",
+      "900": "#1e3a8a"
+    },
+    "highlightScale": {
+      "50": "#eff6ff",
+      "100": "#dbeafe",
+      "200": "#bfdbfe",
+      "500": "#60a5fa",
+      "600": "#3b82f6",
+      "700": "#2563eb",
+      "900": "#1e40af"
+    },
+    "surfaces": {
+      "page": "#0A0F1E",
+      "pageAlt": "#0D1528",
+      "gradientFrom": "#101A30",
+      "gradientVia": "#0A0F1E",
+      "gradientTo": "#0D1528",
+      "card": "#10182A",
+      "cardHover": "#15213A",
+      "panel": "#121C30",
+      "panelStrong": "#18243A",
+      "muted": "#111B2E",
+      "accentSoft": "#132A50",
+      "border": "#263650",
+      "borderStrong": "#3A4B68"
+    },
+    "text": {
+      "primary": "#F8FAFC",
+      "secondary": "#CBD5E1",
+      "brand": "#60A5FA",
+      "accent": "#93C5FD",
+      "muted": "#94A3B8",
+      "onPrimary": "#FFFFFF",
+      "onHighlight": "#FFFFFF",
+      "onContrast": "#3B82F6"
+    },
+    "semantic": {
+      "success": "#16a34a",
+      "warning": "#d97706",
+      "danger": "#dc2626"
+    },
+    "shell": {
+      "buttonText": "#FFFFFF",
+      "accentButtonText": "#FFFFFF",
+      "dockText": "#FFFFFF",
+      "icon": "#60A5FA",
+      "shadow": "#050814",
+      "shadowStrong": "#02040A"
+    }
+  },
+  "typography": {
+    "font": "Inter",
+    "category": "sans-serif",
+    "weights": [
+      400,
+      500,
+      600,
+      700
+    ],
+    "headingFont": "Inter",
+    "bodyFont": "Inter"
+  }
+}

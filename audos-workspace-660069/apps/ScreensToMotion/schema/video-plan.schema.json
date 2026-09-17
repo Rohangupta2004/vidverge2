@@ -1,0 +1,187 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "video-plan.schema.json",
+  "title": "VideoPlan",
+  "description": "Stage 3 output: the schema-validated motion plan. A scene is either a screenshot scene (kind absent or 'screen': screenId + bed + accents + ui required) or a clip scene (kind 'clip': src + trim + grade + audio required) - the kind-conditional required fields, crops inside safeCrops, bed alternation, 20-40s total, budgets, rhythm, clip lengths, and beat alignment are enforced in src/plan/validate.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["meta", "motion", "theme", "ground", "scenes"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "fps", "width", "height"],
+      "properties": {
+        "title": { "type": "string", "maxLength": 120 },
+        "fps": { "type": "number", "enum": [30] },
+        "width": { "type": "number", "enum": [1920] },
+        "height": { "type": "number", "enum": [1080] }
+      }
+    },
+    "motion": { "type": "string", "enum": ["calm", "snappy", "cinematic", "kinetic"] },
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "accent", "isDark"],
+      "properties": {
+        "source": { "type": "string", "enum": ["derived"] },
+        "accent": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "isDark": { "type": "boolean" }
+      }
+    },
+    "ground": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["style", "from", "grain", "vignette"],
+      "properties": {
+        "style": { "type": "string", "enum": ["mesh", "wash", "flat"] },
+        "from": { "type": "string", "enum": ["palette"] },
+        "grain": { "type": "number", "minimum": 0.02, "maximum": 0.04 },
+        "vignette": { "type": "number", "minimum": 0, "maximum": 0.08 }
+      }
+    },
+    "sync": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["bpm", "offsetMs", "snap", "landOn"],
+      "properties": {
+        "bpm": { "type": "number", "minimum": 60, "maximum": 200 },
+        "offsetMs": { "type": "number", "minimum": 0 },
+        "snap": { "type": "string", "enum": ["beat", "bar"] },
+        "landOn": { "type": "string", "enum": ["settle", "start"] }
+      }
+    },
+    "music": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "gainDb": { "type": "number", "minimum": -24, "maximum": 0 }
+      }
+    },
+    "uiGrade": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["brightness", "contrast", "saturate"],
+      "properties": {
+        "brightness": { "type": "number", "minimum": 0.8, "maximum": 1.2 },
+        "contrast": { "type": "number", "minimum": 0.7, "maximum": 1.1 },
+        "saturate": { "type": "number", "minimum": 0.6, "maximum": 1.25 }
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "duration"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["screen", "clip"] },
+          "duration": { "type": "number", "minimum": 24, "maximum": 420 },
+          "screenId": { "type": "string", "minLength": 1 },
+          "bed": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["op", "params"],
+            "properties": {
+              "op": { "type": "string", "enum": ["push", "pan", "scrollSim", "deviceTilt"] },
+              "params": { "type": "object" }
+            }
+          },
+          "accents": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["op", "params"],
+              "properties": {
+                "op": { "type": "string", "enum": ["focus", "lift", "parallax", "cursor", "highlight", "callout", "maskWipe", "compare"] },
+                "params": { "type": "object" },
+                "from": { "type": "number", "minimum": 0 },
+                "to": { "type": "number", "minimum": 0 }
+              }
+            }
+          },
+          "ui": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["op", "regionId", "params", "at", "duration"],
+              "properties": {
+                "op": { "type": "string", "enum": ["countUp", "chartDraw", "listStagger", "skeleton", "typeIn", "progressFill", "toggleFlip", "statusFlip", "notify", "badgePop", "tabSlide", "ripple"] },
+                "regionId": { "type": "string" },
+                "params": { "type": "object" },
+                "at": { "type": "number", "minimum": 0 },
+                "duration": { "type": "number", "minimum": 24 }
+              }
+            }
+          },
+          "src": { "type": "string", "minLength": 1 },
+          "trim": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "number", "minimum": 0 }
+          },
+          "grade": { "type": "string", "enum": ["auto", "none"] },
+          "audio": { "type": "string", "enum": ["strip", "duck"] },
+          "out": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["carry"],
+            "properties": {
+              "carry": { "type": "string", "enum": ["left", "right", "up", "down", "in", "out"] }
+            }
+          },
+          "plate": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["screenId", "corners", "blur", "glow", "reflection"],
+            "properties": {
+              "screenId": { "type": "string", "minLength": 1 },
+              "corners": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["at", "tl", "tr", "br", "bl"],
+                  "properties": {
+                    "at": { "type": "number", "minimum": 0 },
+                    "tl": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": 0, "maximum": 1 } },
+                    "tr": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": 0, "maximum": 1 } },
+                    "br": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": 0, "maximum": 1 } },
+                    "bl": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": 0, "maximum": 1 } }
+                  }
+                }
+              },
+              "blur": { "type": "number", "minimum": 0, "maximum": 6 },
+              "glow": { "type": "number", "minimum": 0, "maximum": 0.4 },
+              "reflection": { "type": "number", "minimum": 0.04, "maximum": 0.08 }
+            }
+          },
+          "overlay": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["size", "text", "side"],
+            "properties": {
+              "size": { "type": "string", "enum": ["eyebrow", "headline", "body", "caption"] },
+              "text": { "type": "string", "minLength": 1, "maxLength": 90 },
+              "side": { "type": "string", "enum": ["top", "bottom", "left", "right"] },
+              "icon": { "type": ["string", "null"], "enum": ["check", "arrow", "spark", "bolt", "shield", "lock", "clock", "chart", "users", "search", "bell", "send", "plus", "filter", "sync", "globe", "doc", "card", "flag", "seal", null] },
+              "at": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

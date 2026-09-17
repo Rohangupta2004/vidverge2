@@ -1,0 +1,132 @@
+{
+  "id": "workspace-660069",
+  "name": "VidVerge",
+  "description": "VidVerge brings two focused video workflows together: create polished product videos or enhance footage you already have.",
+  "version": "1.0.0",
+  "apps": [
+    {
+      "id": "product-video",
+      "name": "Product Video",
+      "description": "Track B: designed product films built with HyperFrames from your real product. Lands on a My Videos gallery of 3D cards, then a full-screen agentic editor — live-autosaved text, timing, music, brand colours, drag-to-reorder scenes, credit-gated regeneration, and an 'Ask AI to edit' bar. Creation offers a Choose Style step with six options: the standard HyperFrames Product Launch film, plus five styled pipelines (Clip Style hand-cut paper collage, Cinematic Trailer, Text-to-Video (English) generated straight from a typed description, Documentary, Product Showcase), each with its own script strategy, image strategy, motion parameters and musical register. A styled pick opens a guided seven-step flow: style, product or typed description, length (which sets the scene budget), the SCRIPT REVIEW GATE where Claude writes a hook plus per-scene visual directions plus a call to action and nothing renders until the customer approves it, the frame prompts, the ElevenLabs sound (narration voiceover, background music, an optional sound-effects brief and an optional captions toggle, all previewable first), then generate. The server pipeline renders every shot, joins them, and lays the narration, music, sound effects and optional burned-in captions over the film in a final pass, with a .SRT caption file alongside. A Saved Videos tab is the unified, self-healing gallery of every finished video from both flows, persisted in the database; a Product Launch film gets the same sound and captions step from a Sound button on its card. Once initiated, the production pipeline self-drives to completion in the background — a 5-minute server sweep adopts finished renders and submits the next shot even with the tab closed.",
+      "icon": "Rocket",
+      "component": "apps/ProductStudio/App.tsx"
+    },
+    {
+      "id": "video-enhancer",
+      "name": "Video Enhancer",
+      "description": "Full AI editing suite for footage you already have, in a dark editor around a centered preview. Analyze: an AI vision model watches sampled frames, reports smart findings (a supporting chart appears only when a finding carries a score, comparison, recommendation or multi-step explanation — plain findings stay text) and designs adaptive graphic overlays for that exact content — motion-path arrows, callouts with leader lines, numbered step badges, pulsing highlight rings, labels and mini flow diagrams (strictly graphics, never captions), each previewing live, color-coded, toggleable and click-to-seek. Full toolset: trim/cut with draggable in/out timeline handles, split-at-playhead and per-segment keep/cut; brightness/contrast/saturation/blur/vignette filters plus 0.5×–2× speed; draggable timed text overlays with size, color and duration; 16:9, 9:16, 1:1 and 4:5 aspect presets as a centered cover-crop; original-audio mute/volume; and an ElevenLabs music bed from a mood prompt or preset style with a music-vs-original volume slider (uses the founder's ELEVENLABS_API_KEY when configured, built-in engine otherwise). Export composites the whole edit in one pass into a downloadable MP4 (or WebM) with High/Standard/Compact quality options; the output is stored durably and replaces the raw upload in the player with a View-original toggle. Also the handoff target for SceneForge: a finished SceneForge video opened \"in the Editor\" or \"sent to the Enhancer\" loads here automatically, ready to trim, overlay, rescore or enhance.",
+      "icon": "Sparkles",
+      "component": "apps/VideoEnhancer/App.tsx"
+    },
+    {
+      "id": "script-to-video",
+      "name": "Script-to-Video",
+      "description": "The 10-stage autonomous pipeline: give it a word, a line, a whole script (never rewritten), an uploaded script file, or a product URL — come back to a finished video. It writes the script, freezes a scene plan, generates a character bible with a likeness guard, films every scene with the SAME character (chained last-frame, drawn bookends, or auto-picked strategy), has an AI judge check every clip and repair failures once with a rewritten prompt (Omni fallback — never a blind retry), then assembles one MP4 with the joins checked. A live Render room shows the machine working; runs survive tab-close and a 5-minute background sweep recovers stalls (a judge that returns no verdict within 15 minutes auto-advances the scene on trust). Review offers per-clip verdicts and regeneration; Finish offers opt-in captions, end card and music (keep the film's own sound or rescore — dialogue always stays the model's). Pick a target length (15s/30s/45s/60s/90s/120s — default 30s) and a model (Veo 3.1 fast default, Omni Flash fallback). The length is a starting point, not a gate: each shot is budgeted from the words it actually speaks, and a script that reads longer than the pick expands the film to fit it (up to a 120s ceiling) instead of being rejected. The blueprint shows the planned shot count, the real running time and the estimated credit cost for you to confirm or cancel before rendering. Legacy projects stay accessible in the Library.",
+      "icon": "Clapperboard",
+      "component": "apps/ScriptToVideo/App.tsx"
+    },
+    {
+      "id": "sceneforge",
+      "name": "SceneForge",
+      "description": "SceneForge v2 is an eight-step avatar-first explainer studio coordinated by Verger: topic and deep-research script, editable script approval, live HeyGen v3 avatar/voice controls, four new visual systems plus archived styles, timestamped supporting-scene planning driven by the script writer's own per-beat image briefs, a live pipeline board where each scene card shows its own thumbnail and status the moment that scene's image lands (Images X/Y · Code X/Y, with Assemble locked until every scene has both), audio-preserving assembly with six quality checks, an inline player so the finished film is watchable before download, an ElevenLabs music bed with its own audio preview that is mixed under a 16:9 master, and scene-level editor handoff. Picture models: GPT Image 2, the platform default, DALL·E 3 and Nano Banana 2, each falling back to the platform model rather than losing a scene. Supports native 16:9 and 9:16, user-uploaded scene images, one reusable Veo motion background, model/default settings, resumable WorkspaceDB projects, and natural-language script, scene, style, and assembly changes.",
+      "icon": "Film",
+      "component": "apps/SceneForge/App.tsx"
+    },
+    {
+      "id": "asset-generator",
+      "name": "Asset Generator",
+      "description": "Standalone AI asset studio pre-loaded with the Netflix vs Blockbuster 6-scene storyboard. Dark two-column layout: the left column lists the six scene cards — each with its voiceover line, a live status badge (WAITING / GENERATING / DONE / ERROR), a thumbnail and its own Generate/Regenerate button — and the right column shows a large preview of the selected scene's finished 9:16 image with a Download button and the full art-directed prompt. Every scene carries a detailed hand-written image brief (subject, composition, lighting, mood — far richer than the voiceover line). 'Generate All' runs the six scenes sequentially with a progress bar and a Stop control. PLATFORM-ONLY generation (Sep 15 2026): all images are made by the asset-image-gen server function through the platform's wallet-billed image engine with durable GCS URLs — no founder-owned API keys, no BYOK, no external providers, nothing to configure. Finished URLs persist locally so the set survives a refresh.",
+      "icon": "Image",
+      "component": "apps/AssetGenerator/App.tsx"
+    }
+  ],
+  "terminology": {
+    "reading": "reading",
+    "writing": "writing",
+    "creating": "creating",
+    "deleting": "deleting",
+    "editing": "editing"
+  },
+  "desktop": {
+    "theme": {
+      "gradient": "from-[#101A30] to-[#0A0F1E]",
+      "accentColor": "#3B82F6",
+      "dockStyle": "glass"
+    },
+    "themeTokens": {
+      "typography": {
+        "headingFont": "Inter",
+        "bodyFont": "Inter",
+        "fontFamily": "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+      },
+      "shell": {
+        "accentColor": "#3B82F6",
+        "dockStyle": "glass",
+        "pageBackground": "radial-gradient(1100px 560px at 50% -10%, rgba(59,130,246,0.18), transparent 60%), #0A0F1E",
+        "gateBackground": "radial-gradient(1200px 620px at 50% -12%, rgba(59,130,246,0.20), transparent 62%), #0A0F1E",
+        "panelBackground": "rgba(16,24,42,0.92)",
+        "panelStrongBackground": "#18243A"
+      },
+      "cssVariables": {
+        "--space-surface-bg": "#0A0F1E",
+        "--space-surface-gradient-from": "#101A30",
+        "--space-surface-gradient-via": "#0A0F1E",
+        "--space-surface-gradient-to": "#0D1528",
+        "--space-surface-card": "#10182A",
+        "--space-surface-panel": "#121C30",
+        "--space-surface-panel-strong": "#18243A",
+        "--space-surface-muted": "#111B2E",
+        "--space-surface-accent-soft": "rgba(59,130,246,0.16)",
+        "--space-border-default": "rgba(148,163,184,0.16)",
+        "--space-border-strong": "rgba(148,163,184,0.28)",
+        "--space-text-primary": "#F8FAFC",
+        "--space-text-secondary": "#CBD5E1",
+        "--space-text-muted": "#94A3B8",
+        "--space-text-brand": "#60A5FA",
+        "--space-text-accent": "#5eead4",
+        "--space-text-on-primary": "#ffffff",
+        "--space-text-on-highlight": "#ffffff",
+        "--space-brand-primary": "#2563eb",
+        "--space-brand-primary-50": "rgba(37,99,235,0.08)",
+        "--space-brand-primary-100": "rgba(37,99,235,0.14)",
+        "--space-brand-primary-200": "rgba(37,99,235,0.26)",
+        "--space-brand-primary-500": "#3b82f6",
+        "--space-brand-primary-600": "#2563eb",
+        "--space-brand-primary-700": "#1d4ed8",
+        "--space-brand-primary-900": "#1e3a8a",
+        "--space-brand-highlight": "#2563eb",
+        "--space-brand-highlight-50": "rgba(45,212,191,0.08)",
+        "--space-brand-highlight-100": "rgba(45,212,191,0.16)",
+        "--space-brand-highlight-200": "rgba(45,212,191,0.28)",
+        "--space-brand-highlight-500": "#2dd4bf",
+        "--space-brand-highlight-600": "#14b8a6",
+        "--space-brand-highlight-700": "#0d9488",
+        "--space-brand-highlight-900": "#134e4a",
+        "--space-shell-dock-text": "#ffffff",
+        "--space-shell-icon": "#60a5fa",
+        "--space-semantic-success": "#4ade80",
+        "--space-semantic-success-50": "rgba(74,222,128,0.10)",
+        "--space-semantic-success-100": "rgba(74,222,128,0.20)",
+        "--space-semantic-success-500": "#22c55e",
+        "--space-semantic-success-600": "#4ade80",
+        "--space-semantic-success-700": "#86efac",
+        "--space-semantic-danger": "#f87171",
+        "--space-semantic-danger-500": "#ef4444",
+        "--space-semantic-danger-600": "#dc2626",
+        "--space-neutral-800": "#17171d",
+        "--space-neutral-100": "#e4e4ea"
+      }
+    },
+    "layout": {
+      "agentPosition": "center",
+      "dockPosition": "left",
+      "appWindowSize": "fullscreen"
+    },
+    "branding": {
+      "name": "VidVerge",
+      "tagline": "Create a product video or enhance existing footage.",
+      "headingFont": "Inter",
+      "bodyFont": "Inter"
+    }
+  }
+}

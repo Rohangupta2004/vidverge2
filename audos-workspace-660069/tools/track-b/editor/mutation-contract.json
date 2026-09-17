@@ -1,0 +1,25 @@
+{
+  "$comment": "Safe mutation contract for the Customer Product Editor (PRD §editor). The in-space editor (apps/ProductStudio) and the trackb-project server function BOTH enforce this contract; the server function is authoritative. Anything not listed here is rejected explicitly — never silently applied. The customer never receives CodeMirror or raw composition source; the editor wraps @hyperframes/player, it is not a second composition engine.",
+  "schema_version": "1.0.0",
+  "operations": {
+    "set_headline":     { "scope": "scene",   "field": "headline",          "ownership": "USER", "credit_tier": "text_edit",   "validation": "non-empty string ≤ 120 chars" },
+    "set_caption":      { "scope": "scene",   "field": "caption",           "ownership": "USER", "credit_tier": "text_edit",   "validation": "string ≤ 200 chars, empty allowed" },
+    "set_duration":     { "scope": "scene",   "field": "duration_s",        "ownership": "USER", "credit_tier": "timing_edit", "validation": "within the scene's PLANNER timing_range AND global scene_duration_bounds_s" },
+    "set_music_track":  { "scope": "project", "field": "music.track",       "ownership": "USER", "credit_tier": "music_change", "validation": "must be the id of a FROZEN audio asset in the project ledger" },
+    "set_music_volume": { "scope": "project", "field": "music.volume",      "ownership": "USER", "credit_tier": "music_change", "validation": "0.0–1.0" },
+    "set_brand_primary":{ "scope": "project", "field": "brand.primary_token","ownership": "USER", "credit_tier": "colour_edit", "validation": "must name an existing brand token — colour edits are brand-token based, never free hex" },
+    "set_brand_accent": { "scope": "project", "field": "brand.accent_token", "ownership": "USER", "credit_tier": "colour_edit", "validation": "must name an existing brand token" },
+    "set_title":        { "scope": "project", "field": "title",             "ownership": "USER", "credit_tier": "text_edit",   "validation": "non-empty string ≤ 140 chars" },
+    "regenerate_scene": { "scope": "scene",   "field": null,                "ownership": "USER-initiated SYSTEM op", "credit_tier": "scene_regeneration", "validation": "scene must be EDITABLE; enforced budget: max_attempts_per_scene, max_credits_per_scene, max_credits_per_project, escalation_threshold; isolated — never touches other scenes; creates a recoverable version snapshot first" }
+  },
+  "rules": {
+    "editable_states_only": "Mutations apply only to scenes in state EDITABLE. BAKED (Track A footage), REGENERATING, ERROR and LOCKED scenes reject mutations with an explanation the UI must surface.",
+    "quote_before_expensive": "Any operation whose credit cost ≥ credits.json expensive_threshold must be quoted to the customer BEFORE execution.",
+    "no_charge_on_failure": "A mutation that fails validation or persistence produces no billable work and deducts no credits; the previous valid state is preserved.",
+    "undo_redo": "Every successful customer-visible mutation pushes an inverse entry onto the undo stack; redo replays it; undo/redo are free.",
+    "live_sync": "A successful edit propagates atomically to: saved project, composition source (next build), preview, timeline, scene thumbnails, player state, undo history. A partial update is a failure and is rolled back.",
+    "user_wins": "If an agent mutation targets a field the user changed after the version the agent read, the user's value is preserved, the agent's intent is logged in the activity log, and no overwrite occurs — no dialog, pure automation.",
+    "agent_visibility": "Agent edits are ordinary logged mutations: visible in the activity log (e.g. 'Updating headline in Scene 03') and undoable exactly like user edits.",
+    "version_identity": "Every mutation bumps project.version; every render records the exact project/schema/manifest/composition/audio/voice versions it consumed."
+  }
+}
