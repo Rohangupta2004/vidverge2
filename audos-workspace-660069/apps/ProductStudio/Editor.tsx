@@ -271,7 +271,23 @@ export default function Editor({ projectId, onBack, onEnhance }: {
         setGenerating(false);
         showNotice('ok', 'Your video is ready to preview and edit.');
       } else {
-        setGenerationStage('visuals');
+        // Auto-render: the planner leaves the project 'planned' with scenes but no
+        // compositions yet. Immediately queue the full render pipeline here so
+        // Generate always produces a finished video without a separate manual
+        // Export/Render click — the orchestrator cron would eventually pick this
+        // up, but this makes the render start right away.
+        setGenerationStage('composing');
+        try {
+          const renderRes = await trackB.renderFilm(ok.project.id);
+          if ((renderRes as MutationRejection).ok === false) {
+            const rej = renderRes as MutationRejection;
+            throw new Error(rej.explain ? `${rej.error}. ${rej.explain}` : rej.error);
+          }
+        } catch (renderError) {
+          setGenerationStage(null);
+          setGenerating(false);
+          showNotice('error', renderError instanceof Error ? renderError.message : 'Your scenes are planned, but the render could not be queued automatically — click Export to render.');
+        }
       }
     } catch (error) {
       setGenerationStage(null);
