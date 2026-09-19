@@ -18,7 +18,6 @@ import {
   GitBranch,
   MessageCircle,
   Play,
-  Rocket,
   Sparkles,
   UserRoundCheck,
   WandSparkles,
@@ -274,10 +273,9 @@ export default function LandingShowcase(props: LandingShowcaseProps) {
   };
 
   const features = [
-    { icon: UserRoundCheck, title: 'Consistent Characters', copy: 'Same character, every scene. No drift, no resets.', accent: '#60A5FA' },
-    { icon: GitBranch, title: 'Full Pipeline', copy: 'Script → Animation → Music → Download. Nothing to stitch together.', accent: '#2563EB' },
-    { icon: Clock3, title: 'Credit-Smart', copy: '1 credit = 1 second. Use only what you need.', accent: '#3B82F6' },
-    { icon: Rocket, title: 'Built for Creators', copy: 'Solo creators and small teams who move fast.', accent: '#1D4ED8' },
+    { icon: UserRoundCheck, title: 'Consistent characters, every scene', copy: 'Your character stays the same from shot to shot. No drift. No manual fixes.', accent: '#60A5FA' },
+    { icon: GitBranch, title: 'Script to video in one place', copy: 'Brief in. Finished video out. No stitching tools together.', accent: '#2563EB' },
+    { icon: Clock3, title: 'No wasted credits', copy: 'Only generate what you actually need.', accent: '#3B82F6' },
   ];
   const pricing = [
     { name: 'Free Trial', price: '$0', unit: '', credits: '30 credits', copy: 'One 30s video, no card needed', fill: '18%', featured: false, details: ['30 seconds included', 'Full pipeline access', 'Publish-ready MP4'] },
@@ -326,10 +324,10 @@ export default function LandingShowcase(props: LandingShowcaseProps) {
         <div className="vv-container vv-hero-grid">
           <motion.div className="vv-hero-copy" style={{ y: backY }} initial={reducedMotion ? false : { opacity: 0, y: 35 }} animate={{ opacity: 1, y: 0 }} transition={ENTRANCE_SPRING}>
             <span className="vv-eyebrow"><WandSparkles size={13} /> AI production, end to end</span>
-            <h1><span className="vv-gradient-text">Brief to Video.</span><br />Instantly.</h1>
-            <p>Describe your idea. Vidverge scripts it, animates it, and delivers a download-ready video — consistent characters, every shot.</p>
+            <h1><span className="vv-gradient-text">Type a brief.</span><br />Get a consistent video.</h1>
+            <p>Stop losing credits to inconsistent characters and broken pipelines. Vidverge handles scripting, generation, and character consistency — end to end.</p>
             <div className="vv-hero-actions">
-              <MagneticButton onClick={scrollToAuth}>Generate Your First Video <ArrowRight size={17} /></MagneticButton>
+              <MagneticButton onClick={scrollToAuth}>Try it free <ArrowRight size={17} /></MagneticButton>
               <span className="vv-trust"><CheckCircle2 size={14} /> 30 credits free · no card</span>
             </div>
           </motion.div>
@@ -341,12 +339,12 @@ export default function LandingShowcase(props: LandingShowcaseProps) {
 
       <section className="vv-section vv-glow-section">
         <div className="vv-container">
-          <Reveal><div className="vv-kicker"><span className="vv-eyebrow">How it works</span><h2>One brief. Three moves.<br />A finished video.</h2><p>Each stage flows into the next, with live rendering progress from first word to final MP4.</p></div></Reveal>
+          <Reveal><div className="vv-kicker"><span className="vv-eyebrow">How it works</span><h2>One brief. Three moves.<br />A finished video.</h2><p>Script, generate, and keep every character consistent — without jumping between tools.</p></div></Reveal>
           <div className="vv-steps">
             {[
-              { icon: MessageCircle, title: 'Describe', copy: 'Describe your video in plain language', accent: '#60A5FA' },
-              { icon: Zap, title: 'Generate', copy: 'AI scripts, animates, and renders your video', accent: '#2563EB' },
-              { icon: Download, title: 'Download', copy: 'One click export. Publish-ready MP4.', accent: '#1D4ED8' },
+              { icon: MessageCircle, title: 'Brief it', copy: 'Describe the video you want in plain language.', accent: '#60A5FA' },
+              { icon: Zap, title: 'Generate it', copy: 'Vidverge scripts and renders every scene with a consistent character.', accent: '#2563EB' },
+              { icon: Download, title: 'Publish it', copy: 'Download your finished, publish-ready MP4.', accent: '#1D4ED8' },
             ].map((step, index) => (
               <Reveal key={step.title} delay={index * 0.08}>
                 <TiltCard className="vv-step-card"><div className="vv-card-content"><span className="vv-step-num">0{index + 1}</span><div className="vv-icon"><step.icon size={21} /></div><h3>{step.title}</h3><p>{step.copy}</p><div className="vv-step-render"><MiniRender accent={step.accent} /></div></div></TiltCard>
@@ -359,20 +357,21 @@ export default function LandingShowcase(props: LandingShowcaseProps) {
 
       <section className="vv-section">
         <div className="vv-container">
-          <Reveal><div className="vv-kicker"><span className="vv-eyebrow">See it in action</span><h2>From sentence to scene.</h2><p>Watch the brief become a rendered, timed, ready-to-publish video inside one production surface.</p></div></Reveal>
+          <Reveal><div className="vv-kicker"><span className="vv-eyebrow">See it in action</span><h2>From sentence to finished video.</h2><p>Watch the brief become a rendered, timed, ready-to-publish video inside one production surface.</p></div></Reveal>
           <Reveal delay={0.08}>
             <TiltCard className="vv-demo-panel">
               <div className="vv-demo-side"><div className="vv-window-bar"><span>VIDEO BRIEF</span><span className="vv-dots"><i /><i /><i /></span></div><div className="vv-textarea">{typedBrief}<motion.span className="vv-caret" animate={{ opacity: reducedMotion ? 1 : [1, 0.15] }} transition={{ ...MICRO_SPRING, repeat: Infinity, repeatType: 'reverse' }} /></div><div style={{ marginTop: 18 }}><GeneratingLine /></div></div>
               <div className="vv-demo-side vv-demo-output"><video className={demoReady ? 'vv-demo-video-ready' : ''} src={REAL_DEMO} autoPlay muted loop playsInline preload="metadata" aria-label="Vidverge generated video preview" />{!demoReady ? <motion.div className="vv-demo-loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><div><div style={{ position: 'relative' }}><div className="vv-loader-orbit" /><div className="vv-loader-core" /></div><strong>Building your video</strong><span>Scripting · animating · mixing sound</span></div></motion.div> : <motion.div className="vv-video-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={ENTRANCE_SPRING}><motion.div className="vv-play-pulse" animate={reducedMotion ? undefined : { scale: [1, 1.08] }} transition={{ ...ENTRANCE_SPRING, repeat: Infinity, repeatType: 'reverse' }}><Play size={24} fill="currentColor" /></motion.div><span className="vv-eyebrow" style={{ alignSelf: 'flex-start' }}><CheckCircle2 size={12} /> Render complete</span><div className="vv-wave">{Array.from({ length: 18 }, (_, index) => <WaveBar key={index} index={index} />)}</div><div className="vv-output-meta"><span>6 scenes rendered</span><span>00:30 · MP4 ready</span></div></motion.div>}</div>
             </TiltCard>
           </Reveal>
-          <div className="vv-demo-cta"><MagneticButton onClick={scrollToAuth}>Generate Video <ArrowRight size={17} /></MagneticButton></div>
+          <p className="vv-payg">Creators are already using Vidverge to produce consistent video series and ad campaigns.</p>
+          <div className="vv-demo-cta"><MagneticButton onClick={scrollToAuth}>Try it free <ArrowRight size={17} /></MagneticButton></div>
         </div>
       </section>
 
       <section className="vv-section vv-glow-section">
         <div className="vv-container">
-          <Reveal><div className="vv-kicker"><span className="vv-eyebrow">Built for shippable output</span><h2>The whole studio,<br />without the stitching.</h2></div></Reveal>
+          <Reveal><div className="vv-kicker"><span className="vv-eyebrow">Built for shippable output</span><h2>Same character.<br />Every scene.</h2></div></Reveal>
           <div className="vv-feature-grid">
             {features.map((feature, index) => (
               <Reveal key={feature.title} delay={index * 0.08}><TiltCard className="vv-feature-card"><div className="vv-card-content"><div className="vv-icon"><feature.icon size={21} /></div><div className="vv-feature-copy"><div><h3>{feature.title}</h3><p>{feature.copy}</p></div><MiniRender accent={feature.accent} /></div></div></TiltCard></Reveal>
@@ -417,18 +416,18 @@ export default function LandingShowcase(props: LandingShowcaseProps) {
 
       <section className="vv-final vv-section">
         <motion.div className="vv-final-gradient" animate={reducedMotion ? undefined : { rotate: 360 }} transition={{ ...ENTRANCE_SPRING, repeat: Infinity, duration: 18 }} />
-        <div className="vv-container"><Reveal><h2>Ready to make your first video?</h2><div style={{ width: 220, margin: '0 auto 24px', position: 'relative' }}><GeneratingLine compact /></div><div className="vv-final-actions"><MagneticButton onClick={scrollToAuth}>Generate Video <ArrowRight size={17} /></MagneticButton></div></Reveal></div>
+        <div className="vv-container"><Reveal><h2>Your next consistent video starts with a brief.</h2><div style={{ width: 220, margin: '0 auto 24px', position: 'relative' }}><GeneratingLine compact /></div><div className="vv-final-actions"><MagneticButton onClick={scrollToAuth}>Try it free <ArrowRight size={17} /></MagneticButton></div></Reveal></div>
       </section>
 
       <section id="vidverge-auth" className="vv-auth-section">
         <div className="vv-auth-wrap">
-          <Reveal><div className="vv-auth-heading"><BrandMark name={brandName} logoUrl={props.logoUrl} size={48} /><h2>Generate your first video</h2><p>Enter your email and start briefing Vidverge.<br />No card. No setup.</p></div></Reveal>
+          <Reveal><div className="vv-auth-heading"><BrandMark name={brandName} logoUrl={props.logoUrl} size={48} /><h2>Start your first video free</h2><p>Enter your email. Bring a brief.<br />Vidverge handles the rest.</p></div></Reveal>
           <Reveal delay={0.08}>
             <div className="vv-auth-card">
               <form onSubmit={props.onEmailSubmit} className="vv-auth-form">
                 <div><input type="email" value={props.email} onChange={event => props.onEmailChange(event.target.value)} placeholder="you@work.com" className="vv-input" disabled={props.loading} required data-testid="input-email" />{props.error && <p className="vv-error" data-testid="text-error">{props.error}</p>}</div>
                 {props.gdprEnabled && <div className="vv-gdpr"><p style={{ margin: 0 }}>By entering your email, you agree to our <a href="/privacy">Privacy Policy</a>.</p><label><input type="checkbox" checked={props.marketingConsent} onChange={event => props.onMarketingConsentChange(event.target.checked)} /><span>I want to receive marketing emails and updates (optional)</span></label></div>}
-                <motion.button type="submit" disabled={props.loading || !props.email} className="vv-submit" data-testid="button-continue" whileHover={reducedMotion ? undefined : { scale: 1.018 }} whileTap={{ scale: 0.98 }} transition={MICRO_SPRING}>{props.loading ? 'Just a moment...' : 'Create my first video →'}</motion.button>
+                <motion.button type="submit" disabled={props.loading || !props.email} className="vv-submit" data-testid="button-continue" whileHover={reducedMotion ? undefined : { scale: 1.018 }} whileTap={{ scale: 0.98 }} transition={MICRO_SPRING}>{props.loading ? 'Just a moment...' : 'Start for free →'}</motion.button>
               </form>
               <div className="vv-auth-proof">{['Free first video', 'No credit card', 'Yours to keep'].map(item => <span key={item}><Check size={12} />{item}</span>)}</div>
               {socialProviders.length > 0 && <><div className="vv-divider">or continue with</div><div className="vv-social-grid">{socialProviders.map(provider => <button key={provider} type="button" onClick={() => props.onSocialLogin(provider)} disabled={props.loading} className="vv-social"><SocialIcon provider={provider} />{provider}</button>)}</div></>}
