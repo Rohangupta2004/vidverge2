@@ -284,8 +284,16 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
       ) : null}
 
       {loading && projects.length === 0 ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: S.muted, fontSize: 13, padding: 24 }}>
-          <Loader2 size={14} className="rc-spin" /> Loading your videos…
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 290px), 1fr))', gap: 20 }} aria-label="Loading your videos">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="ps-skeleton" style={{ overflow: 'hidden' }}>
+              <div style={{ aspectRatio: '16 / 9', background: 'var(--space-surface-muted)' }} />
+              <div style={{ padding: '12px 14px 16px' }}>
+                <div style={{ height: 13, width: '65%', borderRadius: 5, background: 'var(--space-surface-muted)' }} />
+                <div style={{ height: 10, width: '40%', borderRadius: 5, background: 'var(--space-surface-muted)', marginTop: 8 }} />
+              </div>
+            </div>
+          ))}
         </div>
       ) : projects.length === 0 ? (
         <div className="ps-fade-up" style={{ borderRadius: 18, border: `1px solid ${S.border}`, background: S.panel, padding: 'clamp(32px, 6vw, 56px)', textAlign: 'center' }} data-testid="empty-projects">

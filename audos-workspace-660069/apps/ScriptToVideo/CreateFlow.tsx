@@ -1,7 +1,9 @@
 /**
  * Screens 2–4 — Create, Brief, and Blueprint. Claude turns the user's source
- * scenes into a dynamic shot plan: each shot is <=8s, one source scene may
- * become several shots, and bridge shots may be inserted for continuity.
+ * scenes into a dynamic shot plan: each shot is <=8s (Omni Flash's clip cap),
+ * one source scene may become several shots, and bridge shots may be
+ * inserted for continuity. Every shot renders on Gemini Omni Flash —
+ * HyperFrames + Omni Flash policy, no model picker.
  */
 import { useRef, useState } from 'react';
 import { Clapperboard, FileUp, Loader2, Pencil, Play } from 'lucide-react';
@@ -21,13 +23,6 @@ const FORMATS = [
 // 120s) instead of being rejected, so this is a floor, never a hard cap.
 const LENGTHS = [15, 30, 45, 60, 90, 120] as const;
 
-// PRD 1.3 — model picker. Veo 3.1 fast is the pre-selected default; Veo 3.1
-// standard is deliberately excluded.
-const MODELS = [
-  { id: 'veo', name: 'Veo 3.1 fast', hint: 'Better motion & realism', tag: 'Recommended' },
-  { id: 'omni', name: 'Omni Flash', hint: 'Proven, reliable', tag: 'Fallback' },
-] as const;
-
 // ---------------------------------------------------------------------------
 // Screen 2 — Create
 // ---------------------------------------------------------------------------
@@ -35,7 +30,7 @@ const MODELS = [
 export function CreateScreen(props: {
   initialText?: string;
   busy: boolean;
-  onSubmit: (params: { input_text: string; upload_text?: string; mode: string; aspect_ratio: string; chips: string[]; focus: string; target_length_s: number; video_model: string }) => void;
+  onSubmit: (params: { input_text: string; upload_text?: string; mode: string; aspect_ratio: string; chips: string[]; focus: string; target_length_s: number }) => void;
 }) {
   const { initialText, busy, onSubmit } = props;
   const [text, setText] = useState(initialText || '');
@@ -43,7 +38,6 @@ export function CreateScreen(props: {
   const [uploadName, setUploadName] = useState('');
   const [fmt, setFmt] = useState<(typeof FORMATS)[number]>(FORMATS[0]);
   const [lenS, setLenS] = useState<number>(30);
-  const [model, setModel] = useState<'veo' | 'omni'>('veo');
   const [chips, setChips] = useState<string[]>([]);
   const [customChip, setCustomChip] = useState('');
   const [focus, setFocus] = useState('');
@@ -61,7 +55,8 @@ export function CreateScreen(props: {
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '28px 24px 140px' }}>
       <div style={{ maxWidth: 640, margin: '0 auto' }}>
-        <div style={{ color: T.bone, fontSize: 24, fontWeight: 700, marginBottom: 20 }}>What are we making?</div>
+        <div style={{ color: T.bone, fontSize: 25, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6 }}>What are we making?</div>
+        <div style={{ color: T.muted, fontSize: 13.5, lineHeight: 1.5, marginBottom: 22 }}>Describe it in a word or paste a whole script — the pipeline handles everything after.</div>
 
         <textarea
           value={text}
@@ -82,8 +77,9 @@ export function CreateScreen(props: {
 
         <div style={{ display: 'flex', gap: 14, marginTop: 12, alignItems: 'center' }}>
           <button
+            className="s2v-ghost"
             onClick={() => fileRef.current?.click()}
-            style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: 'none', color: T.muted, fontSize: 13, cursor: 'pointer', padding: 0 }}
+            style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: 'none', color: T.muted, fontSize: 13, cursor: 'pointer', padding: '5px 8px', margin: '-5px -8px', borderRadius: 7 }}
           >
             <FileUp size={14} /> Upload script
           </button>
@@ -106,7 +102,7 @@ export function CreateScreen(props: {
           />
         </div>
 
-        <div style={{ color: T.bone, fontSize: 13.5, fontWeight: 600, marginTop: 28, marginBottom: 10 }}>Format</div>
+        <div style={{ color: T.muted, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginTop: 32, marginBottom: 10 }}>Format</div>
         <div style={{ display: 'flex', gap: 8 }}>
           {FORMATS.map((f) => (
             <button
@@ -123,7 +119,7 @@ export function CreateScreen(props: {
           ))}
         </div>
 
-        <div style={{ color: T.bone, fontSize: 13.5, fontWeight: 600, marginTop: 28, marginBottom: 10 }}>Length</div>
+        <div style={{ color: T.muted, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginTop: 32, marginBottom: 10 }}>Length</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {LENGTHS.map((seconds) => (
             <button
@@ -141,36 +137,10 @@ export function CreateScreen(props: {
             </button>
           ))}
         </div>
-        <div style={{ color: T.dim, fontSize: 11.5, marginTop: 8 }}>Claude may split scenes or add bridge shots. If your script reads longer than the length you pick, the film is stretched to fit it rather than cut — up to a 120s ceiling.</div>
+        <div style={{ color: T.dim, fontSize: 11.5, marginTop: 8 }}>Claude may split scenes or add bridge shots. If your script reads longer than the length you pick, the film is stretched to fit it rather than cut — up to a 120s ceiling. Every shot renders on Gemini Omni Flash.</div>
 
-        <div style={{ color: T.bone, fontSize: 13.5, fontWeight: 600, marginTop: 28, marginBottom: 10 }}>
-          Model <span style={{ color: T.dim, fontWeight: 400 }}>(pre-selected — change only if you want to)</span>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {MODELS.map((m) => {
-            const on = model === m.id;
-            return (
-              <button
-                key={m.id}
-                onClick={() => setModel(m.id)}
-                style={{
-                  background: on ? 'rgba(232,163,60,0.12)' : T.raised, color: on ? T.bone : T.muted,
-                  border: `1px solid ${on ? T.live : T.dim}`, borderRadius: 10,
-                  padding: '10px 14px', fontSize: 13, cursor: 'pointer', textAlign: 'left', minWidth: 190,
-                }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
-                  {m.name}
-                  <span style={{ fontSize: 10, fontWeight: 600, color: on ? T.live : T.dim, border: `1px solid ${on ? T.live : T.dim}`, borderRadius: 999, padding: '1px 8px' }}>{m.tag}</span>
-                </span>
-                <span style={{ display: 'block', fontSize: 11.5, marginTop: 3, opacity: 0.8 }}>{m.hint}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ color: T.bone, fontSize: 13.5, fontWeight: 600, marginTop: 28, marginBottom: 10 }}>
-          Direction <span style={{ color: T.dim, fontWeight: 400 }}>(optional)</span>
+        <div style={{ color: T.muted, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginTop: 32, marginBottom: 10 }}>
+          Direction <span style={{ color: T.dim, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {CHIP_PRESETS.map((c) => {
@@ -201,8 +171,8 @@ export function CreateScreen(props: {
           />
         </div>
 
-        <div style={{ color: T.bone, fontSize: 13.5, fontWeight: 600, marginTop: 28, marginBottom: 10 }}>
-          Focus on… <span style={{ color: T.dim, fontWeight: 400 }}>(optional)</span>
+        <div style={{ color: T.muted, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginTop: 32, marginBottom: 10 }}>
+          Focus on… <span style={{ color: T.dim, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
         </div>
         <input
           value={focus}
@@ -211,20 +181,22 @@ export function CreateScreen(props: {
           style={{ width: '100%', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 8, color: T.bone, fontSize: 13.5, padding: '11px 14px', outline: 'none' }}
         />
 
-        {err ? <div style={{ color: T.fault, fontSize: 13, marginTop: 14 }}>{err}</div> : null}
+        {err ? <div style={{ color: T.fault, fontSize: 12.5, lineHeight: 1.5, marginTop: 14, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '9px 13px' }}>{err}</div> : null}
 
         <div style={{ color: T.muted, fontSize: 12.5, marginTop: 24, fontFamily: T.mono }}>
           From {estCredits} credits · ~{lenS}s video · at least {minimumShots} shots
         </div>
 
         <button
+          className="s2v-lift"
           disabled={!canGo || busy}
-          onClick={() => onSubmit({ input_text: text.trim(), upload_text: uploadText || undefined, mode: fmt.mode, aspect_ratio: fmt.aspect, chips, focus: focus.trim(), target_length_s: lenS, video_model: model })}
+          onClick={() => onSubmit({ input_text: text.trim(), upload_text: uploadText || undefined, mode: fmt.mode, aspect_ratio: fmt.aspect, chips, focus: focus.trim(), target_length_s: lenS })}
           style={{
             display: 'flex', alignItems: 'center', gap: 10, marginTop: 12,
             background: canGo && !busy ? T.live : T.raised, color: canGo && !busy ? '#1A1205' : T.dim,
-            border: 'none', borderRadius: 10, padding: '14px 28px', fontSize: 15, fontWeight: 700,
+            border: 'none', borderRadius: 11, padding: '14px 28px', fontSize: 15, fontWeight: 700,
             cursor: canGo && !busy ? 'pointer' : 'default',
+            boxShadow: canGo && !busy ? '0 2px 12px rgba(232,163,60,0.25)' : 'none',
           }}
         >
           {busy ? <Loader2 size={17} className="animate-spin" /> : <Clapperboard size={17} />}
@@ -255,9 +227,10 @@ export function BriefScreen(props: {
             {questions.length > 1 ? 'Two quick things.' : 'One quick thing.'}
           </div>
           <button
+            className="s2v-ghost"
             disabled={busy}
             onClick={() => onContinue({})}
-            style={{ background: 'none', border: 'none', color: T.muted, fontSize: 13.5, cursor: 'pointer', textDecoration: 'underline' }}
+            style={{ background: 'none', border: 'none', color: T.muted, fontSize: 13.5, cursor: 'pointer', textDecoration: 'underline', padding: '5px 9px', borderRadius: 7 }}
           >
             Skip all →
           </button>
@@ -296,11 +269,13 @@ export function BriefScreen(props: {
         ))}
 
         <button
+          className="s2v-lift"
           disabled={busy}
           onClick={() => onContinue(answers)}
           style={{
             display: 'flex', alignItems: 'center', gap: 10, background: T.live, color: '#1A1205',
-            border: 'none', borderRadius: 10, padding: '13px 26px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer',
+            border: 'none', borderRadius: 11, padding: '13px 26px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer',
+            boxShadow: '0 2px 12px rgba(232,163,60,0.25)',
           }}
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : null}
@@ -352,8 +327,9 @@ export function BlueprintScreen(props: {
               Cancel
             </button>
             <button
+              className="s2v-lift"
               onClick={() => { if (!started.current) { started.current = true; onStart(); } }}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.live, color: '#1A1205', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.live, color: '#1A1205', border: 'none', borderRadius: 9, padding: '10px 20px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 12px rgba(232,163,60,0.25)' }}
             >
               <Play size={14} /> Confirm & render
             </button>
@@ -375,20 +351,20 @@ export function BlueprintScreen(props: {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 22 }}>
           <div>
-            <div style={{ color: T.muted, fontSize: 12, textTransform: 'none', marginBottom: 10 }}>Script</div>
-            <div style={{ color: T.bone, fontSize: 12.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', background: T.raised, borderRadius: 10, padding: 16, maxHeight: 420, overflowY: 'auto' }}>
+            <div style={{ color: T.muted, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Script</div>
+            <div style={{ color: T.bone, fontSize: 12.5, lineHeight: 1.65, whiteSpace: 'pre-wrap', background: T.raised, border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, padding: 16, maxHeight: 420, overflowY: 'auto' }}>
               {project.script_text || project.input_text}
             </div>
           </div>
           <div>
-            <div style={{ color: T.muted, fontSize: 12, marginBottom: 10 }}>Continuity-driven shots · {scenes.length}</div>
+            <div style={{ color: T.muted, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Shots · {scenes.length}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 420, overflowY: 'auto' }}>
               {scenes.map((s: any, i: number) => {
                 const idx = Number(s.index || s.idx || i + 1);
                 const spec = s.spec || s;
                 const editing = editIdx === idx;
                 return (
-                  <div key={idx} style={{ background: T.raised, borderRadius: 8, padding: '10px 12px' }}>
+                  <div key={idx} style={{ background: T.raised, border: '1px solid rgba(255,255,255,0.05)', borderRadius: 10, padding: '11px 13px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ color: T.dim, fontFamily: T.mono, fontSize: 11 }}>Shot {idx} · {Math.min(8, Number(spec.duration_s) || 8)}s · source {String(s.source_scene_id || spec.source_scene_id || spec.source_scene || idx)}</span>
                       {!editing ? (
@@ -421,10 +397,10 @@ export function BlueprintScreen(props: {
             </div>
           </div>
           <div>
-            <div style={{ color: T.muted, fontSize: 12, marginBottom: 10 }}>Cast</div>
+            <div style={{ color: T.muted, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Cast</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {(characters as any[]).length ? (characters as any[]).map((c: any) => (
-                <div key={c.token || c.name} style={{ display: 'flex', gap: 12, alignItems: 'center', background: T.raised, borderRadius: 8, padding: 10 }}>
+                <div key={c.token || c.name} style={{ display: 'flex', gap: 12, alignItems: 'center', background: T.raised, border: '1px solid rgba(255,255,255,0.05)', borderRadius: 10, padding: 11 }}>
                   <div style={{ width: 44, height: 58, borderRadius: 6, background: T.canvas, overflow: 'hidden', flexShrink: 0 }}>
                     {c.ref_image_url ? <img src={c.ref_image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null}
                   </div>

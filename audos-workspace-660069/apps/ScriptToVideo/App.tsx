@@ -13,7 +13,7 @@
  */
 import { Component, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertCircle, ArrowLeft, Download } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Clapperboard, Download } from 'lucide-react';
 import { api, AgentEvent, CharacterRow, LegacyProject, Project, Question, SceneRow, T } from './api';
 import { captureFrames } from '../../lib/frameshotClient';
 import Library from './Library';
@@ -23,6 +23,25 @@ import { FinishScreen, ReviewScreen } from './ReviewFinish';
 import AgentPanel from './AgentPanel';
 
 type Screen = 'library' | 'create' | 'brief' | 'blueprint' | 'run' | 'review' | 'finish' | 'legacy';
+
+// App-wide interaction polish: transitions, hover states and keyboard focus
+// rings for every screen in this app. Purely presentational.
+const APP_CSS = `
+  .s2v-app button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease; }
+  .s2v-app button:focus-visible, .s2v-app a:focus-visible, .s2v-app [role="button"]:focus-visible { outline: 2px solid ${T.live}; outline-offset: 2px; }
+  .s2v-app input:focus-visible, .s2v-app textarea:focus-visible, .s2v-app select:focus-visible { outline: none; border-color: ${T.live} !important; box-shadow: 0 0 0 3px rgba(232,163,60,0.18); }
+  .s2v-app input, .s2v-app textarea, .s2v-app select { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
+  .s2v-row { transition: background-color 0.16s ease; border-radius: 10px; }
+  .s2v-row:hover { background: rgba(255,255,255,0.035) !important; }
+  .s2v-lift:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
+  .s2v-lift:active:not(:disabled) { transform: translateY(0); }
+  .s2v-ghost:hover:not(:disabled) { color: ${T.bone} !important; background: rgba(255,255,255,0.05) !important; }
+  .s2v-fade-in { animation: s2v-fade-in 0.3s ease; }
+  @keyframes s2v-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .s2v-app ::-webkit-scrollbar { width: 8px; height: 8px; }
+  .s2v-app ::-webkit-scrollbar-thumb { background: ${T.dim}; border-radius: 999px; }
+  .s2v-app ::-webkit-scrollbar-track { background: transparent; }
+`;
 
 /** Anything the server may hand back as a list is read as a list, never trusted as one. */
 function list<T>(v: unknown): T[] {
@@ -145,7 +164,7 @@ function ScriptToVideoApp() {
 
   // ------- flow handlers -------
 
-  async function handleCreate(params: { input_text: string; upload_text?: string; mode: string; aspect_ratio: string; chips: string[]; focus: string; target_length_s: number; video_model: string }) {
+  async function handleCreate(params: { input_text: string; upload_text?: string; mode: string; aspect_ratio: string; chips: string[]; focus: string; target_length_s: number }) {
     setBusy(true); setError('');
     try {
       const res = await api.create(params);
@@ -199,15 +218,21 @@ function ScriptToVideoApp() {
   const showBack = screen !== 'library';
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: T.canvas, fontFamily: T.sans, overflow: 'hidden' }}>
+    <div className="s2v-app" style={{ position: 'relative', width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: T.canvas, fontFamily: T.sans, overflow: 'hidden' }}>
+      <style>{APP_CSS}</style>
       {/* Top bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderBottom: `1px solid ${T.raised}`, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 20px', borderBottom: `1px solid ${T.raised}`, flexShrink: 0 }}>
         {showBack ? (
-          <button onClick={() => { setScreen('library'); setLegacyOpen(null); loadLibrary(); }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: T.muted, fontSize: 13, cursor: 'pointer', padding: 0 }}>
+          <button className="s2v-ghost" onClick={() => { setScreen('library'); setLegacyOpen(null); loadLibrary(); }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: T.muted, fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '6px 10px', margin: '-6px -10px', borderRadius: 8 }}>
             <ArrowLeft size={15} /> Library
           </button>
         ) : (
-          <div style={{ color: T.bone, fontSize: 14, fontWeight: 700 }}>Script to Video</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(232,163,60,0.12)', border: '1px solid rgba(232,163,60,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Clapperboard size={14} color={T.live} />
+            </div>
+            <div style={{ color: T.bone, fontSize: 14.5, fontWeight: 700, letterSpacing: -0.2 }}>Script to Video</div>
+          </div>
         )}
         <div style={{ marginLeft: 'auto', color: T.dim, fontSize: 11.5 }}>
           Give it a word, a line, or a script. Come back to a finished video.
@@ -215,8 +240,9 @@ function ScriptToVideoApp() {
       </div>
 
       {error ? (
-        <div style={{ background: 'rgba(226,114,111,0.1)', borderBottom: `1px solid ${T.fault}`, color: T.fault, fontSize: 12.5, padding: '8px 18px' }}>
-          {error}
+        <div className="s2v-fade-in" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'rgba(226,114,111,0.1)', borderBottom: '1px solid rgba(226,114,111,0.4)', color: T.fault, fontSize: 12.5, lineHeight: 1.5, padding: '9px 20px' }}>
+          <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>{error}</span>
         </div>
       ) : null}
 
@@ -322,7 +348,7 @@ function LegacyViewer({ legacy: legacyOpen }: { legacy: LegacyProject }) {
           <div style={{ marginTop: 16 }}>
             <video src={finalUrl} controls style={{ maxWidth: '100%', maxHeight: 440, borderRadius: 12, background: '#000' }} />
             <div style={{ marginTop: 12 }}>
-              <a href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.live, color: '#1A1205', borderRadius: 9, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none' }}>
+              <a className="s2v-lift" href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.live, color: '#1A1205', borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 2px 10px rgba(232,163,60,0.25)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
                 <Download size={14} /> Download MP4
               </a>
             </div>
@@ -363,13 +389,15 @@ class S2VBoundary extends Component<{ children?: ReactNode }, { error: Error | n
     if (this.state.error) {
       return (
         <div style={{ width: '100%', height: '100%', minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: T.canvas, fontFamily: T.sans }}>
-          <div style={{ maxWidth: 460, textAlign: 'center', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 14, padding: '28px 24px' }}>
-            <AlertCircle size={26} color={T.fault} style={{ display: 'block', margin: '0 auto 10px' }} />
-            <div style={{ color: T.bone, fontSize: 16, fontWeight: 700, marginBottom: 6 }}>This screen hit a snag</div>
-            <div style={{ color: T.muted, fontSize: 13, lineHeight: 1.55, marginBottom: 16 }}>
+          <div style={{ maxWidth: 460, textAlign: 'center', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 16, padding: '32px 28px', boxShadow: '0 24px 60px rgba(0,0,0,0.4)' }}>
+            <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(226,114,111,0.1)', border: '1px solid rgba(226,114,111,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+              <AlertCircle size={24} color={T.fault} />
+            </div>
+            <div style={{ color: T.bone, fontSize: 16.5, fontWeight: 700, letterSpacing: -0.2, marginBottom: 8 }}>This screen hit a snag</div>
+            <div style={{ color: T.muted, fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>
               Your video is safe — the pipeline runs on our side and nothing stopped. Reopen the library to pick it up again.
             </div>
-            <button onClick={() => this.setState({ error: null })} style={{ background: T.live, color: '#1A1205', border: 'none', borderRadius: 9, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
+            <button onClick={() => this.setState({ error: null })} style={{ background: T.live, color: '#1A1205', border: 'none', borderRadius: 10, padding: '11px 24px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 10px rgba(232,163,60,0.25)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
               Back to your videos
             </button>
           </div>

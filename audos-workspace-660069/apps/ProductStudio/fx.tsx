@@ -16,6 +16,10 @@ export const FX_CSS = `
 .ps-scroll-x { scrollbar-width: thin; }
 @keyframes ps-spin { to { transform: rotate(360deg); } }
 .rc-spin { animation: ps-spin 0.9s linear infinite; }
+@keyframes ps-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.rc-pulse { animation: ps-pulse 1.4s ease-in-out infinite; }
+@keyframes ps-skeleton { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.9; } }
+.ps-skeleton { animation: ps-skeleton 1.5s ease-in-out infinite; background: var(--space-surface-panel); border-radius: 16px; border: 1px solid var(--space-border-default); }
 .ps-btn { transition: background .16s ease, border-color .16s ease, color .16s ease, filter .16s ease, transform .16s ease, box-shadow .16s ease; }
 .ps-btn:hover:not(:disabled) { filter: brightness(1.12); }
 .ps-btn:active:not(:disabled) { transform: scale(0.98); }

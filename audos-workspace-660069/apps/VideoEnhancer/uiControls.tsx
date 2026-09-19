@@ -17,6 +17,9 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
   return (
     <button
       onClick={() => onChange(!on)}
+      className="ve-btn"
+      role="switch"
+      aria-checked={on}
       style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--space-text-secondary)', fontSize: 13 }}
     >
       <span style={{
@@ -41,6 +44,8 @@ export function Section({ title, icon, right, defaultOpen = false, children }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px' }}>
         <button
           onClick={() => setOpen((o) => !o)}
+          className="ve-btn"
+          aria-expanded={open}
           style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--space-text-primary)', textAlign: 'left' }}
         >
           <ChevronDown size={15} style={{ color: 'var(--space-text-muted)', transition: 'transform 0.18s', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', flexShrink: 0 }} />

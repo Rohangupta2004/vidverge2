@@ -44,8 +44,8 @@ export function ReviewScreen(props: {
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '22px 24px 190px' }}>
       <div style={{ maxWidth: 900, margin: '0 auto' }}>
-        <div style={{ color: T.bone, fontSize: 20, fontWeight: 700 }}>Review · {p.title}</div>
-        <div style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>
+        <div style={{ color: T.bone, fontSize: 21, fontWeight: 700, letterSpacing: -0.3 }}>Review · {p.title}</div>
+        <div style={{ color: T.muted, fontSize: 13, lineHeight: 1.55, marginTop: 5 }}>
           Every shot in order. Each ending becomes the next shot’s start; regenerating one shot rebuilds everything after it.
         </div>
 
@@ -55,7 +55,7 @@ export function ReviewScreen(props: {
             const sel = selected.includes(s.idx);
             const spec = s.spec || {};
             return (
-              <div key={s.idx} style={{ display: 'flex', gap: 16, background: T.raised, borderRadius: 12, padding: 14, border: sel ? `1px solid ${T.live}` : '1px solid transparent' }}>
+              <div key={s.idx} style={{ display: 'flex', gap: 16, background: T.raised, borderRadius: 14, padding: 16, border: sel ? `1px solid ${T.live}` : '1px solid rgba(255,255,255,0.05)', boxShadow: sel ? '0 0 0 1px rgba(232,163,60,0.3)' : 'none', transition: 'border-color 0.18s ease, box-shadow 0.18s ease' }}>
                 <div style={{ width: 130, flexShrink: 0 }}>
                   {s.clip_url && playing === s.idx ? (
                     <video src={s.clip_url} controls autoPlay style={{ width: '100%', borderRadius: 8, background: '#000' }} />
@@ -75,7 +75,7 @@ export function ReviewScreen(props: {
                     <span style={{ color: T.dim, fontFamily: T.mono, fontSize: 12 }}>Shot {s.idx}</span>
                     <span style={{ color: T.muted, fontSize: 11 }}>source {s.source_scene_id || String(spec.source_scene_id || spec.source_scene || s.idx)}</span>
                     {s.shot_kind === 'bridge' || spec.shot_kind === 'bridge' ? <span style={{ color: T.live, fontSize: 11, border: `1px solid ${T.live}`, borderRadius: 5, padding: '1px 6px' }}>bridge</span> : null}
-                    <span style={{ color: b.color, fontSize: 12, border: `1px solid ${b.color}`, borderRadius: 5, padding: '1px 8px' }}>{b.word}</span>
+                    <span style={{ color: b.color, fontSize: 11.5, fontWeight: 600, border: `1px solid ${b.color}`, borderRadius: 999, padding: '2px 9px' }}>{b.word}</span>
                     {s.alternate_render ? <span style={{ color: T.muted, fontSize: 11, border: `1px solid ${T.dim}`, borderRadius: 5, padding: '1px 6px' }}>alternate render</span> : null}
                     <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: T.muted, fontSize: 12, cursor: 'pointer' }}>
                       <input type="checkbox" checked={sel} onChange={() => setSelected(sel ? selected.filter((x) => x !== s.idx) : [...selected, s.idx])} /> select
@@ -133,7 +133,7 @@ export function ReviewScreen(props: {
             <RefreshCw size={13} /> Rebuild chain from earliest selected shot
           </button>
         ) : null}
-        <button disabled={busy || assembling || anyInFlight} onClick={onAssemble} style={{ display: 'flex', alignItems: 'center', gap: 10, background: T.live, color: '#1A1205', border: 'none', borderRadius: 10, padding: '14px 32px', fontSize: 15, fontWeight: 700, cursor: 'pointer', opacity: assembling || anyInFlight ? 0.6 : 1 }}>
+        <button className="s2v-lift" disabled={busy || assembling || anyInFlight} onClick={onAssemble} style={{ display: 'flex', alignItems: 'center', gap: 10, background: T.live, color: '#1A1205', border: 'none', borderRadius: 11, padding: '14px 32px', fontSize: 15, fontWeight: 700, cursor: 'pointer', opacity: assembling || anyInFlight ? 0.6 : 1, boxShadow: '0 4px 18px rgba(232,163,60,0.3)' }}>
           {assembling ? <Loader2 size={16} className="animate-spin" /> : <Layers size={16} />}
           {assembling ? 'Checking the joins…' : anyInFlight ? 'Shots still filming…' : 'Assemble video'}
         </button>
@@ -192,15 +192,15 @@ export function FinishScreen(props: {
     <div style={{ flex: 1, overflowY: 'auto', padding: '22px 24px 150px' }}>
       <div style={{ maxWidth: 760, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ color: T.bone, fontSize: 20, fontWeight: 700 }}>{p.title}</div>
-          <button onClick={onBackToReview} style={{ background: 'none', border: 'none', color: T.muted, fontSize: 13, cursor: 'pointer', textDecoration: 'underline' }}>Back to scenes</button>
+          <div style={{ color: T.bone, fontSize: 21, fontWeight: 700, letterSpacing: -0.3 }}>{p.title}</div>
+          <button className="s2v-ghost" onClick={onBackToReview} style={{ background: 'none', border: 'none', color: T.muted, fontSize: 13, cursor: 'pointer', textDecoration: 'underline', padding: '5px 9px', borderRadius: 7 }}>Back to scenes</button>
         </div>
 
-        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', background: '#0C0C0F', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', background: '#0C0C0F', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 20px 50px rgba(0,0,0,0.4)' }}>
           {videoUrl ? (
             <video key={videoUrl} src={videoUrl} controls style={{ maxWidth: '100%', maxHeight: 460, background: '#000' }} />
           ) : (
-            <div style={{ color: T.dim, fontSize: 13, padding: 60 }}>Assemble the video first.</div>
+            <div style={{ color: T.dim, fontSize: 13, padding: 60 }}>Assemble the video first — your finished film plays here.</div>
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10 }}>
@@ -209,7 +209,7 @@ export function FinishScreen(props: {
         </div>
 
         <div style={{ marginTop: 26 }}>
-          <div style={{ color: T.bone, fontSize: 14.5, fontWeight: 600, marginBottom: 4 }}>Finishing layers</div>
+          <div style={{ color: T.muted, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 6 }}>Finishing layers</div>
           <div style={{ color: T.muted, fontSize: 12.5, marginBottom: 14 }}>
             Spoken words are recorded once from your script and mixed automatically; captions use those same words. Music and end-card graphics remain optional.{!wide ? ' Vertical finishing uses the same recorded voice track; graphics and scoring remain limited by the current portrait renderer.' : ''}
           </div>
@@ -242,18 +242,18 @@ export function FinishScreen(props: {
             ) : null}
           </div>
 
-          {err ? <div style={{ color: T.fault, fontSize: 13, marginTop: 14 }}>{err}</div> : null}
+          {err ? <div style={{ color: T.fault, fontSize: 12.5, lineHeight: 1.5, marginTop: 14, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '9px 13px' }}>{err}</div> : null}
           {layers.state === 'failed' && layers.error ? <div style={{ color: T.live, fontSize: 12.5, marginTop: 14 }}>Last finishing pass failed ({layers.error}) — the original cut was kept.</div> : null}
 
           <div style={{ display: 'flex', gap: 12, marginTop: 22, alignItems: 'center', flexWrap: 'wrap' }}>
             {dirty ? (
-              <button disabled={busy || working || applying} onClick={apply} style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.bone, color: T.canvas, border: 'none', borderRadius: 9, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
+              <button className="s2v-lift" disabled={busy || working || applying} onClick={apply} style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.bone, color: T.canvas, border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.3)' }}>
                 {working || applying ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
                 {working ? 'Preparing…' : applying ? 'Rendering layers…' : 'Apply layers'}
               </button>
             ) : null}
             {videoUrl ? (
-              <a href={videoUrl} download target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 9, background: T.live, color: '#1A1205', borderRadius: 9, padding: '12px 26px', fontSize: 14, fontWeight: 700, textDecoration: 'none' }}>
+              <a className="s2v-lift" href={videoUrl} download target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 9, background: T.live, color: '#1A1205', borderRadius: 10, padding: '12px 26px', fontSize: 14, fontWeight: 700, textDecoration: 'none', boxShadow: '0 2px 12px rgba(232,163,60,0.25)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
                 <Download size={15} /> Download MP4
               </a>
             ) : null}

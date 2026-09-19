@@ -4,31 +4,53 @@
  * scene carries a DETAILED art-directed image brief (subject, composition,
  * lighting, mood — not just the voiceover line).
  *
- * PLATFORM-ONLY GENERATION (Sep 15 2026): the founder owns no external API
- * keys, so all generation goes through the asset-image-gen server function,
- * which calls the platform-managed image proxy (gpt-image family, wallet-
- * billed, durable GCS URLs). No BYOK, no secrets proxy, no direct provider
- * calls from the browser — browser-shaped calls to /api/veo/generate/image
- * violate the veo_generations app_id foreign key, which is exactly the bug
- * this rewrite fixes.
+ * HYPERFRAMES + OMNI FLASH GENERATION (fixed 17 Sep 2026): all generation
+ * goes through the asset-image-gen server function, which calls Gemini Omni
+ * Flash's image model (gemini-3.1-flash-image) via the schema-validated
+ * /api/veo/generate/image proxy — wallet-billed, durable GCS URLs, no
+ * founder-owned API keys. No BYOK, no secrets proxy, no direct provider
+ * calls from the browser, and no GPT Image / DALL-E fallback.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, ImageIcon, Loader2, Play, RefreshCw, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Download, ImageIcon, Loader2, Play, RefreshCw, Sparkles, X } from 'lucide-react';
 
 const T = {
   canvas: '#121214',
   raised: '#1B1B1F',
+  raisedHover: '#212127',
   line: '#2A2A30',
+  lineStrong: '#3A3A42',
   bone: '#F4F2EE',
   muted: '#8D8B94',
   dim: '#55535C',
   coral: '#FF6B4A',
+  coralHover: '#FF7E61',
   done: '#7FD4B4',
   fault: '#E2726F',
   gold: '#E8A33C',
   mono: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
   sans: "'Inter', system-ui, sans-serif",
 } as const;
+
+const CSS = `
+  .ag-root * { box-sizing: border-box; }
+  .ag-root button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease; }
+  .ag-root button:focus-visible, .ag-root a:focus-visible, .ag-root [role="button"]:focus-visible { outline: 2px solid ${T.coral}; outline-offset: 2px; border-radius: 10px; }
+  .ag-primary-btn:hover:not(:disabled) { background: ${T.coralHover} !important; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(255,107,74,0.35); }
+  .ag-primary-btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 8px rgba(255,107,74,0.25); }
+  .ag-ghost-btn:hover:not(:disabled) { border-color: ${T.lineStrong} !important; color: ${T.bone} !important; background: ${T.raised} !important; }
+  .ag-card { transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease; }
+  .ag-card:hover { background: ${T.raisedHover} !important; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+  .ag-card:focus-visible { outline: 2px solid ${T.coral}; outline-offset: 2px; }
+  .ag-download:hover { background: ${T.coralHover} !important; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(255,107,74,0.35); }
+  .ag-preview-img { animation: ag-fade-in 0.35s ease; }
+  @keyframes ag-fade-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: scale(1); } }
+  .ag-progress-fill { transition: width 0.45s cubic-bezier(0.4, 0, 0.2, 1); }
+  .ag-scroll::-webkit-scrollbar { width: 8px; }
+  .ag-scroll::-webkit-scrollbar-thumb { background: ${T.line}; border-radius: 999px; }
+  .ag-scroll::-webkit-scrollbar-thumb:hover { background: ${T.lineStrong}; }
+  .ag-scroll::-webkit-scrollbar-track { background: transparent; }
+`;
 
 type SceneStatus = 'WAITING' | 'GENERATING' | 'DONE' | 'ERROR';
 
@@ -163,29 +185,40 @@ export default function App() {
   const selUrl = urls[sel.id];
   const doneCount = SCENES.filter((s) => status[s.id] === 'DONE').length;
 
-  const badgeColor: Record<SceneStatus, string> = { WAITING: T.dim, GENERATING: T.gold, DONE: T.done, ERROR: T.fault };
+  const badgeStyle: Record<SceneStatus, { color: string; bg: string }> = {
+    WAITING: { color: T.muted, bg: 'rgba(141,139,148,0.12)' },
+    GENERATING: { color: T.gold, bg: 'rgba(232,163,60,0.14)' },
+    DONE: { color: T.done, bg: 'rgba(127,212,180,0.14)' },
+    ERROR: { color: T.fault, bg: 'rgba(226,114,111,0.14)' },
+  };
 
   return (
-    <div style={{ width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: T.canvas, fontFamily: T.sans, overflow: 'hidden' }}>
+    <div className="ag-root" style={{ width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: T.canvas, fontFamily: T.sans, overflow: 'hidden' }}>
+      <style>{CSS}</style>
       {/* header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderBottom: `1px solid ${T.line}`, flexShrink: 0 }}>
-        <div style={{ color: T.bone, fontSize: 14, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ImageIcon size={16} color={T.coral} /> Asset Generator
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: `1px solid ${T.line}`, flexShrink: 0, background: 'linear-gradient(180deg, rgba(255,107,74,0.04), transparent)' }}>
+        <div style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(255,107,74,0.12)', border: '1px solid rgba(255,107,74,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <ImageIcon size={16} color={T.coral} />
         </div>
-        <div style={{ color: T.dim, fontSize: 11.5 }}>Netflix vs Blockbuster — 6-scene storyboard · platform image engine · 9:16</div>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <div style={{ color: T.bone, fontSize: 14.5, fontWeight: 700, letterSpacing: -0.2, lineHeight: 1.2 }}>Asset Generator</div>
+          <div style={{ color: T.muted, fontSize: 11.5, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Netflix vs Blockbuster · 6-scene storyboard · 9:16 stills</div>
+        </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
           {runningAll ? (
             <>
-              <div style={{ width: 140, height: 6, borderRadius: 999, background: T.raised, overflow: 'hidden' }}>
-                <div style={{ width: `${Math.round((progress / SCENES.length) * 100)}%`, height: '100%', background: T.coral, transition: 'width 0.4s' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 150, height: 6, borderRadius: 999, background: T.raised, overflow: 'hidden', border: `1px solid ${T.line}` }}>
+                  <div className="ag-progress-fill" style={{ width: `${Math.round((progress / SCENES.length) * 100)}%`, height: '100%', background: `linear-gradient(90deg, ${T.coral}, ${T.coralHover})`, borderRadius: 999 }} />
+                </div>
+                <span style={{ color: T.muted, fontSize: 11.5, fontFamily: T.mono, minWidth: 30 }}>{progress}/{SCENES.length}</span>
               </div>
-              <span style={{ color: T.muted, fontSize: 11.5, fontFamily: T.mono }}>{progress}/{SCENES.length}</span>
-              <button onClick={() => { cancelAll.current = true; }} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: `1px solid ${T.line}`, color: T.muted, borderRadius: 8, padding: '7px 12px', fontSize: 12, cursor: 'pointer' }}>
+              <button className="ag-ghost-btn" onClick={() => { cancelAll.current = true; }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: `1px solid ${T.line}`, color: T.muted, borderRadius: 9, padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                 <X size={12} /> Stop
               </button>
             </>
           ) : (
-            <button onClick={() => void generateAll()} style={{ display: 'flex', alignItems: 'center', gap: 7, background: T.coral, color: '#1A0E08', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>
+            <button className="ag-primary-btn" onClick={() => void generateAll()} style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.coral, color: '#1A0E08', border: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 10px rgba(255,107,74,0.25)' }}>
               <Sparkles size={13} /> Generate All
             </button>
           )}
@@ -195,30 +228,48 @@ export default function App() {
       {/* two columns */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         {/* left: scene cards */}
-        <div style={{ width: 380, flexShrink: 0, overflowY: 'auto', borderRight: `1px solid ${T.line}`, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ color: T.muted, fontSize: 11.5, fontFamily: T.mono }}>{doneCount}/{SCENES.length} assets ready</div>
+        <div className="ag-scroll" style={{ width: 380, flexShrink: 0, overflowY: 'auto', borderRight: `1px solid ${T.line}`, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
+            <span style={{ color: T.muted, fontSize: 10.5, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase' }}>Storyboard</span>
+            <span style={{ color: doneCount === SCENES.length ? T.done : T.muted, fontSize: 11, fontFamily: T.mono }}>{doneCount}/{SCENES.length} ready</span>
+          </div>
           {SCENES.map((sc, i) => {
             const st = status[sc.id] || 'WAITING';
             const on = selected === sc.id;
+            const badge = badgeStyle[st];
             return (
-              <div key={sc.id} onClick={() => setSelected(sc.id)} style={{ display: 'flex', gap: 12, background: T.raised, border: `1px solid ${on ? T.coral : st === 'ERROR' ? T.fault : T.line}`, borderRadius: 12, padding: 12, cursor: 'pointer' }}>
-                <div style={{ width: 62, height: 100, borderRadius: 8, background: '#000', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div
+                key={sc.id}
+                className="ag-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelected(sc.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(sc.id); } }}
+                style={{ display: 'flex', gap: 12, background: T.raised, border: `1px solid ${on ? T.coral : st === 'ERROR' ? T.fault : T.line}`, borderRadius: 14, padding: 13, cursor: 'pointer', boxShadow: on ? '0 0 0 1px rgba(255,107,74,0.35), 0 8px 24px rgba(0,0,0,0.3)' : 'none' }}
+              >
+                <div style={{ width: 62, height: 100, borderRadius: 9, background: '#000', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${T.line}` }}>
                   {urls[sc.id] ? <img src={urls[sc.id]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     : st === 'GENERATING' ? <Loader2 size={16} color={T.gold} className="animate-spin" />
-                    : <span style={{ color: T.dim, fontSize: 18 }}>{i + 1}</span>}
+                    : <span style={{ color: T.dim, fontSize: 17, fontFamily: T.mono }}>{i + 1}</span>}
                 </div>
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: T.bone, fontSize: 13, fontWeight: 700 }}>{i + 1}. {sc.title}</span>
-                    <span style={{ marginLeft: 'auto', color: badgeColor[st], fontSize: 10, fontWeight: 800, letterSpacing: 0.5, fontFamily: T.mono }}>{st}</span>
+                    <span style={{ color: T.bone, fontSize: 13, fontWeight: 600, letterSpacing: -0.1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{i + 1}. {sc.title}</span>
+                    <span style={{ marginLeft: 'auto', flexShrink: 0, color: badge.color, background: badge.bg, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, fontFamily: T.mono, borderRadius: 999, padding: '3px 8px' }}>{st}</span>
                   </div>
-                  <div style={{ color: T.muted, fontSize: 11.5, lineHeight: 1.45, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>🗣 {sc.voiceLine}</div>
-                  {errors[sc.id] ? <div style={{ color: T.fault, fontSize: 10.5, lineHeight: 1.4 }}>{errors[sc.id]}</div> : null}
+                  <div style={{ color: T.muted, fontSize: 11.5, lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>🗣 {sc.voiceLine}</div>
+                  {errors[sc.id] ? (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, color: T.fault, fontSize: 10.5, lineHeight: 1.45, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.2)', borderRadius: 7, padding: '5px 8px' }}>
+                      <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} />
+                      <span>{errors[sc.id]} — hit Retry to try again.</span>
+                    </div>
+                  ) : null}
                   <div style={{ marginTop: 'auto' }}>
                     <button
+                      className={st === 'DONE' ? 'ag-ghost-btn' : 'ag-primary-btn'}
                       disabled={st === 'GENERATING' || runningAll}
                       onClick={(e) => { e.stopPropagation(); setSelected(sc.id); void generateOne(sc); }}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: st === 'DONE' ? 'transparent' : T.coral, border: st === 'DONE' ? `1px solid ${T.line}` : 'none', color: st === 'DONE' ? T.muted : '#1A0E08', borderRadius: 7, padding: '6px 12px', fontSize: 11.5, fontWeight: 700, cursor: st === 'GENERATING' || runningAll ? 'default' : 'pointer', opacity: st === 'GENERATING' || runningAll ? 0.6 : 1 }}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: st === 'DONE' ? 'transparent' : T.coral, border: st === 'DONE' ? `1px solid ${T.line}` : '1px solid transparent', color: st === 'DONE' ? T.muted : '#1A0E08', borderRadius: 8, padding: '7px 13px', fontSize: 11.5, fontWeight: 600, cursor: st === 'GENERATING' || runningAll ? 'default' : 'pointer', opacity: st === 'GENERATING' || runningAll ? 0.55 : 1 }}
                     >
                       {st === 'GENERATING' ? <Loader2 size={11} className="animate-spin" /> : st === 'DONE' ? <RefreshCw size={11} /> : <Play size={11} />}
                       {st === 'GENERATING' ? 'Generating…' : st === 'DONE' ? 'Regenerate' : st === 'ERROR' ? 'Retry' : 'Generate'}
@@ -231,24 +282,29 @@ export default function App() {
         </div>
 
         {/* right: large preview */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16, minWidth: 0, overflowY: 'auto' }}>
+        <div className="ag-scroll" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 28, gap: 18, minWidth: 0, overflowY: 'auto' }}>
           {selUrl ? (
             <>
-              <img src={selUrl} alt={sel.title} style={{ maxHeight: 'calc(100% - 120px)', maxWidth: '100%', borderRadius: 14, border: `1px solid ${T.line}`, objectFit: 'contain' }} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
-                <div style={{ color: T.bone, fontSize: 13.5, fontWeight: 700 }}>{sel.title}</div>
-                <a href={selUrl} download={`${sel.id}.png`} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: T.coral, color: '#1A0E08', borderRadius: 9, padding: '10px 18px', fontSize: 12.5, fontWeight: 800, textDecoration: 'none' }}>
+              <img key={selUrl} className="ag-preview-img" src={selUrl} alt={sel.title} style={{ maxHeight: 'calc(100% - 140px)', maxWidth: '100%', borderRadius: 16, border: `1px solid ${T.lineStrong}`, objectFit: 'contain', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+                <div style={{ color: T.bone, fontSize: 14.5, fontWeight: 700, letterSpacing: -0.2 }}>{sel.title}</div>
+                <a className="ag-download" href={selUrl} download={`${sel.id}.png`} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: T.coral, color: '#1A0E08', borderRadius: 10, padding: '10px 20px', fontSize: 12.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 2px 10px rgba(255,107,74,0.25)', transition: 'background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease' }}>
                   <Download size={13} /> Download
                 </a>
               </div>
-              <div style={{ color: T.dim, fontSize: 11, maxWidth: 560, lineHeight: 1.5, textAlign: 'center' }}>{sel.prompt}</div>
+              <div style={{ maxWidth: 600, background: T.raised, border: `1px solid ${T.line}`, borderRadius: 12, padding: '12px 16px' }}>
+                <div style={{ color: T.muted, fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 6 }}>Art direction</div>
+                <div style={{ color: T.muted, fontSize: 11.5, lineHeight: 1.6 }}>{sel.prompt}</div>
+              </div>
             </>
           ) : (
-            <div style={{ textAlign: 'center', maxWidth: 440 }}>
-              <div style={{ fontSize: 40, marginBottom: 10 }}>🎬</div>
-              <div style={{ color: T.bone, fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{sel.title}</div>
-              <div style={{ color: T.muted, fontSize: 12.5, lineHeight: 1.55, marginBottom: 14 }}>🗣 {sel.voiceLine}</div>
-              <div style={{ color: T.dim, fontSize: 11.5, lineHeight: 1.55 }}>{status[sel.id] === 'GENERATING' ? 'The image engine is painting this scene…' : 'Hit Generate on the card — the finished 9:16 still lands here.'}</div>
+            <div style={{ textAlign: 'center', maxWidth: 440, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div style={{ width: 72, height: 72, borderRadius: 20, background: 'rgba(255,107,74,0.08)', border: '1px solid rgba(255,107,74,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}>
+                {status[sel.id] === 'GENERATING' ? <Loader2 size={26} color={T.gold} className="animate-spin" /> : <ImageIcon size={26} color={T.coral} />}
+              </div>
+              <div style={{ color: T.bone, fontSize: 16, fontWeight: 700, letterSpacing: -0.2, marginBottom: 8 }}>{sel.title}</div>
+              <div style={{ color: T.muted, fontSize: 12.5, lineHeight: 1.6, marginBottom: 14 }}>🗣 {sel.voiceLine}</div>
+              <div style={{ color: T.dim, fontSize: 11.5, lineHeight: 1.6 }}>{status[sel.id] === 'GENERATING' ? 'The image engine is painting this scene — it lands here the moment it finishes.' : 'Hit Generate on the card to the left — the finished 9:16 still appears here, ready to download.'}</div>
             </div>
           )}
         </div>

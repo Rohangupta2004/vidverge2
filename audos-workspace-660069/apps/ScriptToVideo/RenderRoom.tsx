@@ -129,7 +129,7 @@ export default function RenderRoom(props: {
       </div>
 
       <div style={{ maxWidth: 680, margin: '0 auto', padding: '22px 24px 0' }}>
-        <div style={{ color: T.bone, fontSize: 19, fontWeight: 700 }}>
+        <div style={{ color: T.bone, fontSize: 21, fontWeight: 700, letterSpacing: -0.3 }}>
           {p.status === 'ready' ? 'Your video is ready' : stalled ? 'The run stalled' : 'Making your video'}
         </div>
         <div style={{ color: stalled ? T.fault : T.live, fontSize: 13.5, marginTop: 5, minHeight: 20 }}>
@@ -174,7 +174,7 @@ export default function RenderRoom(props: {
 
         {/* Blocked characters — the one failure that waits for the user */}
         {castBlocked.map((c) => (
-          <div key={c.id} style={{ background: 'rgba(226,114,111,0.09)', border: `1px solid ${T.fault}`, borderRadius: 10, padding: 14, marginTop: 14 }}>
+          <div key={c.id} style={{ background: 'rgba(226,114,111,0.09)', border: '1px solid rgba(226,114,111,0.4)', borderRadius: 12, padding: 16, marginTop: 14 }}>
             <div style={{ color: T.fault, fontSize: 13.5, fontWeight: 600 }}>{c.name} is blocked by the likeness guard</div>
             <div style={{ color: T.muted, fontSize: 12.5, marginTop: 4 }}>{c.blocked_reason}</div>
             {recastKey === c.char_key ? (
@@ -208,13 +208,13 @@ export default function RenderRoom(props: {
         ) : null}
 
         {stalled ? (
-          <button onClick={onResume} style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 20, background: T.live, color: '#1A1205', border: 'none', borderRadius: 10, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+          <button className="s2v-lift" onClick={onResume} style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 20, background: T.live, color: '#1A1205', border: 'none', borderRadius: 11, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 12px rgba(232,163,60,0.25)' }}>
             <Play size={15} /> Resume from the first missing scene
           </button>
         ) : null}
 
         {p.status === 'review' || (filmingDone && p.status === 'rendering') ? (
-          <button onClick={onReview} style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 20, background: T.bone, color: T.canvas, border: 'none', borderRadius: 10, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+          <button className="s2v-lift" onClick={onReview} style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 20, background: T.bone, color: T.canvas, border: 'none', borderRadius: 11, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.3)' }}>
             Review the scenes
           </button>
         ) : null}

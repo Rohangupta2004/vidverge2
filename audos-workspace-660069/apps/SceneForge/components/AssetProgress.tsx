@@ -79,7 +79,7 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
       // and its image Retry stays hidden: the fix is another coding pass, not
       // another image.
       const labelBroken = broken || scene.coding_status === 'error';
-      return <div key={scene.id} className="flex items-center gap-4 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4">
+      return <div key={scene.id} className="flex items-center gap-4 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4 transition-colors hover:border-[var(--space-border-strong)]">
         {/* 80x60 inline preview, shown the instant THIS scene's image lands. */}
         <span className="flex h-[60px] w-[80px] shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--space-surface-muted)]">
           {scene.render_url
@@ -97,7 +97,7 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
         <span className="hidden items-center gap-1 text-xs text-[var(--space-text-muted)] sm:flex"><ImageIcon className="h-3.5 w-3.5" />{scene.status}</span>
         <span className="hidden items-center gap-1 text-xs text-[var(--space-text-muted)] sm:flex"><Code2 className="h-3.5 w-3.5" />{scene.coding_status || 'pending'}</span>
         {previewable ? <button onClick={() => setPreviewSceneId(scene.id)} className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,var(--space-brand-primary-500)_45%,transparent)] bg-[color-mix(in_srgb,var(--space-brand-primary-500)_10%,transparent)] px-3 py-2 text-xs font-semibold text-[var(--space-text-brand)] transition hover:bg-[color-mix(in_srgb,var(--space-brand-primary-500)_18%,transparent)]"><Eye className="h-3.5 w-3.5" />Preview</button> : null}
-        {broken && onRetryScene ? <button onClick={() => onRetryScene(scene)} className="flex items-center gap-1 rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-xs text-[var(--space-text-primary)]"><RefreshCw className="h-3.5 w-3.5" />Retry</button> : null}
+        {broken && onRetryScene ? <button onClick={() => onRetryScene(scene)} className="flex items-center gap-1 rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-xs font-medium text-[var(--space-text-primary)] transition-colors hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)]"><RefreshCw className="h-3.5 w-3.5" />Retry</button> : null}
       </div>;
     })}</div>
 
@@ -107,12 +107,12 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
     {codeFailed.length ? <p className="mt-2 text-sm text-[var(--space-semantic-danger)]">{codeFailed.length} scene{codeFailed.length === 1 ? '' : 's'} could not write motion code. “Generate the remaining scenes” retries only those — the pictures and finished scenes are kept.</p> : null}
 
     <div className="mt-6 flex flex-wrap gap-3">
-      <button disabled={!allReady || busy} onClick={onAssemble} className="rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-3 font-semibold text-white disabled:opacity-40">
+      <button disabled={!allReady || busy} onClick={onAssemble} className="rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_6px_18px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)] disabled:opacity-40 disabled:shadow-none disabled:hover:translate-y-0">
         {busy ? 'Working…' : allReady ? 'Assemble video' : `Assemble video · ${Math.min(imagesReady, codeReady)} of ${total} scenes ready`}
       </button>
       {/* Picks a half-finished run back up: scenes that already have a picture
           and their code are skipped, so this costs only what is missing. */}
-      {!allReady && onResume ? <button disabled={busy} onClick={onResume} className="rounded-xl border border-[var(--space-border-default)] px-5 py-3 font-semibold text-[var(--space-text-primary)] disabled:opacity-40">Generate the remaining scenes</button> : null}
+      {!allReady && onResume ? <button disabled={busy} onClick={onResume} className="rounded-xl border border-[var(--space-border-default)] px-5 py-3 font-semibold text-[var(--space-text-primary)] transition-colors hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)] disabled:opacity-40">Generate the remaining scenes</button> : null}
     </div>
   </div>;
 }

@@ -71,6 +71,8 @@ const VE_CSS = `
 .ve-btn:hover:not(:disabled) { filter: brightness(1.14); }
 .ve-btn:active:not(:disabled) { transform: scale(0.97); }
 .ve-btn:focus-visible { outline: 2px solid ${P.blue}; outline-offset: 2px; }
+.ve-input { transition: border-color .16s ease, box-shadow .16s ease; outline: none; }
+.ve-input:focus { border-color: ${P.blue} !important; box-shadow: 0 0 0 3px rgba(61,139,255,0.18); }
 .ve-drop { transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
 .ve-chip { transition: background .15s ease, border-color .15s ease, opacity .15s ease, color .15s ease; }
 .ve-elcard { transition: border-color .15s ease, background .15s ease, opacity .2s ease; cursor: pointer; }
