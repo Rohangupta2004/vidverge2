@@ -31,58 +31,28 @@ const EXAMPLES = [
   'Product intro for an AI writing tool, punchy and fast-paced',
 ];
 
-type ShowcaseVideo = {
-  src: string;
-  title: string;
-  detail: string;
-  capability: string;
-  className?: string;
-  poster?: string;
-};
-
-const SHOWCASE_VIDEOS: ShowcaseVideo[] = [
+const SHOWCASE_VIDEOS = [
   {
-    src: 'https://storage.googleapis.com/remotioncloudrun-29i6x7bt7e/renders/0c6b0198-c9c4-4310-8154-79f01b3fe31d/out.mp4',
-    title: 'VicharakAI product launch',
-    detail: 'Screenshots turned into a polished product film',
-    capability: 'Product Launch · Remotion',
+    src: 'https://storage.googleapis.com/audos-images/videos/f24710e5-7c6d-4db4-92b4-c2c235877575_stitched_1787432470357.mp4',
+    title: 'Basketball tutorial',
+    detail: 'Consistent player across every scene',
     className: 'vv-reel-wide',
   },
   {
-    src: 'https://storage.googleapis.com/remotioncloudrun-29i6x7bt7e/renders/46a76f40-3572-475e-9767-d008ff1d65c8/out.mp4',
-    title: 'Unicus Loans product tour',
-    detail: 'Feature story with branded motion graphics',
-    capability: 'Product Tour · Remotion',
+    src: 'https://storage.googleapis.com/audos-images/workspaces/f24710e5-7c6d-4db4-92b4-c2c235877575/uploads/videos/c860b676-a28b-4148-bb95-5bec11c80011.mp4',
+    title: 'True Haven product ad',
+    detail: 'Product brief to vertical ad',
+    className: '',
   },
   {
-    src: 'https://storage.googleapis.com/remotioncloudrun-29i6x7bt7e/renders/4e8310bf-ccdc-485a-a3a7-f57e81bd839f/out.mp4',
-    title: 'True Haven product launch',
-    detail: 'A product brief shaped into a launch film',
-    capability: 'Product Launch · Remotion',
-  },
-  {
-    src: 'https://storage.googleapis.com/remotioncloudrun-29i6x7bt7e/renders/4d1de4a8-eabd-44ba-a802-0a9c81c82026/out.mp4',
-    title: 'Founder cinematic trailer',
-    detail: 'Fast, editorial storytelling for social',
-    capability: 'Cinematic Trailer',
-    poster: 'https://storage.googleapis.com/audos-images/generated-images/image-1789550424949-dokl5e.png',
-  },
-  {
-    src: 'https://storage.googleapis.com/audos-images/videos/f24710e5-7c6d-4db4-92b4-c2c235877575_stitched_1789636974714.mp4',
-    title: 'Documentary-style story',
-    detail: 'Narrative scenes assembled into one film',
-    capability: 'Documentary',
-    poster: 'https://storage.googleapis.com/audos-images/generated-images/image-1789556236983-uj5a0d.png',
-  },
-  {
-    src: 'https://storage.googleapis.com/audos-images/videos/f24710e5-7c6d-4db4-92b4-c2c235877575_stitched_1787432470357.mp4',
-    title: 'Basketball tutorial series',
-    detail: 'The same player stays consistent across scenes',
-    capability: 'Character Consistency',
+    src: 'https://storage.googleapis.com/remotioncloudrun-29i6x7bt7e/renders/86fd1ac8-bbfd-4f6b-bb98-eec20ad2132b/out.mp4',
+    title: 'Touchpoints product video',
+    detail: 'Branded product launch made in Remotion',
+    className: '',
   },
 ];
 
-const REAL_DEMO = SHOWCASE_VIDEOS[0].src;
+const REAL_DEMO = SHOWCASE_VIDEOS[1].src;
 
 type LandingShowcaseProps = {
   brandName: string;
@@ -121,30 +91,14 @@ function HeroVideoShowcase({ name, logoUrl }: { name: string; logoUrl?: string }
         <span className="vv-live-pill"><i /> Playing now</span>
       </div>
       <div className="vv-reel-grid">
-        {SHOWCASE_VIDEOS.slice(0, 3).map(video => (
-          <div key={video.title} className={`vv-reel-item ${video.className || ''}`}> 
+        {SHOWCASE_VIDEOS.map(video => (
+          <div key={video.title} className={`vv-reel-item ${video.className}`}> 
             <video src={video.src} autoPlay muted loop playsInline preload="metadata" aria-label={video.title} />
             <div className="vv-reel-caption"><strong>{video.title}</strong><span>{video.detail}</span></div>
           </div>
         ))}
       </div>
       <div className="vv-reel-footer"><CheckCircle2 size={14} /> Scripted, generated, and delivered in Vidverge</div>
-    </div>
-  );
-}
-
-function CapabilityVideoGallery() {
-  return (
-    <div className="vv-capability-grid">
-      {SHOWCASE_VIDEOS.map(video => (
-        <article key={video.title} className="vv-capability-card">
-          <div className="vv-capability-video">
-            <video src={video.src} poster={video.poster} autoPlay muted loop playsInline preload="metadata" aria-label={video.title} />
-            <span>{video.capability}</span>
-          </div>
-          <div className="vv-capability-copy"><strong>{video.title}</strong><p>{video.detail}</p></div>
-        </article>
-      ))}
     </div>
   );
 }
@@ -380,7 +334,6 @@ export default function LandingShowcase(props: LandingShowcaseProps) {
         .vv-hero-reel{width:100%;padding:14px;border-radius:26px;background:rgba(9,9,13,.92);border:1px solid rgba(255,255,255,.12);box-shadow:0 30px 90px rgba(0,0,0,.55),0 0 80px rgba(37,99,235,.15);backdrop-filter:blur(16px)}.vv-reel-header{display:flex;align-items:center;justify-content:space-between;padding:2px 3px 13px}.vv-reel-brand{display:flex;align-items:center;gap:10px}.vv-reel-brand span{display:grid;gap:2px}.vv-reel-brand strong{font-size:13px;color:#F8FAFC}.vv-reel-brand small{font-size:10px;color:#64748B}.vv-live-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border-radius:999px;background:rgba(37,99,235,.12);border:1px solid rgba(96,165,250,.2);color:#93C5FD;font-size:10px;font-weight:700}.vv-live-pill i{width:6px;height:6px;border-radius:50%;background:#60A5FA;box-shadow:0 0 10px #60A5FA}.vv-reel-grid{height:440px;display:grid;grid-template-columns:1.45fr .75fr;grid-template-rows:1fr 1fr;gap:10px}.vv-reel-item{position:relative;min-height:0;overflow:hidden;border-radius:16px;background:linear-gradient(135deg,#101827,#07101d);border:1px solid rgba(255,255,255,.1)}.vv-reel-wide{grid-row:1 / 3}.vv-reel-item video{width:100%;height:100%;display:block;object-fit:cover;background:#08090d}.vv-reel-caption{position:absolute;left:0;right:0;bottom:0;padding:34px 13px 12px;background:linear-gradient(transparent,rgba(3,5,9,.92));display:grid;gap:2px}.vv-reel-caption strong{font-size:12px;color:#fff}.vv-reel-caption span{font-size:9px;color:#CBD5E1}.vv-reel-footer{display:flex;align-items:center;justify-content:center;gap:7px;padding:12px 4px 0;color:#94A3B8;font-size:10px}.vv-reel-footer svg{color:#60A5FA}
         @keyframes vvLoaderSpin{to{transform:rotate(360deg)}}
         .vv-hero-fallback{height:100%;position:relative;perspective:1200px;transform-style:preserve-3d}.vv-css-stage{position:absolute;inset:2% 0 0;perspective:1200px;transform-style:preserve-3d}.vv-css-object{position:absolute;inset:8% 3%;transform-style:preserve-3d;animation:vvSceneFloat 8s cubic-bezier(.22,1,.36,1) infinite;will-change:transform}.vv-css-halo{position:absolute;left:50%;top:48%;width:62%;aspect-ratio:1;border-radius:50%;border:1px solid rgba(96,165,250,.26);box-shadow:0 0 70px rgba(37,99,235,.2),inset 0 0 50px rgba(29,78,216,.1);transform-style:preserve-3d;animation:vvHaloSpin 18s linear infinite}.vv-css-halo-one{transform:translate(-50%,-50%) rotateX(68deg)}.vv-css-halo-two{width:48%;border-color:rgba(37,99,235,.18);animation-direction:reverse;animation-duration:13s}.vv-css-frame{position:absolute;width:54%;aspect-ratio:1.68;border-radius:18px;padding:10px;background:rgba(16,12,26,.9);border:1px solid rgba(255,255,255,.15);box-shadow:0 26px 70px rgba(0,0,0,.55),0 0 48px rgba(37,99,235,.18);backdrop-filter:blur(12px);transform-style:preserve-3d}.vv-css-frame-edge{position:absolute;inset:8px -9px -9px 8px;border-radius:18px;background:linear-gradient(145deg,#2B174A,#100B1F);transform:translateZ(-18px);box-shadow:0 26px 60px rgba(0,0,0,.48)}.vv-css-frame-1{left:0;top:34%;transform:translateZ(-34px) rotateY(27deg) rotateZ(-5deg)}.vv-css-frame-2{left:23%;top:20%;z-index:2;transform:translateZ(72px) rotateX(-2deg)}.vv-css-frame-3{right:0;top:36%;transform:translateZ(-34px) rotateY(-27deg) rotateZ(5deg)}.vv-css-frame-screen{height:75%;position:relative;border-radius:12px;background:radial-gradient(circle at 30% 24%,rgba(147,197,253,.58),transparent 28%),linear-gradient(135deg,rgba(37,99,235,.76),#0A0712 68%);display:flex;align-items:center;justify-content:center;overflow:hidden;transform:translateZ(16px)}.vv-css-frame-scene{position:absolute;width:48%;height:120%;right:-7%;bottom:-45%;border-radius:46%;background:linear-gradient(160deg,rgba(255,255,255,.28),rgba(29,78,216,.12));transform:rotate(-18deg)}.vv-css-frame-play{position:relative;width:38px;height:38px;border-radius:50%;background:#F8FAFC;color:#1D4ED8;display:grid;place-items:center;font-size:12px;box-shadow:0 8px 22px rgba(0,0,0,.38);transform:translateZ(24px)}.vv-css-frame-timeline{height:25%;display:flex;align-items:center;gap:6px;padding:4px 8px;transform:translateZ(12px)}.vv-css-frame-timeline i{width:12%;border-radius:3px;background:linear-gradient(#60A5FA,#1D4ED8)}.vv-css-logo-extrusion{position:absolute;left:43%;top:43%;width:70px;height:70px;transform-style:preserve-3d;transform:translateZ(142px) rotateY(-12deg)}.vv-css-logo-extrusion span{position:absolute;inset:0;border-radius:18px;display:grid;place-items:center;font-size:31px;font-weight:900;color:#fff;background:linear-gradient(135deg,#60A5FA,#1D4ED8);border:1px solid rgba(255,255,255,.28);box-shadow:0 14px 35px rgba(29,78,216,.28)}.vv-css-floor{position:absolute;left:16%;right:16%;bottom:5%;height:90px;border-radius:50%;background:radial-gradient(ellipse,rgba(37,99,235,.28),transparent 68%);filter:blur(22px);transform:rotateX(76deg) translateZ(-70px)}.vv-hero-fallback[data-reduced-motion='true'] .vv-css-object,.vv-hero-fallback[data-reduced-motion='true'] .vv-css-halo{animation:none}.vv-hero-fallback[data-flat='true']{perspective:none}.vv-hero-fallback[data-flat='true'] .vv-css-object{animation:none;transform:none}.vv-hero-fallback[data-flat='true'] .vv-css-frame{transform:none}.vv-hero-fallback[data-flat='true'] .vv-css-frame-1{left:0}.vv-hero-fallback[data-flat='true'] .vv-css-frame-3{right:0}.vv-hero-fallback[data-flat='true'] .vv-css-logo-extrusion{display:none}
-        .vv-capability-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:28px}.vv-capability-card{overflow:hidden;border-radius:18px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.09);transition:transform .2s ease,border-color .2s ease}.vv-capability-card:hover{transform:translateY(-3px);border-color:rgba(96,165,250,.32)}.vv-capability-video{position:relative;aspect-ratio:16/9;background:#09090d;overflow:hidden}.vv-capability-video video{width:100%;height:100%;display:block;object-fit:cover;background:#09090d}.vv-capability-video>span{position:absolute;left:10px;top:10px;padding:5px 8px;border-radius:999px;background:rgba(5,5,7,.78);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(8px);color:#DBEAFE;font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}.vv-capability-copy{padding:14px}.vv-capability-copy strong{display:block;color:#F8FAFC;font-size:14px}.vv-capability-copy p{margin:5px 0 0;color:#64748B;font-size:11px;line-height:1.5}
         .vv-kicker{text-align:center;margin-bottom:54px}.vv-kicker h2{font-size:clamp(34px,5vw,58px);line-height:1.02;letter-spacing:-.045em;margin:16px 0}.vv-kicker p{color:#64748B;max-width:620px;margin:0 auto;line-height:1.7}.vv-glow-section{background:radial-gradient(700px 400px at 50% 45%,rgba(37,99,235,.11),transparent 70%),#050507}
         .vv-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;position:relative}.vv-step-card,.vv-feature-card,.vv-price-card{height:100%;padding:24px;border-radius:22px;background:var(--glass);border:1px solid var(--border);backdrop-filter:blur(12px);position:relative;overflow:hidden}.vv-tilt-card{transition:transform .22s ease,border-color .22s ease,box-shadow .22s ease}.vv-tilt-card:hover{transform:translateY(-3px);border-color:rgba(96,165,250,.25);box-shadow:0 18px 42px rgba(0,0,0,.22)}.vv-card-content{position:relative;z-index:1}.vv-icon{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;color:#93C5FD;background:rgba(37,99,235,.13);border:1px solid rgba(96,165,250,.19);margin-bottom:30px}.vv-step-num{position:absolute;right:22px;top:20px;color:rgba(255,255,255,.14);font-weight:800;font-size:13px}.vv-step-card h3,.vv-feature-card h3,.vv-price-card h3{font-size:18px;margin:0 0 8px;letter-spacing:-.02em}.vv-step-card p,.vv-feature-card p{margin:0;color:#64748B;font-size:14px;line-height:1.65}.vv-step-render{margin-top:24px}.vv-connector{position:absolute;z-index:3;left:29%;width:14%;top:calc(50% - 1px);pointer-events:none}.vv-generating{padding:11px;border-radius:12px;background:#0B0911;border:1px solid rgba(255,255,255,.08);box-shadow:0 14px 30px rgba(0,0,0,.4)}.vv-generating-label{display:flex;align-items:center;gap:6px;font-size:10px;color:#60A5FA;margin-bottom:8px}.vv-progress-track{height:4px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden}.vv-progress-track span{display:block;width:100%;height:100%;transform-origin:left;border-radius:inherit;background:linear-gradient(90deg,#1D4ED8,#60A5FA);box-shadow:0 0 12px #2563EB}.vv-generating-compact{padding:9px}
         .vv-demo-panel{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:22px;border-radius:28px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.1);box-shadow:0 35px 100px rgba(0,0,0,.45),0 0 90px rgba(37,99,235,.09);backdrop-filter:blur(14px)}.vv-demo-side{border-radius:20px;background:#09090D;border:1px solid rgba(255,255,255,.08);padding:22px;min-height:380px}.vv-window-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;color:#64748B;font-size:11px}.vv-dots{display:flex;gap:5px}.vv-dots i{width:6px;height:6px;border-radius:50%;background:#25222d}.vv-textarea{min-height:210px;border-radius:16px;padding:18px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.08);font-size:16px;line-height:1.65;color:#CBD5E1}.vv-caret{display:inline-block;width:2px;height:1.1em;margin-left:2px;background:#60A5FA;vertical-align:-2px}.vv-demo-output{position:relative;overflow:hidden;padding:0;background:#07070A}.vv-demo-output video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transform:scale(1.04);transition:opacity .7s ease,transform 1.2s cubic-bezier(.22,1,.36,1)}.vv-demo-output video.vv-demo-video-ready{opacity:.56;transform:scale(1)}.vv-demo-loading{position:absolute;inset:0;z-index:3;display:grid;place-items:center;background:radial-gradient(circle at 50% 42%,rgba(37,99,235,.2),transparent 34%),#07070A;text-align:center}.vv-loader-orbit{width:76px;height:76px;margin:0 auto 20px;border-radius:50%;border:1px solid rgba(96,165,250,.2);border-top:2px solid #60A5FA;box-shadow:0 0 38px rgba(37,99,235,.25);animation:vvLoaderSpin 1.2s linear infinite}.vv-loader-core{position:absolute;left:50%;top:50%;width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#60A5FA,#1D4ED8);transform:translate(-50%,-84%) rotate(12deg);box-shadow:0 0 30px rgba(37,99,235,.5)}.vv-demo-loading strong{display:block;font-size:14px}.vv-demo-loading span{display:block;margin-top:7px;color:#64748B;font-size:11px}.vv-video-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,5,7,.08),rgba(5,5,7,.86));display:flex;flex-direction:column;justify-content:flex-end;padding:22px}.vv-play-pulse{position:absolute;left:50%;top:43%;transform:translate(-50%,-50%);width:64px;height:64px;border-radius:50%;display:grid;place-items:center;color:#fff;background:rgba(37,99,235,.78);border:1px solid rgba(255,255,255,.24);box-shadow:0 0 0 12px rgba(37,99,235,.09),0 0 55px rgba(37,99,235,.5)}.vv-wave{height:38px;display:flex;align-items:center;gap:5px;margin:14px 0}.vv-wave i{display:block;width:4px;height:100%;border-radius:99px;background:linear-gradient(#93C5FD,#1D4ED8)}.vv-output-meta{display:flex;justify-content:space-between;color:#94A3B8;font-size:11px}.vv-demo-cta{display:flex;justify-content:center;margin-top:30px}
@@ -389,8 +342,8 @@ export default function LandingShowcase(props: LandingShowcaseProps) {
         .vv-final{padding:126px 0;text-align:center;overflow:hidden;background:#050507}.vv-final-gradient{position:absolute;width:680px;height:680px;border-radius:45%;left:50%;top:50%;background:conic-gradient(from 0deg,transparent,#1D4ED8,transparent,#2563EB,transparent);filter:blur(100px);opacity:.12;transform:translate(-50%,-50%)}.vv-final h2{position:relative;font-size:clamp(40px,6vw,70px);line-height:1;letter-spacing:-.055em;margin:0 auto 30px;max-width:780px}.vv-final-actions{position:relative;display:flex;justify-content:center}
         .vv-auth-section{padding:110px 0;background:radial-gradient(600px 400px at 50% 50%,rgba(37,99,235,.12),transparent 70%),#050507}.vv-auth-wrap{width:min(500px,calc(100% - 40px));margin:auto}.vv-auth-heading{text-align:center;margin-bottom:25px}.vv-auth-heading h2{font-size:32px;letter-spacing:-.04em;margin:12px 0 8px}.vv-auth-heading p{color:#64748B;margin:0;line-height:1.6}.vv-auth-card{padding:26px;border-radius:22px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.1);box-shadow:0 28px 80px rgba(0,0,0,.52),0 0 70px rgba(37,99,235,.11);backdrop-filter:blur(16px)}.vv-auth-form{display:grid;gap:13px}.vv-input{width:100%;padding:15px 16px;border-radius:12px;background:#0B0A10;border:1px solid rgba(255,255,255,.11);color:#F8FAFC;font:inherit;font-size:15px;outline:0}.vv-input:focus{border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,.18)}.vv-input::placeholder{color:#4B5563}.vv-submit{width:100%;padding:15px;border:0;border-radius:12px;background:linear-gradient(135deg,#3B82F6,#2563EB,#1D4ED8);color:#fff;font:inherit;font-weight:750;cursor:pointer;box-shadow:0 12px 32px rgba(37,99,235,.28)}.vv-submit:disabled{opacity:.45;cursor:not-allowed}.vv-error{color:#F87171;font-size:12px;margin:7px 0 0}.vv-gdpr{font-size:11px;color:#64748B;padding:11px;border-radius:10px;background:rgba(255,255,255,.025)}.vv-gdpr a{color:#CBD5E1}.vv-gdpr label{display:flex;gap:8px;margin-top:8px}.vv-auth-proof{display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin:16px 0 0;color:#64748B;font-size:11px}.vv-auth-proof span{display:flex;gap:5px;align-items:center}.vv-auth-proof svg{color:#60A5FA}.vv-divider{display:flex;align-items:center;gap:10px;color:#4B5563;font-size:10px;margin:18px 0 12px}.vv-divider:before,.vv-divider:after{content:'';height:1px;flex:1;background:rgba(255,255,255,.08)}.vv-social-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.vv-social{display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;border-radius:11px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.025);color:#CBD5E1;text-transform:capitalize;cursor:pointer}.vv-google{font-weight:800;background:conic-gradient(from -45deg,#4285F4,#34A853,#FBBC05,#EA4335,#4285F4);background-clip:text;-webkit-background-clip:text;color:transparent}.vv-guest{display:block;margin:15px auto 0;border:0;background:none;color:#64748B;cursor:pointer}.vv-footer{padding:34px 20px;border-top:1px solid rgba(255,255,255,.06);text-align:center;color:#4B5563;font-size:11px}.vv-footer-brand{display:flex;justify-content:center;align-items:center;gap:8px;color:#94A3B8;margin-bottom:9px}
         @media(max-width:1100px) and (min-width:901px){.vv-pricing-grid{grid-template-columns:repeat(2,1fr)}}
-        @media(max-width:900px){.vv-hero-grid{grid-template-columns:1fr;padding-top:130px}.vv-hero-copy{text-align:center}.vv-hero-copy>p{margin-left:auto;margin-right:auto}.vv-hero-actions{justify-content:center}.vv-hero-visual{height:460px}.vv-steps,.vv-pricing-grid{grid-template-columns:1fr}.vv-capability-grid{grid-template-columns:repeat(2,1fr)}.vv-connector{display:none}.vv-price-pop{transform:none}.vv-price-shell{height:390px}.vv-demo-panel{grid-template-columns:1fr}.vv-demo-side{min-height:330px}}
-        @media(max-width:767px){.vv-container{width:min(1160px,calc(100% - 28px))}.vv-section{padding:82px 0}.vv-nav-status{display:none}.vv-hero h1{font-size:clamp(48px,15vw,70px)}.vv-hero-visual{height:520px;margin:0 -6px}.vv-hero-grid{gap:0;padding-bottom:55px}.vv-hero-reel{padding:10px;border-radius:20px}.vv-reel-grid{height:410px;grid-template-columns:1fr 1fr;grid-template-rows:1.2fr .8fr}.vv-reel-wide{grid-column:1 / 3;grid-row:auto}.vv-capability-grid{grid-template-columns:1fr}.vv-feature-grid{grid-template-columns:1fr}.vv-feature-copy{grid-template-columns:1fr 120px}.vv-kicker{margin-bottom:38px}.vv-demo-panel{padding:12px;border-radius:22px}.vv-demo-side{padding:16px}.vv-final{padding:90px 0}.vv-social-grid{grid-template-columns:1fr}}
+        @media(max-width:900px){.vv-hero-grid{grid-template-columns:1fr;padding-top:130px}.vv-hero-copy{text-align:center}.vv-hero-copy>p{margin-left:auto;margin-right:auto}.vv-hero-actions{justify-content:center}.vv-hero-visual{height:460px}.vv-steps,.vv-pricing-grid{grid-template-columns:1fr}.vv-connector{display:none}.vv-price-pop{transform:none}.vv-price-shell{height:390px}.vv-demo-panel{grid-template-columns:1fr}.vv-demo-side{min-height:330px}}
+        @media(max-width:767px){.vv-container{width:min(1160px,calc(100% - 28px))}.vv-section{padding:82px 0}.vv-nav-status{display:none}.vv-hero h1{font-size:clamp(48px,15vw,70px)}.vv-hero-visual{height:520px;margin:0 -6px}.vv-hero-grid{gap:0;padding-bottom:55px}.vv-hero-reel{padding:10px;border-radius:20px}.vv-reel-grid{height:410px;grid-template-columns:1fr 1fr;grid-template-rows:1.2fr .8fr}.vv-reel-wide{grid-column:1 / 3;grid-row:auto}.vv-feature-grid{grid-template-columns:1fr}.vv-feature-copy{grid-template-columns:1fr 120px}.vv-kicker{margin-bottom:38px}.vv-demo-panel{padding:12px;border-radius:22px}.vv-demo-side{padding:16px}.vv-final{padding:90px 0}.vv-social-grid{grid-template-columns:1fr}}
         @media(prefers-reduced-motion:reduce){.vv-landing *{scroll-behavior:auto!important}.vv-tilt-card:hover{transform:none}}
       `}</style>
 
@@ -443,12 +396,8 @@ export default function LandingShowcase(props: LandingShowcaseProps) {
           <Reveal delay={0.08}>
             <TiltCard className="vv-demo-panel">
               <div className="vv-demo-side"><div className="vv-window-bar"><span>VIDEO BRIEF</span><span className="vv-dots"><i /><i /><i /></span></div><div className="vv-textarea">{typedBrief}<motion.span className="vv-caret" animate={{ opacity: reducedMotion ? 1 : [1, 0.15] }} transition={{ ...MICRO_SPRING, repeat: Infinity, repeatType: 'reverse' }} /></div><div style={{ marginTop: 18 }}><GeneratingLine /></div></div>
-              <div className="vv-demo-side vv-demo-output"><video className={demoReady ? 'vv-demo-video-ready' : ''} src={REAL_DEMO} autoPlay muted loop playsInline preload="metadata" aria-label="Vidverge Product Launch Remotion preview" />{!demoReady ? <motion.div className="vv-demo-loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><div><div style={{ position: 'relative' }}><div className="vv-loader-orbit" /><div className="vv-loader-core" /></div><strong>Building your video</strong><span>Scripting · directing · rendering in Remotion</span></div></motion.div> : <motion.div className="vv-video-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={ENTRANCE_SPRING}><motion.div className="vv-play-pulse" animate={reducedMotion ? undefined : { scale: [1, 1.08] }} transition={{ ...ENTRANCE_SPRING, repeat: Infinity, repeatType: 'reverse' }}><Play size={24} fill="currentColor" /></motion.div><span className="vv-eyebrow" style={{ alignSelf: 'flex-start' }}><CheckCircle2 size={12} /> Product Launch render</span><div className="vv-wave">{Array.from({ length: 18 }, (_, index) => <WaveBar key={index} index={index} />)}</div><div className="vv-output-meta"><span>7 scenes rendered</span><span>Remotion · MP4 ready</span></div></motion.div>}</div>
+              <div className="vv-demo-side vv-demo-output"><video className={demoReady ? 'vv-demo-video-ready' : ''} src={REAL_DEMO} autoPlay muted loop playsInline preload="metadata" aria-label="Vidverge generated video preview" />{!demoReady ? <motion.div className="vv-demo-loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><div><div style={{ position: 'relative' }}><div className="vv-loader-orbit" /><div className="vv-loader-core" /></div><strong>Building your video</strong><span>Scripting · animating · mixing sound</span></div></motion.div> : <motion.div className="vv-video-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={ENTRANCE_SPRING}><motion.div className="vv-play-pulse" animate={reducedMotion ? undefined : { scale: [1, 1.08] }} transition={{ ...ENTRANCE_SPRING, repeat: Infinity, repeatType: 'reverse' }}><Play size={24} fill="currentColor" /></motion.div><span className="vv-eyebrow" style={{ alignSelf: 'flex-start' }}><CheckCircle2 size={12} /> Render complete</span><div className="vv-wave">{Array.from({ length: 18 }, (_, index) => <WaveBar key={index} index={index} />)}</div><div className="vv-output-meta"><span>6 scenes rendered</span><span>00:30 · MP4 ready</span></div></motion.div>}</div>
             </TiltCard>
-          </Reveal>
-          <Reveal delay={0.12}>
-            <div className="vv-kicker" style={{ marginTop: 72, marginBottom: 28 }}><span className="vv-eyebrow">Explore every capability</span><h2>More than one kind of video.</h2><p>Product launches, app tours, cinematic trailers, documentaries, and consistent-character series — all made in Vidverge.</p></div>
-            <CapabilityVideoGallery />
           </Reveal>
           <p className="vv-payg">Creators are already using Vidverge to produce consistent video series and ad campaigns.</p>
           <div className="vv-demo-cta"><MagneticButton onClick={scrollToAuth}>Try it free <ArrowRight size={17} /></MagneticButton></div>
