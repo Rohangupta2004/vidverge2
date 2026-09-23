@@ -25,13 +25,13 @@
  *   'kling:' prefix so status polling routes to the right endpoint even
  *   across a reload (resumeFilm only has the stored operation id).
  *
- * AVAILABILITY (verified Sep 23 2026): Omni Flash works end-to-end. Kling
- * answers every call with "Kling is not configured on this platform
- * (KLING_API_KEY missing)" and every openrouter/* kickoff fails instantly at
- * the provider — both need PLATFORM-side keys, nothing this workspace can fix.
- * The adapters below are complete, so both models start working the moment
- * the platform configures them; until then their picker entries carry an
- * availability note and a submit fails with the provider's own plain reason.
+ * AVAILABILITY (catalog update, 23 Sep 2026): the full Group A catalog is
+ * approved on /api/veo/generate/video — Omni Flash, Veo 3.1 / 3.1 Fast /
+ * 3.0 / 3.0 Fast / 2.0, Sora 2 / 2 Pro, and the openrouter/* paths
+ * (Seedance 2.0 Fast, Veo 3.1 / Fast / Lite). Kling is still platform-key
+ * gated ("Kling is not configured on this platform") — its picker entries are
+ * [Coming Soon] and disabled; the adapter below starts working the moment the
+ * platform configures the key.
  */
 
 import { Aspect, ReferenceAsset, uploadBlob, uploadDataUrl, wsToken } from '../api';
@@ -40,7 +40,7 @@ import { Aspect, ReferenceAsset, uploadBlob, uploadDataUrl, wsToken } from '../a
 // Central model registry — add or change models HERE and nowhere else.
 // ---------------------------------------------------------------------------
 
-export type VideoProvider = 'google' | 'openrouter' | 'kling';
+export type VideoProvider = 'google' | 'openai' | 'openrouter' | 'kling';
 
 export interface VideoModelConfig {
   /** Registry id — persisted on the film row (s2v_films.video_model). */
@@ -65,6 +65,17 @@ export interface VideoModelConfig {
   timeoutMs: number;
   /** Availability hint surfaced in the picker (undefined = fully available). */
   availabilityNote?: string;
+  /** Picker badge: Fast / Standard / Cinematic / Lite / Character / Pro. */
+  tier?: 'Fast' | 'Standard' | 'Cinematic' | 'Lite' | 'Character' | 'Pro';
+  /** True = listed but DISABLED in the picker ([Coming Soon] — Kling). */
+  comingSoon?: boolean;
+  /** referenceImages are mutually exclusive with the seed frame (Veo 3.1 rule)
+   * — when both travel, the seed (continuity) wins and refs are dropped. */
+  refsExclusiveWithSeed?: boolean;
+  /** The model renders native audio when asked (OpenRouter paths do not). */
+  supportsAudio?: boolean;
+  /** '4k' resolution is honored (veo-3.1-generate-preview + fast only). */
+  supports4k?: boolean;
 }
 
 export const VIDEO_MODEL: VideoModelConfig = {
@@ -80,6 +91,8 @@ export const VIDEO_MODEL: VideoModelConfig = {
   negativeMaxChars: 500,
   pollIntervalMs: 5000,
   timeoutMs: 8 * 60 * 1000,
+  tier: 'Character',
+  supportsAudio: true,
 };
 
 export const SEEDANCE_2_0: VideoModelConfig = {
@@ -95,7 +108,7 @@ export const SEEDANCE_2_0: VideoModelConfig = {
   negativeMaxChars: 500,
   pollIntervalMs: 5000,
   timeoutMs: 10 * 60 * 1000,
-  availabilityNote: 'Provider key pending on the platform — submits fail until it lands.',
+  tier: 'Fast',
 };
 
 export const KLING_V2_MASTER: VideoModelConfig = {
@@ -111,11 +124,54 @@ export const KLING_V2_MASTER: VideoModelConfig = {
   negativeMaxChars: 2500,
   pollIntervalMs: 5000,
   timeoutMs: 10 * 60 * 1000,
-  availabilityNote: 'Provider key pending on the platform — submits fail until it lands.',
+  tier: 'Cinematic',
+  comingSoon: true,
+  availabilityNote: 'Kling is being configured on the platform — it will activate automatically when ready.',
 };
 
-/** Every model the pipeline can run on, in picker order. */
-export const VIDEO_MODELS: VideoModelConfig[] = [VIDEO_MODEL, SEEDANCE_2_0, KLING_V2_MASTER];
+/** Shorthand for the standard /api/veo proxy models (Group A). */
+function veoProxyModel(p: {
+  id: string; label: string; apiModel: string; provider: VideoProvider;
+  tier: VideoModelConfig['tier']; maxRefs?: number; refsExclusiveWithSeed?: boolean;
+  audio?: boolean; supports4k?: boolean; safeMax?: number;
+}): VideoModelConfig {
+  return {
+    id: p.id, label: p.label, provider: p.provider, model: p.id, apiModel: p.apiModel,
+    supportedDurations: [4, 6, 8, 10], safeMaxDuration: p.safeMax ?? 8,
+    maxReferenceImages: p.maxRefs ?? 0, promptMaxChars: 1000, negativeMaxChars: 500,
+    pollIntervalMs: 5000, timeoutMs: 10 * 60 * 1000,
+    tier: p.tier, refsExclusiveWithSeed: p.refsExclusiveWithSeed, supportsAudio: p.audio,
+    supports4k: p.supports4k,
+  };
+}
+
+export const VEO_31 = veoProxyModel({ id: 'veo-3.1', label: 'Veo 3.1', apiModel: 'veo-3.1-generate-preview', provider: 'google', tier: 'Cinematic', maxRefs: 3, refsExclusiveWithSeed: true, audio: true, supports4k: true });
+export const VEO_31_FAST = veoProxyModel({ id: 'veo-3.1-fast', label: 'Veo 3.1 Fast', apiModel: 'veo-3.1-fast-generate-preview', provider: 'google', tier: 'Fast', maxRefs: 3, refsExclusiveWithSeed: true, audio: true, supports4k: true });
+export const VEO_30 = veoProxyModel({ id: 'veo-3.0', label: 'Veo 3.0', apiModel: 'veo-3.0-generate-001', provider: 'google', tier: 'Standard', audio: true });
+export const VEO_30_FAST = veoProxyModel({ id: 'veo-3.0-fast', label: 'Veo 3.0 Fast', apiModel: 'veo-3.0-fast-generate-001', provider: 'google', tier: 'Fast', audio: true });
+export const VEO_20 = veoProxyModel({ id: 'veo-2.0', label: 'Veo 2.0', apiModel: 'veo-2.0-generate-001', provider: 'google', tier: 'Standard' });
+export const SORA_2 = veoProxyModel({ id: 'sora-2', label: 'Sora 2', apiModel: 'sora-2', provider: 'openai', tier: 'Cinematic', audio: true, safeMax: 10 });
+export const SORA_2_PRO = veoProxyModel({ id: 'sora-2-pro', label: 'Sora 2 Pro', apiModel: 'sora-2-pro', provider: 'openai', tier: 'Pro', audio: true, safeMax: 10 });
+export const OR_VEO_31 = veoProxyModel({ id: 'or-veo-3.1', label: 'Veo 3.1 (OpenRouter)', apiModel: 'openrouter/google/veo-3.1', provider: 'openrouter', tier: 'Cinematic' });
+export const OR_VEO_31_FAST = veoProxyModel({ id: 'or-veo-3.1-fast', label: 'Veo 3.1 Fast (OpenRouter)', apiModel: 'openrouter/google/veo-3.1-fast', provider: 'openrouter', tier: 'Fast' });
+export const OR_VEO_31_LITE = veoProxyModel({ id: 'or-veo-3.1-lite', label: 'Veo 3.1 Lite (OpenRouter)', apiModel: 'openrouter/google/veo-3.1-lite', provider: 'openrouter', tier: 'Lite' });
+
+const klingModel = (id: string, label: string, tier: VideoModelConfig['tier']): VideoModelConfig => ({
+  ...KLING_V2_MASTER, id, label, model: id, apiModel: id, tier, comingSoon: true,
+});
+export const KLING_V16 = klingModel('kling-v1-6', 'Kling v1.6', 'Standard');
+export const KLING_V15 = klingModel('kling-v1-5', 'Kling v1.5', 'Standard');
+export const KLING_V1 = klingModel('kling-v1', 'Kling v1', 'Lite');
+
+/** Every model the pipeline can run on, in picker order. The default stays
+ * Omni Flash — existing films and untouched new films behave exactly as before. */
+export const VIDEO_MODELS: VideoModelConfig[] = [
+  VIDEO_MODEL,
+  VEO_31, VEO_31_FAST, VEO_30, VEO_30_FAST, VEO_20,
+  SORA_2, SORA_2_PRO,
+  SEEDANCE_2_0, OR_VEO_31, OR_VEO_31_FAST, OR_VEO_31_LITE,
+  KLING_V2_MASTER, KLING_V16, KLING_V15, KLING_V1,
+];
 
 /** Resolve a stored model id (s2v_films.video_model) onto its config.
  * Unknown/null ids fall back to the default so old films keep working. */
@@ -153,6 +209,8 @@ export interface CreateVideoParams {
   /** first_frame → seed image (continuation); reference → reference image. */
   referenceAssets?: ReferenceAsset[] | null;
   model?: VideoModelConfig;
+  /** Optional target resolution; '4k' only sticks on models that honor it. */
+  resolution?: '720p' | '1080p' | '4k';
 }
 
 export interface VideoJob { jobId: string; model: string }
@@ -271,11 +329,15 @@ export const VideoModelService = {
       // false-positives on seeded continuity frames.
       safetyFilterLevel: 'block_only_high',
     };
-    // Omni renders native audio; the openrouter path is video-only.
-    if (cfg.provider === 'google') body.generateAudio = true;
+    // Native audio where the model supports it; the OpenRouter paths are video-only.
+    body.generateAudio = Boolean(cfg.supportsAudio);
+    if (params.resolution) body.resolution = params.resolution === '4k' && !cfg.supports4k ? '1080p' : params.resolution;
     if (params.negative) body.negativePrompt = capText(params.negative, cfg.negativeMaxChars);
     if (seed) body.imageData = seed.url;
-    if (refs.length) body.referenceImages = refs.map((r) => ({ imageData: r.url, referenceType: 'asset' }));
+    // Veo 3.1 refuses referenceImages combined with a seed frame — the seed
+    // (frame-chained continuity) wins and the refs are dropped on those models.
+    const usableRefs = cfg.refsExclusiveWithSeed && seed ? [] : refs;
+    if (usableRefs.length) body.referenceImages = usableRefs.map((r) => ({ imageData: r.url, referenceType: 'asset' }));
 
     let attempt = await submitVeoProxyOnce(body);
     // Duration fallback: if the proxy rejects a long clip (e.g. 10s) with a 400,

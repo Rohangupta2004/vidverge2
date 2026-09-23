@@ -62,7 +62,10 @@ export async function forge<T = any>(op: string, params: Record<string, unknown>
 
 export const forgeApi = {
   status: (projectId: string) => forge<ForgeStatus>('status', { project_id: projectId }),
-  planScenes: (projectId: string, scenes: any[]) => forge<{ scenes: Scene[] }>('plan_scenes', { project_id: projectId, scenes }),
+  // `partial: true` is the chunked-planning save: it upserts the scenes
+  // planned so far WITHOUT deleting later rows and WITHOUT flipping the
+  // project to scene_review, so an in-progress plan persists window by window.
+  planScenes: (projectId: string, scenes: any[], options: { partial?: boolean } = {}) => forge<{ scenes: Scene[] }>('plan_scenes', { project_id: projectId, scenes, ...(options.partial ? { partial: true } : {}) }),
   addScene: (projectId: string, scene: Partial<Scene>) => forge<{ scene: Scene; scenes: Scene[] }>('add_scene', { project_id: projectId, scene }),
   saveScene: (projectId: string, sceneId: string, patch: Partial<Scene>) => forge<{ scene: Scene }>('save_scene', { project_id: projectId, scene_id: sceneId, patch }),
   deleteScene: (projectId: string, sceneId: string) => forge<{ scenes: Scene[] }>('delete_scene', { project_id: projectId, scene_id: sceneId }),

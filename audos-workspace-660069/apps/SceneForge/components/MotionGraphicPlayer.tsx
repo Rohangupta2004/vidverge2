@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { gsap } from 'https://esm.sh/gsap@3.12.5';
 import { accentForSpec, contrastAccent, normalizeMotionSpec, type MotionItem, type MotionSpec } from '../lib/motionSpec';
-import { BG, INK, INK_SOFT, INK_MUTED, FONT, PANEL, PANEL_EDGE, SVG_NS, cameraMove, drawIn, drawnLine, el, nodeBox, nodeImageChip, riseIn, springIn, textBlock, wrapLines } from '../lib/motionKit';
-import { renderDirectedLayers } from '../lib/motionPrimitives';
+import { BG, INK, INK_SOFT, INK_MUTED, FONT, FONT_DISPLAY, PANEL, PANEL_EDGE, PANEL_GLASS, GLASS_EDGE, NEUTRAL, EDGE_SOFT, THEME, SVG_NS, cameraMove, desatFilter, drawIn, drawnLine, el, grainOverlay, halftonePattern, motionThemeForStyle, nodeBox, nodeImageChip, paperShadowFilter, riseIn, setMotionTheme, springIn, textBlock, tornClipPath, wrapLines } from '../lib/motionKit';
+import { renderDirectedLayers, renderUSStateMap } from '../lib/motionPrimitives';
 import { normalizeSceneDirection, type SceneDirection } from '../lib/visualTimeline';
 
 // MOTION GRAPHICS ENGINE — GSAP + SVG. One builder produces both surfaces:
@@ -53,6 +53,10 @@ export interface MotionBuildOptions {
    * When present and usable, the directed primitive renderer composes the
    * scene; when absent or broken, the classic kind renderer takes over. */
   directed?: SceneDirection | Record<string, unknown> | null;
+  /** The project's visual style id — picks the render THEME ('vox-explainer'
+   * → the paper-cut language; everything else → midnight). Falls back to
+   * window.__sceneForgeStyleId (set by the app when a project opens). */
+  styleId?: string | null;
 }
 
 /**
@@ -61,12 +65,19 @@ export interface MotionBuildOptions {
  */
 export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>, width: number, height: number, durationOverrideSec?: number, options: MotionBuildOptions = {}): BuiltMotionGraphic {
   const spec = normalizeMotionSpec(rawSpec);
+  // THEME: the project's visual style picks the language — 'vox-explainer'
+  // renders the paper-cut system, everything else keeps midnight. Builds are
+  // synchronous and captures serialize through one queue, so swapping the
+  // module theme here is race-free.
+  setMotionTheme(motionThemeForStyle(options.styleId ?? (typeof window !== 'undefined' ? String((window as any).__sceneForgeStyleId || '') : '')));
   const W = width; const H = height;
   const transparent = options.transparent === true;
   const u = (Math.min(W, H) / 1080) * (Number(options.unitScale) > 0 ? Number(options.unitScale) : 1);
   // Content-aware accent: explicit spec accent > topic keywords > kind default
   // > deterministic rotation — so the film stops repeating one blue card.
-  const accent = accentForSpec(spec);
+  // Paper theme: palette DISCIPLINE beats variety — one locked accent per
+  // film, and colour means "look here".
+  const accent = THEME.accentOverride || accentForSpec(spec);
   const portrait = H > W;
   const total = Math.min(20, Math.max(2.5, Number(durationOverrideSec || spec.durationSec) || 6));
 
@@ -76,7 +87,12 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
   // The full-bleed background, grid and atmosphere glow belong to the
   // FULL-FRAME treatment only: a transparent build leaves every untouched
   // pixel alpha=0 so the presenter stays visible through the composite.
-  if (!transparent) {
+  if (!transparent && THEME.paper) {
+    // Paper field: flat warm cream — no glow, no grid. The texture comes from
+    // the single newsprint grain overlay appended above the content at the
+    // end of the build; atmosphere never competes with the ink.
+    el('rect', { x: 0, y: 0, width: W, height: H, fill: BG }, svg);
+  } else if (!transparent) {
     const glowId = `mgGlow${Math.floor(Math.random() * 1e9)}`;
     const glow = el('radialGradient', { id: glowId, cx: '50%', cy: '0%', r: '85%' }, defs);
     el('stop', { offset: '0%', 'stop-color': accent, 'stop-opacity': 0.28 }, glow);
@@ -106,6 +122,9 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
   if (!transparent && !direction && spec.imageUrl && spec.kind !== 'annotated_image') {
     backdropImage = el('image', { x: -W * 0.03, y: -H * 0.03, width: W * 1.06, height: H * 1.06, href: spec.imageUrl, preserveAspectRatio: 'xMidYMid slice', opacity: 0.34 }, svg);
     backdropImage.setAttributeNS('http://www.w3.org/1999/xlink', 'href', spec.imageUrl);
+    // Paper theme: photos get pulled into the flat palette (desaturated) and
+    // washed with paper rather than dimmed with navy.
+    if (THEME.paper) backdropImage.setAttribute('filter', `url(#${desatFilter(defs, 0.25)})`);
     el('rect', { x: 0, y: 0, width: W, height: H, fill: BG, opacity: 0.56 }, svg);
   }
 
@@ -114,7 +133,7 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
   // content, fading in and out with it, so exact text reads on any footage
   // while the presenter remains visible around the card.
   if (transparent && options.panel !== false) {
-    el('rect', { x: W * 0.015, y: H * 0.015, width: W * 0.97, height: H * 0.97, rx: Math.min(W, H) * 0.055, fill: 'rgba(7,11,22,0.78)', stroke: 'rgba(255,255,255,0.16)', 'stroke-width': 2 }, root);
+    el('rect', { x: W * 0.015, y: H * 0.015, width: W * 0.97, height: H * 0.97, rx: THEME.paper ? 8 : Math.min(W, H) * 0.055, fill: PANEL_GLASS, stroke: GLASS_EDGE, 'stroke-width': 2 }, root);
   }
   const tl = gsap.timeline({ paused: true });
   tl.to(root, { opacity: 1, duration: 0.35, ease: 'power1.out' }, 0);
@@ -249,7 +268,7 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
     // Two genuinely contrasting sides: the right column gets an opposing
     // accent, so the comparison reads as A-versus-B instead of one blue card
     // repeated twice.
-    const rightAccent = contrastAccent(accent);
+    const rightAccent = THEME.accentSecondary || contrastAccent(accent);
     const panels: { title: string; entries: string[]; x: number; y: number; w: number; h: number; from: number; tone: string }[] = portrait
       ? [{ title: spec.leftTitle || 'A', entries: leftItems, x: W * 0.08, y: top, w: W * 0.84, h: (bottom - top) * 0.46, from: -1, tone: accent }, { title: spec.rightTitle || 'B', entries: rightItems, x: W * 0.08, y: top + (bottom - top) * 0.54, w: W * 0.84, h: (bottom - top) * 0.46, from: 1, tone: rightAccent }]
       : [{ title: spec.leftTitle || 'A', entries: leftItems, x: W * 0.07, y: top, w: W * 0.4, h: bottom - top, from: -1, tone: accent }, { title: spec.rightTitle || 'B', entries: rightItems, x: W * 0.53, y: top, w: W * 0.4, h: bottom - top, from: 1, tone: rightAccent }];
@@ -304,7 +323,7 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
   } else if (spec.kind === 'big_stat') {
     const stat = spec.stat || { value: Number(items[0]?.value) || 0, label: spec.title || items[0]?.label };
     const cy = H * 0.46;
-    const value = el<SVGTextElement>('text', { x: W / 2, y: cy, 'font-family': FONT, 'font-size': (portrait ? 150 : 190) * u, 'font-weight': 900, fill: INK, 'text-anchor': 'middle' }, root);
+    const value = el<SVGTextElement>('text', { x: W / 2, y: cy, 'font-family': FONT_DISPLAY, 'font-size': (portrait ? 150 : 190) * u, 'font-weight': 900, fill: INK, 'text-anchor': 'middle' }, root);
     const decimals = Math.abs(stat.value) < 10 && !Number.isInteger(stat.value) ? 1 : 0;
     const fmt = (n: number) => `${stat.prefix || ''}${n.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })}${stat.suffix || ''}`;
     value.textContent = fmt(0);
@@ -322,14 +341,17 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
     const span = portrait ? W * 0.84 : W * 0.72;
     const x0 = (W - span) / 2;
     const slot = span / count; const barW = Math.min(120 * u, slot * 0.52);
-    const base = drawnLine(root, x0 - 10 * u, chartBottom, x0 + span + 10 * u, chartBottom, PANEL_EDGE, 3 * u);
+    const base = drawnLine(root, x0 - 10 * u, chartBottom, x0 + span + 10 * u, chartBottom, THEME.paper ? INK : PANEL_EDGE, 3 * u);
     draw(tl, base, cursor, 0.5); cursor += 0.25;
+    // Colour means "look here": in the paper theme only the ANSWER bar (the
+    // largest value) carries the accent; every other bar stays neutral gray.
+    const answerIndex = THEME.paper ? items.slice(0, 6).reduce((best, item, index, all) => (Math.abs(Number(item.value) || 0) > Math.abs(Number(all[best]?.value) || 0) ? index : best), 0) : 0;
     items.slice(0, 6).forEach((item, index) => {
       const at = cursor + index * step;
       const value = Math.abs(Number(item.value) || 0);
       const h = Math.max(10 * u, ((chartBottom - chartTop) * value) / max);
       const x = x0 + slot * index + (slot - barW) / 2;
-      const bar = el('rect', { x, y: chartBottom - h, width: barW, height: h, rx: 10 * u, fill: index === 0 ? accent : PANEL, stroke: index === 0 ? accent : PANEL_EDGE, 'stroke-width': 2 }, root);
+      const bar = el('rect', { x, y: chartBottom - h, width: barW, height: h, rx: THEME.paper ? 2 * u : 10 * u, fill: index === answerIndex ? accent : NEUTRAL, stroke: index === answerIndex ? accent : PANEL_EDGE, 'stroke-width': 2 }, root);
       gsap.set(bar, { transformOrigin: '50% 100%', scaleY: 0 });
       tl.to(bar, { scaleY: 1, duration: 0.6, ease: 'power3.out' }, at);
       const valueText = el<SVGTextElement>('text', { x: x + barW / 2, y: chartBottom - h - 16 * u, 'font-family': FONT, 'font-size': 27 * u, 'font-weight': 800, fill: INK, 'text-anchor': 'middle' }, root);
@@ -344,33 +366,62 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
     cursor += count * step + 0.3;
   } else if (spec.kind === 'node_graph') {
     const count = Math.min(7, n);
-    const cx = W / 2; const cy = (top + bottom) / 2;
-    const rx = portrait ? W * 0.34 : W * 0.3; const ry = (bottom - top) * 0.38;
-    const positions = items.slice(0, 7).map((_, index) => { const angle = -Math.PI / 2 + (2 * Math.PI * index) / count; return { x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) }; });
-    const hub = spec.root ? nodeBox(root, cx, cy, spec.root, { size: 32 * u, accent, filled: true, minWidth: 220 * u }) : null;
-    positions.forEach((pos, index) => {
-      const at = cursor + index * step;
-      const from = hub ? { x: cx, y: cy } : positions[(index + count - 1) % count];
-      const edge = drawnLine(root, from.x, from.y, pos.x, pos.y, 'rgba(96,165,250,0.55)', 3 * u);
-      draw(tl, edge, at, Math.min(0.5, step + 0.2));
-      const node = nodeBox(root, pos.x, pos.y, items[index].label, { size: 26 * u, accent, minWidth: 150 * u, maxChars: 12 });
-      pop(tl, node.group, at + 0.18, 0.45);
-      if (items[index].imageUrl) { const chip = nodeImageChip(root, defs, pos.x, pos.y - node.height / 2 - 40 * u, 34 * u, String(items[index].imageUrl), accent); pop(tl, chip, at + 0.28, 0.45); }
+    const mapItems = items.slice(0, 7);
+    const drewUSMap = renderUSStateMap({
+      parent: root,
+      timeline: tl,
+      rect: { x: W * 0.06, y: top, w: W * 0.88, h: bottom - top },
+      items: mapItems,
+      accent,
+      unit: u,
+      at: cursor,
+      step,
     });
-    if (hub) { pop(tl, hub.group, cursor + 0.1, 0.5); }
-    cursor += count * step + 0.4;
+    if (drewUSMap) {
+      cursor += count * step + 0.45;
+    } else {
+      const cx = W / 2; const cy = (top + bottom) / 2;
+      const rx = portrait ? W * 0.34 : W * 0.3; const ry = (bottom - top) * 0.38;
+      const positions = mapItems.map((_, index) => { const angle = -Math.PI / 2 + (2 * Math.PI * index) / count; return { x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) }; });
+      const hub = spec.root ? nodeBox(root, cx, cy, spec.root, { size: 32 * u, accent, filled: true, minWidth: 220 * u }) : null;
+      positions.forEach((pos, index) => {
+        const at = cursor + index * step;
+        const from = hub ? { x: cx, y: cy } : positions[(index + count - 1) % count];
+        const edge = drawnLine(root, from.x, from.y, pos.x, pos.y, EDGE_SOFT, 3 * u);
+        draw(tl, edge, at, Math.min(0.5, step + 0.2));
+        const node = nodeBox(root, pos.x, pos.y, mapItems[index].label, { size: 26 * u, accent, minWidth: 150 * u, maxChars: 12 });
+        pop(tl, node.group, at + 0.18, 0.45);
+        if (mapItems[index].imageUrl) { const chip = nodeImageChip(root, defs, pos.x, pos.y - node.height / 2 - 40 * u, 34 * u, String(mapItems[index].imageUrl), accent); pop(tl, chip, at + 0.28, 0.45); }
+      });
+      if (hub) { pop(tl, hub.group, cursor + 0.1, 0.5); }
+      cursor += count * step + 0.4;
+    }
   } else if (spec.kind === 'annotated_image') {
     const frameX = portrait ? W * 0.06 : W * 0.1; const frameW = W - frameX * 2;
     const frameY = top; const frameH = bottom - top;
-    const clipId = `mgClip${Math.floor(Math.random() * 1e9)}`;
-    const clip = el('clipPath', { id: clipId }, defs);
-    el('rect', { x: frameX, y: frameY, width: frameW, height: frameH, rx: 28 * u }, clip);
-    const imageGroup = el<SVGGElement>('g', { 'clip-path': `url(#${clipId})` }, root);
+    // Paper theme: the annotated picture is a torn-edge CUTOUT seated with
+    // the two-shadow stack (shadow on the OUTER group — filter-then-clip on
+    // one element would clip the shadow away) and desaturated into the palette.
+    let clipId: string;
+    let cutoutHost: SVGElement = root;
+    if (THEME.paper) {
+      clipId = tornClipPath(defs, { x: frameX, y: frameY, w: frameW, h: frameH }, Math.round(frameX * 7 + frameY * 13 + frameW));
+      cutoutHost = el<SVGGElement>('g', { filter: `url(#${paperShadowFilter(defs)})` }, root);
+    } else {
+      clipId = `mgClip${Math.floor(Math.random() * 1e9)}`;
+      const clip = el('clipPath', { id: clipId }, defs);
+      el('rect', { x: frameX, y: frameY, width: frameW, height: frameH, rx: 28 * u }, clip);
+    }
+    const imageGroup = el<SVGGElement>('g', { 'clip-path': `url(#${clipId})` }, cutoutHost);
     if (spec.imageUrl) {
       const image = el('image', { x: frameX, y: frameY, width: frameW, height: frameH, href: spec.imageUrl, preserveAspectRatio: 'xMidYMid slice' }, imageGroup);
       image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', spec.imageUrl);
+      if (THEME.paper) image.setAttribute('filter', `url(#${desatFilter(defs, 0.3)})`);
       gsap.set(image, { transformOrigin: '50% 50%', scale: 1.04 });
       tl.to(image, { scale: 1.14, x: -frameW * 0.015, duration: total, ease: 'none' }, 0);
+    } else if (THEME.paper) {
+      // No picture: a halftone accent block — the signature newsprint cutout.
+      el('rect', { x: frameX, y: frameY, width: frameW, height: frameH, fill: `url(#${halftonePattern(defs, accent)})` }, imageGroup);
     } else {
       // No backdrop image reached the capture — draw a deliberate branded
       // backdrop (accent glow + concentric rings) instead of a flat gray
@@ -385,21 +436,21 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
         el('circle', { cx: frameX + frameW * 0.72, cy: frameY + frameH * 0.36, r: frameH * (0.14 + ringIndex * 0.11), fill: 'none', stroke: accent, 'stroke-width': 2.5 * u, opacity: 0.26 - ringIndex * 0.07 }, imageGroup);
       }
     }
-    el('rect', { x: frameX, y: frameY, width: frameW, height: frameH, rx: 28 * u, fill: 'none', stroke: PANEL_EDGE, 'stroke-width': 2.5 }, root);
+    if (!THEME.paper) el('rect', { x: frameX, y: frameY, width: frameW, height: frameH, rx: 28 * u, fill: 'none', stroke: PANEL_EDGE, 'stroke-width': 2.5 }, root);
     el('rect', { x: frameX, y: frameY + frameH * 0.55, width: frameW, height: frameH * 0.45, fill: 'rgba(5,8,18,0.0)' }, root);
     items.slice(0, 4).forEach((item, index) => {
       const at = cursor + 0.3 + index * step;
       const anchorX = frameX + frameW * (0.2 + 0.6 * ((index % 3) / 2));
       const anchorY = frameY + frameH * (0.28 + 0.38 * (index % 2));
-      const dot = el('circle', { cx: anchorX, cy: anchorY, r: 12 * u, fill: accent, stroke: '#fff', 'stroke-width': 3 * u }, root);
+      const dot = el('circle', { cx: anchorX, cy: anchorY, r: 12 * u, fill: THEME.paper ? INK : accent, stroke: THEME.paper ? BG : '#fff', 'stroke-width': 3 * u }, root);
       pop(tl, dot, at, 0.35);
       const labelY = frameY + frameH - 46 * u - index * 58 * u;
-      const leader = drawnLine(root, anchorX, anchorY, frameX + 56 * u, labelY - 10 * u, 'rgba(248,250,252,0.65)', 2.5 * u);
+      const leader = drawnLine(root, anchorX, anchorY, frameX + 56 * u, labelY - 10 * u, THEME.paper ? EDGE_SOFT : 'rgba(248,250,252,0.65)', 2.5 * u);
       draw(tl, leader, at + 0.1, 0.4);
       const pill = el<SVGGElement>('g', {}, root);
       const label = item.label;
       const pillW = Math.min(frameW * 0.8, label.length * 15 * u + 60 * u);
-      el('rect', { x: frameX + 30 * u, y: labelY - 34 * u, width: pillW, height: 48 * u, rx: 24 * u, fill: 'rgba(10,15,30,0.88)', stroke: accent, 'stroke-width': 2 }, pill);
+      el('rect', { x: frameX + 30 * u, y: labelY - 34 * u, width: pillW, height: 48 * u, rx: THEME.paper ? 4 * u : 24 * u, fill: PANEL_GLASS, stroke: THEME.paper ? INK : accent, 'stroke-width': 2 }, pill);
       textBlock(pill, frameX + 30 * u + pillW / 2, labelY - 2 * u, label, { size: 24 * u, weight: 700, fill: INK, maxChars: 40, maxLines: 1 });
       rise(tl, pill, at + 0.2, 14 * u, 0.4);
     });
@@ -411,10 +462,21 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
     const size = (portrait ? 72 : 92) * u;
     const blockH = lines.length * size * 1.18;
     const startY = H * 0.46 - blockH / 2 + size * 0.8;
-    const bar = el('rect', { x: W / 2 - 44 * u, y: startY - size * 1.5, width: 88 * u, height: 8 * u, rx: 4 * u, fill: accent }, root);
-    pop(tl, bar, cursor, 0.45);
+    if (THEME.paper) {
+      // THE HIGHLIGHTER: a solid accent bar sweeps in BEHIND the last line,
+      // landing ~120ms after the words settle — punctuation, one per scene.
+      const lastLine = lines[lines.length - 1] || '';
+      const lineY = startY + (lines.length - 1) * size * 1.18;
+      const hlW = Math.max(size, lastLine.length * size * 0.62) + 24 * u;
+      const hl = el('rect', { x: W / 2 - hlW / 2, y: lineY - size * 0.82, width: hlW, height: size * 1.02, fill: accent }, root);
+      gsap.set(hl, { transformOrigin: '0% 50%', scaleX: 0 });
+      tl.to(hl, { scaleX: 1, duration: 0.26, ease: 'power3.out' }, cursor + 0.77 + (lines.length - 1) * 0.16);
+    } else {
+      const bar = el('rect', { x: W / 2 - 44 * u, y: startY - size * 1.5, width: 88 * u, height: 8 * u, rx: 4 * u, fill: accent }, root);
+      pop(tl, bar, cursor, 0.45);
+    }
     lines.forEach((line, index) => {
-      const lineText = el<SVGTextElement>('text', { x: W / 2, y: startY + index * size * 1.18, 'font-family': FONT, 'font-size': size, 'font-weight': 900, fill: INK, 'text-anchor': 'middle', 'letter-spacing': '-0.01em' }, root);
+      const lineText = el<SVGTextElement>('text', { x: W / 2, y: startY + index * size * 1.18, 'font-family': FONT_DISPLAY, 'font-size': size, 'font-weight': 900, fill: INK, 'text-anchor': 'middle', 'letter-spacing': '-0.01em' }, root);
       lineText.textContent = line;
       rise(tl, lineText, cursor + 0.15 + index * 0.16, 44 * u, 0.7);
     });
@@ -434,6 +496,10 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
   tl.to(root, { y: -6 * u, duration: Math.max(0.4, (total - 0.45) - scaledEnd) * (tl.timeScale() || 1), ease: 'sine.inOut' }, naturalEnd);
   tl.to(root, { opacity: 0, duration: 0.4 * (tl.timeScale() || 1), ease: 'power1.in' }, total * (tl.timeScale() || 1) - 0.42 * (tl.timeScale() || 1));
 
+  // Paper theme: ONE newsprint grain overlay for the whole frame, above the
+  // content (never per-asset) — the handmade texture that sells the paper.
+  if (THEME.paper && !transparent) grainOverlay(svg, defs, W, H);
+
   return { svg, timeline: tl, durationSec: total };
 }
 
@@ -441,7 +507,7 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
  * `transparent`, the graphic renders on an alpha background (plus its glass
  * legibility panel) and fills its container — the "preview on video" mode
  * positions it over the real avatar footage exactly as assembly will. */
-export default function MotionGraphicPlayer({ spec, aspect = '16:9', durationSec, className, transparent, tileWidth, tileHeight, unitScale, directed }: { spec: MotionSpec | Record<string, unknown>; aspect?: '16:9' | '9:16'; durationSec?: number; className?: string; transparent?: boolean; tileWidth?: number; tileHeight?: number; unitScale?: number; directed?: SceneDirection | Record<string, unknown> | null }) {
+export default function MotionGraphicPlayer({ spec, aspect = '16:9', durationSec, className, transparent, tileWidth, tileHeight, unitScale, directed, styleId }: { spec: MotionSpec | Record<string, unknown>; aspect?: '16:9' | '9:16'; durationSec?: number; className?: string; transparent?: boolean; tileWidth?: number; tileHeight?: number; unitScale?: number; directed?: SceneDirection | Record<string, unknown> | null; styleId?: string | null }) {
   const host = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const mount = host.current;
@@ -449,14 +515,14 @@ export default function MotionGraphicPlayer({ spec, aspect = '16:9', durationSec
     const portrait = aspect === '9:16';
     const W = Number(tileWidth) > 0 ? Number(tileWidth) : (portrait ? 1080 : 1920);
     const H = Number(tileHeight) > 0 ? Number(tileHeight) : (portrait ? 1920 : 1080);
-    const built = buildMotionGraphic(spec, W, H, durationSec, transparent ? { transparent: true, panel: true, unitScale, directed } : { directed });
+    const built = buildMotionGraphic(spec, W, H, durationSec, transparent ? { transparent: true, panel: true, unitScale, directed, styleId } : { directed, styleId });
     built.svg.removeAttribute('width'); built.svg.removeAttribute('height');
     built.svg.style.width = '100%'; built.svg.style.height = '100%'; built.svg.style.display = 'block';
     mount.innerHTML = '';
     mount.appendChild(built.svg);
     built.timeline.repeat(-1).repeatDelay(0.8).play(0);
     return () => { built.timeline.kill(); mount.innerHTML = ''; };
-  }, [JSON.stringify(spec), JSON.stringify(directed || null), aspect, durationSec, transparent, tileWidth, tileHeight, unitScale]);
+  }, [JSON.stringify(spec), JSON.stringify(directed || null), aspect, durationSec, transparent, tileWidth, tileHeight, unitScale, styleId]);
   const fills = Boolean(transparent || (Number(tileWidth) > 0 && Number(tileHeight) > 0));
   return <div ref={host} className={className} style={fills ? { width: '100%', height: '100%' } : { aspectRatio: aspect === '9:16' ? '9 / 16' : '16 / 9' }} />;
 }

@@ -16,6 +16,8 @@ import {
 } from './api';
 import { assembleVeoPrompt, continuityNoteFromFrame, inspectClip } from './opus';
 import { VEO_MODEL, extractFrame, pollVeo, probeClipDuration, submitVeo } from './veo';
+import { RUNWAY_DISABLED_MESSAGE, runwayVideoModel } from '../../lib/videoEngines';
+import { isPublicHttpsUrl, isRunwayDisabledError, pollRunway, runwayQuote, runwaySubmitVideo } from '../../lib/videoEngineClient';
 import { buildClipOverlay, recordOverlay, OverlayContext } from './overlays';
 import { adFrameSize, assembleAd, AssemblyClip, AssemblyResult } from './assemble';
 
@@ -48,6 +50,9 @@ export async function generateClipAgentic(params: {
   continuityNote: string | null;
   previousFrameUrl: string | null;
   promptOverride?: string | null;
+  /** Clip engine: a Group A platform model id, or Runway 'gen4.5'/'gen4_turbo'.
+   * Null/undefined = Omni Flash — existing sessions behave exactly as before. */
+  modelId?: string | null;
   onNote: (n: string) => void;
 }): Promise<ClipRunResult> {
   const { plan, script } = params;
@@ -66,22 +71,55 @@ export async function generateClipAgentic(params: {
     attempts = attempt;
     params.onNote(attempt === 1 ? `Clip ${script.clip_number}: filming…` : `Clip ${script.clip_number}: retaking with the adjusted prompt…`);
     try {
-      const operationId = await submitVeo({
-        prompt,
-        negative,
-        aspect: params.aspect,
-        durationS: script.duration_seconds,
-        referenceImageUrl: params.avatarUrl,
-      });
-      videoUrl = await pollVeo(operationId);
+      const rwCfg = runwayVideoModel(params.modelId || '');
+      if (rwCfg) {
+        // RUNWAY PATH — pixel-pair ratios, free quote BEFORE the paid submit,
+        // fresh Idempotency-Key per submit (handled by the shared client).
+        const ratio = params.aspect === '9:16' ? '720:1280' : params.aspect === '1:1' ? '960:960' : '1280:720';
+        const durationS = Math.min(10, Math.max(2, Math.round(script.duration_seconds)));
+        const image = params.avatarUrl && isPublicHttpsUrl(params.avatarUrl) ? params.avatarUrl : null;
+        if (rwCfg.id === 'gen4_turbo' && !image) throw new Error('Runway Gen 4 Turbo is image-to-video only — upload an avatar image in Step 1, or switch engines.');
+        const body: Record<string, unknown> = { model: rwCfg.id, ratio, duration: durationS, promptText: prompt.slice(0, 990) };
+        if (image) {
+          if (rwCfg.id === 'gen4_turbo') body.promptImage = [{ uri: image, position: 'first' }];
+          else { body.mode = 'image-to-video'; body.promptImage = image; }
+        }
+        const quote = await runwayQuote(body);
+        if (quote.ok && quote.priceUsd !== undefined) params.onNote(`Clip ${script.clip_number}: Runway quoted $${quote.priceUsd.toFixed(2)} (free quote) — submitting…`);
+        const kick = await runwaySubmitVideo(body);
+        if (kick.uncertain) throw new Error("Runway's outcome is uncertain — do NOT resubmit this clip; check back shortly.");
+        params.onNote(`Clip ${script.clip_number}: Runway task ${kick.taskId} — polling every 5s…`);
+        const result = await pollRunway(kick.taskId, { onStatus: (st) => params.onNote(`Clip ${script.clip_number}: Runway — ${st}…`) });
+        videoUrl = result.mediaUrls[0] || null;
+        if (!videoUrl) throw new Error('Runway succeeded but returned no media URL.');
+      } else {
+        const operationId = await submitVeo({
+          prompt,
+          negative,
+          aspect: params.aspect,
+          durationS: script.duration_seconds,
+          referenceImageUrl: params.avatarUrl,
+          model: params.modelId || undefined,
+        });
+        videoUrl = await pollVeo(operationId);
+      }
     } catch (e: any) {
       const message = String(e?.message || e);
+      // 503 generation_disabled: Runway is still being enabled — fail this clip
+      // with the friendly message, never retry, never break the rest of the run.
+      if (isRunwayDisabledError(e)) {
+        return { videoUrl: null, status: 'failed', issues: [RUNWAY_DISABLED_MESSAGE], attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: params.modelId || VEO_MODEL, note: RUNWAY_DISABLED_MESSAGE, continuityNote: '', measuredDurationS: 0 };
+      }
+      // 'uncertain' must never be resubmitted — surface it without a retry.
+      if (/uncertain/i.test(message)) {
+        return { videoUrl: null, status: 'failed', issues: [message], attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: params.modelId || VEO_MODEL, note: message, continuityNote: '', measuredDurationS: 0 };
+      }
       if (attempt < MAX_ATTEMPTS && !/billing|declined|402/i.test(message)) {
         issues = [...issues, `Take ${attempt} failed to render: ${message.slice(0, 160)}`];
         params.onNote(`Clip ${script.clip_number}: the take failed (${message.slice(0, 100)}). Trying once more…`);
         continue;
       }
-      return { videoUrl: null, status: 'failed', issues: [...issues, message.slice(0, 300)], attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: VEO_MODEL, note: 'Render failed — regenerate manually.', continuityNote: '', measuredDurationS: 0 };
+      return { videoUrl: null, status: 'failed', issues: [...issues, message.slice(0, 300)], attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: params.modelId || VEO_MODEL, note: 'Render failed — regenerate manually.', continuityNote: '', measuredDurationS: 0 };
     }
 
     // Inspection — frames out, Opus verdict in.
@@ -123,11 +161,11 @@ export async function generateClipAgentic(params: {
     let measured = 0;
     try { measured = await probeClipDuration(videoUrl); } catch { /* planned duration stands */ }
 
-    return { videoUrl, status, issues, attempts, lastFrameUrl: lastFrame || null, promptUsed: prompt, modelUsed: VEO_MODEL, note, continuityNote: continuity, measuredDurationS: measured };
+    return { videoUrl, status, issues, attempts, lastFrameUrl: lastFrame || null, promptUsed: prompt, modelUsed: params.modelId || VEO_MODEL, note, continuityNote: continuity, measuredDurationS: measured };
   }
 
   // Unreachable, but keeps the type checker honest.
-  return { videoUrl, status: 'failed', issues, attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: VEO_MODEL, note: 'Generation did not complete.', continuityNote: '', measuredDurationS: 0 };
+  return { videoUrl, status: 'failed', issues, attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: params.modelId || VEO_MODEL, note: 'Generation did not complete.', continuityNote: '', measuredDurationS: 0 };
 }
 
 // ---------------------------------------------------------------------------

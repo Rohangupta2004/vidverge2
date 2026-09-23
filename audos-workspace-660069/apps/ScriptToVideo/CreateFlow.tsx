@@ -72,11 +72,20 @@ export function CreateScreen(props: {
 
         <div style={{ color: T.muted, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginTop: 30, marginBottom: 10 }}>Video model</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {VIDEO_MODELS.map((m) => (
-            <button key={m.id} onClick={() => setVideoModel(m.id)} title={m.availabilityNote || ''} style={{ background: videoModel === m.id ? T.bone : T.raised, color: videoModel === m.id ? T.canvas : T.muted, border: `1px solid ${videoModel === m.id ? T.bone : T.dim}`, borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-              {m.label}
-            </button>
-          ))}
+          {VIDEO_MODELS.map((m) => {
+            const active = videoModel === m.id;
+            const soon = Boolean(m.comingSoon);
+            return (
+              <button key={m.id} disabled={soon} onClick={() => { if (!soon) setVideoModel(m.id); }} title={m.availabilityNote || ''} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: active ? T.bone : T.raised, color: active ? T.canvas : T.muted, border: `1px solid ${active ? T.bone : T.dim}`, borderRadius: 8, padding: '8px 13px', fontSize: 12.5, fontWeight: 600, cursor: soon ? 'default' : 'pointer', opacity: soon ? 0.5 : 1 }}>
+                {m.label}
+                {(soon || m.tier) ? (
+                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', background: active ? 'rgba(19,19,22,0.14)' : 'rgba(148,163,184,0.16)', borderRadius: 5, padding: '2px 6px' }}>
+                    {soon ? 'Coming Soon' : m.tier}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
         {(() => {
           const chosen = VIDEO_MODELS.find((m) => m.id === videoModel);

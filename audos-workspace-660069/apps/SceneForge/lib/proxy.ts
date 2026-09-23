@@ -51,6 +51,14 @@ async function claudeMessages<T>(system: string, content: unknown, model: string
     // output_tokens_too_large, rate_limited…). Without it a rejection reads as
     // a bare status and the next person has to guess what the request did.
     const detail = payload?.error?.message || (typeof payload?.error === 'string' ? payload.error : '') || payload?.message || `Claude request failed (${response.status})`;
+    // PROVIDER-ACCOUNT FAILURES (exhausted credit, invalidated key) come back
+    // verbatim from the provider and read like something the user must fix
+    // ("go to Plans & Billing"). They are the PLATFORM's shared provider
+    // account — not this workspace, the wallet, or any limit in this app —
+    // so say that instead of relaying the misleading billing instruction.
+    if (/credit balance is too low|api key is invalid|api key has been invalidated|authentication_error|token_invalidated/i.test(String(detail))) {
+      throw new ClaudeRequestError(`The AI provider behind Audos is temporarily unavailable (provider answered: ${String(detail).slice(0, 120)}). This is a platform-side account issue — not your workspace, your wallet, or a usage limit in this app. Try again shortly.`, { code: 'provider_account_unavailable', status: response.status });
+    }
     const message = payload?.code ? `${detail} [${payload.code}]` : String(detail);
     throw new ClaudeRequestError(message, { code: payload?.code, status: response.status, retryAfterSeconds: Number(payload?.retryAfterSeconds) || undefined });
   }

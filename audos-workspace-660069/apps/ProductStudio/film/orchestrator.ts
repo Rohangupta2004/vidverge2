@@ -21,7 +21,7 @@
  */
 
 import { extractFrame, probeClipDuration, recordSvgAnimation, uploadClip } from '../../ScriptToVideo/pipeline/capture';
-import { VideoModelService } from '../../ScriptToVideo/pipeline/videoModelService';
+import { VideoModelService, resolveVideoModel } from '../../ScriptToVideo/pipeline/videoModelService';
 import { generateMusicBed, generateSfxBed } from '../audioSuite';
 import {
   AdVariation, Aspect, Film, FilmScene, MotionSpec, SceneQaReport,
@@ -84,12 +84,15 @@ export async function createFilm(params: {
   /** Auto Generate / Auto Mix — ON by default; the user may turn either off. */
   autoGenerate?: boolean;
   autoMix?: boolean;
+  /** Engine registry id for the AI-video scenes ('omni-flash' default). */
+  videoModel?: string | null;
 }): Promise<Film> {
   const film = await db.createFilm({
     title: null,
     source_url: params.url || null,
     goal: params.goal || null,
     video_style: params.videoStyle || null,
+    video_model: params.videoModel || null,
     aspect_ratio: params.aspect,
     screenshots: params.screenshots,
     narration_voice: params.voice || null,
@@ -335,12 +338,14 @@ async function produceVideoScene(film: Film, scene: FilmScene, prev: FilmScene |
       if (chain && prev?.keyframe_url) refs.push({ role: 'first_frame', url: prev.keyframe_url });
       for (const r of scene.reference_assets || []) if (r?.url) refs.push({ role: r.role === 'first_frame' ? 'first_frame' : 'reference', url: r.url });
 
-      say(hooks, `Scene ${scene.idx + 1}: filming on Omni Flash${chain ? ' (continuing from the previous shot)' : ''}…`);
+      const engineCfg = resolveVideoModel(film.video_model);
+      say(hooks, `Scene ${scene.idx + 1}: filming on ${engineCfg.label}${chain ? ' (continuing from the previous shot)' : ''}…`);
       const job = await VideoModelService.createVideo({
         prompt, negative,
         aspect: (film.aspect_ratio || '16:9') as Aspect,
         durationS: Number(scene.duration_s) || 6,
         referenceAssets: refs,
+        model: engineCfg,
       });
       await patchScene(scene, hooks, { veo_operation_id: job.jobId });
       const videoUrl = await VideoModelService.getVideoResult(job.jobId);
@@ -457,7 +462,7 @@ async function produceVideoScene(film: Film, scene: FilmScene, prev: FilmScene |
  * cinematic-still treatment on any failure. */
 async function produceAnimatedImageScene(film: Film, scene: FilmScene, hooks: RunHooks, assetUrl: string): Promise<boolean> {
   try {
-    say(hooks, `Scene ${scene.idx + 1}: animating the image on Omni Flash…`);
+    say(hooks, `Scene ${scene.idx + 1}: animating the image on ${resolveVideoModel(film.video_model).label}…`);
     const concept = scene.visual_prompt || String((scene.spec as any).asset_prompt || '');
     const prompt = `Animate this exact still image with subtle, realistic motion — gentle parallax, drifting light, breathing atmosphere. Preserve the composition, subject and palette exactly. ${concept}`.slice(0, 990);
     const job = await VideoModelService.createVideo({
@@ -466,6 +471,7 @@ async function produceAnimatedImageScene(film: Film, scene: FilmScene, hooks: Ru
       aspect: (film.aspect_ratio || '16:9') as Aspect,
       durationS: Number(scene.duration_s) || 6,
       referenceAssets: [{ role: 'first_frame', url: assetUrl }],
+      model: resolveVideoModel(film.video_model),
     });
     await patchScene(scene, hooks, { veo_operation_id: job.jobId });
     const videoUrl = await VideoModelService.getVideoResult(job.jobId);

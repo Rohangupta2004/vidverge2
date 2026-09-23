@@ -29,6 +29,7 @@ import {
   updateSceneNarration, updateScenePrompt,
 } from './orchestrator';
 import { listAllVoices, TTS_VOICES } from './voiceover';
+import { VIDEO_MODELS } from '../../ScriptToVideo/pipeline/videoModelService';
 import type { VoiceOption } from '../audioSuite';
 
 const CSS = `
@@ -113,6 +114,8 @@ export default function FilmStudio() {
   // Auto Generate / Auto Mix — ON by default; the user may turn either off.
   const [autoGen, setAutoGen] = useState(true);
   const [autoMixFlag, setAutoMixFlag] = useState(true);
+  // Video engine for the AI-video scenes — defaults to Omni Flash (no regression).
+  const [engine, setEngine] = useState('omni-flash');
   const [shots, setShots] = useState<string[]>([]);
   const [voice, setVoice] = useState('');
   const [voices, setVoices] = useState<VoiceOption[]>([]);
@@ -206,7 +209,7 @@ export default function FilmStudio() {
     if (!wsToken()) { setFormError('Your workspace session is still loading — try again in a moment.'); return; }
     setFormError('');
     try {
-      const f = await createFilm({ url: cleanUrl || null, screenshots: shots, goal: goal.trim() || null, aspect, voice: voice || null, videoStyle: style as VideoStyle, autoGenerate: autoGen, autoMix: autoMixFlag });
+      const f = await createFilm({ url: cleanUrl || null, screenshots: shots, goal: goal.trim() || null, aspect, voice: voice || null, videoStyle: style as VideoStyle, autoGenerate: autoGen, autoMix: autoMixFlag, videoModel: engine });
       setFilm(f); setScenes([]); setNotes([]);
       say('The director has the brief. Starting…');
       void drive((ff) => runFilm(ff, hooks), f);
@@ -423,6 +426,21 @@ export default function FilmStudio() {
                   </button>
                 );
               })}
+            </div>
+          </div>
+          {/* Video engine for AI-video scenes — default Omni Flash, Kling coming-soon disabled */}
+          <div style={{ marginTop: 16 }}>
+            <label style={{ color: T.muted, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', display: 'block', marginBottom: 7 }}>AI-video engine</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <select value={engine} onChange={(e) => setEngine(e.target.value)} style={{ background: T.raised, color: T.bone, border: `1px solid ${T.line}`, borderRadius: 9, padding: '8px 11px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', maxWidth: 320 }} data-testid="select-video-engine">
+                {VIDEO_MODELS.map((m) => (
+                  <option key={m.id} value={m.id} disabled={Boolean(m.comingSoon)}>{m.label}{m.comingSoon ? ' — Coming Soon' : m.tier ? ` — ${m.tier}` : ''}</option>
+                ))}
+              </select>
+              {(() => {
+                const cfg = VIDEO_MODELS.find((m) => m.id === engine);
+                return <span style={{ color: T.dim, fontSize: 10.5, lineHeight: 1.5, maxWidth: 420 }}>{cfg?.availabilityNote || (engine === 'omni-flash' ? 'The proven default — character-consistent AI video.' : 'Every AI-video and animated-image scene of this ad renders on this engine.')}</span>;
+              })()}
             </div>
           </div>
           {/* Auto Generate / Auto Mix — ON by default, user-configurable */}

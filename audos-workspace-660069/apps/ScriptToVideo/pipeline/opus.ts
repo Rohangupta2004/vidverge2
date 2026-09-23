@@ -50,8 +50,16 @@ export async function askOpus({ system, user, images = [], maxTokens = 4096, eff
   });
   const data = await res.json().catch(() => null);
   if (!res.ok || data?.error) {
+    const detail = String(data?.error?.message || data?.error || `The director did not answer (HTTP ${res.status})`);
+    // Provider-account failures (exhausted credit, invalidated key) are the
+    // PLATFORM's shared AI account — not this workspace, the wallet, or a
+    // usage limit in this app. Say that instead of relaying the provider's
+    // misleading "go to Plans & Billing" instruction.
+    if (/credit balance is too low|api key is invalid|api key has been invalidated|authentication_error|token_invalidated/i.test(detail)) {
+      throw new Error(`The AI provider behind Audos is temporarily unavailable (provider answered: ${detail.slice(0, 120)}). This is a platform-side account issue — not your account, your wallet, or a limit in this app. Try again shortly.`);
+    }
     const code = data?.code ? ` [${data.code}]` : '';
-    throw new Error(`${data?.error?.message || data?.error || `The director did not answer (HTTP ${res.status})`}${code}`);
+    throw new Error(`${detail}${code}`);
   }
   return (Array.isArray(data?.content) ? data.content : [])
     .filter((b: any) => b?.type === 'text')

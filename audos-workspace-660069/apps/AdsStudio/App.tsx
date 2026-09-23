@@ -26,6 +26,9 @@ import {
   regenerateScenePlanForClip, researchProduct, writeScript,
 } from './opus';
 import { generateClipAgentic, assembleWithOverlays, ResolvedClip } from './pipeline';
+import EnginePicker from '../../components/EngineSelector';
+import RunwayRecipesPanel from '../../components/RunwayRecipesPanel';
+import { runwayVideoModel } from '../../lib/videoEngines';
 
 // ---------------------------------------------------------------------------
 // Small UI atoms (inline — the app is self-contained)
@@ -335,7 +338,7 @@ export default function AdsStudioApp() {
       say(`Generating clip ${sc.clip_number} of ${cur.script.length}…`);
       const res = await generateClipAgentic({
         plan: { ...plan, spoken_line: sc.spoken_line }, script: sc, aspect: cur.aspect,
-        avatarUrl: cur.avatar?.url || null,
+        avatarUrl: cur.avatar?.url || null, modelId: cur.videoModel || null,
         continuityNote: continuity, previousFrameUrl: prevFrame, onNote: say,
       });
       clips = clips.map((c) => c.clipNumber === sc.clip_number ? {
@@ -365,7 +368,7 @@ export default function AdsStudioApp() {
       const continuity = prev?.lastFrameUrl ? await continuityNoteFromFrame(prev.lastFrameUrl) : null;
       const res = await generateClipAgentic({
         plan: { ...plan, spoken_line: sc.spoken_line }, script: sc, aspect: cur.aspect,
-        avatarUrl: cur.avatar?.url || null, continuityNote: continuity,
+        avatarUrl: cur.avatar?.url || null, modelId: cur.videoModel || null, continuityNote: continuity,
         previousFrameUrl: prev?.lastFrameUrl || null, promptOverride: promptOverride || null, onNote: say,
       });
       setClipState(clipNumber, { videoUrl: res.videoUrl, status: res.status, issues: res.issues, attempts: res.attempts, lastFrameUrl: res.lastFrameUrl, promptUsed: res.promptUsed, modelUsed: res.modelUsed, note: res.note });
@@ -481,7 +484,7 @@ export default function AdsStudioApp() {
         const newPlan: ScenePlan = { ...plan, spoken_line: lines[key] };
         const res = await generateClipAgentic({
           plan: newPlan, script: newScript, aspect: cur.aspect,
-          avatarUrl: cur.avatar?.url || null, continuityNote: continuity, previousFrameUrl: prevFrame, onNote: say,
+          avatarUrl: cur.avatar?.url || null, modelId: cur.videoModel || null, continuityNote: continuity, previousFrameUrl: prevFrame, onNote: say,
         });
         if (!res.videoUrl) throw new Error(`Clip ${sc.clip_number} failed: ${res.note || res.issues.join('; ') || 'render error'}`);
         clipVideos[key] = res.videoUrl;
@@ -881,6 +884,22 @@ export default function AdsStudioApp() {
               <div>
                 <h2 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 800 }}>Generation</h2>
                 <p style={{ margin: 0, color: T.muted, fontSize: 13.5 }}>Each clip is filmed, inspected by Opus, auto-retaken once if rejected, and chained for continuity.</p>
+                <div style={{ marginTop: 10, maxWidth: 560 }}>
+                  <EnginePicker
+                    label="Clip engine"
+                    value={s.videoModel || 'gemini-omni-flash-preview'}
+                    onChange={(id) => patch({ videoModel: id })}
+                    groupAIds="all"
+                    includeRunway
+                    disabled={s.isProcessing}
+                    note={(() => {
+                      const rw = runwayVideoModel(s.videoModel);
+                      if (!rw) return 'Default: Gemini Omni Flash — the proven avatar-consistent engine. Changing the engine affects newly generated clips only.';
+                      const seconds = s.script.reduce((a, c) => a + Math.min(10, Math.max(2, c.duration_seconds)), 0);
+                      return `Runway is gated — every clip is quoted FREE before the paid submit (≈ $${(rw.pricePerSecondUsd * seconds).toFixed(2)} for all ${s.script.length} clips at $${rw.pricePerSecondUsd.toFixed(2)}/s). If Runway answers 503 the clip shows “Runway generation is being enabled — check back soon.” and the rest of the run keeps working.`;
+                    })()}
+                  />
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn onClick={runGeneration} disabled={s.isProcessing}><Play size={14} /> {s.clips.some((c) => c.videoUrl) ? 'Resume / generate remaining' : 'Start generation'}</Btn>
@@ -926,6 +945,13 @@ export default function AdsStudioApp() {
                 );
               })}
             </div>
+            {/* Runway Recipes — quoted free before any paid submit; 503-guarded */}
+            <details style={{ marginTop: 18 }}>
+              <summary style={{ fontSize: 13, fontWeight: 700, color: T.soft, cursor: 'pointer' }}>Runway Recipe tools — product ads, UGC, swaps, multi-shot, localization, campaign images (free quote before every paid call)</summary>
+              <div style={{ marginTop: 10 }}>
+                <RunwayRecipesPanel uploadFile={(f) => uploadUserFile(f).then((a) => a.url)} />
+              </div>
+            </details>
           </div>
         )}
 

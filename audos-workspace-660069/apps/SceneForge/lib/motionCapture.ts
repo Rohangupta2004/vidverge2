@@ -1,4 +1,5 @@
 import { buildMotionGraphic, type BuiltMotionGraphic } from '../components/MotionGraphicPlayer';
+import { motionThemeForStyle } from './motionKit';
 import { motionFingerprint, normalizeMotionSpec, specFromOverlay, type MotionSpec } from './motionSpec';
 import { directionFingerprint, normalizeSceneDirection, type SceneDirection } from './visualTimeline';
 import { updateScene, type Project, type Scene } from './supabase';
@@ -147,6 +148,9 @@ function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width:
  * narration window while the HeyGen picture and audio continue underneath.
  */
 export async function generatePortraitCalloutImage(project: Project, scene: Scene): Promise<string> {
+  // Paper-cut styles carry the callout on a warm paper card with ink type
+  // instead of the dark glass pill.
+  const paper = String(project.style || '') === 'vox-explainer';
   const overlay = scene.overlay_config || {};
   const headline = String(overlay.text || scene.description || '').trim();
   const subtext = String(overlay.subtext || '').trim();
@@ -198,25 +202,25 @@ export async function generatePortraitCalloutImage(project: Project, scene: Scen
   ctx.shadowColor = 'rgba(0,0,0,0.45)';
   ctx.shadowBlur = 40;
   ctx.shadowOffsetY = 10;
-  roundedRect(ctx, x, y, width, height, 24);
-  ctx.fillStyle = 'rgba(8,12,24,0.82)';
+  roundedRect(ctx, x, y, width, height, paper ? 6 : 24);
+  ctx.fillStyle = paper ? 'rgba(250,247,240,0.94)' : 'rgba(8,12,24,0.82)';
   ctx.fill();
   ctx.shadowColor = 'transparent';
   ctx.lineWidth = 2;
-  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.strokeStyle = paper ? 'rgba(26,26,26,0.28)' : 'rgba(255,255,255,0.2)';
   ctx.stroke();
 
   const align: CanvasTextAlign = position.endsWith('_left') ? 'left' : position.endsWith('_right') ? 'right' : 'center';
   const textX = align === 'left' ? x + padX : align === 'right' ? x + width - padX : x + width / 2;
   ctx.textAlign = align;
   ctx.textBaseline = 'top';
-  ctx.fillStyle = '#FFFFFF';
+  ctx.fillStyle = paper ? '#1A1A1A' : '#FFFFFF';
   ctx.font = `800 ${headlineSize}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif`;
   let textY = y + padY;
   headlineLines.forEach((line) => { ctx.fillText(line, textX, textY); textY += headlineLine; });
   if (subtextLines.length) {
     textY += gap;
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillStyle = paper ? 'rgba(26,26,26,0.85)' : 'rgba(255,255,255,0.92)';
     ctx.font = `500 ${subtextSize}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif`;
     subtextLines.forEach((line) => { ctx.fillText(line, textX, textY); textY += subtextLine; });
   }
@@ -304,7 +308,7 @@ export async function generatePortraitMotionOverlayFrames(project: Project, scen
   // Small tiles get a bigger type unit so labels remain readable at 9:16.
   const unitScale = comp.mode === 'central' ? 1.12 : compact ? 1.5 : 1.25;
   if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined);
-  const built: BuiltMotionGraphic = buildMotionGraphic(spec, rect.w, rect.h, duration, { transparent: true, panel: true, unitScale, directed: sceneDirection(scene) });
+  const built: BuiltMotionGraphic = buildMotionGraphic(spec, rect.w, rect.h, duration, { transparent: true, panel: true, unitScale, directed: sceneDirection(scene), styleId: project.style });
   const host = document.createElement('div');
   host.style.cssText = `position:fixed;left:-100000px;top:0;width:${rect.w}px;height:${rect.h}px;pointer-events:none;opacity:0;`;
   host.appendChild(built.svg);
@@ -362,6 +366,8 @@ export async function generatePortraitImageCardPng(project: Project, scene: Scen
   const image = await new Promise<HTMLImageElement>((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error(`Scene ${scene.scene_index}'s image could not be decoded.`)); img.src = dataUrl; });
   if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined);
 
+  const paper = String(project.style || '') === 'vox-explainer';
+  const cardRadius = paper ? 8 : 28;
   const rect = portraitPlacement(comp, { tall: true });
   const canvas = document.createElement('canvas');
   canvas.width = FRAME_W; canvas.height = FRAME_H;
@@ -373,20 +379,22 @@ export async function generatePortraitImageCardPng(project: Project, scene: Scen
   ctx.shadowColor = 'rgba(0,0,0,0.5)';
   ctx.shadowBlur = 48;
   ctx.shadowOffsetY = 14;
-  roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, 28);
-  ctx.fillStyle = 'rgba(8,12,24,0.9)';
+  roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, cardRadius);
+  ctx.fillStyle = paper ? 'rgba(250,247,240,0.96)' : 'rgba(8,12,24,0.9)';
   ctx.fill();
   ctx.restore();
   ctx.save();
-  roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, 28);
+  roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, cardRadius);
   ctx.clip();
   const cover = Math.max(rect.w / image.width, rect.h / image.height);
   const dw = image.width * cover; const dh = image.height * cover;
+  if (paper) ctx.filter = 'saturate(0.35)';
   ctx.drawImage(image, rect.x + (rect.w - dw) / 2, rect.y + (rect.h - dh) / 2, dw, dh);
+  ctx.filter = 'none';
   ctx.restore();
-  roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, 28);
+  roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, cardRadius);
   ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.strokeStyle = paper ? 'rgba(26,26,26,0.25)' : 'rgba(255,255,255,0.22)';
   ctx.stroke();
 
   const caption = String(scene.overlay_config?.text || '').trim();
@@ -402,14 +410,14 @@ export async function generatePortraitImageCardPng(project: Project, scene: Scen
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.45)';
     ctx.shadowBlur = 30;
-    roundedRect(ctx, pillX, pillY, pillW, pillH, 20);
-    ctx.fillStyle = 'rgba(8,12,24,0.82)';
+    roundedRect(ctx, pillX, pillY, pillW, pillH, paper ? 6 : 20);
+    ctx.fillStyle = paper ? 'rgba(250,247,240,0.94)' : 'rgba(8,12,24,0.82)';
     ctx.fill();
     ctx.shadowColor = 'transparent';
     ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.strokeStyle = paper ? 'rgba(26,26,26,0.28)' : 'rgba(255,255,255,0.18)';
     ctx.stroke();
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = paper ? '#1A1A1A' : '#FFFFFF';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     let textY = pillY + 16;
@@ -435,7 +443,7 @@ export function hasFreshMotionClip(scene: Scene): boolean {
  * Runs the GSAP timeline in real time; a rasterization pass that briefly
  * falls behind repeats the last frame instead of distorting the timing.
  */
-export async function recordMotionGraphic(spec: MotionSpec, aspect: '16:9' | '9:16', durationSec: number, onProgress?: (fraction: number) => void, directed?: SceneDirection | null): Promise<Blob> {
+export async function recordMotionGraphic(spec: MotionSpec, aspect: '16:9' | '9:16', durationSec: number, onProgress?: (fraction: number) => void, directed?: SceneDirection | null, styleId?: string | null): Promise<Blob> {
   const mime = recorderMime();
   if (!mime) throw new Error('This browser cannot record motion graphics (MediaRecorder is unavailable). Switch the scene to Image or AI Video instead.');
   const portrait = aspect === '9:16';
@@ -443,7 +451,7 @@ export async function recordMotionGraphic(spec: MotionSpec, aspect: '16:9' | '9:
   const H = portrait ? 1920 : 1080;
 
   const inlined = await inlineSpecImages(spec);
-  const built = buildMotionGraphic(inlined, W, H, durationSec, directed ? { directed } : {});
+  const built = buildMotionGraphic(inlined, W, H, durationSec, { ...(directed ? { directed } : {}), styleId: styleId ?? null });
   const host = document.createElement('div');
   host.style.cssText = `position:fixed;left:-100000px;top:0;width:${W}px;height:${H}px;pointer-events:none;opacity:0;`;
   host.appendChild(built.svg);
@@ -453,7 +461,7 @@ export async function recordMotionGraphic(spec: MotionSpec, aspect: '16:9' | '9:
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
   if (!ctx) { host.remove(); throw new Error('Canvas 2D is unavailable in this browser.'); }
-  ctx.fillStyle = '#0A0F1E'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = motionThemeForStyle(styleId).bg; ctx.fillRect(0, 0, W, H);
 
   const serializer = new XMLSerializer();
   let rasterBusy = false;
@@ -539,7 +547,7 @@ export async function generateSceneMotionClip(project: Project, scene: Scene, op
   const directed = sceneDirection(scene);
   const fingerprint = sceneCaptureFingerprint(scene);
   if (!options.force && hasFreshMotionClip(scene)) return { videoUrl: String(scene.render_url), reused: true, fingerprint };
-  const blob = await enqueue(() => recordMotionGraphic(spec, project.aspect_ratio === '9:16' ? '9:16' : '16:9', sceneMotionDuration(scene), options.onProgress, directed));
+  const blob = await enqueue(() => recordMotionGraphic(spec, project.aspect_ratio === '9:16' ? '9:16' : '16:9', sceneMotionDuration(scene), options.onProgress, directed, project.style));
   const file = new File([blob], `scene-${scene.scene_index}-motion.webm`, { type: 'video/webm' });
   const uploaded = await uploadFile(file, `sceneforge-v2/${project.id}/motion`);
   await updateScene(scene.id, { render_url: uploaded.url, video_prompt: fingerprint, status: 'ready' }, scene.project_id);

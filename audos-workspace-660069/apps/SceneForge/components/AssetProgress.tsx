@@ -5,6 +5,7 @@ import { isVideoUrl, sceneKind, sceneSettled } from '../lib/sceneState';
 import { hasFreshMotionClip } from '../lib/motionCapture';
 import { KIND_COLORS, KIND_LABELS } from '../lib/effects';
 import RemotionCodePreview from './RemotionCodePreview';
+import CompositionPreview from './CompositionPreview';
 
 // Live pipeline board. Every card reflects its OWN scene the moment that
 // scene's clip or still lands, so nothing waits for the slowest scene. A
@@ -78,6 +79,7 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
 }) {
   const [previewSceneId, setPreviewSceneId] = useState<string | null>(null);
   const [videoSceneId, setVideoSceneId] = useState<string | null>(null);
+  const [filmPreviewOpen, setFilmPreviewOpen] = useState(false);
   const previewScene = scenes.find((scene) => scene.id === previewSceneId) || null;
   const videoScene = scenes.find((scene) => scene.id === videoSceneId) || null;
   const total = scenes.length;
@@ -156,6 +158,20 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
     </div> : null}
 
     {failed.length ? <p className="mt-4 text-sm text-[var(--space-semantic-danger)]">{failed.length} scene{failed.length === 1 ? '' : 's'} failed — each one can be retried, switched to Text/Graphics, or skipped. The rest of the film is unaffected.</p> : null}
+
+    {/* FULL-FILM DRAFT PREVIEW before the production render: the browser plays
+        the complete composition from the same timeline and props the Remotion
+        render will receive — presenter states, clips, stills, overlays,
+        captions and the ducked music bed. Strictly a preview: the final MP4 is
+        always produced by the platform renderer. */}
+    {project && allReady ? <div className="mt-6 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-5">
+      <button onClick={() => setFilmPreviewOpen((open) => !open)} className="flex w-full items-center gap-2 text-left">
+        <Clapperboard className="h-4 w-4 text-[var(--space-text-brand)]" />
+        <span className="font-semibold text-[var(--space-text-primary)]">Preview the full film before rendering</span>
+        <span className="ml-auto text-xs font-semibold text-[var(--space-text-brand)]">{filmPreviewOpen ? 'Hide' : 'Show'}</span>
+      </button>
+      {filmPreviewOpen ? <div className="mt-4"><CompositionPreview project={project} scenes={scenes} /></div> : null}
+    </div> : null}
 
     <div className="mt-6 flex flex-wrap gap-3">
       {/* The final-assembly call to action must be impossible to miss the

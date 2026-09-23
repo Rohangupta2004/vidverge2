@@ -18,6 +18,9 @@ export interface AssemblyJob {
   finished_at?: string;
   output_url?: string;
   error?: string;
+  /** The DirectorPlan draft version this render was submitted with — an output
+   * of an older draft is shown but never promoted over a newer edit. */
+  draft_version?: number;
 }
 export const ASSEMBLY_RUNNING_STATUSES: AssemblyStatus[] = ['preparing', 'assembling', 'checking'];
 export function assemblyJobRunning(job?: AssemblyJob | null): boolean {
@@ -33,8 +36,10 @@ export interface Project {
   // `render_operation_id` is cleared with null when a render stops being in
   // flight, so the column has to accept it.
   assembled_video_url?: string; checks?: CheckResult[]; render_operation_id?: string | null; build_hash?: string; editor_manifest?: any;
-  /** Written only by the sceneforge-v2 server function. */
-  music_url?: string; music_prompt?: string; final_video_url?: string; stage_note?: string;
+  /** Written only by the sceneforge-v2 server function. `final_video_url` is
+   * cleared with null when a mix fails verification or a new assembled cut
+   * supersedes the old mix, so the column has to accept it. */
+  music_url?: string; music_prompt?: string; final_video_url?: string | null; stage_note?: string;
   /** How narration runs under middle visuals: 'continuous_heygen_voiceover' (default) — the avatar master's audio plays uninterrupted, documentary style. */
   audio_strategy?: string;
   /** Planning strategy, separate from the palette/typography style. */
@@ -45,6 +50,16 @@ export interface Project {
   qc_report?: { summary?: string; gaps?: string[]; overlaps?: string[]; suggestions?: Array<{ scene_id?: string; scene_index: number; weak: boolean; suggestion: string }> } | null;
   /** Live final-assembly job state — see AssemblyJob. Browser-writable (owner session); also passes through save_project. */
   assembly_job?: AssemblyJob | null;
+  /** The AI Editorial Director's authoritative plan for the current generation (lib/directorPlan.DirectorPlan). */
+  director_plan?: Record<string, unknown> | null;
+  /** Id of the current plan generation — scenes/assets are stamped with it so stale work never leaks into a new render. */
+  generation_id?: string | null;
+  /** The last render that completed, verified and passed QA: { draft_version, generation_id, video_url, build_hash, promoted_at }. A failed render NEVER replaces this. */
+  last_good_version?: Record<string, unknown> | null;
+  /** Result of the last pre-render timeline validation (lib/timelineValidation). */
+  timeline_report?: Record<string, unknown> | null;
+  /** Film-level output QA for the assembled MP4 (lib/filmQa). */
+  final_qa_report?: Record<string, unknown> | null;
 }
 export interface WordTimestamp { word: string; start: number; end: number }
 export interface Scene {
@@ -75,18 +90,31 @@ export interface Scene {
    * status pass/flagged/skipped, issues, summary. 'flagged' = auto-fix retries
    * exhausted — the scene ships its best render and the board shows why. */
   qa_report?: Record<string, unknown> | null;
+  /** First-class EDITABLE overlay elements composed above the scene's visual
+   * at assembly (lib/directorPlan.SceneOverlayElement[]). An overlay-only edit
+   * re-renders the composition without regenerating any AI/HeyGen asset. */
+  overlays?: Record<string, unknown>[] | null;
+  /** Explicit presenter composition for this window (lib/directorPlan.PresenterState). */
+  presenter_state?: Record<string, unknown> | null;
+  /** Ken Burns / image motion for still scenes (lib/directorPlan.MotionTreatment). */
+  motion_treatment?: Record<string, unknown> | null;
+  /** The plan generation this scene's media belongs to. */
+  generation_id?: string | null;
 }
 export interface Asset { id: string; project_id: string; scene_id?: string; asset_type: 'scene_image' | 'motion_bg' | 'user_upload'; element_name: string; storage_path: string; public_url?: string; prompt?: string; source: 'generated' | 'upload'; width?: number; height?: number }
 export interface ForgeSettings {
   /** The ONE orchestrator LLM behind the whole pipeline: script, scene manifest, image/video prompts, Remotion scene data, overlays and change-request routing. There are no per-stage models. */
   id?: string; workspace_id: string; llm_model: string; image_model: string;
+  /** Video engine for AI-video supporting scenes — the EXACT platform model id
+   * (e.g. gemini-omni-flash-preview, veo-3.1-fast-generate-preview). */
+  video_model?: string;
   heygen_api_key_secret_name: string; eleven_labs_voice_id?: string; default_avatar_id?: string; default_style?: string;
   default_language: string; default_target_length_sec: number; default_scene_share: 'low' | 'medium' | 'high'; default_aspect_ratio: '16:9' | '9:16'; heygen_defaults?: Record<string, unknown>;
 }
 export interface CheckResult { id: string; pass: boolean; label: string; detail: string }
 
 export const DEFAULT_SETTINGS: ForgeSettings = {
-  workspace_id: WORKSPACE_ID, llm_model: 'claude-opus-5', image_model: 'gemini-3.1-flash-image',
+  workspace_id: WORKSPACE_ID, llm_model: 'claude-opus-5', image_model: 'gemini-3.1-flash-image', video_model: 'gemini-omni-flash-preview',
   heygen_api_key_secret_name: 'HEYGEN_API_KEY', default_language: 'en', default_target_length_sec: 300, default_scene_share: 'medium', default_aspect_ratio: '9:16',
 };
 
@@ -156,13 +184,14 @@ export async function loadSettings(): Promise<ForgeSettings> {
   const row = result?.data?.[0] || {};
   // A settings row written before the single-LLM rework carries no llm_model;
   // its old script_model is the closest statement of intent.
-  return { ...DEFAULT_SETTINGS, ...row, llm_model: row.llm_model || row.script_model || DEFAULT_SETTINGS.llm_model };
+  return { ...DEFAULT_SETTINGS, ...row, llm_model: row.llm_model || row.script_model || DEFAULT_SETTINGS.llm_model, video_model: row.video_model || DEFAULT_SETTINGS.video_model };
 }
 export async function saveSettings(settings: ForgeSettings) {
   const payload = {
     workspace_id: WORKSPACE_ID,
     llm_model: settings.llm_model,
     image_model: settings.image_model,
+    video_model: settings.video_model || 'gemini-omni-flash-preview',
     heygen_api_key_secret_name: settings.heygen_api_key_secret_name,
     eleven_labs_voice_id: settings.eleven_labs_voice_id || '',
     default_avatar_id: settings.default_avatar_id || '',

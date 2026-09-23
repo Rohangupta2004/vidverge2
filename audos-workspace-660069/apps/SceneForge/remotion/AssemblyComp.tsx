@@ -3,6 +3,7 @@ import type { CompositionSpec, OverlayConfig, VisualKind } from '../lib/effects'
 import { effectiveComposition, normalizeEffect, visualKindOf } from '../lib/effects';
 import { normalizeMotionSpec } from '../lib/motionSpec';
 import { chooseTransition, normalizeSceneDirection, type TransitionSpec } from '../lib/visualTimeline';
+import { defaultMotionTreatment, effectivePresenterState, normalizeMotionTreatment, normalizeOverlays, type MotionTreatment, type PipPosition, type SceneOverlayElement } from '../lib/directorPlan';
 
 export interface TimelineSegment {
   type: 'avatar' | 'scene';
@@ -29,6 +30,21 @@ export interface TimelineSegment {
    * kind-aware chooser); rendered frame-accurately in the composition. */
   transitionIn?: { type: string; frames: number; direction?: string } | null;
   transitionOut?: { type: string; frames: number; direction?: string } | null;
+  /** EXPLICIT presenter state for this scene window (Director layer): 'full'
+   * keeps the presenter visible as the base under an overlay/central visual,
+   * 'hidden' is a fullscreen cutaway (narration continues), 'pip' shows the
+   * presenter in a positioned card over the visual. Every scene segment
+   * declares one — no scene relies on accidental stacking. */
+  presenter?: { video: 'full' | 'hidden' | 'pip'; pip?: { position: PipPosition; scale: number } };
+  /** True only when the Director explicitly mutes narration for this window. */
+  presenterMuted?: boolean;
+  /** First-class EDITABLE overlay elements (text, arrows, circles, highlights,
+   * labels, stats, citations, lower thirds) composed above the scene visual;
+   * captions render above these. Editing them re-renders only the composition. */
+  overlayElements?: SceneOverlayElement[];
+  /** Deterministic Ken Burns motion for still visuals (Director-specified,
+   * with a default so images never sit as dead slides). */
+  motion?: MotionTreatment | null;
 }
 
 // Decide from the URL itself, not from "this scene has code": a scene whose
@@ -95,6 +111,14 @@ export function buildTimeline(project: Project, scenes: Scene[], assets: Asset[]
     const motionKind = kind === 'motion_graphic' || kind === 'text_overlay' ? normalizeMotionSpec(scene.spec || {}, scene.description).kind : null;
     const composition = overAvatar ? null : effectiveComposition(kind, overlay, motionKind);
     transitionMeta.set(scene.id, { motionKind, direction: normalizeSceneDirection(scene.director_timeline), dir: overlay?.effect?.direction });
+    // DIRECTOR LAYER: explicit presenter state (derived from the composition
+    // when the plan predates the field — never left implicit), first-class
+    // editable overlay elements, and Ken Burns motion for still visuals.
+    const presenter = effectivePresenterState(scene);
+    const overlayElements = normalizeOverlays((scene as any).overlays, scene.id);
+    const stillMotion = !hasCodedRender && renderUrl
+      ? (normalizeMotionTreatment((scene as any).motion_treatment) || (kind === 'image' ? defaultMotionTreatment(scene.scene_index) : null))
+      : normalizeMotionTreatment((scene as any).motion_treatment);
     segments.push({
       type: 'scene',
       visualKind: visualKindOf(scene.visual_kind),
@@ -106,6 +130,10 @@ export function buildTimeline(project: Project, scenes: Scene[], assets: Asset[]
       ...(renderUrl ? { sceneRenderUrl: renderUrl, sceneRenderKind: hasCodedRender ? 'video' as const : 'image' as const } : {}),
       ...(composition && composition.mode !== 'fullscreen' ? { composition: { mode: composition.mode, position: composition.position, scale: composition.scale } } : {}),
       ...(overlay && !textBaked ? { overlay } : {}),
+      presenter: { video: presenter.video, ...(presenter.pip ? { pip: presenter.pip } : {}) },
+      ...(presenter.audio === 'mute' ? { presenterMuted: true } : {}),
+      ...(overlayElements.length ? { overlayElements } : {}),
+      ...(stillMotion ? { motion: stillMotion } : {}),
       audioMuted: scene.audio_muted !== false,
       audioVolume: Math.max(0, Math.min(1, Number(scene.audio_volume || 0))),
     });
@@ -383,6 +411,134 @@ var transitionStyle = function (s, frame, frames) {
   else if (outF >= 1 && frames - frame < outF) apply(tout ? tout.type : 'crossfade', clamp01((frames - frame) / outF), false, tout && tout.direction);
   return style;
 };
+// KEN BURNS — the Director's deterministic image motion (initial/final scale,
+// pan, optional rotation, easing). Applied to still visuals so images never
+// sit as dead slides; when present it overrides the generic preset effect for
+// the still. KEEP IN SYNC with remotion/compositionRuntime.kenBurnsStyleAt.
+var kenBurnsStyle = function (motion, frame, frames) {
+  if (!motion) return null;
+  var p = ease(frames > 1 ? frame / frames : 1, motion.easing || 'ease-in-out');
+  var from = Number(motion.scale_from); if (!(from > 0)) from = 1.04;
+  var to = Number(motion.scale_to); if (!(to > 0)) to = 1.14;
+  var scale = from + (to - from) * p;
+  var x = (Number(motion.pan_x_pct) || 0) * p;
+  var y = (Number(motion.pan_y_pct) || 0) * p;
+  var rot = (Number(motion.rotate_deg) || 0) * p;
+  return {transform: 'scale(' + scale + ') translate(' + x + '%,' + y + '%)' + (rot ? ' rotate(' + rot + 'deg)' : ''), opacity: 1, filter: ''};
+};
+// EDITABLE OVERLAY ELEMENTS — first-class timeline elements (text, labels,
+// lower thirds, stats, citations, arrows, circles, highlights) composed ABOVE
+// the scene visual from the scene's stored overlays data. An overlay-only
+// edit re-renders ONLY this composition — never the underlying AI or HeyGen
+// assets. Captions render above these at the root. KEEP IN SYNC with
+// remotion/compositionRuntime.overlayStateAt.
+var OV_ANIM_F = 9;
+var overlayState = function (o, frame, frames) {
+  var startF = Math.round((Number(o.start_offset_sec) || 0) * 30);
+  var durF = Math.max(6, Math.min(frames - startF, Math.round((Number(o.duration_sec) || 3) * 30)));
+  var local = frame - startF;
+  if (local < 0 || local >= durF) return null;
+  var inP = clamp01(local / OV_ANIM_F);
+  var outP = clamp01((durF - local) / OV_ANIM_F);
+  var opacity = 1; var transform = ''; var draw = 1;
+  var ai = String(o.anim_in || 'rise');
+  if (ai === 'fade') opacity *= ease(inP, 'ease-out');
+  else if (ai === 'rise') { opacity *= ease(inP, 'ease-out'); transform += ' translateY(' + ((1 - ease(inP, 'ease-out')) * 18) + 'px)'; }
+  else if (ai === 'pop') { var q = ease(inP, 'ease-out'); opacity *= q; transform += ' scale(' + (0.72 + 0.28 * q + 0.05 * Math.sin(q * Math.PI)) + ')'; }
+  else if (ai === 'draw') { draw = ease(clamp01(local / (OV_ANIM_F * 2)), 'ease-in-out'); opacity *= Math.min(1, inP * 2); }
+  var ao = String(o.anim_out || 'fade');
+  if (ao === 'fade') opacity *= ease(outP, 'ease-out');
+  else if (ao === 'rise') { opacity *= ease(outP, 'ease-out'); transform += ' translateY(' + (-(1 - ease(outP, 'ease-out')) * 12) + 'px)'; }
+  else if (ao === 'pop') { var q2 = ease(outP, 'ease-out'); opacity *= q2; transform += ' scale(' + (0.85 + 0.15 * q2) + ')'; }
+  return {opacity: opacity, transform: transform, draw: draw};
+};
+function OverlayElements(props) {
+  var frame = useCurrentFrame();
+  var list = Array.isArray(props.overlays) ? props.overlays : [];
+  var frames = props.frames || 1;
+  if (!list.length) return null;
+  return <AbsoluteFill style={{pointerEvents:'none'}}>
+    {list.map(function (o, i) {
+      if (!o) return null;
+      var st = overlayState(o, frame, frames);
+      if (!st) return null;
+      var accent = String(o.accent || '#3B82F6');
+      var scale = Number(o.scale); if (!(scale > 0)) scale = 1;
+      var x = Number(o.x_pct); if (!Number.isFinite(x)) x = 50;
+      var y = Number(o.y_pct); if (!Number.isFinite(y)) y = 84;
+      var z = 40 + (Number(o.z_index) || 10);
+      var type = String(o.type || 'text');
+      if (type === 'arrow' || type === 'circle') {
+        var tx = Number(o.target_x_pct); if (!Number.isFinite(tx)) tx = x;
+        var ty = Number(o.target_y_pct); if (!Number.isFinite(ty)) ty = Math.max(6, y - 26);
+        var x1 = x * 19.2; var y1 = y * 10.8; var x2 = tx * 19.2; var y2 = ty * 10.8;
+        var dx = x2 - x1; var dy = y2 - y1; var len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        var hx = x2 - (dx / len) * 34; var hy = y2 - (dy / len) * 34;
+        var px = -(dy / len) * 20; var py = (dx / len) * 20;
+        return <AbsoluteFill key={o.id || i} style={{zIndex: z, opacity: st.opacity, pointerEvents:'none'}}>
+          <svg viewBox="0 0 1920 1080" style={{position:'absolute', inset:0, width:'100%', height:'100%'}}>
+            {type === 'circle'
+              ? <ellipse cx={x * 19.2} cy={y * 10.8} rx={130 * scale} ry={90 * scale} fill="none" stroke={accent} strokeWidth={7} strokeDasharray={700} strokeDashoffset={700 * (1 - st.draw)} transform={'rotate(-8 ' + (x * 19.2) + ' ' + (y * 10.8) + ')'}/>
+              : <g>
+                  <line x1={x1} y1={y1} x2={x1 + dx * st.draw} y2={y1 + dy * st.draw} stroke={accent} strokeWidth={8} strokeLinecap="round"/>
+                  {st.draw > 0.96 ? <polygon points={x2 + ',' + y2 + ' ' + (hx + px) + ',' + (hy + py) + ' ' + (hx - px) + ',' + (hy - py)} fill={accent}/> : null}
+                </g>}
+          </svg>
+          {o.text ? <div style={{position:'absolute', left: x + '%', top: y + '%', transform:'translate(-50%, 20%)', fontFamily:"'Inter', system-ui, sans-serif", fontSize: 26 * scale, fontWeight: 700, color:'#fff', background:'rgba(8,12,24,0.78)', borderRadius: 12, padding:'6px 14px', border:'1.5px solid rgba(255,255,255,0.16)'}}>{o.text}</div> : null}
+        </AbsoluteFill>;
+      }
+      if (type === 'highlight') {
+        return <div key={o.id || i} style={{position:'absolute', left: x + '%', top: y + '%', width: (26 * scale) + '%', height: (11 * scale) + '%', transform: 'translate(-50%,-50%)' + st.transform, zIndex: z, opacity: st.opacity * 0.42, background: accent, borderRadius: 18, pointerEvents:'none'}}/>;
+      }
+      var isLower = type === 'lower_third';
+      var isStat = type === 'stat';
+      var isCite = type === 'citation';
+      var isLabel = type === 'label';
+      var block = {position:'absolute', left: (isLower ? 4 : x) + '%', top: isLower ? undefined : y + '%', bottom: isLower ? '7%' : undefined, transform: (isLower ? '' : 'translate(-50%,-50%)') + st.transform, zIndex: z, opacity: st.opacity, maxWidth:'62%', pointerEvents:'none', fontFamily:"'Inter', system-ui, sans-serif", textAlign: isLower ? 'left' : 'center'};
+      if (isLower || isLabel || isCite) { block.background = 'rgba(8,12,24,0.80)'; block.border = '1.5px solid rgba(255,255,255,0.16)'; block.borderRadius = 16; block.padding = isLower ? '14px 26px' : '10px 20px'; block.boxShadow = '0 10px 40px rgba(0,0,0,0.45)'; }
+      if (isLower) { block.borderLeft = '6px solid ' + accent; }
+      return <div key={o.id || i} style={block}>
+        {isStat && o.text ? <div style={{fontSize: 96 * scale, fontWeight: 900, lineHeight: 1, color: accent, textShadow:'0 6px 30px rgba(0,0,0,0.7)'}}>{o.text}</div>
+          : o.text ? <div style={{fontSize: (isCite ? 24 : isLabel ? 30 : isLower ? 40 : 52) * scale, fontWeight: isCite ? 500 : 800, lineHeight: 1.2, color:'#fff', fontStyle: isCite ? 'italic' : 'normal', textShadow:'0 4px 22px rgba(0,0,0,0.75)'}}>{o.text}</div> : null}
+        {o.subtext ? <div style={{marginTop: 8, fontSize: (isStat ? 30 : 24) * scale, fontWeight: 500, color:'rgba(255,255,255,0.9)'}}>{o.subtext}</div> : null}
+        {o.source ? <div style={{marginTop: 8, fontSize: 20 * scale, fontWeight: 500, color:'rgba(255,255,255,0.72)'}}>{'\u2014 ' + o.source}</div> : null}
+      </div>;
+    })}
+  </AbsoluteFill>;
+}
+// PRESENTER PIP — the explicit picture-in-picture presenter card over a
+// fullscreen visual. startFrom keeps the PIP picture time-aligned with the
+// continuous base master; it is muted (the base layer already carries the
+// narration, so audio is never duplicated).
+function PresenterPip(props) {
+  var s = props.segment || {};
+  var pip = s.presenter && s.presenter.pip ? s.presenter.pip : null;
+  if (!props.avatarVideoUrl || !s.presenter || s.presenter.video !== 'pip') return null;
+  var scale = pip && pip.scale > 0 ? Math.min(0.34, Math.max(0.16, Number(pip.scale))) : 0.24;
+  var pos = String((pip && pip.position) || 'bottom_right');
+  var style = {position:'absolute', width: (scale * 100) + '%', aspectRatio:'16 / 9', borderRadius: 18, overflow:'hidden', boxShadow:'0 18px 50px rgba(0,0,0,0.6)', border:'2px solid rgba(255,255,255,0.28)', zIndex: 30};
+  if (pos === 'top_left' || pos === 'top_right') style.top = '6%'; else style.bottom = '7%';
+  if (pos === 'top_left' || pos === 'bottom_left') style.left = '4%'; else style.right = '4%';
+  return <div style={style}><OffthreadVideo src={props.avatarVideoUrl} muted startFrom={startAt(s)} style={COVER}/></div>;
+}
+// CAPTIONS — deterministic word-timed lower-third pills built from the avatar
+// master's word timestamps (props.captions = [{text,start,end}]). Rendered
+// LAST at the root so captions are the TOPMOST layer above every scene
+// visual, overlay element and PIP card. KEEP IN SYNC with
+// remotion/compositionRuntime.captionAt.
+function Captions(props) {
+  var frame = useCurrentFrame();
+  var chunks = Array.isArray(props.captions) ? props.captions : [];
+  if (!chunks.length) return null;
+  var t = frame / 30;
+  var active = null;
+  for (var i = 0; i < chunks.length; i += 1) { var c = chunks[i]; if (c && t >= Number(c.start) - 0.05 && t <= Number(c.end) + 0.25) { active = c; break; } }
+  if (!active || !active.text) return null;
+  var inO = Math.min(1, Math.max(0, (t - (Number(active.start) - 0.05)) / 0.14));
+  return <AbsoluteFill style={{justifyContent:'flex-end', alignItems:'center', paddingBottom:'3.6%', pointerEvents:'none', zIndex: 90}}>
+    <div style={{maxWidth:'74%', background:'rgba(6,10,20,0.72)', border:'1.5px solid rgba(255,255,255,0.14)', borderRadius:14, padding:'10px 22px', opacity: inO, fontFamily:"'Inter', system-ui, sans-serif", fontSize: 34, fontWeight: 700, lineHeight: 1.25, color:'#fff', textAlign:'center', textShadow:'0 2px 12px rgba(0,0,0,0.8)'}}>{String(active.text)}</div>
+  </AbsoluteFill>;
+}
 function SceneOverlay(props) {
   var frame = useCurrentFrame();
   var s = props.segment || {};
@@ -392,6 +548,8 @@ function SceneOverlay(props) {
   var overlay = s.overlay || {};
   var fx = overlay.effect || null;
   var fxStyle = effectStyle(fx, frame, frames);
+  // Director-specified Ken Burns wins over the generic preset for stills.
+  var kb = s.motion ? kenBurnsStyle(s.motion, frame, frames) : null;
   var stills = (Array.isArray(s.assetUrls) ? s.assetUrls : []).filter(Boolean);
   var isVideo = s.sceneRenderKind === 'video' && s.sceneRenderUrl;
   var showAsset = overlay.showAsset !== false;
@@ -416,6 +574,7 @@ function SceneOverlay(props) {
     var chipOnRight = textPos.indexOf('right') < 0;
     return <AbsoluteFill style={{opacity: opacity, transform: ts.transform || undefined, clipPath: ts.clipPath || undefined, background:'transparent', overflow:'hidden'}}>
       {chipUrl ? <div style={{position:'absolute', bottom:'6%', left: chipOnRight ? undefined : '4%', right: chipOnRight ? '4%' : undefined, width:'16%', aspectRatio:'1 / 1', borderRadius:24, overflow:'hidden', border:'2px solid rgba(255,255,255,0.25)', boxShadow:'0 14px 40px rgba(0,0,0,0.45)'}}><Img src={chipUrl} style={COVER}/></div> : null}
+      <OverlayElements overlays={s.overlayElements} frames={frames}/>
       <TextOverlay overlay={overlay} frames={frames} callout={true}/>
     </AbsoluteFill>;
   }
@@ -435,10 +594,11 @@ function SceneOverlay(props) {
     cardStyle.transform = (cardStyle.transform ? cardStyle.transform + ' ' : '') + 'scale(' + cardScale + ') translateY(' + cardRise + '%)';
     return <AbsoluteFill style={{opacity: opacity, transform: ts.transform || undefined, clipPath: ts.clipPath || undefined, background:'transparent', overflow:'hidden'}}>
       <div style={cardStyle}>
-        <div style={{position:'absolute', inset:0, transform: fxStyle.transform || undefined, opacity: fxStyle.opacity, filter: fxStyle.filter || undefined}}>
+        <div style={{position:'absolute', inset:0, transform: (kb && !isVideo ? kb.transform : fxStyle.transform) || undefined, opacity: fxStyle.opacity, filter: fxStyle.filter || undefined}}>
           {isVideo ? <Video src={s.sceneRenderUrl} muted={s.audioMuted !== false} volume={Math.max(0, Math.min(1, Number(s.audioVolume) || 0))} loop style={COVER}/> : <Img src={imageUrl} style={COVER}/>}
         </div>
       </div>
+      <OverlayElements overlays={s.overlayElements} frames={frames}/>
       {(overlay.text || overlay.subtext) ? <TextOverlay overlay={overlay} frames={frames} callout={true}/> : null}
     </AbsoluteFill>;
   }
@@ -460,11 +620,13 @@ function SceneOverlay(props) {
     {framed ? null : isVideo
       ? <div style={visualWrap}><Video src={s.sceneRenderUrl} muted={s.audioMuted !== false} volume={Math.max(0, Math.min(1, Number(s.audioVolume) || 0))} loop style={COVER}/></div>
       : imageUrl
-        ? <div style={visualWrap}><Img src={imageUrl} style={COVER}/></div>
+        ? <div style={kb ? {position:'absolute', inset:0, transform: kb.transform || undefined, opacity: fxStyle.opacity} : visualWrap}><Img src={imageUrl} style={COVER}/></div>
         : showAsset && stills.length
           ? <div style={visualWrap}>{stills.map(function (url, j) { return <Img key={url} src={url} style={{position:'absolute',inset:(8+j*3)+'%',width:(84-j*6)+'%',height:(84-j*6)+'%',objectFit:'contain',filter:'drop-shadow(0 22px 30px rgba(0,0,0,.35))'}}/>; })}</div>
           : <AbsoluteFill style={{background:'radial-gradient(1100px 560px at 50% -10%, rgba(59,130,246,0.25), transparent 60%), #0A0F1E'}}/>}
     <LightSweep effect={fx} frames={frames}/>
+    <PresenterPip segment={s} avatarVideoUrl={props.avatarVideoUrl}/>
+    <OverlayElements overlays={s.overlayElements} frames={frames}/>
     <TextOverlay overlay={overlay} frames={frames} positionOverride={textOverride || undefined}/>
   </AbsoluteFill>;
 }
@@ -474,13 +636,24 @@ export default function Assembly(props) {
   var motionBgUrl = p.motionBgUrl;
   var segments = segmentsOf(p);
   var sceneSegments = segments.filter(function (s) { return s && s.type === 'scene'; });
+  // Presenter audio is the continuous spine of the film. A scene may
+  // explicitly mute it for its window (rare, Director-deliberate); everything
+  // else leaves narration untouched — hiding the presenter's PICTURE never
+  // touches its AUDIO, so a fullscreen cutaway keeps narrating underneath.
+  var muteWindows = [];
+  sceneSegments.forEach(function (s) { if (s.presenterMuted === true) muteWindows.push([startAt(s), startAt(s) + frameCount(s)]); });
+  var presenterVolume = function (f) {
+    for (var i = 0; i < muteWindows.length; i += 1) { if (f >= muteWindows[i][0] && f < muteWindows[i][1]) return 0; }
+    return 1;
+  };
   return <AbsoluteFill style={{background:'#0A0F1E'}}>
-    {avatarVideoUrl ? <OffthreadVideo src={avatarVideoUrl} style={COVER}/> : null}
+    {avatarVideoUrl ? (muteWindows.length ? <OffthreadVideo src={avatarVideoUrl} volume={presenterVolume} style={COVER}/> : <OffthreadVideo src={avatarVideoUrl} style={COVER}/>) : null}
     {sceneSegments.map(function (s, i) {
       return <Sequence key={i} from={startAt(s)} durationInFrames={frameCount(s)}>
-        <SceneOverlay segment={s} motionBgUrl={motionBgUrl}/>
+        <SceneOverlay segment={s} motionBgUrl={motionBgUrl} avatarVideoUrl={avatarVideoUrl}/>
       </Sequence>;
     })}
+    <Captions captions={p.captions}/>
   </AbsoluteFill>;
 }
 `;

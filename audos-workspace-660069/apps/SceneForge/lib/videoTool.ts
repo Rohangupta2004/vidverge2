@@ -42,7 +42,7 @@ export interface SceneVideoResult { videoUrl: string; reused: boolean }
  * twice. The durable URL is persisted onto the scene through the server
  * function (render_url is a server-only column).
  */
-export async function generateSceneVideo(project: Project, scene: Scene, options: { force?: boolean } = {}): Promise<SceneVideoResult> {
+export async function generateSceneVideo(project: Project, scene: Scene, options: { force?: boolean; model?: string } = {}): Promise<SceneVideoResult> {
   const prompt = sceneVideoPrompt(scene);
   if (!prompt || prompt.length < 5) throw new Error(`Scene ${scene.scene_index} has no description to generate video from.`);
   if (!options.force && hasFreshSceneVideo(scene, prompt)) return { videoUrl: String(scene.render_url), reused: true };
@@ -53,7 +53,8 @@ export async function generateSceneVideo(project: Project, scene: Scene, options
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
     body: JSON.stringify({
-      model: VIDEO_MODEL,
+      // Workspace-selectable engine (SceneForge settings) — Omni Flash default.
+      model: options.model || VIDEO_MODEL,
       prompt: `${prompt}. Cinematic, high quality, no on-screen text or lettering, no watermark.`,
       aspectRatio: project.aspect_ratio,
       duration,

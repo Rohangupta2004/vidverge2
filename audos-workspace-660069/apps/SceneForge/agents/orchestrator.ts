@@ -1,8 +1,9 @@
-import { claudeJson, isTransientAiError } from '../lib/proxy';
+import { claudeJson, isTransientAiError, sleep } from '../lib/proxy';
 import type { WordTimestamp } from '../lib/supabase';
 import { normalizeMotionSpec } from '../lib/motionSpec';
 import { normalizeComposition } from '../lib/effects';
 import { getEditingPreset } from '../styles/registry';
+import { normalizeMotionTreatment, normalizeMusicTreatment, normalizeOverlays, normalizePresenterState, normalizeTreatment, treatmentDefaults, type MusicTreatment } from '../lib/directorPlan';
 
 /**
  * THE SINGLE LLM. SceneForge runs on exactly ONE language model, and this
@@ -77,43 +78,86 @@ export async function writeScript(input: { topic: string; audience?: string; lan
 // overlay spec (for the assembly compositor).
 // ---------------------------------------------------------------------------
 
-export const SCENE_PLAN_TASK = `CURRENT TASK: the full video blueprint. Input includes the full script, word-level timestamps, visual style, requested middle-visual share, user uploads, an editingPreset with explicit planningBias, and optionally referenceStyleAnalysis. EDITING PRESET: treat planningBias as a real editing strategy — it controls graphic density, B-roll frequency, text-overlay usage and pacing, not merely colors. Follow it unless it conflicts with factual accuracy, exact-text requirements, presenter safety or the requested middle-visual share. REFERENCE VIDEO LANGUAGE: when referenceStyleAnalysis exists, transfer only its abstract cut frequency, graphic density, caption behavior, pacing, framing and transition rules. Never copy or mention its people, footage, words, music, logos, products or other assets. The film alternates between the HeyGen talking head (the avatar master, always on screen by default) and MIDDLE VISUAL SECTIONS that replace the picture while the presenter's narration continues underneath, documentary style. Structure rules: the first 5 seconds stay on the talking head; the final segment before the end returns to the talking head (the CTA is delivered on camera); never place two middle sections back-to-back without a talking-head return, unless one continuous sentence spans that gap; default to alternating talking head → middle visual → talking head for any topic that benefits from visual explanation. Keep total middle-section duration near low=30%, medium=50%, or high=65%. For every middle scene include narration_segment: the exact script text the scene covers. CHOOSE visual_kind per scene from four types: "ai_video" ONLY for beats needing real filmed motion (a place, an action, physical footage; NEVER for text, names, numbers or lists — AI video hallucinates lettering); "motion_graphic" whenever structure or accuracy serves the beat — processes, relationships, timelines, comparisons, lists, charts, exact numbers, maps, node networks (this is the documentary explainer layer; prefer it when in doubt); "text_overlay" for a pure emphasized headline, key phrase or quote; "image" for one strong still (a portrait, artifact, place establishing shot). FOR motion_graphic SCENES return layout — the deterministic spec the GSAP motion engine renders EXACTLY (every string and number is shown verbatim on screen, so copy them precisely from the script; never invent figures): {"kind":one of branching_diagram|flowchart|timeline|comparison|list_reveal|big_stat|bar_chart|node_graph|annotated_image|text_reveal,"title"?:string<=90 chars,"subtitle"?:string,"root"?:central node label (branching_diagram/node_graph),"items":[{"label":string<=40 chars,"sublabel"?:string<=60,"value"?:number (bar_chart)}] max 6,"leftTitle"?+"rightTitle"?+"leftItems"?+"rightItems"? (comparison),"stat"?:{"value":number,"prefix"?,"suffix"?,"label"?} (big_stat)}. FOR text_overlay SCENES return overlay {"text":exact headline<=90 chars,"subtext"?:one supporting line,"overAvatar":true,"position"?:"lower_third"|"bottom_left"|"bottom_right"|"top_left"|"top_right"} — exact strings only. TEXT RIDES ON THE PRESENTER, NOT BETWEEN CUTS: a text_overlay composites ON TOP of the talking head — the avatar keeps playing full-frame while the label fades in and out in a safe zone (lower third by default, never over the face), synced to the narration segment's timestamps. Always set "overAvatar":true, and use text_overlay callouts liberally to reinforce key phrases, names and numbers WHILE the presenter speaks instead of cutting away to a full-screen card. FOR ai_video SCENES include video_prompt, sent VERBATIM to the video model. Write it as a DETAILED PRODUCTION SHOT BRIEF of 60-120 words, never a generic one-liner ("Create cinematic footage of a factory" is a failure). The brief states what the shot must COMMUNICATE for its narration beat, not merely what object exists, and covers: SUBJECT (who/what, specific appearance), CONTEXT/ENVIRONMENT (place, era, weather, set dressing), ACTION (what unfolds during the clip), CAMERA MOVEMENT (slow dolly-in, lateral track, handheld drift, static tripod, aerial drift…), FRAMING & COMPOSITION (wide establishing / medium / close-up; foreground and background elements; depth of field), LENS/LOOK (e.g. 35mm documentary, shallow focus, natural film grain), LIGHTING & COLOR (golden hour, practical lamps, cool overcast; the palette), MOTION PACING (contemplative vs energetic) and VISUAL STYLE matching the film's documentary tone. Close every prompt with negative constraints: no on-screen text, no lettering, no logos, no watermark, no distorted faces. FOR image SCENES each image prompt describes one cinematic full-frame picture and is sent VERBATIM to the image model: subject, setting, framing, light and mood, no words or lettering. When the input carries imageBriefs from your scriptwriting pass, treat them as the intended visual for their beat. Reuse a fitting upload by naming it in suggested_user_uploads. VISUAL VARIETY RULES: vary motion_graphic layout kinds across the film — never give two consecutive motion_graphic scenes the same kind when another kind fits the content; match each scene's optional layout "accent" (a hex color) to its subject (data/science → cyan #06B6D4, money/growth → emerald #10B981, history → amber #F59E0B, risk/warning → rose #F43F5E, product/tech → violet #8B5CF6) instead of defaulting everything to one blue. COMPARISON RULE: a comparison layout MUST fill BOTH leftItems AND rightItems (1-5 entries each) — never return a comparison with an empty side. COMPLETENESS RULE (hard): motion_graphic and text_overlay content carries the FULL text the script promises — write every item in full, never truncate, never summarize a list down, and never use ellipsis ("…"/"...") or "etc". If the script names N things, the layout carries ALL N: a comparison includes EVERY compared row on BOTH sides, a list_reveal includes EVERY bullet, a timeline EVERY beat. When content genuinely exceeds one card's 6-item ceiling, SPLIT it across consecutive motion_graphic scenes covering adjacent narration — never drop items. ACCURACY RULE (hard): every product name, feature name, number and comparison value is copied EXACTLY from the script — never rounded, renamed, abbreviated or invented. DESIGN RULES: motion graphics must look bold and premium, never generic — punchy high-contrast titles (short strong wording in "title", detail in "subtitle"), a deliberate accent per scene (vary hues across the film), and the layout kind that best DRAMATIZES the content (big_stat for one number, bar_chart for magnitudes, comparison for A-vs-B, timeline for chronology, flowchart for how-it-works steps, list_reveal for feature lists, quote-style text_reveal for testimonials). BACKDROP IMAGES: for a motion_graphic scene that benefits from atmosphere (stats, quotes, headlines, documentary beats), ALSO include ONE image prompt in its image_prompts describing a vivid contextual backdrop picture (subject, setting, framing, light, mood — no words, no lettering, no watermark); the engine generates it and dims it behind the graphic so the exact text always stays on top. ASSET CONTINUITY: when a beat revisits a subject an earlier scene already visualized (the same character, product or icon), repeat that subject's core wording in the new scene's image prompt so the existing asset is reused and the film stays visually consistent. COMPOSITED AI VIDEO: for an ai_video scene whose beat is analytical (data, product, UI, a detail worth annotating) you may return overlay {"text":short caption,"mediaLayout":"inset_left"|"inset_right"|"circle"|"card"} to composite the clip as an element beside its caption instead of a full-bleed takeover. SHOT CONTINUITY (ai_video): when consecutive ai_video scenes cover one continuing subject, location or sequence, carry the SAME subject appearance, environment, lighting, color grade and camera language descriptors across their prompts — word them as one filmed sequence so the shots cut together; when the film moves to a new subject, establish it cleanly instead of echoing the previous shot. COMPOSITION DIRECTION (hard): you are the editor — the avatar video is the BASE LAYER of the whole film and every supporting visual is COMPOSITED AGAINST the presenter, never parked as an isolated card. For EVERY middle scene also return "composition": {"mode":"overlay"|"central"|"fullscreen","position"?:"lower_third"|"left"|"right"|"top_left"|"top_right"|"bottom_left"|"bottom_right","scale"?:number 0.2-0.95 (fraction of frame width),"keepAvatarVisible":boolean,"purpose":one sentence answering WHY this visual is on screen}. Decide the visual hierarchy per beat — never give every visual the same treatment, never make everything an overlay, never make everything full-screen: a small statistic, lower third, label, keyword, small icon/callout or supporting reference image → "overlay" (the presenter stays fully visible; the graphic rides a face-safe zone on a transparent background); a 3-step process, flow diagram, detailed chart, comparison, timeline or map → "central" (the diagram becomes the main focus at generous scale while the presenter stays partially visible — never force a real diagram into a tiny corner just because the presenter exists); cinematic AI B-roll, a complex demonstration, a historical scene, or a large chart/map/product UI that needs the viewer's full attention → "fullscreen" cutaway (avatar → visual → avatar). PURPOSE RULE: if you cannot justify a visual's purpose in one sentence, do not create that scene — the presenter alone is better than clutter. AVATAR SAFE AREAS: never place an overlay over the presenter's face, mouth or key gestures — the face sits in the upper-center band, so prefer the lower third and side zones; when the presenter would naturally look or gesture toward one side, place the graphic on that side (position "left" or "right") so the composition feels directed rather than random. 9:16 films are mobile-first: use generous scale (overlay ≥0.45, central ≥0.8) so labels stay readable, and ai_video always plays as a fullscreen cutaway in 9:16. TEXT SUPPORTS THE VISUAL, IT IS NEVER THE VISUAL: when narration describes structure, quantity, chronology, geography or comparison, choose the real diagram kind with real items — narration "the process has three stages" must become a flowchart with the three actual stages animating in sequence, never a text card saying "THREE STAGES"; "versus / before-after / old-new / faster-slower" narration becomes a comparison with BOTH sides filled; counted growth ("from three employees to more than one hundred") becomes big_stat or bar_chart with the exact numbers; chronology becomes a timeline; geography becomes a node_graph map with real locations as nodes. Reserve text_reveal for a genuinely pure headline or quote. CHANGE REQUESTS: when the input carries changeRequest, it is the user's plain-language edit to an EXISTING plan — apply exactly what it asks (plus whatever it implies for adjacent scenes), keep every other scene's timing, kind and content as close to the current plan as the request allows, and never reinterpret the whole film. Set audio_strategy to "continuous_heygen_voiceover" — the talking-head narration keeps playing under every middle section. Return strict JSON only: {"scenes":[{"scene_index":number,"script_start_sec":number,"script_end_sec":number,"scene_type":string,"visual_kind":"ai_video"|"image"|"motion_graphic"|"text_overlay","description":string,"narration_segment":string,"image_prompts":string[],"motion_notes":string,"video_prompt"?:string,"layout"?:object,"overlay"?:object,"composition"?:{"mode":"overlay"|"central"|"fullscreen","position"?:string,"scale"?:number,"keepAvatarVisible":boolean,"purpose":string},"suggested_user_uploads"?:string[]}],"audio_strategy":"continuous_heygen_voiceover","total_scene_sec":number,"total_avatar_sec":number}.`;
+export const SCENE_PLAN_TASK = `CURRENT TASK: the full video blueprint. Input includes the full script, word-level timestamps, visual style, requested middle-visual share, user uploads, an editingPreset with explicit planningBias, and optionally referenceStyleAnalysis. EDITING PRESET: treat planningBias as a real editing strategy — it controls graphic density, B-roll frequency, text-overlay usage and pacing, not merely colors. Follow it unless it conflicts with factual accuracy, exact-text requirements, presenter safety or the requested middle-visual share. REFERENCE VIDEO LANGUAGE: when referenceStyleAnalysis exists, transfer only its abstract cut frequency, graphic density, caption behavior, pacing, framing and transition rules. Never copy or mention its people, footage, words, music, logos, products or other assets. The film alternates between the HeyGen talking head (the avatar master, always on screen by default) and MIDDLE VISUAL SECTIONS that replace the picture while the presenter's narration continues underneath, documentary style. Structure rules: the first 5 seconds stay on the talking head; the final segment before the end returns to the talking head (the CTA is delivered on camera); never place two middle sections back-to-back without a talking-head return, unless one continuous sentence spans that gap; default to alternating talking head → middle visual → talking head for any topic that benefits from visual explanation. Keep total middle-section duration near low=30%, medium=50%, or high=65%. For every middle scene include narration_segment: the exact script text the scene covers. CHOOSE visual_kind per scene from four types: "ai_video" ONLY for beats needing real filmed motion (a place, an action, physical footage; NEVER for text, names, numbers or lists — AI video hallucinates lettering); "motion_graphic" whenever structure or accuracy serves the beat — processes, relationships, timelines, comparisons, lists, charts, exact numbers, maps, node networks (this is the documentary explainer layer; prefer it when in doubt); "text_overlay" for a pure emphasized headline, key phrase or quote; "image" for one strong still (a portrait, artifact, place establishing shot). FOR motion_graphic SCENES return layout — the deterministic spec the GSAP motion engine renders EXACTLY (every string and number is shown verbatim on screen, so copy them precisely from the script; never invent figures): {"kind":one of branching_diagram|flowchart|timeline|comparison|list_reveal|big_stat|bar_chart|node_graph|annotated_image|text_reveal,"title"?:string<=90 chars,"subtitle"?:string,"root"?:central node label (branching_diagram/node_graph),"items":[{"label":string<=40 chars,"sublabel"?:string<=60,"value"?:number (bar_chart)}] max 6,"leftTitle"?+"rightTitle"?+"leftItems"?+"rightItems"? (comparison),"stat"?:{"value":number,"prefix"?,"suffix"?,"label"?} (big_stat)}. FOR text_overlay SCENES return overlay {"text":exact headline<=90 chars,"subtext"?:one supporting line,"overAvatar":true,"position"?:"lower_third"|"bottom_left"|"bottom_right"|"top_left"|"top_right"} — exact strings only. TEXT RIDES ON THE PRESENTER, NOT BETWEEN CUTS: a text_overlay composites ON TOP of the talking head — the avatar keeps playing full-frame while the label fades in and out in a safe zone (lower third by default, never over the face), synced to the narration segment's timestamps. Always set "overAvatar":true, and use text_overlay callouts liberally to reinforce key phrases, names and numbers WHILE the presenter speaks instead of cutting away to a full-screen card. FOR ai_video SCENES include video_prompt, sent VERBATIM to the video model. Write it as a DETAILED PRODUCTION SHOT BRIEF of 60-120 words, never a generic one-liner ("Create cinematic footage of a factory" is a failure). The brief states what the shot must COMMUNICATE for its narration beat, not merely what object exists, and covers: SUBJECT (who/what, specific appearance), CONTEXT/ENVIRONMENT (place, era, weather, set dressing), ACTION (what unfolds during the clip), CAMERA MOVEMENT (slow dolly-in, lateral track, handheld drift, static tripod, aerial drift…), FRAMING & COMPOSITION (wide establishing / medium / close-up; foreground and background elements; depth of field), LENS/LOOK (e.g. 35mm documentary, shallow focus, natural film grain), LIGHTING & COLOR (golden hour, practical lamps, cool overcast; the palette), MOTION PACING (contemplative vs energetic) and VISUAL STYLE matching the film's documentary tone. Close every prompt with negative constraints: no on-screen text, no lettering, no logos, no watermark, no distorted faces. FOR image SCENES each image prompt describes one cinematic full-frame picture and is sent VERBATIM to the image model: subject, setting, framing, light and mood, no words or lettering. When the input carries imageBriefs from your scriptwriting pass, treat them as the intended visual for their beat. Reuse a fitting upload by naming it in suggested_user_uploads. VISUAL VARIETY RULES: vary motion_graphic layout kinds across the film — never give two consecutive motion_graphic scenes the same kind when another kind fits the content; match each scene's optional layout "accent" (a hex color) to its subject (data/science → cyan #06B6D4, money/growth → emerald #10B981, history → amber #F59E0B, risk/warning → rose #F43F5E, product/tech → violet #8B5CF6) instead of defaulting everything to one blue. COMPARISON RULE: a comparison layout MUST fill BOTH leftItems AND rightItems (1-5 entries each) — never return a comparison with an empty side. COMPLETENESS RULE (hard): motion_graphic and text_overlay content carries the FULL text the script promises — write every item in full, never truncate, never summarize a list down, and never use ellipsis ("…"/"...") or "etc". If the script names N things, the layout carries ALL N: a comparison includes EVERY compared row on BOTH sides, a list_reveal includes EVERY bullet, a timeline EVERY beat. When content genuinely exceeds one card's 6-item ceiling, SPLIT it across consecutive motion_graphic scenes covering adjacent narration — never drop items. ACCURACY RULE (hard): every product name, feature name, number and comparison value is copied EXACTLY from the script — never rounded, renamed, abbreviated or invented. DESIGN RULES: motion graphics must look bold and premium, never generic — punchy high-contrast titles (short strong wording in "title", detail in "subtitle"), a deliberate accent per scene (vary hues across the film), and the layout kind that best DRAMATIZES the content (big_stat for one number, bar_chart for magnitudes, comparison for A-vs-B, timeline for chronology, flowchart for how-it-works steps, list_reveal for feature lists, quote-style text_reveal for testimonials). BACKDROP IMAGES: for a motion_graphic scene that benefits from atmosphere (stats, quotes, headlines, documentary beats), ALSO include ONE image prompt in its image_prompts describing a vivid contextual backdrop picture (subject, setting, framing, light, mood — no words, no lettering, no watermark); the engine generates it and dims it behind the graphic so the exact text always stays on top. ASSET CONTINUITY: when a beat revisits a subject an earlier scene already visualized (the same character, product or icon), repeat that subject's core wording in the new scene's image prompt so the existing asset is reused and the film stays visually consistent. COMPOSITED AI VIDEO: for an ai_video scene whose beat is analytical (data, product, UI, a detail worth annotating) you may return overlay {"text":short caption,"mediaLayout":"inset_left"|"inset_right"|"circle"|"card"} to composite the clip as an element beside its caption instead of a full-bleed takeover. SHOT CONTINUITY (ai_video): when consecutive ai_video scenes cover one continuing subject, location or sequence, carry the SAME subject appearance, environment, lighting, color grade and camera language descriptors across their prompts — word them as one filmed sequence so the shots cut together; when the film moves to a new subject, establish it cleanly instead of echoing the previous shot. COMPOSITION DIRECTION (hard): you are the editor — the avatar video is the BASE LAYER of the whole film and every supporting visual is COMPOSITED AGAINST the presenter, never parked as an isolated card. For EVERY middle scene also return "composition": {"mode":"overlay"|"central"|"fullscreen","position"?:"lower_third"|"left"|"right"|"top_left"|"top_right"|"bottom_left"|"bottom_right","scale"?:number 0.2-0.95 (fraction of frame width),"keepAvatarVisible":boolean,"purpose":one sentence answering WHY this visual is on screen}. Decide the visual hierarchy per beat — never give every visual the same treatment, never make everything an overlay, never make everything full-screen: a small statistic, lower third, label, keyword, small icon/callout or supporting reference image → "overlay" (the presenter stays fully visible; the graphic rides a face-safe zone on a transparent background); a 3-step process, flow diagram, detailed chart, comparison, timeline or map → "central" (the diagram becomes the main focus at generous scale while the presenter stays partially visible — never force a real diagram into a tiny corner just because the presenter exists); cinematic AI B-roll, a complex demonstration, a historical scene, or a large chart/map/product UI that needs the viewer's full attention → "fullscreen" cutaway (avatar → visual → avatar). PURPOSE RULE: if you cannot justify a visual's purpose in one sentence, do not create that scene — the presenter alone is better than clutter. AVATAR SAFE AREAS: never place an overlay over the presenter's face, mouth or key gestures — the face sits in the upper-center band, so prefer the lower third and side zones; when the presenter would naturally look or gesture toward one side, place the graphic on that side (position "left" or "right") so the composition feels directed rather than random. 9:16 films are mobile-first: use generous scale (overlay ≥0.45, central ≥0.8) so labels stay readable, and ai_video always plays as a fullscreen cutaway in 9:16. TEXT SUPPORTS THE VISUAL, IT IS NEVER THE VISUAL: when narration describes structure, quantity, chronology, geography or comparison, choose the real diagram kind with real items — narration "the process has three stages" must become a flowchart with the three actual stages animating in sequence, never a text card saying "THREE STAGES"; "versus / before-after / old-new / faster-slower" narration becomes a comparison with BOTH sides filled; counted growth ("from three employees to more than one hundred") becomes big_stat or bar_chart with the exact numbers; chronology becomes a timeline; geography becomes a node_graph map with real locations as nodes. Reserve text_reveal for a genuinely pure headline or quote. EDITORIAL DIRECTOR LAYER (hard): you are ALSO the film's editorial director. For EVERY middle scene additionally return "treatment", one of: "FULLSCREEN_BROLL" (ai_video cutaway — cinematic environments, historical recreation, scientific phenomena, physical processes, locations, emotional establishing shots; AI video must be genuinely USEFUL for the beat, never a default), "PIP_BROLL" (ai_video full frame with the presenter in a small picture-in-picture card — use when the presenter's continued presence matters during footage), "FULLSCREEN_IMAGE" (one strong generated still), "FULLSCREEN_ARCHIVAL" (an archival-style still: write its image prompt in archival language — era-appropriate photograph, documentary film grain, period-correct detail), "FULLSCREEN_MAP" (geography: motion_graphic with layout kind node_graph whose nodes are the REAL locations named in the script and whose connections are the routes/relationships discussed), "FULLSCREEN_DOCUMENT" (books, papers, reports, quotes, source material: motion_graphic with layout kind annotated_image plus an image prompt describing the document-style visual, and overlay callouts — arrow/circle/highlight/citation — marking the exact passage the narration cites), "FULLSCREEN_CHART" (numbers: bar_chart / timeline / comparison / big_stat with the script's exact figures), "FULLSCREEN_GRAPHIC" (structure: branching_diagram / flowchart / list_reveal / node_graph), "KINETIC_TYPOGRAPHY" (a hook, key statement, statistic or conclusion as large animated typography: layout kind text_reveal). The treatment must agree with visual_kind and the layout kind. PRESENTER STATE (hard): every middle scene also returns "presenter": {"video":"full"|"hidden"|"pip","audio":"continue","pip"?:{"position":"bottom_left"|"bottom_right"|"top_left"|"top_right","scale":number 0.18-0.30}} — "full" when the composition keeps the avatar visible (overlay/central), "hidden" for fullscreen cutaways (the narration ALWAYS continues underneath), "pip" only with treatment PIP_BROLL. Never leave the presenter's state implicit. EDITABLE OVERLAYS: a scene may return "overlays" — up to 3 first-class timeline elements [{"type":"text"|"label"|"lower_third"|"stat"|"citation"|"arrow"|"circle"|"highlight","text"?:string,"subtext"?:string,"source"?:string (citation: the real source being cited),"position":"lower_third"|"top_left"|"top_right"|"bottom_left"|"bottom_right"|"center"|"left"|"right","start_offset_sec":number (seconds after the scene starts),"duration_sec":number,"scale"?:number 0.5-2}] — use citation elements for factual claims (name the actual source), arrow/circle/highlight to point at the precise region of a document, map or chart the narration references, lower_third to name people and places, stat for a key number. Copy every overlay string EXACTLY from the script; overlays are composed above the visual at assembly and stay editable afterwards. IMAGE MOTION (hard): every image/archival scene also returns "motion": {"scale_from":number 1.0-1.25,"scale_to":number 1.0-1.3,"pan_x_pct":number -6..6,"pan_y_pct":number -6..6,"easing":"ease-in-out"} — a deliberate Ken Burns move that serves the shot (push toward a face, drift across a landscape, pull back from a detail); a still must never sit as a dead slide. MUSIC TREATMENT: return top-level "music": {"required":boolean,"mood":string,"intensity":"low"|"medium"|"high","prompt":string (one-sentence instrumental brief for the music generator, e.g. mood, instrumentation, tempo),"volume":number 0.15-0.35} — decide whether this film needs a bed at all (silence is a valid decision), its mood and level; narration ducking is automatic and the bed must never overpower the voice. Also return top-level "captions": boolean — whether burned-in captions serve this film. CHANGE REQUESTS: when the input carries changeRequest, it is the user's plain-language edit to an EXISTING plan (the input's current_plan lists that plan's scenes with their timing, kinds and content summaries) — apply exactly what it asks (plus whatever it implies for adjacent scenes), keep every other scene's timing, kind and content as close to the current plan as the request allows, and never reinterpret the whole film. Set audio_strategy to "continuous_heygen_voiceover" — the talking-head narration keeps playing under every middle section. Return strict JSON only: {"scenes":[{"scene_index":number,"script_start_sec":number,"script_end_sec":number,"scene_type":string,"visual_kind":"ai_video"|"image"|"motion_graphic"|"text_overlay","treatment":string,"description":string,"narration_segment":string,"image_prompts":string[],"motion_notes":string,"video_prompt"?:string,"layout"?:object,"overlay"?:object,"composition"?:{"mode":"overlay"|"central"|"fullscreen","position"?:string,"scale"?:number,"keepAvatarVisible":boolean,"purpose":string},"presenter":{"video":"full"|"hidden"|"pip","audio":"continue","pip"?:{"position":string,"scale":number}},"overlays"?:object[],"motion"?:object,"suggested_user_uploads"?:string[]}],"audio_strategy":"continuous_heygen_voiceover","music":{"required":boolean,"mood":string,"intensity":string,"prompt":string,"volume":number},"captions":boolean,"total_scene_sec":number,"total_avatar_sec":number}.`;
 
 const PLAN_KINDS = ['ai_video', 'image', 'motion_graphic', 'text_overlay', 'text_graphics'];
 
-// One scene-planning attempt gets 90 seconds — enough for the orchestrator to
-// write a full manifest, short enough that a hung or dropped request surfaces
-// quickly instead of leaving the "timing supporting scenes" screen up forever.
+// One scene-planning LLM call gets 90 seconds. The bound is per CALL, and the
+// planner is built so no call ever needs more: the old design asked ONE
+// request for the ENTIRE film's manifest, and on longer scripts the model
+// simply cannot write that much JSON inside 90 seconds — every attempt (and
+// its automatic retry) hit the timeout and Step 4 failed with "The agent did
+// not answer within 90 seconds". Planning now runs in narration WINDOWS
+// (planWindows below): each call covers roughly PLAN_WINDOW_SEC seconds of
+// film and writes only a handful of scenes, so it settles far inside the
+// bound — and every finished window is persisted immediately through
+// PlanHooks.persistPartial, so a later failure, a rate limit or a closed tab
+// never loses completed planning work.
 const PLAN_TIMEOUT_MS = 90_000;
+/** Narration seconds one planning window/call covers. */
+const PLAN_WINDOW_SEC = 70;
+/** A film at or under this length still plans in a single call. */
+const PLAN_SINGLE_CALL_MAX_SEC = 100;
+// Output budget for one windowed call: a window plans 2-5 scenes at roughly
+// 600-900 tokens each, so this is generous — while still bounding a runaway
+// reply that would otherwise ride out the whole timeout before failing on
+// truncated JSON.
+const PLAN_WINDOW_MAX_TOKENS = 5000;
 
-export async function planScenes(input: { script: string; wordTimestamps: WordTimestamp[]; style: string; sceneShare: 'low' | 'medium' | 'high'; uploads: string[]; durationSec: number; imageBriefs?: SceneImageBrief[]; changeRequest?: string; editingPreset?: string; referenceStyleAnalysis?: Record<string, unknown> | null }, model = DEFAULT_LLM_MODEL) {
-  const remembered = typeof window !== 'undefined' ? ((window as any).__sceneForgePlanningContext || {}) : {};
-  const preset = getEditingPreset(input.editingPreset || remembered.editingPreset);
-  const planningInput = { ...input, editingPreset: { id: preset.id, name: preset.name, planningBias: preset.planningBias }, referenceStyleAnalysis: input.referenceStyleAnalysis || remembered.referenceStyleAnalysis || null };
-  // This call is the step behind the "timing supporting scenes against the
-  // avatar" screen. Each attempt is bounded, and one automatic retry covers a
-  // transient failure (timeout, rate limit, dropped connection, truncated
-  // JSON) — so planScenes always settles: it resolves with a plan or throws an
-  // error the UI can show, never hangs.
-  let result: any;
-  try {
-    result = await claudeJson<any>(`${ORCHESTRATOR_PERSONA} ${SCENE_PLAN_TASK}`, planningInput, model, 8192, PLAN_TIMEOUT_MS);
-  } catch (firstError) {
-    if (!isTransientAiError(firstError)) throw firstError;
-    result = await claudeJson<any>(`${ORCHESTRATOR_PERSONA} ${SCENE_PLAN_TASK}`, planningInput, model, 8192, PLAN_TIMEOUT_MS);
-  }
-  const duration = Math.max(6, input.durationSec);
-  const sorted = (Array.isArray(result.scenes) ? result.scenes : [])
-    .map((s: any, i: number) => {
+// Appended to SCENE_PLAN_TASK on windowed calls only.
+const PLAN_WINDOW_TASK = `WINDOW MODE (hard): the input carries plan_window {index,count,start_sec,end_sec}. This call plans ONLY the middle scenes that fall inside [start_sec, end_sec] — the rest of the film is planned by the other window calls. planned_so_far lists the scenes earlier windows already planned (timing, kind, treatment, description): NEVER re-emit or overlap them, continue their alternation rhythm, and vary layout kinds and accent colors against them. The global structure rules apply to the WHOLE film, so honor the ones that touch this window: window 1 keeps the first 5 seconds on the talking head; the LAST window leaves the final narration segment on the talking head (the CTA is delivered on camera); every window keeps talking-head returns between middle sections and respects the requested middle-visual share for its span. music, captions and audio_strategy are decided by window 1 for the whole film (later windows may repeat values; they are ignored). Return the SAME strict JSON shape carrying ONLY this window's scenes.`;
+
+export interface PlanProgress { window: number; windowCount: number; scenesPlanned: number }
+export interface PlanHooks {
+  /** Fires before each window's LLM call — drive the progress UI from it. */
+  onWindow?: (progress: PlanProgress) => void;
+  /** Called after each finished window with EVERY scene planned so far
+   * (normalized, cumulative, in arrival order). Persist them so a later
+   * window's failure or a closed tab keeps the finished part of the plan.
+   * A persistence hiccup never fails the planning itself. */
+  persistPartial?: (scenes: any[]) => Promise<void>;
+}
+
+/** Split the film into planning windows of roughly PLAN_WINDOW_SEC seconds. */
+function planWindows(durationSec: number): { start: number; end: number }[] {
+  const usable = Math.max(6, durationSec);
+  const count = usable <= PLAN_SINGLE_CALL_MAX_SEC ? 1 : Math.ceil(usable / PLAN_WINDOW_SEC);
+  const size = usable / count;
+  return Array.from({ length: count }, (_, index) => ({
+    start: Math.round(index * size * 10) / 10,
+    end: Math.round(Math.min(usable, (index + 1) * size) * 10) / 10,
+  }));
+}
+
+/** The per-scene normalization every planned scene goes through — one place,
+ * shared by every window, so what lands in the database is exactly what the
+ * motion engine will draw: deterministic strings, no rework downstream. */
+function normalizePlannedScene(s: any, i: number, duration: number) {
       const layout = s.layout && typeof s.layout === 'object' ? s.layout : (s.spec && typeof s.spec === 'object' ? s.spec : null);
-      // Kind fallbacks read the scene's own evidence: a layout means a motion
+      // DIRECTOR TREATMENT: the editorial director names one of the ten
+      // documentary treatments per scene; it maps deterministically onto the
+      // existing production schema (visual_kind + composition + presenter) —
+      // no new renderer, no schema replacement.
+      const treatment = normalizeTreatment(s.treatment);
+      const defaults = treatment && treatment !== 'PRESENTER' ? treatmentDefaults(treatment) : null;
+      // Kind fallbacks read the scene's own evidence: the declared visual kind
+      // first, then the treatment mapping, then a layout means a motion
       // graphic, a video prompt means AI video, otherwise a text beat.
-      const kind = PLAN_KINDS.includes(s.visual_kind) ? s.visual_kind : (layout ? 'motion_graphic' : (typeof s.video_prompt === 'string' && s.video_prompt ? 'ai_video' : 'text_overlay'));
+      const kind = PLAN_KINDS.includes(s.visual_kind) ? s.visual_kind : (defaults ? defaults.visual_kind : (layout ? 'motion_graphic' : (typeof s.video_prompt === 'string' && s.video_prompt ? 'ai_video' : 'text_overlay')));
       // The composition decision (overlay / central / fullscreen + position,
       // scale, purpose) rides on the overlay_config so it persists with the
       // scene and stays editable; assembly falls back to kind-aware defaults
       // when a plan predates this field.
-      const composition = normalizeComposition(s.composition || (s.overlay && typeof s.overlay === 'object' ? (s.overlay as any).composition : null));
+      const composition = normalizeComposition(s.composition || (s.overlay && typeof s.overlay === 'object' ? (s.overlay as any).composition : null))
+        || (defaults ? { mode: defaults.compositionMode, keepAvatarVisible: defaults.compositionMode !== 'fullscreen' } : null);
+      // Explicit presenter state (Director layer): the model's own answer
+      // first, then the treatment default; assembly derives from composition
+      // when both are absent, so the state is never accidental. Editable
+      // overlay elements and Ken Burns motion normalize here so what persists
+      // is exactly what the composition renders.
+      const presenterState = normalizePresenterState(s.presenter, defaults ? defaults.presenter : null);
+      const overlayElements = normalizeOverlays(s.overlays, String(i + 1));
+      const motionTreatment = normalizeMotionTreatment(s.motion || s.motion_treatment);
       const baseOverlay = s.overlay && typeof s.overlay === 'object'
         ? (kind === 'text_overlay' ? { ...s.overlay, overAvatar: s.overlay.overAvatar !== false } : s.overlay)
         : (kind === 'text_overlay'
@@ -132,18 +176,95 @@ export async function planScenes(input: { script: string; wordTimestamps: WordTi
         // explicitly opted out — full-screen text cards are no longer the
         // default for pure text beats.
         overlay_config: composition ? { ...(baseOverlay || {}), composition } : baseOverlay,
+        presenter_state: presenterState,
+        overlays: overlayElements.length ? overlayElements : null,
+        motion_treatment: motionTreatment,
         // Normalized once here so what lands in the database is exactly what
         // the motion engine will draw — deterministic strings, no rework.
         spec: kind === 'motion_graphic' || (kind === 'text_overlay' && layout) ? normalizeMotionSpec(layout || {}, String(s.description || '')) : null,
         description: String(s.description || s.narration_segment || 'Middle visual'),
       };
-    })
+}
+
+export async function planScenes(input: { script: string; wordTimestamps: WordTimestamp[]; style: string; sceneShare: 'low' | 'medium' | 'high'; uploads: string[]; durationSec: number; imageBriefs?: SceneImageBrief[]; changeRequest?: string; currentScenes?: Array<Record<string, unknown>>; editingPreset?: string; referenceStyleAnalysis?: Record<string, unknown> | null }, model = DEFAULT_LLM_MODEL, hooks: PlanHooks = {}) {
+  const remembered = typeof window !== 'undefined' ? ((window as any).__sceneForgePlanningContext || {}) : {};
+  const preset = getEditingPreset(input.editingPreset || remembered.editingPreset);
+  const duration = Math.max(6, input.durationSec);
+  const windows = planWindows(duration);
+  // Change requests carry the CURRENT plan (compact) so "keep everything
+  // else" is grounded in what actually exists, not in the model's memory.
+  const currentPlan = Array.isArray(input.currentScenes) && input.currentScenes.length
+    ? input.currentScenes.slice(0, 80).map((s: any) => ({ scene_index: s.scene_index, script_start_sec: s.script_start_sec, script_end_sec: s.script_end_sec, visual_kind: s.visual_kind, description: String(s.description || '').slice(0, 160) }))
+    : null;
+  const all: any[] = [];
+  let music: MusicTreatment = { required: false };
+  let captions = false;
+  let audioStrategy = 'continuous_heygen_voiceover';
+  for (let w = 0; w < windows.length; w += 1) {
+    const win = windows[w];
+    const windowed = windows.length > 1;
+    hooks.onWindow?.({ window: w + 1, windowCount: windows.length, scenesPlanned: all.length });
+    const payload: Record<string, unknown> = {
+      script: input.script,
+      style: input.style,
+      sceneShare: input.sceneShare,
+      uploads: input.uploads,
+      durationSec: input.durationSec,
+      imageBriefs: input.imageBriefs || [],
+      editingPreset: { id: preset.id, name: preset.name, planningBias: preset.planningBias },
+      referenceStyleAnalysis: input.referenceStyleAnalysis || remembered.referenceStyleAnalysis || null,
+      // Word timings ship per window — the full array costs thousands of
+      // input tokens on a long film and the model only times THIS window's
+      // scenes against them.
+      wordTimestamps: windowed ? (input.wordTimestamps || []).filter((word) => word.end >= win.start - 1 && word.start <= win.end + 1) : (input.wordTimestamps || []),
+      ...(input.changeRequest ? { changeRequest: input.changeRequest } : {}),
+      ...(currentPlan ? { current_plan: currentPlan } : {}),
+      ...(windowed ? {
+        plan_window: { index: w + 1, count: windows.length, start_sec: win.start, end_sec: win.end },
+        planned_so_far: all.map((s) => ({ script_start_sec: s.script_start_sec, script_end_sec: s.script_end_sec, visual_kind: s.visual_kind, treatment: s.treatment || null, description: String(s.description || '').slice(0, 120) })),
+      } : {}),
+    };
+    const system = windowed ? `${ORCHESTRATOR_PERSONA} ${SCENE_PLAN_TASK} ${PLAN_WINDOW_TASK}` : `${ORCHESTRATOR_PERSONA} ${SCENE_PLAN_TASK}`;
+    const maxTokens = windowed ? PLAN_WINDOW_MAX_TOKENS : 8192;
+    // Each attempt is bounded, and one automatic retry covers a transient
+    // failure (timeout, rate limit, dropped connection, truncated JSON) — so
+    // every window settles: it resolves with scenes or throws an error the
+    // UI can show, never hangs.
+    let result: any;
+    try {
+      result = await claudeJson<any>(system, payload, model, maxTokens, PLAN_TIMEOUT_MS);
+    } catch (firstError) {
+      if (!isTransientAiError(firstError)) throw firstError;
+      // A rate-limited burst names its own retry delay — honor it (capped)
+      // instead of re-sending instantly into the same limit window.
+      const waitSec = Math.min(20, Math.max(2, Number((firstError as any)?.retryAfterSeconds) || 2));
+      await sleep(waitSec * 1000);
+      result = await claudeJson<any>(system, payload, model, maxTokens, PLAN_TIMEOUT_MS);
+    }
+    (Array.isArray(result?.scenes) ? result.scenes : []).forEach((raw: any) => { all.push(normalizePlannedScene(raw, all.length, duration)); });
+    if (w === 0) {
+      // Plan-level Director decisions: the music treatment (mood/intensity/
+      // prompt for the EXISTING ElevenLabs bed + ducking mix pipeline —
+      // silence is a valid decision) and whether burned-in captions serve
+      // this film. Window 1 decides them for the whole film.
+      music = normalizeMusicTreatment(result?.music);
+      captions = result?.captions === true;
+      audioStrategy = String(result?.audio_strategy || audioStrategy);
+    }
+    // DURABILITY: everything planned so far is handed over for persistence
+    // after every window, so the finished part of the plan survives a later
+    // window's failure or a closed tab. A persist hiccup is non-fatal — the
+    // final save persists everything again.
+    if (hooks.persistPartial && all.length) {
+      try { await hooks.persistPartial([...all]); } catch { /* covered by the final save */ }
+    }
+  }
+  const sorted = all
     .filter((s: any) => s.script_end_sec > s.script_start_sec)
     .sort((a: any, b: any) => a.script_start_sec - b.script_start_sec);
   const separated = sorted.filter((s: any, i: number) => i === 0 || s.script_start_sec - sorted[i - 1].script_end_sec >= 0.4);
   const total = separated.reduce((n: number, s: any) => n + s.script_end_sec - s.script_start_sec, 0);
-  const audioStrategy = String(result.audio_strategy || 'continuous_heygen_voiceover');
-  return { scenes: separated, audio_strategy: audioStrategy, total_scene_sec: total, total_avatar_sec: Math.max(0, duration - total) };
+  return { scenes: separated, audio_strategy: audioStrategy, total_scene_sec: total, total_avatar_sec: Math.max(0, duration - total), music, captions };
 }
 
 // ---------------------------------------------------------------------------

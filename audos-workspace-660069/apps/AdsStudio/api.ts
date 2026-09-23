@@ -177,6 +177,9 @@ export interface AdsSession {
   productVideos: UploadedAsset[];
   logo: UploadedAsset | null;
   aspect: '9:16' | '16:9' | '1:1';
+  /** Clip engine — exact platform model id (Group A) or a Runway base model
+   * id ('gen4.5' / 'gen4_turbo'). Default = Omni Flash, the proven engine. */
+  videoModel: string;
   // Research
   research: ProductResearch | null;
   researchStatus: 'idle' | 'loading' | 'done' | 'error';
@@ -211,6 +214,7 @@ export function emptySession(): AdsSession {
     productUrl: '', productDescription: '', offerCta: '',
     avatar: null, screenshots: [], productImages: [], productVideos: [], logo: null,
     aspect: '9:16',
+    videoModel: 'gemini-omni-flash-preview',
     research: null, researchStatus: 'idle', researchError: null,
     angles: [], selectedAngleIds: [], activeAngleId: null, opusPick: null,
     script: [],

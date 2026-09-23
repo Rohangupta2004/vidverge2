@@ -16,11 +16,13 @@ import { gsap } from 'https://esm.sh/gsap@3.12.5';
 import {
   el, textBlock, kineticWords, wrapLines, nodeBox, nodeImageChip, drawnLine, drawnPath,
   springIn, riseIn, slideFadeIn, maskReveal, drawIn, countUp, ambientFloat, breathe, cameraMove, exitOut, parallaxDrift,
-  FONT, INK, INK_SOFT, INK_MUTED, BG, PANEL, PANEL_EDGE, type MotionTimeline,
+  FONT, FONT_DISPLAY, INK, INK_SOFT, INK_MUTED, BG, PANEL, PANEL_EDGE, PANEL_GLASS, GLASS_EDGE, ON_ACCENT, NEUTRAL, EDGE_SOFT, ROUTE, THEME,
+  tornClipPath, paperShadowFilter, halftonePattern, desatFilter, type MotionTimeline,
 } from './motionKit';
 import { resolvePlacements, toPixels } from './spatial';
 import type { DirectedLayer, EntranceSpec, SceneDirection } from './visualTimeline';
 import { contrastAccent, type MotionSpec } from './motionSpec';
+import { centroids as usCentroids, labelOffsets as usLabelOffsets, matchUSStateName, paths as usPaths, regionViewBox } from './usMapData';
 
 export interface PixRect { x: number; y: number; w: number; h: number }
 const centerOf = (rect: PixRect) => ({ x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 });
@@ -112,7 +114,7 @@ function applyEntrance(ctx: DirectedRenderContext, group: SVGElement, bounds: Pi
 type PrimitiveBuild = { group: SVGGElement; bounds: PixRect };
 
 function glassPanel(parent: SVGElement, rect: PixRect, u: number, stroke = PANEL_EDGE): SVGRectElement {
-  return el<SVGRectElement>('rect', { x: rect.x, y: rect.y, width: rect.w, height: rect.h, rx: Math.min(rect.w, rect.h) * 0.08, fill: 'rgba(10,15,30,0.72)', stroke, 'stroke-width': 2 }, parent);
+  return el<SVGRectElement>('rect', { x: rect.x, y: rect.y, width: rect.w, height: rect.h, rx: THEME.paper ? 4 * u : Math.min(rect.w, rect.h) * 0.08, fill: PANEL_GLASS, stroke, 'stroke-width': 2 }, parent);
 }
 
 function fitFont(text: string, rect: PixRect, opts: { maxLines?: number; weight?: number } = {}): { size: number; maxChars: number; lines: number } {
@@ -145,8 +147,22 @@ function buildKineticHeadline(ctx: DirectedRenderContext, layer: DirectedLayer, 
   const content = contentFor(layer, ctx.spec);
   const { x } = centerOf(rect);
   const fit = fitFont(content.text, { ...rect, h: rect.h * 0.7 }, { maxLines: 3 });
-  const bar = el('rect', { x: x - 40 * ctx.u, y: rect.y + fit.size * 0.1, width: 80 * ctx.u, height: 7 * ctx.u, rx: 3.5 * ctx.u, fill: ctx.accent }, group);
-  springIn(ctx.tl, bar, at, { dur: 0.4 }); // accent bar leads — anchors the eye before the words land
+  if (THEME.paper) {
+    // THE HIGHLIGHTER (the signature paper-cut move): a solid accent bar
+    // sweeps in BEHIND the last line, landing ~120ms after the words settle —
+    // punctuation, never simultaneous noise. One highlighter per scene.
+    const lines = wrapLines(content.text, fit.maxChars, 3);
+    const lastLine = lines[lines.length - 1] || '';
+    const wordCount = lines.reduce((n, line) => n + line.split(' ').filter(Boolean).length, 0);
+    const lineY = rect.y + fit.size * 1.35 + (lines.length - 1) * fit.size * 1.18;
+    const hlW = Math.max(fit.size, lastLine.length * fit.size * 0.62) + 20 * ctx.u;
+    const hl = el('rect', { x: x - hlW / 2, y: lineY - fit.size * 0.86, width: hlW, height: fit.size * 1.04, fill: ctx.accent }, group);
+    gsap.set(hl, { transformOrigin: '0% 50%', scaleX: 0 });
+    ctx.tl.to(hl, { scaleX: 1, duration: 0.26, ease: 'power3.out' }, at + 0.12 + wordCount * 0.09 + 0.47);
+  } else {
+    const bar = el('rect', { x: x - 40 * ctx.u, y: rect.y + fit.size * 0.1, width: 80 * ctx.u, height: 7 * ctx.u, rx: 3.5 * ctx.u, fill: ctx.accent }, group);
+    springIn(ctx.tl, bar, at, { dur: 0.4 }); // accent bar leads — anchors the eye before the words land
+  }
   const { words } = kineticWords(group, x, rect.y + fit.size * 1.35, content.text, { size: fit.size, weight: 900, maxChars: fit.maxChars, maxLines: 3 });
   // Word-by-word kinetic entrance — each word springs up with overshoot.
   words.forEach((word, index) => {
@@ -168,7 +184,7 @@ function buildMetric(ctx: DirectedRenderContext, layer: DirectedLayer, rect: Pix
   const size = Math.min(rect.h * 0.52, rect.w / (String(Math.round(value)).length + content.prefix.length + content.suffix.length + 1) * 1.5);
   const decimals = Math.abs(value) < 10 && !Number.isInteger(value) ? 1 : 0;
   const fmt = (n: number) => `${content.prefix}${n.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })}${content.suffix}`;
-  const valueText = el<SVGTextElement>('text', { x, y: y + size * 0.1, 'font-family': FONT, 'font-size': size, 'font-weight': 900, fill: INK, 'text-anchor': 'middle' }, group);
+  const valueText = el<SVGTextElement>('text', { x, y: y + size * 0.1, 'font-family': FONT_DISPLAY, 'font-size': size, 'font-weight': 900, fill: INK, 'text-anchor': 'middle' }, group);
   countUp(ctx.tl, valueText, value, at + 0.15, { dur: Math.min(2, ctx.total * 0.35), format: fmt }); // the number IS the story — counting to the exact value
   const underline = el('rect', { x: x - rect.w * 0.18, y: y + size * 0.34, width: rect.w * 0.36, height: 7 * ctx.u, rx: 3.5 * ctx.u, fill: ctx.accent }, group);
   springIn(ctx.tl, underline, at + 0.35, { dur: 0.45 });
@@ -186,18 +202,21 @@ function buildChart(ctx: DirectedRenderContext, layer: DirectedLayer, rect: PixR
   const content = contentFor(layer, ctx.spec);
   const items = content.items.slice(0, 6);
   const max = Math.max(...items.map((item) => Math.abs(Number(item.value) || 0)), 1);
+  // Colour means "look here": in the paper theme ONLY the answer bar (the
+  // largest value) carries the accent — every other bar stays neutral gray.
+  const answerIndex = THEME.paper ? items.reduce((best, item, index, all) => (Math.abs(Number(item.value) || 0) > Math.abs(Number(all[best]?.value) || 0) ? index : best), 0) : 0;
   const chartTop = rect.y + rect.h * 0.08;
   const chartBottom = rect.y + rect.h * 0.78;
   const slot = rect.w / Math.max(1, items.length);
   const barW = Math.min(110 * ctx.u, slot * 0.52);
-  const base = drawnLine(group, rect.x, chartBottom, rect.x + rect.w, chartBottom, PANEL_EDGE, 3 * ctx.u);
+  const base = drawnLine(group, rect.x, chartBottom, rect.x + rect.w, chartBottom, THEME.paper ? INK : PANEL_EDGE, 3 * ctx.u);
   drawIn(ctx.tl, base, at, 0.45);
   items.forEach((item, index) => {
     const t = at + 0.2 + index * 0.22; // staggered build-in — magnitudes land one at a time
     const value = Math.abs(Number(item.value) || 0);
     const h = Math.max(8 * ctx.u, (chartBottom - chartTop) * value / max);
     const x = rect.x + slot * index + (slot - barW) / 2;
-    const bar = el('rect', { x, y: chartBottom - h, width: barW, height: h, rx: 8 * ctx.u, fill: index === 0 ? ctx.accent : PANEL, stroke: index === 0 ? ctx.accent : PANEL_EDGE, 'stroke-width': 2 }, group);
+    const bar = el('rect', { x, y: chartBottom - h, width: barW, height: h, rx: THEME.paper ? 2 * ctx.u : 8 * ctx.u, fill: index === answerIndex ? ctx.accent : NEUTRAL, stroke: index === answerIndex ? ctx.accent : PANEL_EDGE, 'stroke-width': 2 }, group);
     gsap.set(bar, { transformOrigin: '50% 100%', scaleY: 0 });
     ctx.tl.to(bar, { scaleY: 1, duration: 0.6, ease: 'back.out(1.2)' }, t); // bars overshoot slightly — growth feels physical
     const valueText = el<SVGTextElement>('text', { x: x + barW / 2, y: chartBottom - h - 14 * ctx.u, 'font-family': FONT, 'font-size': Math.max(15, 24 * ctx.u), 'font-weight': 800, fill: INK, 'text-anchor': 'middle' }, group);
@@ -248,7 +267,7 @@ function buildTimelineRail(ctx: DirectedRenderContext, layer: DirectedLayer, rec
 function buildComparison(ctx: DirectedRenderContext, layer: DirectedLayer, rect: PixRect, at: number): PrimitiveBuild {
   const group = el<SVGGElement>('g', {}, ctx.root);
   const content = contentFor(layer, ctx.spec);
-  const rightAccent = contrastAccent(ctx.accent);
+  const rightAccent = THEME.accentSecondary || contrastAccent(ctx.accent);
   const stacked = rect.h > rect.w * 0.9;
   const panels = stacked
     ? [{ title: content.leftTitle, entries: content.leftItems, x: rect.x, y: rect.y, w: rect.w, h: rect.h * 0.47, from: -1, tone: ctx.accent }, { title: content.rightTitle, entries: content.rightItems, x: rect.x, y: rect.y + rect.h * 0.53, w: rect.w, h: rect.h * 0.47, from: 1, tone: rightAccent }]
@@ -281,7 +300,7 @@ function buildDiagram(ctx: DirectedRenderContext, layer: DirectedLayer, rect: Pi
     const angle = -Math.PI / 2 + (2 * Math.PI * index) / Math.max(1, items.length);
     const nx = cx + rx * Math.cos(angle); const ny = cy + ry * Math.sin(angle);
     const t = at + 0.3 + index * 0.2;
-    const edge = drawnLine(group, cx, cy, nx, ny, 'rgba(96,165,250,0.55)', 3 * ctx.u);
+    const edge = drawnLine(group, cx, cy, nx, ny, EDGE_SOFT, 3 * ctx.u);
     drawIn(ctx.tl, edge, t, 0.4); // relationships literally draw themselves
     const node = nodeBox(group, nx, ny, item.label, { size: Math.max(14, 21 * ctx.u), accent: ctx.accent, minWidth: rect.w * 0.16, maxChars: 12 });
     springIn(ctx.tl, node.group, t + 0.16, { dur: 0.45 });
@@ -303,7 +322,7 @@ function buildFlowChart(ctx: DirectedRenderContext, layer: DirectedLayer, rect: 
     const cy = vertical ? rect.y + 30 * ctx.u + index * ((rect.h - 60 * ctx.u) / Math.max(1, items.length - 1) || 0) : rect.y + rect.h / 2;
     const box = nodeBox(group, cx, cy, item.label, { size, accent: ctx.accent, minWidth: rect.w * (vertical ? 0.5 : 0.16), maxChars: 14 });
     const badge = el('circle', { cx: cx - box.width / 2 + 2 * ctx.u, cy: cy - box.height / 2 + 2 * ctx.u, r: 16 * ctx.u, fill: ctx.accent }, group);
-    const badgeText = textBlock(group, cx - box.width / 2 + 2 * ctx.u, cy - box.height / 2 + 8 * ctx.u, String(index + 1), { size: 18 * ctx.u, weight: 800, fill: '#fff' });
+    const badgeText = textBlock(group, cx - box.width / 2 + 2 * ctx.u, cy - box.height / 2 + 8 * ctx.u, String(index + 1), { size: 18 * ctx.u, weight: 800, fill: ON_ACCENT });
     slideFadeIn(ctx.tl, box.group, t, { fromY: vertical ? 24 * ctx.u : 0, fromX: vertical ? 0 : 24 * ctx.u, dur: 0.5 }); // steps arrive in narrative order
     springIn(ctx.tl, badge, t + 0.12, { dur: 0.35 });
     riseIn(ctx.tl, badgeText, t + 0.12, { dist: 0, dur: 0.35 });
@@ -318,15 +337,31 @@ function buildFlowChart(ctx: DirectedRenderContext, layer: DirectedLayer, rect: 
 }
 
 function imageInFrame(ctx: DirectedRenderContext, parent: SVGElement, frame: PixRect, href: string, rxRadius: number) {
-  const clipId = `mgCard${Math.floor(Math.random() * 1e9)}`;
-  const clip = el('clipPath', { id: clipId }, ctx.defs);
-  el('rect', { x: frame.x, y: frame.y, width: frame.w, height: frame.h, rx: rxRadius }, clip);
-  const holder = el<SVGGElement>('g', { 'clip-path': `url(#${clipId})` }, parent);
+  // Paper theme: the picture is a paper CUTOUT — torn silhouette clipped from
+  // a seeded polygon, seated by the two-shadow stack (the shadow lives on an
+  // OUTER group: filter-then-clip on one element would clip the shadow away),
+  // and desaturated into the flat palette.
+  let clipId: string;
+  let shadowHost: SVGElement = parent;
+  if (THEME.paper) {
+    clipId = tornClipPath(ctx.defs, frame, Math.round(frame.x * 7 + frame.y * 13 + frame.w * 3 + frame.h));
+    shadowHost = el<SVGGElement>('g', { filter: `url(#${paperShadowFilter(ctx.defs)})` }, parent);
+  } else {
+    clipId = `mgCard${Math.floor(Math.random() * 1e9)}`;
+    const clip = el('clipPath', { id: clipId }, ctx.defs);
+    el('rect', { x: frame.x, y: frame.y, width: frame.w, height: frame.h, rx: rxRadius }, clip);
+  }
+  const holder = el<SVGGElement>('g', { 'clip-path': `url(#${clipId})` }, shadowHost);
   if (href) {
     const image = el('image', { x: frame.x, y: frame.y, width: frame.w, height: frame.h, href, preserveAspectRatio: 'xMidYMid slice' }, holder);
     image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
+    if (THEME.paper) image.setAttribute('filter', `url(#${desatFilter(ctx.defs, 0.3)})`);
     gsap.set(image, { transformOrigin: '50% 50%', scale: 1.04 });
     ctx.tl.to(image, { scale: 1.12, x: -frame.w * 0.012, duration: ctx.total, ease: 'none' }, 0); // Ken Burns drift — stills are never static
+  } else if (THEME.paper) {
+    // No picture: a halftone accent block — the signature newsprint cutout —
+    // instead of a dark panel that would break the paper field.
+    el('rect', { x: frame.x, y: frame.y, width: frame.w, height: frame.h, fill: `url(#${halftonePattern(ctx.defs, ctx.accent)})` }, holder);
   } else {
     el('rect', { x: frame.x, y: frame.y, width: frame.w, height: frame.h, fill: PANEL }, holder);
     for (let ring = 0; ring < 3; ring += 1) el('circle', { cx: frame.x + frame.w * 0.7, cy: frame.y + frame.h * 0.35, r: frame.h * (0.12 + ring * 0.1), fill: 'none', stroke: ctx.accent, 'stroke-width': 2 * ctx.u, opacity: 0.24 - ring * 0.06 }, holder);
@@ -341,7 +376,8 @@ function buildImageCard(ctx: DirectedRenderContext, layer: DirectedLayer, rect: 
   const frameH = caption ? rect.h * 0.84 : rect.h;
   const frame = { x: rect.x, y: rect.y, w: rect.w, h: frameH };
   imageInFrame(ctx, group, frame, content.imageUrl, 22 * ctx.u);
-  el('rect', { x: frame.x, y: frame.y, width: frame.w, height: frame.h, rx: 22 * ctx.u, fill: 'none', stroke: PANEL_EDGE, 'stroke-width': 2.5 }, group);
+  // The torn silhouette IS the frame in the paper theme — no border rect.
+  if (!THEME.paper) el('rect', { x: frame.x, y: frame.y, width: frame.w, height: frame.h, rx: 22 * ctx.u, fill: 'none', stroke: PANEL_EDGE, 'stroke-width': 2.5 }, group);
   if (caption) {
     const cap = textBlock(group, rect.x + rect.w / 2, rect.y + frameH + 32 * ctx.u, caption, { size: Math.max(14, 22 * ctx.u), weight: 600, fill: INK_SOFT, maxChars: Math.round(rect.w / (12 * ctx.u)), maxLines: 1 });
     riseIn(ctx.tl, cap, at + 0.3, { dist: 12 * ctx.u });
@@ -393,13 +429,93 @@ function buildProgressIndicator(ctx: DirectedRenderContext, layer: DirectedLayer
   return { group, bounds: rect };
 }
 
+export interface USStateMapRenderOptions {
+  parent: SVGElement;
+  timeline: MotionTimeline;
+  rect: PixRect;
+  items: { label: string }[];
+  accent: string;
+  unit: number;
+  at: number;
+  step?: number;
+}
+
+/** Draw the bundled Albers-projected lower 48 + DC when one or more items
+ * resolve to real states. Returns false so callers retain their abstract
+ * fallback for entirely non-US places and generic node graphs. */
+export function renderUSStateMap(options: USStateMapRenderOptions): boolean {
+  const { parent, timeline, rect, items, accent, unit, at } = options;
+  const matched = items
+    .map((item) => ({ item, name: matchUSStateName(item.label) }))
+    .filter((entry): entry is { item: { label: string }; name: string } => Boolean(entry.name));
+  if (!matched.length) return false;
+
+  const names = Array.from(new Set(matched.map((entry) => entry.name)));
+  const viewBox = regionViewBox(names);
+  const map = el<SVGSVGElement>('svg', {
+    x: rect.x, y: rect.y, width: rect.w, height: rect.h,
+    viewBox: viewBox.join(' '), preserveAspectRatio: 'xMidYMid meet', overflow: 'hidden',
+  }, parent);
+  const mapUnitsPerPixel = viewBox[2] / Math.max(1, rect.w);
+  const strokeWidth = Math.max(1.2, 2.2 * unit * mapUnitsPerPixel);
+  const stateNodes = new Map<string, SVGPathElement>();
+  Object.entries(usPaths).forEach(([name, d]) => {
+    const state = el<SVGPathElement>('path', {
+      d,
+      fill: NEUTRAL,
+      stroke: THEME.paper ? INK : PANEL_EDGE,
+      'stroke-width': strokeWidth,
+      'stroke-linejoin': 'round',
+    }, map);
+    stateNodes.set(name, state);
+  });
+
+  // "Spread" choreography: the first named state is the origin and the rest
+  // highlight in centroid-distance order, not arbitrary item order.
+  const origin = usCentroids[names[0]];
+  const spread = [...names].sort((a, b) => {
+    const pa = usCentroids[a]; const pb = usCentroids[b];
+    return Math.hypot(pa[0] - origin[0], pa[1] - origin[1]) - Math.hypot(pb[0] - origin[0], pb[1] - origin[1]);
+  });
+  const stagger = Math.max(0.16, Math.min(0.32, options.step || 0.24));
+  spread.forEach((name, index) => {
+    const state = stateNodes.get(name);
+    if (state) timeline.to(state, { fill: accent, duration: 0.42, ease: 'power2.out' }, at + 0.18 + index * stagger);
+  });
+
+  spread.forEach((name, index) => {
+    const center = usCentroids[name];
+    const t = at + 0.24 + index * stagger;
+    if (index > 0) {
+      const previous = usCentroids[spread[index - 1]];
+      const bend = Math.max(12, Math.abs(center[0] - previous[0]) * 0.12);
+      const route = drawnPath(map, `M ${previous[0]} ${previous[1]} Q ${(previous[0] + center[0]) / 2} ${Math.min(previous[1], center[1]) - bend} ${center[0]} ${center[1]}`, ROUTE, Math.max(1.6, 3 * unit * mapUnitsPerPixel));
+      drawIn(timeline, route, t - 0.08, 0.42);
+    }
+    const radius = Math.max(3.5, 8 * unit * mapUnitsPerPixel);
+    const pin = el<SVGGElement>('g', {}, map);
+    el('circle', { cx: center[0], cy: center[1], r: radius, fill: THEME.paper ? INK : accent, stroke: THEME.paper ? BG : '#fff', 'stroke-width': Math.max(1.2, 2 * unit * mapUnitsPerPixel) }, pin);
+    el('circle', { cx: center[0], cy: center[1], r: radius * 1.8, fill: 'none', stroke: THEME.paper ? INK : accent, 'stroke-width': Math.max(0.8, unit * mapUnitsPerPixel), opacity: 0.42 }, pin);
+    springIn(timeline, pin, t, { dur: 0.4 });
+    const source = matched.find((entry) => entry.name === name);
+    const offset = usLabelOffsets[name] || [0, radius * 3.2];
+    const fontSize = Math.max(8, 17 * unit * mapUnitsPerPixel);
+    const label = textBlock(map, center[0] + offset[0], center[1] + offset[1], source?.item.label || name, { size: fontSize, weight: 800, fill: INK, maxChars: 20, maxLines: 1 });
+    riseIn(timeline, label, t + 0.12, { dist: Math.max(3, 7 * unit * mapUnitsPerPixel), dur: 0.4 });
+  });
+  return true;
+}
+
 function buildMap(ctx: DirectedRenderContext, layer: DirectedLayer, rect: PixRect, at: number): PrimitiveBuild {
   const group = el<SVGGElement>('g', {}, ctx.root);
   const content = contentFor(layer, ctx.spec);
   const items = content.items.slice(0, 6);
   glassPanel(group, rect, ctx.u);
-  // Deterministic abstract geography: pins spread across the panel; arcs
-  // connect consecutive pins (routes/relationships), drawn in sequence.
+  if (renderUSStateMap({ parent: group, timeline: ctx.tl, rect, items, accent: ctx.accent, unit: ctx.u, at })) {
+    return { group, bounds: rect };
+  }
+
+  // Non-US fallback: deterministic abstract geography with route-drawn pins.
   const positions = items.map((_, index) => ({
     x: rect.x + rect.w * (0.16 + 0.68 * ((index * 0.618) % 1)),
     y: rect.y + rect.h * (0.22 + 0.5 * (((index * 0.618) + 0.38) % 1)),
@@ -409,12 +525,12 @@ function buildMap(ctx: DirectedRenderContext, layer: DirectedLayer, rect: PixRec
     if (index > 0) {
       const prev = positions[index - 1];
       const mx = (prev.x + pos.x) / 2; const my = Math.min(prev.y, pos.y) - rect.h * 0.12;
-      const arc = drawnPath(group, `M ${prev.x} ${prev.y} Q ${mx} ${my} ${pos.x} ${pos.y}`, 'rgba(96,165,250,0.6)', 3 * ctx.u);
-      drawIn(ctx.tl, arc, t - 0.08, 0.45); // the route draws between pins
+      const arc = drawnPath(group, `M ${prev.x} ${prev.y} Q ${mx} ${my} ${pos.x} ${pos.y}`, ROUTE, 3 * ctx.u);
+      drawIn(ctx.tl, arc, t - 0.08, 0.45);
     }
     const pin = el<SVGGElement>('g', {}, group);
-    el('circle', { cx: pos.x, cy: pos.y, r: 11 * ctx.u, fill: ctx.accent, stroke: '#fff', 'stroke-width': 2.5 * ctx.u }, pin);
-    el('circle', { cx: pos.x, cy: pos.y, r: 20 * ctx.u, fill: 'none', stroke: ctx.accent, 'stroke-width': 1.5 * ctx.u, opacity: 0.4 }, pin);
+    el('circle', { cx: pos.x, cy: pos.y, r: 11 * ctx.u, fill: THEME.paper ? INK : ctx.accent, stroke: THEME.paper ? BG : '#fff', 'stroke-width': 2.5 * ctx.u }, pin);
+    el('circle', { cx: pos.x, cy: pos.y, r: 20 * ctx.u, fill: 'none', stroke: THEME.paper ? INK : ctx.accent, 'stroke-width': 1.5 * ctx.u, opacity: 0.4 }, pin);
     springIn(ctx.tl, pin, t, { dur: 0.4 });
     const label = textBlock(group, pos.x, pos.y + 34 * ctx.u, items[index].label, { size: Math.max(12, 19 * ctx.u), weight: 700, fill: INK, maxChars: 14, maxLines: 1 });
     riseIn(ctx.tl, label, t + 0.12, { dist: 8 * ctx.u, dur: 0.4 });
@@ -444,7 +560,7 @@ function buildCaption(ctx: DirectedRenderContext, layer: DirectedLayer, rect: Pi
   const pillH = lines.length * size * 1.3 + 26 * ctx.u;
   const px = rect.x + (rect.w - pillW) / 2;
   const py = rect.y + (rect.h - pillH) / 2;
-  el('rect', { x: px, y: py, width: pillW, height: pillH, rx: 16 * ctx.u, fill: 'rgba(8,12,24,0.82)', stroke: 'rgba(255,255,255,0.18)', 'stroke-width': 1.5 }, group);
+  el('rect', { x: px, y: py, width: pillW, height: pillH, rx: THEME.paper ? 4 * ctx.u : 16 * ctx.u, fill: PANEL_GLASS, stroke: GLASS_EDGE, 'stroke-width': 1.5 }, group);
   textBlock(group, px + pillW / 2, py + 22 * ctx.u + size * 0.72, text, { size, weight: 700, fill: INK, maxChars: Math.round(rect.w / (size * 0.56)), maxLines: 2 });
   return { group, bounds: { x: px, y: py, w: pillW, h: pillH } };
 }
@@ -468,7 +584,7 @@ function buildCallout(ctx: DirectedRenderContext, layer: DirectedLayer, rect: Pi
   const px = rect.x + (rect.w - pillW) / 2;
   const py = rect.y + (rect.h - pillH) / 2;
   const pill = el<SVGGElement>('g', {}, group);
-  el('rect', { x: px, y: py, width: pillW, height: pillH, rx: 14 * ctx.u, fill: 'rgba(10,15,30,0.88)', stroke: ctx.accent, 'stroke-width': 2 }, pill);
+  el('rect', { x: px, y: py, width: pillW, height: pillH, rx: THEME.paper ? 4 * ctx.u : 14 * ctx.u, fill: PANEL_GLASS, stroke: THEME.paper ? INK : ctx.accent, 'stroke-width': 2 }, pill);
   textBlock(pill, px + pillW / 2, py + 18 * ctx.u + size * 0.72, text, { size, weight: 700, fill: INK, maxChars: Math.round(pillW / (size * 0.56)), maxLines: 2 });
   if (target) {
     const anchor = edgePoint(target, { x: px, y: py, w: pillW, h: pillH });
@@ -477,7 +593,7 @@ function buildCallout(ctx: DirectedRenderContext, layer: DirectedLayer, rect: Pi
     const my = (start.y + anchor.y) / 2 - Math.abs(anchor.x - start.x) * 0.12;
     const leader = drawnPath(group, `M ${start.x} ${start.y} Q ${mx} ${my} ${anchor.x} ${anchor.y}`, ctx.accent, 3 * ctx.u);
     drawIn(ctx.tl, leader, at + 0.24, 0.45); // the connector draws TO the thing being explained
-    const dot = el('circle', { cx: anchor.x, cy: anchor.y, r: 9 * ctx.u, fill: ctx.accent, stroke: '#fff', 'stroke-width': 2.5 * ctx.u }, group);
+    const dot = el('circle', { cx: anchor.x, cy: anchor.y, r: 9 * ctx.u, fill: THEME.paper ? INK : ctx.accent, stroke: THEME.paper ? BG : '#fff', 'stroke-width': 2.5 * ctx.u }, group);
     springIn(ctx.tl, dot, at + 0.6, { dur: 0.35 });
   }
   return { group, bounds: { x: px, y: py, w: pillW, h: pillH } };
@@ -556,6 +672,7 @@ export function renderDirectedLayers(ctx: DirectedRenderContext): number {
     if (href) {
       const image = el('image', { x: -W * 0.03, y: -H * 0.03, width: W * 1.06, height: H * 1.06, href, preserveAspectRatio: 'xMidYMid slice', opacity: 0.34 }, ctx.svg);
       image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
+      if (THEME.paper) image.setAttribute('filter', `url(#${desatFilter(defs, 0.25)})`);
       ctx.svg.insertBefore(image, root);
       const scrim = el('rect', { x: 0, y: 0, width: W, height: H, fill: BG, opacity: 0.56 }, ctx.svg);
       ctx.svg.insertBefore(scrim, root);

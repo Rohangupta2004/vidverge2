@@ -28,9 +28,13 @@ import { findReusableAsset } from './lib/assetReuse';
 import { isMotionFingerprint, specFromOverlay } from './lib/motionSpec';
 import { getStyle } from './styles/registry';
 import { buildTimeline, createAssemblySource, timelineDurationInFrames } from './remotion/AssemblyComp';
+import { captionChunks } from './remotion/compositionRuntime';
 import { runChecks } from './lib/checks';
+import { filmQaChecks, runFilmQa, verifyRenderOutput } from './lib/filmQa';
+import { validateTimeline } from './lib/timelineValidation';
+import { newGenerationId, planOf, treatmentOfScene, type DirectorPlan } from './lib/directorPlan';
 import { saveUpload } from './lib/storage';
-import { DEFAULT_SETTINGS, WORKSPACE_ID, assemblyJobRunning, listAssets, listScenes, loadSettings, updateProject, updateScene, type Asset, type AssemblyJob, type ForgeSettings, type Project, type Scene } from './lib/supabase';
+import { DEFAULT_SETTINGS, WORKSPACE_ID, assemblyJobRunning, getProject, listAssets, listScenes, loadSettings, updateProject, updateScene, type Asset, type AssemblyJob, type ForgeSettings, type Project, type Scene } from './lib/supabase';
 import { defaultOverlay, visualKindOf, type VisualKind } from './lib/effects';
 import { isVideoUrl, sceneKind, sceneNeedsGeneration, sceneSettled } from './lib/sceneState';
 import { forgeApi } from './lib/forge';
@@ -129,6 +133,10 @@ export default function App() {
   const resumedPlanning = useRef('');
 
   useEffect(() => { loadSettings().then((value) => { setSettings(value); setSceneShare(value.default_scene_share); }).catch(() => undefined); }, []);
+  // The motion engine's theme source for preview surfaces that don't carry
+  // the project object: 'vox-explainer' renders the paper-cut visual language
+  // (lib/motionKit), every other style keeps the midnight look.
+  useEffect(() => { (window as any).__sceneForgeStyleId = project?.style || ''; }, [project?.style]);
   useEffect(() => {
     if (!project?.id || project.status !== 'scene_review') return;
     let cancelled = false;
@@ -262,7 +270,7 @@ export default function App() {
       setBusy(true); setError(''); setNote('Reconnecting to the assembly render already in flight');
       const startedAt = current.assembly_job?.started_at || new Date().toISOString();
       const baseProgress = Math.min(90, Math.max(20, Number(current.assembly_job?.progress) || 20));
-      await pushAssemblyJob(current.id, { status: 'assembling', progress: baseProgress, message: 'Reconnected to the render already in flight — rendering the final MP4…', started_at: startedAt });
+      await pushAssemblyJob(current.id, { status: 'assembling', progress: baseProgress, message: 'Reconnected to the render already in flight — rendering the final MP4…', started_at: startedAt, ...(current.assembly_job?.draft_version ? { draft_version: current.assembly_job.draft_version } : {}) });
       try {
         for (let i = 0; i < 1350; i += 1) {
           if (assemblyCancelled.current) { await cancelAssemblyRun(current.id); return; }
@@ -348,6 +356,20 @@ export default function App() {
     setProject((live) => live && live.id === projectId ? { ...live, stage_note } : live);
   }
 
+  // Any timeline-affecting edit (overlays, timing, text) bumps the DirectorPlan
+  // draft version. Every render stamps the version it was submitted with, so
+  // an output of an OLDER draft is shown but never promoted over a newer edit
+  // — the stale-render protection half of atomic versioning.
+  async function bumpDraftVersion() {
+    const current = project;
+    if (!current) return;
+    const plan = planOf(current);
+    const next: DirectorPlan = plan
+      ? { ...plan, draft_version: plan.draft_version + 1 }
+      : { version: 1, generation_id: String(current.generation_id || newGenerationId()), draft_version: 2, created_at: new Date().toISOString(), music: { required: false }, captions: false, treatments: [] };
+    await patch({ director_plan: next as any, ...(current.generation_id ? {} : { generation_id: next.generation_id }) });
+  }
+
   async function begin(input: Parameters<typeof start>[0]) {
     setBusy(true); setError('');
     try {
@@ -411,15 +433,49 @@ export default function App() {
   async function confirmStyle() {
     if (!project?.style || !project.script) return; setBusy(true); setError('');
     try {
-      await patch({ status: 'scene_planning' });
+      setNote('Verger is timing supporting scenes against the avatar');
+      await patch({ status: 'scene_planning', stage_note: 'Planning the supporting scenes' });
       const duration = Number(project.avatar_duration_sec || project.estimated_duration_sec || project.target_length_sec);
-      const planned = await planScenes({ script: project.script, wordTimestamps: project.word_timestamps || [], style: project.style, sceneShare, uploads: [], durationSec: duration, imageBriefs }, settings.llm_model);
+      // ONE GENERATION, ONE ID: every scene of this plan is stamped with the
+      // same generation id, and the DirectorPlan stored on the project is the
+      // single authoritative record reconciling scenes, generated assets,
+      // overlay timeline, music treatment and the AssemblyComp props. The id
+      // exists BEFORE planning so every window-by-window partial save already
+      // carries it.
+      const generationId = newGenerationId();
+      // CHUNKED PLANNING (the Step 4 timeout fix): the film is planned in
+      // narration windows — each LLM call writes only a few scenes and
+      // settles far inside its 90-second bound, every finished window is
+      // persisted immediately (a later failure or a reload keeps the finished
+      // part), and the spinner reports real progress instead of a blank wait.
+      const planned = await planScenes({ script: project.script, wordTimestamps: project.word_timestamps || [], style: project.style, sceneShare, uploads: [], durationSec: duration, imageBriefs }, settings.llm_model, {
+        onWindow: ({ window: windowIndex, windowCount, scenesPlanned }) => {
+          if (windowCount <= 1) return;
+          const progress = `Planning the film — part ${windowIndex} of ${windowCount}${scenesPlanned ? ` · ${scenesPlanned} scene${scenesPlanned === 1 ? '' : 's'} planned so far` : ''}`;
+          setNote(progress);
+          void noteStage(project.id, progress);
+          pipelineLog('assets', 'scene-plan-window', { projectId: project.id, window: windowIndex, windowCount, scenesPlanned });
+        },
+        persistPartial: async (scenesSoFar) => {
+          await forgeApi.planScenes(project.id, scenesSoFar.map((scene: any) => ({ ...scene, generation_id: generationId })), { partial: true });
+        },
+      });
       // Keep overAvatar on both shapes. Landscape composes the callout inside
       // Remotion; portrait rasterizes the same scene copy to an RGBA PNG and
       // sends that full-frame transparent asset through the timed FFmpeg
       // overlay endpoint, so the presenter remains visible underneath.
-      await replaceFromPlan(planned.scenes);
-      await patch({ status: 'scene_review', audio_strategy: planned.audio_strategy || 'continuous_heygen_voiceover' });
+      await replaceFromPlan(planned.scenes.map((scene: any) => ({ ...scene, generation_id: generationId })));
+      const persistedRows = await listScenes(project.id);
+      const directorPlan: DirectorPlan = {
+        version: 1,
+        generation_id: generationId,
+        draft_version: 1,
+        created_at: new Date().toISOString(),
+        music: planned.music,
+        captions: planned.captions,
+        treatments: persistedRows.map((row) => ({ scene_index: row.scene_index, treatment: treatmentOfScene(row) })),
+      };
+      await patch({ status: 'scene_review', audio_strategy: planned.audio_strategy || 'continuous_heygen_voiceover', director_plan: directorPlan as any, generation_id: generationId });
     } catch (e: any) {
       // A failed or timed-out planning call must not strand the project on the
       // scene_planning spinner: the status returns to style_choice so the
@@ -509,7 +565,7 @@ export default function App() {
           try {
             const kind = sceneKind(scene);
             if (kind === 'ai_video') {
-              const made = await generateSceneVideo(project, scene);
+              const made = await generateSceneVideo(project, scene, { model: settings.video_model });
               markScene(scene.id, { render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' });
               pipelineLog('scene-media', 'scene-video-ready', { projectId: project.id, sceneIndex: scene.scene_index, reused: made.reused });
             } else if (kind === 'motion_graphic' || kind === 'text_overlay') {
@@ -630,7 +686,7 @@ export default function App() {
     try {
       const kind = sceneKind(scene);
       if (kind === 'ai_video') {
-        const made = await generateSceneVideo(project, scene, { force: true });
+        const made = await generateSceneVideo(project, scene, { force: true, model: settings.video_model });
         setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' as const } : item));
       } else if (kind === 'motion_graphic' || kind === 'text_overlay') {
         const made = await produceMotionScene(project, scene, { force: true, onNote: setNote });
@@ -702,7 +758,7 @@ export default function App() {
     setGeneratingSceneId(scene.id); setSceneImageError('');
     setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, status: 'generating' as const } : item));
     try {
-      const made = await generateSceneVideo(project, scene);
+      const made = await generateSceneVideo(project, scene, { model: settings.video_model });
       setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' as const } : item));
     } catch (e: any) {
       setSceneImageError(e.message || String(e));
@@ -723,10 +779,37 @@ export default function App() {
 
   async function mixMusic() {
     if (!project) return; setMusicBusy(true); setMusicNote('Mixing the music bed under the film…');
+    const projectId = project.id;
+    const expectedSec = Number(project.avatar_duration_sec || project.estimated_duration_sec || project.target_length_sec) || 0;
     try {
-      let result = await forgeApi.mixMusic(project.id);
-      for (let i = 0; i < 60 && result.pending; i += 1) { await sleep(5000); result = await forgeApi.mixStatus(project.id); }
-      if (result.finalUrl) { const url = result.finalUrl; setProject((current) => current ? { ...current, final_video_url: url } : current); }
+      let result = await forgeApi.mixMusic(projectId);
+      for (let i = 0; i < 60 && result.pending; i += 1) { await sleep(5000); result = await forgeApi.mixStatus(projectId); }
+      // MIX OUTPUT GATE — the same principle as completeAssembly's: a render's
+      // HTTP "complete" is never taken as success. The platform renderer can
+      // serve a stale composition bundle that paints nothing (a full-length,
+      // all-black, silent MP4 that still decodes cleanly — the documented
+      // remotion-render-probe failure mode), so the mixed master must exist,
+      // decode to the expected length AND show a real picture before it
+      // replaces the assembled cut in the player. A rejected mix clears the
+      // final_video_url the server persisted at completion, so the working
+      // assembled film keeps playing instead of a black screen.
+      if (result.mixed && result.finalUrl) {
+        const url = result.finalUrl;
+        setMusicNote('Mix rendered — verifying the master before it replaces the film…');
+        const verification = await verifyRenderOutput(url, expectedSec);
+        const sweep = verification.ok ? await runFilmQa(url, verification) : null;
+        const blackFilm = Boolean(sweep && sweep.status !== 'skipped' && sweep.black_frames > 0);
+        if (!verification.ok || blackFilm) {
+          const why = verification.ok ? `${sweep?.black_frames} of ${sweep?.frames_sampled} sampled frames are black.` : verification.reason;
+          await updateProject(projectId, { final_video_url: null, stage_note: 'Music mix rejected — the mixed file failed verification; the film without music is unchanged' }).catch(() => undefined);
+          setProject((current) => current && current.id === projectId ? { ...current, final_video_url: null } : current);
+          setMusicNote(`The mix produced a broken master and was not used: ${why} The assembled film is untouched — press “Mix music into the film” to try again.`);
+          return;
+        }
+        setProject((current) => current && current.id === projectId ? { ...current, final_video_url: url } : current);
+        setMusicNote(result.note || 'The final master now carries the music bed.');
+        return;
+      }
       setMusicNote(result.note || (result.mixed ? 'The final master now carries the music bed.' : 'Still mixing — reopen this project in a moment to pick it up.'));
     } catch (e: any) { setMusicNote(e.message || String(e)); } finally { setMusicBusy(false); }
   }
@@ -738,22 +821,52 @@ export default function App() {
     const mergeProject = (changes: Partial<Project>) => setProject((live) => live && live.id === projectId ? { ...live, ...changes } : live);
     const [sceneRows, assets] = await Promise.all([listScenes(projectId), listAssets(projectId)]);
     const timeline = buildTimeline(current, sceneRows, assets);
+    // OUTPUT VERIFICATION GATE: a render's HTTP "complete" is never taken as
+    // success. The file must exist, be non-empty, and decode to the expected
+    // length BEFORE it replaces anything — a failed verification preserves the
+    // previous working output untouched.
+    const expectedSec = timelineDurationInFrames(timeline, Number(current.avatar_duration_sec || current.estimated_duration_sec || current.target_length_sec) || 0) / 30;
+    const verification = await verifyRenderOutput(videoUrl, expectedSec);
+    if (!verification.ok) {
+      await failAssembly(projectId, `The render finished but its output failed verification: ${verification.reason} Retry the assembly.`);
+      return;
+    }
     const previousHash = current.build_hash;
     const hash = `${Date.now().toString(36)}-${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
     const editorManifest = { version: 2, avatarVideoUrl: current.heygen_video_url, scenes: sceneRows.map((scene) => ({ ...scene, assets: assets.filter((asset) => asset.scene_id === scene.id) })), timeline };
     const startedAt = current.assembly_job?.started_at;
-    const checkingJob: AssemblyJob = { status: 'checking', progress: 96, message: 'Running final quality checks…', started_at: startedAt, updated_at: new Date().toISOString() };
-    const next = { ...current, assembled_video_url: videoUrl, build_hash: hash, editor_manifest: editorManifest, status: 'checks' as const, assembly_job: checkingJob };
-    await updateProject(projectId, { assembled_video_url: videoUrl, build_hash: hash, editor_manifest: editorManifest, status: 'checks', render_operation_id: null, stage_note: 'Running the six delivery checks', assembly_job: checkingJob });
+    const submittedDraft = Number(current.assembly_job?.draft_version) || 0;
+    const checkingJob: AssemblyJob = { status: 'checking', progress: 96, message: 'Running final quality checks…', started_at: startedAt, updated_at: new Date().toISOString(), ...(submittedDraft ? { draft_version: submittedDraft } : {}) };
+    // A fresh assembled cut supersedes any earlier music mix — that mix was
+    // rendered from the PREVIOUS cut, and the player prefers final_video_url,
+    // so keeping it would show a stale (or broken) master over the new film.
+    // The music bed itself is kept; one click re-mixes it into the new cut.
+    const next = { ...current, assembled_video_url: videoUrl, final_video_url: null, build_hash: hash, editor_manifest: editorManifest, status: 'checks' as const, assembly_job: checkingJob };
+    await updateProject(projectId, { assembled_video_url: videoUrl, final_video_url: null, build_hash: hash, editor_manifest: editorManifest, status: 'checks', render_operation_id: null, stage_note: 'Running the delivery checks', assembly_job: checkingJob });
     mergeProject(next);
-    const checks = await runChecks(next, sceneRows, assets, previousHash);
+    // The six mechanical checks plus the film-level output QA (verified file +
+    // black/frozen frame sweep) — eight verdicts in one list.
+    const qa = await runFilmQa(videoUrl, verification);
+    const checks = [...await runChecks(next, sceneRows, assets, previousHash), ...filmQaChecks(verification, qa)];
+    // STALE-RESULT PROTECTION: if the plan was edited while this render was in
+    // flight, this output is an OLDER draft — it is shown, but never promoted
+    // to the last known good version, and the note says to re-render.
+    const fresh = await getProject(projectId).catch(() => null);
+    const liveDraft = Number((planOf(fresh || current) || { draft_version: 1 }).draft_version) || 1;
+    const staleDraft = submittedDraft > 0 && liveDraft > submittedDraft;
     const finalStatus = checks.every((check) => check.pass) ? 'done' as const : 'checks' as const;
-    const stageNote = finalStatus === 'done' ? 'Film assembled and all six checks passed' : 'Film assembled — some checks still need attention';
+    const stageNote = staleDraft
+      ? 'Film assembled from an older draft — the plan changed during the render; re-render to include the newest edits'
+      : finalStatus === 'done' ? 'Film assembled, output verified, and all delivery checks passed' : 'Film assembled — some checks still need attention';
     const doneStamp = new Date().toISOString();
-    const completedJob: AssemblyJob = { status: 'completed', progress: 100, message: 'Film assembled — the final MP4 is loaded in the player.', started_at: startedAt, finished_at: doneStamp, updated_at: doneStamp, output_url: videoUrl };
-    await updateProject(projectId, { checks, status: finalStatus, stage_note: stageNote, assembly_job: completedJob });
-    mergeProject({ ...next, checks, status: finalStatus, stage_note: stageNote, assembly_job: completedJob });
-    pipelineLog('joiner', 'complete', { projectId, videoUrlReady: Boolean(videoUrl), checksPassed: checks.filter((check) => check.pass).length, checkCount: checks.length, finalStatus });
+    const completedJob: AssemblyJob = { status: 'completed', progress: 100, message: 'Film assembled — the final MP4 is loaded in the player.', started_at: startedAt, finished_at: doneStamp, updated_at: doneStamp, output_url: videoUrl, ...(submittedDraft ? { draft_version: submittedDraft } : {}) };
+    // ATOMIC PROMOTION: only a render that completed, verified its output and
+    // passed every check — for the CURRENT draft — becomes last_good_version.
+    const promote = finalStatus === 'done' && !staleDraft;
+    const lastGood = promote ? { draft_version: submittedDraft || liveDraft, generation_id: (fresh || current).generation_id || null, video_url: videoUrl, build_hash: hash, promoted_at: doneStamp } : undefined;
+    await updateProject(projectId, { checks, status: finalStatus, stage_note: stageNote, assembly_job: completedJob, final_qa_report: qa as any, ...(lastGood ? { last_good_version: lastGood } : {}) });
+    mergeProject({ ...next, checks, status: finalStatus, stage_note: stageNote, assembly_job: completedJob, final_qa_report: qa as any, ...(lastGood ? { last_good_version: lastGood } : {}) });
+    pipelineLog('joiner', 'complete', { projectId, videoUrlReady: Boolean(videoUrl), verifiedBytes: verification.bytes, checksPassed: checks.filter((check) => check.pass).length, checkCount: checks.length, finalStatus, promoted: Boolean(lastGood), staleDraft });
   }
 
   // Park the reason on the project so Step 7 can explain the failure and
@@ -764,7 +877,9 @@ export default function App() {
     setError(why);
     const failStamp = new Date().toISOString();
     const failedJob: AssemblyJob = { status: 'failed', progress: 0, message: 'Assembly did not finish', error: why.slice(0, 480), finished_at: failStamp, updated_at: failStamp };
-    const failed: Partial<Project> = { status: 'checks', checks: [], stage_note: `${ASSEMBLY_FAILED_PREFIX} ${why}`.slice(0, 480), render_operation_id: null, assembly_job: failedJob };
+    // The previous assembled/last-good output columns are deliberately NOT
+    // touched here — a failed render never replaces a working video.
+    const failed: Partial<Project> = { status: 'checks', checks: [], stage_note: `${ASSEMBLY_FAILED_PREFIX} ${why} The last working video is preserved.`.slice(0, 480), render_operation_id: null, assembly_job: failedJob };
     await updateProject(projectId, failed).catch(() => undefined);
     setProject((live) => live && live.id === projectId ? { ...live, ...failed } : live);
   }
@@ -810,6 +925,17 @@ export default function App() {
       await updateProject(projectId, opening); mergeProject(opening);
       const assets = await listAssets(projectId); const timeline = buildTimeline(current, scenes, assets); let videoUrl = '';
       if (!timeline.length) throw new Error('The timeline came out empty. Approve at least one scene — or re-record the avatar so its duration is known — then assemble again.');
+      // TIMELINE VALIDATION GATE (Director layer): durations, overlaps,
+      // boundaries, asset reachability, generation stamps, explicit presenter
+      // states, overlay timing and z-order, PIP configuration, music and
+      // captions are checked deterministically HERE — an invalid timeline is
+      // rejected before any production render is paid for.
+      setNote('Validating the timeline before the render');
+      await push({ progress: 6, message: 'Validating the timeline…' });
+      const validation = await validateTimeline(current, scenes, timeline);
+      await updateProject(projectId, { timeline_report: validation as any }).catch(() => undefined);
+      if (!validation.ok) throw new Error(`The timeline failed validation: ${validation.errors.slice(0, 3).join(' ')}${validation.errors.length > 3 ? ` (+${validation.errors.length - 3} more issues)` : ''}`);
+      job.draft_version = validation.draft_version;
       // The render length comes from the timeline itself, so a scene that runs
       // past the recorded avatar duration is not cut off and a project with no
       // duration at all still renders instead of being rejected.
@@ -902,7 +1028,10 @@ export default function App() {
         const data = await response.json().catch(() => ({})); if (!response.ok || !data.overlayUrl) throw new Error(data.error || 'Portrait assembly failed'); videoUrl = data.overlayUrl;
       } else {
         const submitRender = async () => {
-          const response = await fetch('/api/render/remotion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId: WORKSPACE_ID, compositionTsx: createAssemblySource(durationInFrames), props: { timeline, avatarVideoUrl: current.heygen_video_url, motionBgUrl: current.motion_bg_url }, durationInFrames }) });
+          // Captions are a Director decision: word-timed chunks derived from
+          // the avatar master's timestamps, rendered TOPMOST by the composition.
+          const captions = planOf(current)?.captions ? captionChunks(current.word_timestamps) : [];
+          const response = await fetch('/api/render/remotion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId: WORKSPACE_ID, compositionTsx: createAssemblySource(durationInFrames), props: { timeline, avatarVideoUrl: current.heygen_video_url, motionBgUrl: current.motion_bg_url, captions }, durationInFrames }) });
           const started = await response.json().catch(() => ({})); if (!response.ok || !started.operationId) throw new Error(started.error || 'Assembly render could not start');
           const rendering: Partial<Project> = { render_operation_id: String(started.operationId), stage_note: 'Rendering the Remotion assembly' };
           await updateProject(projectId, rendering).catch(() => undefined); mergeProject(rendering);
@@ -916,7 +1045,7 @@ export default function App() {
           const pollCap = Math.max(450, Math.ceil(durationInFrames / 30) * 6);
           for (let i = 0; i < pollCap; i += 1) {
             if (assemblyCancelled.current) throw new Error(ASSEMBLY_CANCELLED);
-            await sleep(2000);
+            await sleep(3000);
             // A dropped poll is not a failed render — the next tick asks again.
             const status = await fetch(`/api/render/remotion/${encodeURIComponent(started.operationId)}`).then((r) => r.json()).catch(() => null);
             if (!status) continue;
@@ -1000,7 +1129,12 @@ export default function App() {
         await patch({ status: 'scene_planning' });
         try {
           const duration = Number(project.avatar_duration_sec || project.target_length_sec);
-          const planned = await planScenes({ script: project.script || '', wordTimestamps: project.word_timestamps || [], style: project.style || 'vox-explainer', sceneShare, uploads: [], durationSec: duration, imageBriefs, changeRequest: request }, settings.llm_model);
+          // The change request rides with the CURRENT plan (so "keep everything
+          // else" is grounded in what exists) and plans in the same bounded
+          // windows as Step 4 — no single call ever has to write the whole film.
+          const planned = await planScenes({ script: project.script || '', wordTimestamps: project.word_timestamps || [], style: project.style || 'vox-explainer', sceneShare, uploads: [], durationSec: duration, imageBriefs, changeRequest: request, currentScenes: scenes as any }, settings.llm_model, {
+            onWindow: ({ window: windowIndex, windowCount }) => { if (windowCount > 1) setNote(`Replanning the film — part ${windowIndex} of ${windowCount}`); },
+          });
           await replaceFromPlan(planned.scenes);
           await patch({ status: 'scene_review' });
           say('I replanned the affected visual range. Review and approve the scenes.');
@@ -1037,7 +1171,7 @@ export default function App() {
     if (project.status === 'script_review') return <ScriptReview key={project.script} initialScript={project.script || ''} sources={project.sources || []} busy={busy} onApprove={(script) => void approveScript(script)} onRewrite={(direction) => void rewrite(direction)} />;
     if (project.status === 'avatar_render') return <HeyGenModule avatars={heygen.avatars} voices={heygen.voices} catalogLoading={heygen.catalogLoading} catalogError={heygen.catalogError} aspectRatio={project.aspect_ratio} progress={heygen.progress} busy={busy} videoUrl={project.heygen_video_url} onGenerate={(options) => void generateAvatar(options)} />;
     if (project.status === 'style_choice') return <StylePicker value={project.style} onChange={(style) => void patch({ style })} onConfirm={() => void confirmStyle()} />;
-    if (project.status === 'scene_planning') return <Working text="Verger is timing supporting scenes against the avatar" />;
+    if (project.status === 'scene_planning') return <Working text={note || 'Verger is timing supporting scenes against the avatar'} />;
     if (project.status === 'scene_review') return <ScenePlanner scenes={scenes} assets={projectAssets} duration={Number(project.avatar_duration_sec || project.target_length_sec)} aspect={project.aspect_ratio} share={sceneShare} onShare={setSceneShare} imageModel={settings.image_model} onImageModel={(image_model) => setSettings((old) => ({ ...old, image_model }))} onPatch={(id, value) => void patchScene(id, value)} onKind={(scene, kind) => void switchSceneKind(scene, kind)} onRemove={(id) => void remove(id)} onAdd={() => void addSceneRange()} onUpload={(scene, file) => void uploadScene(scene, file)} onGenerateImage={(scene) => void generateScenePreview(scene)} onGenerateVideo={(scene) => void generateSceneVideoPreview(scene)} onGenerateMotion={(scene) => void generateSceneMotionPreview(scene)} generatingSceneId={generatingSceneId} onGenerate={() => void generateSupportingScenes()} />;
     const board = <AssetProgress scenes={scenes} busy={busy} note={note} project={project} onAssemble={() => void assemble()} onRetryScene={(scene) => void retryScene(scene)} onConvertScene={(scene) => void convertSceneToText(scene)} onSkipScene={(scene) => void skipScene(scene)} onUnskipScene={(scene) => void unskipScene(scene)} onCancel={cancelGeneration} onResume={() => void generateSupportingScenes()} />;
     if (project.status === 'asset_gen' || project.status === 'coding') return board;
@@ -1052,7 +1186,7 @@ export default function App() {
       // attempt that just happened in front of the customer.
       const noted = String(project.stage_note || '');
       const failure = busy || project.assembled_video_url ? '' : noted.startsWith(ASSEMBLY_FAILED_PREFIX) ? noted.slice(ASSEMBLY_FAILED_PREFIX.length).trim() : error;
-      return <AssemblyProgress busy={busy} note={note} failure={failure} project={project} checks={project.checks || []} musicBusy={musicBusy} musicNote={musicNote} onRetry={() => void assemble()} onCancel={cancelAssembly} onContinue={openEditor} onGenerateMusic={(value) => void makeMusic(value)} onMixMusic={() => void mixMusic()} />;
+      return <AssemblyProgress busy={busy} note={note} failure={failure} project={project} scenes={scenes} checks={project.checks || []} musicBusy={musicBusy} musicNote={musicNote} onRetry={() => void assemble()} onCancel={cancelAssembly} onContinue={openEditor} onGenerateMusic={(value) => void makeMusic(value)} onMixMusic={() => void mixMusic()} onDraftEdited={() => void bumpDraftVersion()} />;
     }
     if (project.status === 'editing') return <EditorHandoff project={project} scenes={scenes} onOpen={openEditor} />;
     return <Working text="Restoring this project" />;

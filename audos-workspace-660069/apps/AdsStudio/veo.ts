@@ -40,11 +40,13 @@ export async function submitVeo(params: {
   aspect: '9:16' | '16:9' | '1:1';
   durationS: number;
   referenceImageUrl?: string | null;
+  /** Exact platform model id — defaults to the proven Omni Flash. */
+  model?: string;
 }): Promise<string> {
   // The video model renders 4–8s clips; a 10s script clip renders at the 8s cap.
   const duration = Math.min(8, Math.max(4, Math.round(params.durationS || 6)));
   const body: Record<string, unknown> = {
-    model: VEO_MODEL,
+    model: params.model || VEO_MODEL,
     prompt: capVeoText(params.prompt),
     aspectRatio: params.aspect,
     duration,

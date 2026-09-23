@@ -52,6 +52,7 @@ import type { CaptionStyleId, CaptionPosition } from './captionSuite';
 import { generateSfxClip, newSfxId } from './sfxSuite';
 import type { SfxCue } from './sfxSuite';
 import { AnalyzePanel, TrimPanel, EffectsPanel, TextPanel, FramePanel, MusicPanel, ExportPanel, ErrLine } from './editorPanels';
+import AiClipsPanel from './aiClipsPanel';
 import { CaptionsPanel } from './captionsPanel';
 import { SfxPanel } from './sfxPanel';
 
@@ -94,10 +95,11 @@ const cardStyle: CSSProperties = {
   boxShadow: '0 22px 50px -38px rgba(0,0,0,0.9)',
 };
 
-type ToolId = 'analyze' | 'trim' | 'effects' | 'text' | 'captions' | 'frame' | 'music' | 'sfx' | 'export';
+type ToolId = 'analyze' | 'aiclips' | 'trim' | 'effects' | 'text' | 'captions' | 'frame' | 'music' | 'sfx' | 'export';
 
 const TOOLS: { id: ToolId; label: string; icon: any; color: string }[] = [
   { id: 'analyze', label: 'Analyze', icon: Sparkles, color: P.blue },
+  { id: 'aiclips', label: 'AI Clips', icon: Wand2, color: P.violet },
   { id: 'trim', label: 'Trim', icon: Scissors, color: P.amber },
   { id: 'effects', label: 'Effects', icon: SlidersHorizontal, color: P.coral },
   { id: 'text', label: 'Text', icon: Type, color: P.violet },
@@ -1279,6 +1281,7 @@ function VideoEnhancerApp() {
                   onToggleElement={toggleElement} onDeleteElement={deleteElement} onSeek={seekTo}
                 />
               )}
+              {activeTool === 'aiclips' && <AiClipsPanel />}
               {activeTool === 'trim' && (
                 <TrimPanel
                   duration={timelineDur} inPoint={inPoint} outPoint={effOut} playheadT={playheadT}

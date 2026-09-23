@@ -437,6 +437,10 @@ export interface Film {
    * subtle SFX bed are generated automatically and ducked under narration.
    * OFF composes with narration only (existing music is still used). */
   auto_mix: boolean | null;
+  /** Video engine registry id the AI-video scenes render on (see
+   * ScriptToVideo/pipeline/videoModelService VIDEO_MODELS — e.g. 'omni-flash',
+   * 'veo-3.1', 'sora-2'). Null = Omni Flash (pre-picker films, no regression). */
+  video_model: string | null;
   created_at: string;
   updated_at: string;
 }
