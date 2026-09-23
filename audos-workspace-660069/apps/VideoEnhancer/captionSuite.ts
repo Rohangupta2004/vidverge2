@@ -33,6 +33,15 @@ export type CaptionStyleId = 'brand' | 'bold' | 'karaoke' | 'minimal';
 
 export const DEFAULT_CAPTION_STYLE: CaptionStyleId = 'brand';
 
+/** Where the caption block sits on the frame — user-changeable. */
+export type CaptionPosition = 'top' | 'middle' | 'bottom';
+export const DEFAULT_CAPTION_POSITION: CaptionPosition = 'bottom';
+export const CAPTION_POSITIONS: { id: CaptionPosition; label: string }[] = [
+  { id: 'top', label: 'Top' },
+  { id: 'middle', label: 'Middle' },
+  { id: 'bottom', label: 'Bottom' },
+];
+
 export const CAPTION_STYLES: { id: CaptionStyleId; label: string; hint: string }[] = [
   { id: 'brand', label: 'Brand', hint: 'Charcoal pill, warm white text, coral highlight on the spoken word — the VidVerge look.' },
   { id: 'bold', label: 'Bold Pop', hint: 'Big bold white caps with a heavy shadow — built for social.' },
@@ -139,15 +148,16 @@ export function drawCaptionOverlay(
   t: number,
   segments: CaptionSegment[],
   styleId: CaptionStyleId,
+  position: CaptionPosition = DEFAULT_CAPTION_POSITION,
 ): void {
   const seg = activeCaptionSegment(segments, t);
   if (!seg || (!seg.text.trim() && !seg.words.length)) return;
   try {
-    drawSegment(ctx, W, H, t, seg, styleId);
+    drawSegment(ctx, W, H, t, seg, styleId, position);
   } catch { /* a bad caption frame must never break the preview or export */ }
 }
 
-function drawSegment(ctx: CanvasRenderingContext2D, W: number, H: number, t: number, seg: CaptionSegment, styleId: CaptionStyleId): void {
+function drawSegment(ctx: CanvasRenderingContext2D, W: number, H: number, t: number, seg: CaptionSegment, styleId: CaptionStyleId, position: CaptionPosition): void {
   const bold = styleId === 'bold';
   const minimal = styleId === 'minimal';
   const highlightSpoken = styleId === 'brand' || styleId === 'karaoke';
@@ -171,7 +181,9 @@ function drawSegment(ctx: CanvasRenderingContext2D, W: number, H: number, t: num
   const boxW = Math.min(W - 8, blockW + padX * 2);
   const boxH = blockH + padY * 2 - (lineH - fs);
   const bx = clamp(W / 2 - boxW / 2, 4, Math.max(4, W - boxW - 4));
-  const by = H * 0.86 - boxH;
+  // The block anchors where the user chose — top, middle or bottom — in both
+  // the live preview and the export burn-in.
+  const by = position === 'top' ? H * 0.08 : position === 'middle' ? (H - boxH) / 2 : H * 0.86 - boxH;
 
   if (!bold) {
     ctx.globalAlpha = 1;

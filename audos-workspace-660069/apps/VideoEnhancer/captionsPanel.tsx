@@ -16,9 +16,9 @@ import { formatTime } from './enhancerCore';
 import { P } from './editSuite';
 import { panelCard, PanelHeader, PrimaryButton, ErrLine } from './editorPanels';
 import {
-  CAPTION_STYLES, DEMO_CAPTION_T, BRAND_CORAL, demoCaptionSegment, drawCaptionOverlay,
+  CAPTION_STYLES, CAPTION_POSITIONS, DEMO_CAPTION_T, BRAND_CORAL, demoCaptionSegment, drawCaptionOverlay,
 } from './captionSuite';
-import type { CaptionStyleId } from './captionSuite';
+import type { CaptionStyleId, CaptionPosition } from './captionSuite';
 
 function StylePreview({ id, active, onPick }: { id: CaptionStyleId; active: boolean; onPick: () => void }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -102,12 +102,12 @@ function SegmentRow({ seg, onToggle, onDelete, onEdit, onSeek }: {
 }
 
 export function CaptionsPanel({
-  captionsOn, styleId, segments, transcribing, note, err, hasVideo, disabled,
-  onToggleOn, onStyle, onGenerate, onToggleSegment, onDeleteSegment, onEditSegment, onSeek,
+  captionsOn, styleId, position, segments, transcribing, note, err, hasVideo, disabled,
+  onToggleOn, onStyle, onPosition, onGenerate, onToggleSegment, onDeleteSegment, onEditSegment, onSeek,
 }: {
-  captionsOn: boolean; styleId: CaptionStyleId; segments: CaptionSegment[];
+  captionsOn: boolean; styleId: CaptionStyleId; position: CaptionPosition; segments: CaptionSegment[];
   transcribing: boolean; note: string; err: string; hasVideo: boolean; disabled: boolean;
-  onToggleOn: (v: boolean) => void; onStyle: (s: CaptionStyleId) => void; onGenerate: () => void;
+  onToggleOn: (v: boolean) => void; onStyle: (s: CaptionStyleId) => void; onPosition: (p: CaptionPosition) => void; onGenerate: () => void;
   onToggleSegment: (id: string) => void; onDeleteSegment: (id: string) => void;
   onEditSegment: (id: string, text: string) => void; onSeek: (t: number) => void;
 }) {
@@ -166,6 +166,26 @@ export function CaptionsPanel({
             {CAPTION_STYLES.map((s) => (
               <StylePreview key={s.id} id={s.id} active={styleId === s.id} onPick={() => onStyle(s.id)} />
             ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: P.sub }}>Position</span>
+            {CAPTION_POSITIONS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="ve-btn"
+                onClick={() => onPosition(p.id)}
+                style={{
+                  fontSize: 11.5, fontWeight: 700, borderRadius: 999, padding: '4px 12px', cursor: 'pointer',
+                  border: '1px solid ' + (position === p.id ? BRAND_CORAL : P.border),
+                  background: position === p.id ? 'color-mix(in srgb, ' + BRAND_CORAL + ' 14%, transparent)' : 'transparent',
+                  color: position === p.id ? BRAND_CORAL : P.muted,
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+            <span style={{ fontSize: 11, color: P.muted }}>applies to the preview and the export</span>
           </div>
         </div>
       )}

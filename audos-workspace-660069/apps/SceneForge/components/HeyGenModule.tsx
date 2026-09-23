@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react';
-import { ChevronDown, Loader2, Play, Upload } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Check, ChevronDown, Loader2, Play, Search, Upload } from 'lucide-react';
 import { uploadFile } from '../lib/proxy';
+import { sortAvatars, sortVoices, suggestedVoices } from '../lib/heygenCatalog';
 import type { HeyGenOptions } from '../hooks/useHeyGen';
 
 const DEFAULTS: HeyGenOptions = {
-  avatar_id: '', voice_id: '', resolution: '1080p', aspect_ratio: '16:9', fit: 'cover',
+  avatar_id: '', voice_id: '', resolution: '1080p', aspect_ratio: '9:16', fit: 'cover',
   background: { type: 'color', value: '#0A0F1E' }, voice_settings: { speed: 1 },
   captions: false, gestures: false, output_format: 'mp4', advanced: {},
 };
+
+type CatalogChip = 'all' | 'indian' | 'female' | 'male';
 
 function Field(props: { label: string; children: any }) {
   return <label className="text-xs font-medium text-[var(--space-text-secondary)]">{props.label}<div className="mt-1">{props.children}</div></label>;
@@ -15,15 +18,91 @@ function Field(props: { label: string; children: any }) {
 function Section(props: { title: string; children: any }) {
   return <section className="my-6 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5"><h2 className="mb-4 font-semibold text-[var(--space-text-primary)]">{props.title}</h2>{props.children}</section>;
 }
+function Badge(props: { children: any }) {
+  return <span className="rounded-full bg-[color-mix(in_srgb,var(--space-text-primary)_7%,transparent)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--space-text-muted)]">{props.children}</span>;
+}
+function Chip(props: { active: boolean; label: string; onClick: () => void }) {
+  return <button type="button" onClick={props.onClick} className={props.active ? 'rounded-full bg-[var(--space-brand-primary-600)] px-3 py-1 text-xs font-semibold text-white' : 'rounded-full border border-[var(--space-border-default)] px-3 py-1 text-xs text-[var(--space-text-secondary)] transition-colors hover:border-[var(--space-border-strong)]'}>{props.label}</button>;
+}
+function chipMatch(chip: CatalogChip, view: { indian: boolean; gender: string }) {
+  if (chip === 'indian') return view.indian;
+  if (chip === 'female') return view.gender.toLowerCase().startsWith('f');
+  if (chip === 'male') return view.gender.toLowerCase().startsWith('m');
+  return true;
+}
+function LibraryTools(props: { query: string; onQuery: (value: string) => void; chip: CatalogChip; onChip: (value: CatalogChip) => void; placeholder: string; hasIndian: boolean; hasGender: boolean }) {
+  const { query, onQuery, chip, onChip, placeholder, hasIndian, hasGender } = props;
+  return <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--space-text-muted)]" />
+      <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder={placeholder} className="input pl-9" />
+    </div>
+    <Chip active={chip === 'all'} label="All" onClick={() => onChip('all')} />
+    {hasIndian ? <Chip active={chip === 'indian'} label="Indian" onClick={() => onChip('indian')} /> : null}
+    {hasGender ? <Chip active={chip === 'female'} label="Female" onClick={() => onChip('female')} /> : null}
+    {hasGender ? <Chip active={chip === 'male'} label="Male" onClick={() => onChip('male')} /> : null}
+  </div>;
+}
+function CatalogNotice(props: { tone: 'error' | 'empty'; text: string }) {
+  return props.tone === 'error'
+    ? <div className="flex items-start gap-2 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] p-4 text-sm text-[var(--space-semantic-danger)]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{props.text}</span></div>
+    : <div className="rounded-xl border border-dashed border-[var(--space-border-default)] p-4 text-sm text-[var(--space-text-secondary)]">{props.text}</div>;
+}
+function LoadingGrid(props: { text: string; shape: 'portrait' | 'row' }) {
+  return <div>
+    <p className="mb-3 flex items-center gap-2 text-sm text-[var(--space-text-secondary)]"><Loader2 className="h-4 w-4 animate-spin" />{props.text}</p>
+    <div className={props.shape === 'portrait' ? 'grid grid-cols-2 gap-3 md:grid-cols-4' : 'grid gap-2 sm:grid-cols-2'}>
+      {Array.from({ length: props.shape === 'portrait' ? 8 : 6 }).map((_, i) => props.shape === 'portrait'
+        ? <div key={i} className="animate-pulse rounded-xl border border-[var(--space-border-default)] p-2"><div className="aspect-video rounded-lg bg-[var(--space-surface-muted)]" /><div className="mt-2 h-3 w-2/3 rounded bg-[var(--space-surface-muted)]" /></div>
+        : <div key={i} className="h-16 animate-pulse rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-muted)]" />)}
+    </div>
+  </div>;
+}
 
-export default function HeyGenModule(props: { avatars: any[]; voices: any[]; aspectRatio: '16:9' | '9:16'; progress: string; busy: boolean; videoUrl?: string; onGenerate: (options: HeyGenOptions) => void }) {
-  const { avatars, voices, aspectRatio, progress, busy, videoUrl, onGenerate } = props;
+export default function HeyGenModule(props: { avatars: any[]; voices: any[]; catalogLoading: boolean; catalogError: string; aspectRatio: '16:9' | '9:16'; progress: string; busy: boolean; videoUrl?: string; onGenerate: (options: HeyGenOptions) => void }) {
+  const { avatars, voices, catalogLoading, catalogError, aspectRatio, progress, busy, videoUrl, onGenerate } = props;
   const [options, setOptions] = useState<HeyGenOptions>({ ...DEFAULTS, aspect_ratio: aspectRatio });
   const [advancedText, setAdvancedText] = useState('{}');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [avatarQuery, setAvatarQuery] = useState('');
+  const [avatarChip, setAvatarChip] = useState<CatalogChip>('all');
+  const [avatarLimit, setAvatarLimit] = useState(48);
+  const [voiceQuery, setVoiceQuery] = useState('');
+  const [voiceChip, setVoiceChip] = useState<CatalogChip>('all');
+  const [voiceLimit, setVoiceLimit] = useState(30);
+  const [voiceScope, setVoiceScope] = useState<'suggested' | 'all'>('suggested');
   useEffect(() => setOptions((old) => ({ ...old, aspect_ratio: aspectRatio })), [aspectRatio]);
   const patch = (value: Partial<HeyGenOptions>) => setOptions((old) => ({ ...old, ...value }));
+
+  // Everything shown comes straight off the live catalog the hook fetched —
+  // ordering puts Indian avatars and Indian-language/accent voices first.
+  const avatarLibrary = useMemo(() => sortAvatars(avatars), [avatars]);
+  const voiceLibrary = useMemo(() => sortVoices(voices), [voices]);
+  const selectedAvatar = useMemo(() => avatarLibrary.find((view) => view.id === options.avatar_id), [avatarLibrary, options.avatar_id]);
+  const suggestion = useMemo(() => suggestedVoices(selectedAvatar?.raw, voiceLibrary), [selectedAvatar, voiceLibrary]);
+  const suggestedList = useMemo(() => (suggestion ? voiceLibrary.filter((view) => suggestion.ids.has(view.id)) : []), [suggestion, voiceLibrary]);
+
+  const filteredAvatars = useMemo(() => {
+    const query = avatarQuery.trim().toLowerCase();
+    return avatarLibrary.filter((view) => chipMatch(avatarChip, view) && (!query || `${view.name} ${view.gender} ${view.styleLabel}`.toLowerCase().includes(query)));
+  }, [avatarLibrary, avatarChip, avatarQuery]);
+  const filteredVoices = useMemo(() => {
+    const query = voiceQuery.trim().toLowerCase();
+    const scoped = voiceScope === 'suggested' && suggestedList.length ? suggestedList : voiceLibrary;
+    return scoped.filter((view) => chipMatch(voiceChip, view) && (!query || `${view.name} ${view.language} ${view.gender}`.toLowerCase().includes(query)));
+  }, [voiceLibrary, suggestedList, voiceScope, voiceChip, voiceQuery]);
+
+  useEffect(() => setAvatarLimit(48), [avatarQuery, avatarChip]);
+  useEffect(() => setVoiceLimit(30), [voiceQuery, voiceChip, voiceScope]);
+  // A fresh avatar pick re-opens the suggested-voices lens and, when HeyGen
+  // names a compatible voice and none is chosen yet, preselects the first —
+  // it never overrides a voice the user already picked.
+  useEffect(() => {
+    setVoiceScope('suggested');
+    if (!options.avatar_id || !suggestedList.length) return;
+    setOptions((old) => (old.voice_id ? old : { ...old, voice_id: suggestedList[0].id }));
+  }, [options.avatar_id, suggestedList]);
 
   async function uploadBackground(file?: File) {
     if (!file) return;
@@ -44,12 +123,29 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; asp
     <p className="mt-2 text-[var(--space-text-secondary)]">Catalog choices come live from HeyGen v3. Additional future controls can be passed through in Advanced.</p>
 
     <Section title="Avatar">
-      <div className="grid max-h-72 grid-cols-2 gap-3 overflow-y-auto md:grid-cols-4">
-        {avatars.map((avatar) => <button key={avatar.id} onClick={() => patch({ avatar_id: avatar.id })} className={options.avatar_id === avatar.id ? 'rounded-xl border border-[var(--space-brand-primary-500)] p-2 text-left' : 'rounded-xl border border-[var(--space-border-default)] p-2 text-left'}>
-          {avatar.preview_image_url || avatar.image_url ? <img src={avatar.preview_image_url || avatar.image_url} className="aspect-video w-full rounded-lg object-cover" /> : <div className="aspect-video rounded-lg bg-[var(--space-surface-muted)]" />}
-          <span className="mt-2 block truncate text-xs text-[var(--space-text-secondary)]">{avatar.name || avatar.id}</span>
-        </button>)}
-      </div>
+      {catalogLoading && !avatarLibrary.length ? <LoadingGrid text="Loading the full avatar library live from HeyGen…" shape="portrait" />
+        : catalogError && !avatarLibrary.length ? <CatalogNotice tone="error" text={`The HeyGen avatar list could not be loaded: ${catalogError} — reopen this step to retry, or paste an avatar look ID below.`} />
+          : !avatarLibrary.length ? <CatalogNotice tone="empty" text="HeyGen returned no avatars for this account. Add avatars in HeyGen, or paste a specific avatar look ID below." />
+            : <>
+              <LibraryTools query={avatarQuery} onQuery={setAvatarQuery} chip={avatarChip} onChip={setAvatarChip} placeholder="Search avatars" hasIndian={avatarLibrary.some((view) => view.indian)} hasGender={avatarLibrary.some((view) => view.gender)} />
+              <p className="mb-2 text-xs text-[var(--space-text-muted)]">{filteredAvatars.length} of {avatarLibrary.length} avatars · live from HeyGen · Indian avatars are listed first{catalogLoading ? ' · loading the rest…' : ''}</p>
+              {filteredAvatars.length
+                ? <div className="grid max-h-96 grid-cols-2 gap-3 overflow-y-auto pr-1 md:grid-cols-4">
+                  {filteredAvatars.slice(0, avatarLimit).map((view, index) => {
+                    const selected = options.avatar_id === view.id;
+                    return <button key={view.id} type="button" onClick={() => patch({ avatar_id: view.id })} className={selected ? 'rounded-xl border-2 border-[var(--space-brand-primary-500)] bg-[color-mix(in_srgb,var(--space-brand-primary-500)_8%,transparent)] p-2 text-left' : 'rounded-xl border border-[var(--space-border-default)] p-2 text-left transition-colors hover:border-[var(--space-border-strong)]'}>
+                      <div className="relative">
+                        {view.image ? <img src={view.image} alt={view.name} loading={index < 8 ? 'eager' : 'lazy'} decoding="async" className="aspect-video w-full rounded-lg object-cover" /> : <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-[var(--space-surface-muted)] text-[10px] text-[var(--space-text-muted)]">No preview</div>}
+                        {selected ? <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--space-brand-primary-600)] shadow"><Check className="h-3 w-3 text-white" /></span> : null}
+                      </div>
+                      <span className="mt-2 block truncate text-xs font-medium text-[var(--space-text-primary)]">{view.name}</span>
+                      <span className="mt-1 flex flex-wrap gap-1">{view.gender ? <Badge>{view.gender}</Badge> : null}{view.styleLabel ? <Badge>{view.styleLabel}</Badge> : null}</span>
+                    </button>;
+                  })}
+                  {filteredAvatars.length > avatarLimit ? <button type="button" onClick={() => setAvatarLimit((old) => old + 96)} className="col-span-full rounded-xl border border-dashed border-[var(--space-border-default)] py-3 text-sm text-[var(--space-text-secondary)] transition-colors hover:border-[var(--space-border-strong)]">Show more ({filteredAvatars.length - avatarLimit} remaining)</button> : null}
+                </div>
+                : <CatalogNotice tone="empty" text="No avatars match this search or filter." />}
+            </>}
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         <Field label="Avatar look ID"><input value={options.avatar_id} onChange={(e) => patch({ avatar_id: e.target.value })} className="input" /></Field>
         <Field label="Pose or style"><input value={options.pose || ''} onChange={(e) => patch({ pose: e.target.value })} placeholder="normal, standing" className="input" /></Field>
@@ -67,8 +163,34 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; asp
     </Section>
 
     <Section title="Voice">
-      <div className="grid gap-3 sm:grid-cols-4">
-        <Field label="HeyGen or integrated voice"><select value={options.voice_id} onChange={(e) => patch({ voice_id: e.target.value })} className="input"><option value="">Choose live voice</option>{voices.map((voice) => <option key={voice.voice_id || voice.id} value={voice.voice_id || voice.id}>{voice.name || voice.display_name || voice.voice_id}</option>)}</select></Field>
+      {catalogLoading && !voiceLibrary.length ? <LoadingGrid text="Loading the live HeyGen voice catalog…" shape="row" />
+        : catalogError && !voiceLibrary.length ? <CatalogNotice tone="error" text={`The HeyGen voice list could not be loaded: ${catalogError} — reopen this step to retry.`} />
+          : !voiceLibrary.length ? <CatalogNotice tone="empty" text="HeyGen returned no voices for this account, so there is nothing to choose from yet." />
+            : <>
+              {suggestion && suggestedList.length ? <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Chip active={voiceScope === 'suggested'} label={`Suggested for ${selectedAvatar?.name || 'this avatar'} (${suggestedList.length})`} onClick={() => setVoiceScope('suggested')} />
+                <Chip active={voiceScope === 'all'} label={`All voices (${voiceLibrary.length})`} onClick={() => setVoiceScope('all')} />
+                <span className="text-xs text-[var(--space-text-muted)]">{suggestion.reason} You can still pick any voice.</span>
+              </div> : null}
+              <LibraryTools query={voiceQuery} onQuery={setVoiceQuery} chip={voiceChip} onChip={setVoiceChip} placeholder="Search voices" hasIndian={voiceLibrary.some((view) => view.indian)} hasGender={voiceLibrary.some((view) => view.gender)} />
+              <p className="mb-2 text-xs text-[var(--space-text-muted)]">{filteredVoices.length} voices · live from HeyGen · Indian-accent and Indian-language voices are listed first{catalogLoading ? ' · loading the rest…' : ''}</p>
+              {filteredVoices.length
+                ? <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                  {filteredVoices.slice(0, voiceLimit).map((view) => {
+                    const selected = options.voice_id === view.id;
+                    return <button key={view.id} type="button" onClick={() => patch({ voice_id: view.id })} className={selected ? 'rounded-xl border-2 border-[var(--space-brand-primary-500)] bg-[color-mix(in_srgb,var(--space-brand-primary-500)_8%,transparent)] p-3 text-left' : 'rounded-xl border border-[var(--space-border-default)] p-3 text-left transition-colors hover:border-[var(--space-border-strong)]'}>
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium text-[var(--space-text-primary)]">{view.name}</span>
+                        {selected ? <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--space-brand-primary-600)]"><Check className="h-3 w-3 text-white" /></span> : null}
+                      </span>
+                      <span className="mt-1.5 flex flex-wrap gap-1"><Badge>{view.language}</Badge>{view.gender ? <Badge>{view.gender}</Badge> : null}</span>
+                    </button>;
+                  })}
+                  {filteredVoices.length > voiceLimit ? <button type="button" onClick={() => setVoiceLimit((old) => old + 60)} className="col-span-full rounded-xl border border-dashed border-[var(--space-border-default)] py-3 text-sm text-[var(--space-text-secondary)] transition-colors hover:border-[var(--space-border-strong)]">Show more ({filteredVoices.length - voiceLimit} remaining)</button> : null}
+                </div>
+                : <CatalogNotice tone="empty" text={voiceScope === 'suggested' ? 'No suggested voice matches this search — switch to All voices.' : 'No voices match this search or filter.'} />}
+            </>}
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <Field label={'Speed ' + options.voice_settings.speed.toFixed(2) + 'x'}><input type="range" min={0.5} max={1.5} step={0.05} value={options.voice_settings.speed} onChange={(e) => patch({ voice_settings: { ...options.voice_settings, speed: Number(e.target.value) } })} /></Field>
         <Field label="Pitch pass-through"><input type="number" value={options.voice_settings.pitch || 0} onChange={(e) => patch({ voice_settings: { ...options.voice_settings, pitch: Number(e.target.value) } })} className="input" /></Field>
         <Field label="Emotion pass-through"><input value={options.voice_settings.emotion || ''} onChange={(e) => patch({ voice_settings: { ...options.voice_settings, emotion: e.target.value } })} className="input" /></Field>

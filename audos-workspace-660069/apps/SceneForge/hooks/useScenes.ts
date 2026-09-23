@@ -5,6 +5,14 @@ export function useScenes(projectId?: string) {
   const [scenes, setScenes] = useState<Scene[]>([]);
   const refresh = useCallback(async () => { if (projectId) setScenes(await listScenes(projectId)); else setScenes([]); }, [projectId]);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const receive = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string; scenes?: Scene[] }>).detail;
+      if (detail?.projectId === projectId && Array.isArray(detail.scenes)) setScenes(detail.scenes);
+    };
+    window.addEventListener('sceneforge:scenes-changed', receive);
+    return () => window.removeEventListener('sceneforge:scenes-changed', receive);
+  }, [projectId]);
 
   // The plan is saved in ONE server call that matches the new scenes onto the
   // rows already at each scene_index. Nothing is deleted and re-inserted, so

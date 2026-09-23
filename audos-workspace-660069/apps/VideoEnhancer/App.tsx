@@ -42,13 +42,13 @@ import type { AnalysisInsight } from './overlayEngine';
 import {
   P, clamp, EffectsState, DEFAULT_EFFECTS, filterCss, TextOverlayItem,
   newTextOverlay, buildSegments, keptRanges, keptDuration, AspectPreset,
-  ASPECT_PRESETS, drawTextOverlays, renderEditedVideo, ExportFormat,
+  ASPECT_PRESETS, drawTextOverlays, drawVignette, drawBackdropFrame, renderEditedVideo, ExportFormat,
   ExportQuality, TextHitRect,
 } from './editSuite';
-import { generateMusicBed } from './musicSuite';
+import { generateMusicBed, suggestMusicPrompt } from './musicSuite';
 import type { GeneratedMusic } from './musicSuite';
-import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE, drawCaptionOverlay, BRAND_CORAL } from './captionSuite';
-import type { CaptionStyleId } from './captionSuite';
+import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE, DEFAULT_CAPTION_POSITION, drawCaptionOverlay, BRAND_CORAL } from './captionSuite';
+import type { CaptionStyleId, CaptionPosition } from './captionSuite';
 import { generateSfxClip, newSfxId } from './sfxSuite';
 import type { SfxCue } from './sfxSuite';
 import { AnalyzePanel, TrimPanel, EffectsPanel, TextPanel, FramePanel, MusicPanel, ExportPanel, ErrLine } from './editorPanels';
@@ -154,7 +154,7 @@ interface EditSnapshot {
   effects?: EffectsState; texts?: TextOverlayItem[]; aspect?: AspectPreset;
   muteOriginal?: boolean; originalVolume?: number; musicVolume?: number;
   format?: ExportFormat; quality?: ExportQuality;
-  captionsOn?: boolean; captionStyleId?: CaptionStyleId;
+  captionsOn?: boolean; captionStyleId?: CaptionStyleId; captionPos?: CaptionPosition;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +237,9 @@ function VideoEnhancerApp() {
   const [captionStyleId, setCaptionStyleId] = useState<CaptionStyleId>(DEFAULT_CAPTION_STYLE);
   const captionStyleIdRef = useRef<CaptionStyleId>(DEFAULT_CAPTION_STYLE);
   useEffect(() => { captionStyleIdRef.current = captionStyleId; }, [captionStyleId]);
+  const [captionPos, setCaptionPos] = useState<CaptionPosition>(DEFAULT_CAPTION_POSITION);
+  const captionPosRef = useRef<CaptionPosition>(DEFAULT_CAPTION_POSITION);
+  useEffect(() => { captionPosRef.current = captionPos; }, [captionPos]);
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeNote, setTranscribeNote] = useState('');
   const [transcribeErr, setTranscribeErr] = useState('');
@@ -398,6 +401,7 @@ function VideoEnhancerApp() {
         if (ed.quality === 'high' || ed.quality === 'standard' || ed.quality === 'compact') setQuality(ed.quality);
         if (typeof ed.captionsOn === 'boolean') setCaptionsOn(ed.captionsOn);
         if (ed.captionStyleId && CAPTION_STYLES.some((s) => s.id === ed.captionStyleId)) setCaptionStyleId(ed.captionStyleId);
+        if (ed.captionPos === 'top' || ed.captionPos === 'middle' || ed.captionPos === 'bottom') setCaptionPos(ed.captionPos);
       }
     } catch { /* localStorage unavailable — the DB restore still runs */ }
   }, []);
@@ -405,10 +409,10 @@ function VideoEnhancerApp() {
   useEffect(() => {
     if (!uploadedUrl && !outputUrl && !elements.length && !texts.length) return;
     try {
-      const edit: EditSnapshot = { inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality, captionsOn, captionStyleId };
+      const edit: EditSnapshot = { inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality, captionsOn, captionStyleId, captionPos };
       window.localStorage.setItem(VE_SNAPSHOT_KEY, JSON.stringify({ uploadedUrl, outputUrl, summary, elements, insights, edit, updatedAt: Date.now() }));
     } catch { /* no-op */ }
-  }, [uploadedUrl, outputUrl, summary, elements, insights, inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality, captionsOn, captionStyleId]);
+  }, [uploadedUrl, outputUrl, summary, elements, insights, inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality, captionsOn, captionStyleId, captionPos]);
 
   useEffect(() => {
     if (!accountUserId) return;
@@ -477,17 +481,36 @@ function VideoEnhancerApp() {
           ctx.clearRect(0, 0, w, h);
           if (!showingOutput) {
             const vw = v.videoWidth, vh = v.videoHeight;
-            const cover = aspectRef.current !== 'original';
-            const s = cover ? Math.max(rect.width / vw, rect.height / vh) : Math.min(rect.width / vw, rect.height / vh);
-            const cw = vw * s * dpr, ch = vh * s * dpr;
-            const ox = (w - cw) / 2, oy = (h - ch) / 2;
+            const fx = effectsRef.current;
+            const backdrop = fx.backdrop && fx.backdrop !== 'none' ? fx.backdrop : null;
+            let ox = 0, oy = 0, cw = w, ch = h;
+            if (backdrop) {
+              // Backdrop framing previews LIVE: the canvas paints the backdrop
+              // and the contained footage itself (covering the element under
+              // it), so what you see is exactly what exports.
+              drawBackdropFrame(ctx, w, h, v, backdrop);
+              const fit = Math.min((w * 0.92) / vw, (h * 0.92) / vh);
+              cw = vw * fit; ch = vh * fit;
+              ox = (w - cw) / 2; oy = (h - ch) / 2;
+              ctx.save();
+              const fCss = filterCss(fx);
+              if (fCss !== 'none') ctx.filter = fCss;
+              ctx.drawImage(v, ox, oy, cw, ch);
+              ctx.restore();
+              drawVignette(ctx, w, h, fx.vignette);
+            } else {
+              const cover = aspectRef.current !== 'original';
+              const s = cover ? Math.max(rect.width / vw, rect.height / vh) : Math.min(rect.width / vw, rect.height / vh);
+              cw = vw * s * dpr; ch = vh * s * dpr;
+              ox = (w - cw) / 2; oy = (h - ch) / 2;
+            }
             previewMapRef.current = { ox, oy, cw, ch, dpr };
             ctx.save();
             ctx.translate(ox, oy);
             drawOverlays(ctx, cw, ch, v.currentTime, elementsRef.current.filter((e) => e.enabled));
             drawTextOverlays(ctx, cw, ch, v.currentTime, textsRef.current, hitRectsRef.current, selectedTextIdRef.current);
             if (captionsOnRef.current && captionSegmentsRef.current.length) {
-              drawCaptionOverlay(ctx, cw, ch, v.currentTime, captionSegmentsRef.current, captionStyleIdRef.current);
+              drawCaptionOverlay(ctx, cw, ch, v.currentTime, captionSegmentsRef.current, captionStyleIdRef.current, captionPosRef.current);
             }
             ctx.restore();
           }
@@ -658,6 +681,9 @@ function VideoEnhancerApp() {
       setInsights(result.insights);
       setElements(result.elements);
       setViewOriginal(true);
+      // Auto-suggest the music mood from what the footage actually shows, so
+      // adding music never requires a manual pick.
+      setMusicPrompt((cur) => (cur.trim() ? cur : suggestMusicPrompt(result.summary)));
       void updateEnhancerJob(jobRowIdRef.current, {
         status: 'done',
         caption_text: JSON.stringify({ summary: result.summary, elements: result.elements, insights: result.insights }),
@@ -689,7 +715,7 @@ function VideoEnhancerApp() {
           muteOriginal,
           originalVolume,
           music: musicTrack ? { blob: musicTrack.blob, volume: musicVolume } : null,
-          captions: captionsOn && captionSegmentsRef.current.length ? { segments: captionSegmentsRef.current.filter((s) => s.enabled), styleId: captionStyleId } : null,
+          captions: captionsOn && captionSegmentsRef.current.length ? { segments: captionSegmentsRef.current.filter((s) => s.enabled), styleId: captionStyleId, position: captionPos } : null,
           sfx: readySfx.map((c) => ({ id: c.id, at: c.at, volume: c.volume, blob: c.blob as Blob })),
           format,
           quality,
@@ -723,14 +749,18 @@ function VideoEnhancerApp() {
       if (aliveRef.current) setExportErr(msg(e));
     }
     if (aliveRef.current) setExporting(false);
-  }, [exporting, analyzing, ensureSourceFile, duration, muteOriginal, originalVolume, musicTrack, musicVolume, format, quality, captionsOn, captionStyleId]);
+  }, [exporting, analyzing, ensureSourceFile, duration, muteOriginal, originalVolume, musicTrack, musicVolume, format, quality, captionsOn, captionStyleId, captionPos]);
 
   // ---- Music ----
   const runMusic = useCallback(async () => {
     if (musicBusy) return;
     setMusicBusy(true); setMusicErr(''); setMusicNote('Composing your track…');
     try {
-      const res = await generateMusicBed(musicPrompt, keptSecsRef.current || duration || 30, (n) => { if (aliveRef.current) setMusicNote(n); });
+      // Music never requires a manual pick: an empty prompt falls back to the
+      // AI-suggested mood derived from the analysis summary (or a solid default).
+      const effectivePrompt = musicPrompt.trim() || suggestMusicPrompt(summary);
+      if (!musicPrompt.trim()) setMusicPrompt(effectivePrompt);
+      const res = await generateMusicBed(effectivePrompt, keptSecsRef.current || duration || 30, (n) => { if (aliveRef.current) setMusicNote(n); });
       if (!aliveRef.current) return;
       setMusicTrack(res);
       setMusicUrl((prev) => { if (prev) { try { URL.revokeObjectURL(prev); } catch { /* no-op */ } } return URL.createObjectURL(res.blob); });
@@ -738,7 +768,7 @@ function VideoEnhancerApp() {
       if (aliveRef.current) setMusicErr(msg(e));
     }
     if (aliveRef.current) { setMusicBusy(false); setMusicNote(''); }
-  }, [musicBusy, musicPrompt, duration]);
+  }, [musicBusy, musicPrompt, duration, summary]);
 
   const removeMusic = useCallback(() => {
     setMusicTrack(null);
@@ -1269,10 +1299,10 @@ function VideoEnhancerApp() {
               )}
               {activeTool === 'captions' && (
                 <CaptionsPanel
-                  captionsOn={captionsOn} styleId={captionStyleId} segments={captionSegments}
+                  captionsOn={captionsOn} styleId={captionStyleId} position={captionPos} segments={captionSegments}
                   transcribing={transcribing} note={transcribeNote} err={transcribeErr}
                   hasVideo={!!file || !!uploadedUrl} disabled={exporting}
-                  onToggleOn={setCaptionsOn} onStyle={setCaptionStyleId} onGenerate={() => { void runGenerateCaptions(); }}
+                  onToggleOn={setCaptionsOn} onStyle={setCaptionStyleId} onPosition={setCaptionPos} onGenerate={() => { void runGenerateCaptions(); }}
                   onToggleSegment={toggleCaptionSegment} onDeleteSegment={deleteCaptionSegment}
                   onEditSegment={editCaptionSegment} onSeek={seekTo}
                 />

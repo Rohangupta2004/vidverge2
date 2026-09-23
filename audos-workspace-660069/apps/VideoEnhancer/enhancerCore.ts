@@ -124,15 +124,15 @@ export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 export const BUFFERED_UPLOAD_BYTES = 50 * 1024 * 1024; // /api/upload/file server-side ceiling
 
 async function uploadVideoBuffered(file: File): Promise<{ url: string; bytes: number }> {
+  const token = workspaceToken();
+  if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
   const form = new FormData();
   form.append('file', file);
   form.append('workspaceId', WORKSPACE_UUID);
   form.append('folder', 'video-enhancer');
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { 'X-Workspace-DB-Token': token };
   const id = appId();
   if (id) headers['X-App-Id'] = id;
-  const token = workspaceToken();
-  if (token) headers['X-Workspace-DB-Token'] = token;
   const res = await fetch('/api/upload/file', { method: 'POST', headers, body: form });
   const data = await res.json().catch(() => null);
   if (!res.ok || !data?.success || !data.url) {
@@ -211,11 +211,11 @@ async function postTranscription(blob: Blob, filename: string): Promise<{ transc
  * word-timed endpoint is unavailable so the creator still gets a transcript.
  */
 async function postPlainTranscription(blob: Blob, filename: string): Promise<{ transcript: string; words: TranscriptWord[]; duration: number }> {
+  const token = workspaceToken();
+  if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
   const form = new FormData();
   form.append('audio', blob, filename);
-  const headers: Record<string, string> = {};
-  const token = workspaceToken();
-  if (token) headers['X-Workspace-DB-Token'] = token;
+  const headers: Record<string, string> = { 'X-Workspace-DB-Token': token };
   const res = await fetch('/api/generate/transcribe', { method: 'POST', headers, body: form });
   const data = await res.json().catch(() => null);
   if (!res.ok || typeof data?.text !== 'string') {
@@ -317,8 +317,33 @@ export async function transcribeVideo(file: File, onNote?: (note: string) => voi
  * reload, new tab, fresh sign-in) re-run transcription and audio analysis
  * without asking the creator to upload the same video again.
  */
+/**
+ * True for a workspace-internal URL (relative, same-origin, or any `/api/`
+ * path) that the platform authenticates with the workspace token. Durable
+ * public GCS object URLs are external — attaching custom headers there would
+ * trip a CORS preflight the storage bucket rejects, so they stay header-free.
+ */
+function isInternalUrl(url: string): boolean {
+  if (!url) return false;
+  if (url.startsWith('/')) return true;
+  try {
+    if (typeof window !== 'undefined' && new URL(url, window.location.href).origin === window.location.origin) return true;
+  } catch { return true; }
+  return /\/api\//.test(url);
+}
+
 export async function fetchVideoAsFile(url: string): Promise<File> {
-  const res = await fetch(url);
+  const headers: Record<string, string> = {};
+  // A stored video served from a workspace-authenticated route (e.g. an
+  // /api/... result_url) needs the workspace token, or it comes back 401
+  // 'authentication_required'; a public GCS URL is fetched without headers.
+  if (isInternalUrl(url)) {
+    const token = workspaceToken();
+    if (token) headers['X-Workspace-DB-Token'] = token;
+    const id = appId();
+    if (id) headers['X-App-Id'] = id;
+  }
+  const res = await fetch(url, Object.keys(headers).length ? { headers } : undefined);
   if (!res.ok) throw new Error('Could not load the stored video (HTTP ' + res.status + ').');
   const blob = await res.blob();
   const name = url.split('?')[0].split('/').pop() || 'video.mp4';
@@ -546,9 +571,9 @@ export async function checkBroll(operationId: string): Promise<{ status: 'proces
 // ---------------------------------------------------------------------------
 
 export async function clipVideo(videoUrlOrKey: string, startSec: number, endSec: number): Promise<{ url: string; durationSec: number }> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = workspaceToken();
-  if (token) headers['X-Workspace-DB-Token'] = token;
+  if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token };
   const res = await fetch('/api/video/clip', {
     method: 'POST',
     headers,

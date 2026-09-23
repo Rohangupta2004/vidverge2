@@ -33,6 +33,21 @@ export const MUSIC_PRESETS: MusicStylePreset[] = [
   { label: 'Hip-hop groove', prompt: 'Confident hip-hop instrumental with a punchy boom-bap beat, deep sub bass and sparse melodic keys' },
 ];
 
+/**
+ * Derive a fitting music mood from the AI analysis summary — used to
+ * auto-suggest (and auto-apply) a track so music never requires a manual
+ * pick. Deterministic keyword mapping onto the preset catalog.
+ */
+export function suggestMusicPrompt(summary: string): string {
+  const s = String(summary || '').toLowerCase();
+  if (/(sport|basketball|workout|training|drill|action|race|run|fast)/.test(s)) return MUSIC_PRESETS[2].prompt;
+  if (/(tutorial|how to|demonstrat|lesson|explain|teach|step)/.test(s)) return MUSIC_PRESETS[4].prompt;
+  if (/(product|app|screen|ui|demo|software|startup|website)/.test(s)) return MUSIC_PRESETS[0].prompt;
+  if (/(nature|calm|slow|peaceful|meditat|relax|scenery|landscape|ocean)/.test(s)) return MUSIC_PRESETS[3].prompt;
+  if (/(cinematic|film|drama|story|travel|epic|trailer)/.test(s)) return MUSIC_PRESETS[1].prompt;
+  return MUSIC_PRESETS[0].prompt;
+}
+
 export type ByokVerdict = 'unknown' | 'usable' | 'missing' | 'rejected' | 'host-not-allowed';
 
 // One latch for the whole session — probing is a real billable round trip.

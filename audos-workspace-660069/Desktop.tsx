@@ -17,6 +17,7 @@ import {
 import type { PricingTrigger } from './lib/plans';
 import { tw } from './lib/colors';
 import { isTenantDelegationCanvas } from './lib/tenant-delegation-canvas';
+import { LauncherToolCard, LauncherFX } from './components/HomeLauncher';
 
 const DESKTOP_VERSION = 2;
 
@@ -736,12 +737,13 @@ export default function SpaceDesktop({
       <div className="hidden md:block h-screen min-h-0 overflow-hidden">
         {/* App Launcher Grid - Shows when in launcher mode */}
         {isLauncherMode && (
-          <div className="flex flex-col items-center justify-center min-h-[calc(100vh-8rem)] px-6 animate-in fade-in duration-500">
+          <div className="relative overflow-hidden flex flex-col items-center justify-center min-h-[calc(100vh-8rem)] px-6 animate-in fade-in duration-500">
+            <LauncherFX />
             {/* Branding */}
             {runtimeTheme.branding.name && (
-              <div className="text-center mb-12">
+              <div className="relative text-center mb-12 vv-fade-up">
                 <h1 className="text-4xl font-bold text-[var(--space-text-primary)] mb-2" style={{ letterSpacing: '-0.02em' }}>
-                  {runtimeTheme.branding.name}
+                  <span className="vv-title-shimmer">{runtimeTheme.branding.name}</span>
                 </h1>
                 {runtimeTheme.branding.tagline && (
                   <p className="text-lg text-[var(--space-text-secondary)]">
@@ -752,26 +754,17 @@ export default function SpaceDesktop({
             )}
 
             {/* App Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 max-w-4xl">
+            <div className="relative grid grid-cols-2 gap-6 w-full max-w-4xl">
               {/* App Cards */}
-              {config.apps.map(app => {
-                const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
-                return (
-                  <button
-                    key={app.id}
-                    onClick={() => openApp(app.id)}
-                    className="group flex flex-col items-center p-6 bg-[var(--space-surface-panel)] backdrop-blur-md rounded-2xl border border-[var(--space-border-default)] shadow-lg hover:bg-[var(--space-surface-panel-strong)] hover:shadow-xl hover:scale-105 transition-all duration-300 cursor-pointer"
-                  >
-                    <div className="w-16 h-16 flex items-center justify-center bg-[var(--space-surface-accent-soft)] rounded-2xl mb-4 group-hover:brightness-95 transition-colors">
-                      <IconComponent className={`w-8 h-8 ${tw.appIcon.active}`} />
-                    </div>
-                    <h3 className="text-base font-semibold text-[var(--space-text-primary)] mb-1">{app.name}</h3>
-                    <p className="text-xs text-[var(--space-text-secondary)] text-center line-clamp-2">
-                      {app.description || `Open ${app.name}`}
-                    </p>
-                  </button>
-                );
-              })}
+              {config.apps.map((app, appIndex) => (
+                <LauncherToolCard
+                  key={app.id}
+                  app={app}
+                  index={appIndex}
+                  variant="desktop"
+                  onOpen={() => openApp(app.id)}
+                />
+              ))}
 
               {/* Memory Card - Hidden in customer mode (use Cmd+M to access for debugging) */}
               {mode === 'entrepreneur' && (
@@ -865,37 +858,27 @@ export default function SpaceDesktop({
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Mobile two-app home */}
           {!activeWindowId && isMobile && (
-            <div className="h-full overflow-y-auto px-5 py-10 bg-[var(--space-surface-bg)]">
-              <div className="mx-auto max-w-md">
-                <div className="mb-8 text-center">
+            <div className="relative h-full overflow-y-auto px-5 py-10 bg-[var(--space-surface-bg)]">
+              <LauncherFX compact />
+              <div className="relative mx-auto max-w-md">
+                <div className="mb-8 text-center vv-fade-up">
                   <h1 className="text-3xl font-bold text-[var(--space-text-primary)]">
-                    {runtimeTheme.branding.name}
+                    <span className="vv-title-shimmer">{runtimeTheme.branding.name}</span>
                   </h1>
                   <p className="mt-2 text-sm text-[var(--space-text-secondary)]">
                     {runtimeTheme.branding.tagline}
                   </p>
                 </div>
                 <div className="grid gap-4">
-                  {config.apps.map(app => {
-                    const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
-                    return (
-                      <button
-                        key={app.id}
-                        onClick={() => openApp(app.id)}
-                        className="flex items-center gap-4 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-5 text-left shadow-lg transition-all active:scale-[0.98]"
-                      >
-                        <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-[var(--space-surface-accent-soft)]">
-                          <IconComponent className={`h-7 w-7 ${tw.appIcon.active}`} />
-                        </div>
-                        <div className="min-w-0">
-                          <h2 className="font-semibold text-[var(--space-text-primary)]">{app.name}</h2>
-                          <p className="mt-1 text-xs text-[var(--space-text-secondary)] line-clamp-2">
-                            {app.description || `Open ${app.name}`}
-                          </p>
-                        </div>
-                      </button>
-                    );
-                  })}
+                  {config.apps.map((app, appIndex) => (
+                    <LauncherToolCard
+                      key={app.id}
+                      app={app}
+                      index={appIndex}
+                      variant="mobile"
+                      onOpen={() => openApp(app.id)}
+                    />
+                  ))}
                 </div>
               </div>
             </div>

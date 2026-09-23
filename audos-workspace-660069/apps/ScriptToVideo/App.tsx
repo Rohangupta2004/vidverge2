@@ -1,34 +1,43 @@
 /**
- * Script-to-Video — the 10-stage autonomous pipeline (PRD v1.0).
+ * Script-to-Video — sequential AI clip pipeline (Sep 2026 rebuild).
  *
- * Give it a word, a line, or a script. Come back to a finished video.
+ *   Script → Opus 5 reads the WHOLE story → sequential clip plan (4/6/8/10s)
+ *          → one prompt at a time (global + scene + continuity context)
+ *          → user-triggered generation on the Google video model (Omni Flash)
+ *          → FFmpeg extracts + validates each clip's real final frame
+ *          → Opus decides continuation vs. independent scene for the next clip
+ *          → FFmpeg assembles the final film
  *
- * The pipeline itself lives server-side in the s2v-run server function
- * (input → intent → frozen scene plan → character bible → render strategies →
- * LLM judge → repair ladder → assembly → opt-in post → MP4 export). This app
- * is a live view onto that run: closing the tab never stops a render.
- *
- * Screens: Library · Create · Brief · Blueprint · Render room · Review ·
- * Finish, with the Agentic Verge command bar docked on every run screen.
+ * Prompt preparation and generation are SEPARATE operations; dependent clips
+ * are never generated simultaneously; a failed scene never loses completed
+ * ones. State persists to WorkspaceDB after every step — reopening a film
+ * resumes in-flight renders. Screens: Library · Create · Board · Final · Legacy.
  */
 import { Component, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AlertCircle, ArrowLeft, Clapperboard, Download } from 'lucide-react';
-import { api, AgentEvent, CharacterRow, LegacyProject, Project, Question, SceneRow, T } from './api';
-import { captureFrames } from '../../lib/frameshotClient';
-import Library from './Library';
-import { BlueprintScreen, BriefScreen, CreateScreen } from './CreateFlow';
+import { Film, FilmScene, T, db } from './api';
+import {
+  AssemblyProgress, allScenesDone, assembleReadyFilm, autoPostProduce,
+  autoProduce, changeMusicDirection, changeNarrationVoice,
+  createAndSegmentFilm, generateScene, prepareFilmAudioStage, prepareScene,
+  regenerateNarration, regenerateScenePrompt, regenerateSfx, resumeFilm,
+  retryAudioLayer, retryScene, runAudioLayerStep, runFinalAssembly,
+  skipAudioLayer, skipScene, useCharacterReferenceFallback,
+} from './pipeline/orchestrator';
+import { audioReady } from './pipeline/audio';
+import Library, { LegacyFilm } from './Library';
+import { CreateScreen } from './CreateFlow';
 import RenderRoom from './RenderRoom';
-import { FinishScreen, ReviewScreen } from './ReviewFinish';
+import { FinalScreen } from './ReviewFinish';
 import AgentPanel from './AgentPanel';
+import AssemblyBar from './AssemblyBar';
 
-type Screen = 'library' | 'create' | 'brief' | 'blueprint' | 'run' | 'review' | 'finish' | 'legacy';
+type Screen = 'library' | 'create' | 'board' | 'final' | 'legacy';
 
-// App-wide interaction polish: transitions, hover states and keyboard focus
-// rings for every screen in this app. Purely presentational.
 const APP_CSS = `
   .s2v-app button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease; }
-  .s2v-app button:focus-visible, .s2v-app a:focus-visible, .s2v-app [role="button"]:focus-visible { outline: 2px solid ${T.live}; outline-offset: 2px; }
+  .s2v-app button:focus-visible, .s2v-app a:focus-visible { outline: 2px solid ${T.live}; outline-offset: 2px; }
   .s2v-app input:focus-visible, .s2v-app textarea:focus-visible, .s2v-app select:focus-visible { outline: none; border-color: ${T.live} !important; box-shadow: 0 0 0 3px rgba(232,163,60,0.18); }
   .s2v-app input, .s2v-app textarea, .s2v-app select { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
   .s2v-row { transition: background-color 0.16s ease; border-radius: 10px; }
@@ -36,194 +45,293 @@ const APP_CSS = `
   .s2v-lift:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
   .s2v-lift:active:not(:disabled) { transform: translateY(0); }
   .s2v-ghost:hover:not(:disabled) { color: ${T.bone} !important; background: rgba(255,255,255,0.05) !important; }
-  .s2v-fade-in { animation: s2v-fade-in 0.3s ease; }
-  @keyframes s2v-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
   .s2v-app ::-webkit-scrollbar { width: 8px; height: 8px; }
   .s2v-app ::-webkit-scrollbar-thumb { background: ${T.dim}; border-radius: 999px; }
   .s2v-app ::-webkit-scrollbar-track { background: transparent; }
 `;
 
-/** Anything the server may hand back as a list is read as a list, never trusted as one. */
-function list<T>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : [];
-}
-
 function ScriptToVideoApp() {
   const [screen, setScreen] = useState<Screen>('library');
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [legacy, setLegacy] = useState<LegacyProject[]>([]);
+  const [films, setFilms] = useState<Film[]>([]);
+  const [legacy, setLegacy] = useState<LegacyFilm[]>([]);
   const [libLoading, setLibLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
   const [quickText, setQuickText] = useState('');
+  const [film, setFilm] = useState<Film | null>(null);
+  const [scenes, setScenes] = useState<FilmScene[]>([]);
+  const [auto, setAuto] = useState(false);
+  const [autoPost, setAutoPost] = useState(true);
+  const [captions, setCaptions] = useState(false);
+  const [assembly, setAssembly] = useState<AssemblyProgress | null>(null);
+  const [legacyOpen, setLegacyOpen] = useState<LegacyFilm | null>(null);
 
-  const [project, setProject] = useState<Project | null>(null);
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [scenes, setScenes] = useState<SceneRow[]>([]);
-  const [characters, setCharacters] = useState<CharacterRow[]>([]);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [blueprint, setBlueprint] = useState<{ scenes: any[]; characters: any[]; assumptions: string[] }>({ scenes: [], characters: [], assumptions: [] });
-  const [legacyOpen, setLegacyOpen] = useState<LegacyProject | null>(null);
+  // The orchestrator works on MUTABLE engine objects (the state machine folds
+  // continuity from clip to clip); React state mirrors them through the hooks.
+  const engineFilm = useRef<Film | null>(null);
+  const engineScenes = useRef<FilmScene[]>([]);
+  const running = useRef(false);
+  const autoRef = useRef(false);
+  const autoPostRef = useRef(true);
+  // One-shot guards per film: the auto-advance to post-production and the
+  // audio auto-run each fire once per opened film — never in a loop.
+  const advancedFor = useRef<number | null>(null);
+  const postKickedFor = useRef<number | null>(null);
 
-  const pollRef = useRef<any>(null);
-  const tickBusy = useRef(false);
-  const projectRef = useRef<Project | null>(null);
-  projectRef.current = project;
-  const screenRef = useRef<Screen>(screen);
-  screenRef.current = screen;
+  const hooks = useRef({
+    onFilm: (patch: Partial<Film>) => setFilm((f) => (f ? { ...f, ...patch } : f)),
+    onScene: (id: number, patch: Partial<FilmScene>) => setScenes((list) => list.map((s) => (s.id === id ? { ...s, ...patch } : s))),
+    onNote: (n: string) => setNote(n),
+    onAssembly: (p: AssemblyProgress) => setAssembly(p),
+  }).current;
 
   const loadLibrary = useCallback(async () => {
     setLibLoading(true);
     try {
-      const res = await api.list();
-      setProjects(list<Project>(res?.projects));
-      setLegacy(list<LegacyProject>(res?.legacy).map((l) => ({ ...l, clips: list<string>(l?.clips) })));
+      setFilms(await db.listFilms());
       setError('');
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
       setLibLoading(false);
     }
+    // Legacy projects (retired s2v-run pipeline) — read-only, best-effort.
+    try {
+      const wdb = (window as any).__workspaceDb;
+      if (wdb) {
+        const { data } = await wdb.from('s2v_projects').orderBy('created_at', 'desc').limit(50).get();
+        const rows = (Array.isArray(data) ? data : [])
+          .filter((r: any) => r && (r.final_url || r.assembled_url))
+          .map((r: any) => ({ id: Number(r.id), title: String(r.title || 'Legacy video'), final_url: String(r.final_url || r.assembled_url || ''), created_at: String(r.created_at || '') }));
+        setLegacy(rows);
+      }
+    } catch { setLegacy([]); }
   }, []);
 
   useEffect(() => { loadLibrary(); }, [loadLibrary]);
 
-  const refreshStatus = useCallback(async (pid: number) => {
+  function adopt(f: Film, list: FilmScene[]) {
+    engineFilm.current = f;
+    engineScenes.current = list;
+    setFilm({ ...f });
+    setScenes(list.map((s) => ({ ...s })));
+  }
+
+  /** Run one engine operation with the shared guards (single flight, error banner). */
+  async function run(work: () => Promise<void>, opts: { block?: boolean } = {}) {
+    if (running.current) return;
+    running.current = true;
+    if (opts.block) setBusy(true);
+    setError('');
     try {
-      const st = await api.status(pid);
-      // A status answer without a project would otherwise leave every screen
-      // reading fields off `undefined` — keep the last good project instead.
-      if (st?.project) setProject(st.project);
-      setScenes(list<SceneRow>(st?.scenes));
-      setCharacters(list<CharacterRow>(st?.characters).filter((c) => c && c.status !== 'superseded' && !!c.name));
-      setEvents(list<AgentEvent>(st?.events));
-      return st?.project || null;
-    } catch (e) { return null; }
-  }, []);
+      await work();
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      running.current = false;
+      if (opts.block) setBusy(false);
+    }
+  }
 
-  // The run poll: the browser is only a VIEW onto server state, but while it is
-  // open it also ticks the machine forward so progress is fast. Background
-  // progress is covered by the platform watcher sweeping every 5 minutes
-  // (twelve staggered hourly schedules), so stalls recover within ~5 minutes.
-  useEffect(() => {
-    clearInterval(pollRef.current);
-    const active = project && ['casting', 'rendering', 'assembling', 'post', 'review'].includes(project.status);
-    const watching = ['run', 'review', 'finish', 'blueprint'].includes(screen);
-    if (!project || !watching) return;
-    pollRef.current = setInterval(async () => {
-      const p = projectRef.current;
-      if (!p || tickBusy.current) return;
-      tickBusy.current = true;
-      try {
-        if (['casting', 'rendering', 'assembling', 'post'].includes(p.status) || (p.status === 'review' && scenes.some((s) => ['rendering', 'judging', 'prepping'].includes(s.status)))) {
-          try { await api.tick(p.id); } catch (e) { /* lease or transient — status still refreshes */ }
-        }
-        const fresh = await refreshStatus(p.id);
-        if (fresh && screenRef.current === 'run' && fresh.status === 'ready') setScreen('finish');
-      } finally {
-        tickBusy.current = false;
-      }
-    }, active ? 6000 : 15000);
-    return () => clearInterval(pollRef.current);
-  }, [project?.id, project?.status, screen, refreshStatus, scenes]);
-
-  // FRAME COURIER — server-side ffmpeg extraction is primary. If it fails and
-  // this tab is open, the server requests a mandatory browser fallback through
-  // scene.frames_requested_at. The courier captures the exact final frame plus
-  // 4–6 720p-capped PNGs from the last second and returns them through
-  // attach_frames. A partial capture is retried while this request remains
-  // active; raw diagnostics stay in the developer console and Details panel.
-  const framingRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const p = projectRef.current;
-    if (!p) return;
-    scenes
-      .filter((s) => (s as any).frames_requested_at && !(s as any).browser_frames && s.clip_url && s.status === 'judging')
-      .forEach((s) => {
-        const key = `${s.id}:${(s as any).frames_requested_at}`;
-        if (framingRef.current.has(key)) return;
-        framingRef.current.add(key);
-        void (async () => {
-          try {
-            const frames = await captureFrames(String(s.clip_url), 6);
-            if (frames.length < 4) throw new Error(`Captured ${frames.length} of the required 4 tail frames.`);
-            await api.attachFrames(p.id, s.id, frames);
-            setError('');
-            await refreshStatus(p.id);
-          } catch (captureError: any) {
-            // Do not pin a failed request in the de-duplication set: the next
-            // status refresh gets one fresh attempt while the server is still
-            // waiting. Keep raw diagnostics out of the customer-facing banner.
-            framingRef.current.delete(key);
-            console.warn(`[ScriptToVideo] shot ${s.idx} browser frame capture failed:`, captureError);
-            setError("We couldn't check this shot yet. Retrying…");
-          }
-        })();
-      });
-  }, [scenes, refreshStatus]);
+  /** AUTO-ADVANCE — when the LAST scene completes (11/11 ✓ + continuity ✓),
+   * move to the post-production view and, when Auto-complete post-production
+   * is on, run narration → music → SFX automatically until Ready for Final
+   * Assembly. Called inside run(), so the single-flight guard is held. */
+  async function maybeAdvancePost() {
+    const f = engineFilm.current;
+    if (!f || !allScenesDone(engineScenes.current)) return;
+    if (advancedFor.current !== f.id) {
+      advancedFor.current = f.id;
+      if (f.status !== 'ready') setScreen('final');
+    }
+    if (autoPostRef.current && postKickedFor.current !== f.id && f.status !== 'ready' && !audioReady(f.audio)) {
+      postKickedFor.current = f.id;
+      await autoPostProduce(f, engineScenes.current, hooks);
+    }
+  }
 
   // ------- flow handlers -------
 
-  async function handleCreate(params: { input_text: string; upload_text?: string; mode: string; aspect_ratio: string; chips: string[]; focus: string; target_length_s: number }) {
+  async function handleCreate(params: { script: string; aspect: any; screenshotUrl: string | null; note: string; videoModel?: string }) {
+    if (running.current) return;
+    running.current = true;
     setBusy(true); setError('');
     try {
-      const res = await api.create(params);
-      setProject(res.project);
-      setQuestions(list<Question>(res?.questions));
-      setScenes([]); setCharacters([]); setEvents([]);
-      setScreen('brief');
+      const res = await createAndSegmentFilm({ script: params.script, aspect: params.aspect, referenceImageUrl: params.screenshotUrl, note: params.note, videoModel: params.videoModel }, hooks);
+      const freshScenes = await db.listScenes(res.film.id);
+      adopt(res.film, freshScenes);
+      setScreen('board');
     } catch (e: any) { setError(String(e?.message || e)); }
-    finally { setBusy(false); }
+    finally { running.current = false; setBusy(false); }
   }
 
-  async function handleBrief(answers: Record<string, string>) {
-    if (!project) return;
-    setBusy(true); setError('');
+  const withEngine = (fn: (f: Film, list: FilmScene[], scene: FilmScene) => Promise<void>) => (scene: FilmScene) => {
+    const f = engineFilm.current;
+    const engineScene = engineScenes.current.find((s) => s.id === scene.id);
+    if (!f || !engineScene) return;
+    void run(async () => {
+      await fn(f, engineScenes.current, engineScene);
+      if (autoRef.current) await autoProduce(f, engineScenes.current, hooks, () => autoRef.current);
+      await maybeAdvancePost();
+    });
+  };
+
+  const handleGenerate = withEngine((f, list, s) => generateScene(f, list, s, hooks));
+  const handlePrepare = withEngine((f, list, s) => prepareScene(f, list, s, hooks));
+  const handleRetry = withEngine((f, list, s) => retryScene(f, list, s, hooks));
+  const handleRegenPrompt = withEngine((f, list, s) => regenerateScenePrompt(f, list, s, hooks));
+  const handleUseCharRef = withEngine((f, list, s) => useCharacterReferenceFallback(f, list, s, hooks));
+  const handleSkip = withEngine((f, list, s) => skipScene(f, list, s, hooks));
+
+  function handleToggleAuto(on: boolean) {
+    setAuto(on);
+    autoRef.current = on;
+    const f = engineFilm.current;
+    if (on && f && !running.current) {
+      void run(async () => {
+        await autoProduce(f, engineScenes.current, hooks, () => autoRef.current);
+        await maybeAdvancePost();
+      });
+    }
+  }
+
+  function handleToggleAutoPost(on: boolean) {
+    setAutoPost(on);
+    autoPostRef.current = on;
+    const f = engineFilm.current;
+    if (on && f && !running.current && allScenesDone(engineScenes.current) && f.status !== 'ready' && !audioReady(f.audio)) {
+      postKickedFor.current = null;
+      void run(() => maybeAdvancePost());
+    }
+  }
+
+  /** Manually run ONE post-production step (Auto-complete off). */
+  const handleRunLayer = (layer: 'narration' | 'music' | 'sfx') => {
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(() => runAudioLayerStep(f, engineScenes.current, hooks, layer), { block: true });
+  };
+
+  const handleRegenNarration = () => {
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(() => regenerateNarration(f, engineScenes.current, hooks), { block: true });
+  };
+
+  const handleRegenSfx = () => {
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(() => regenerateSfx(f, engineScenes.current, hooks), { block: true });
+  };
+
+  /** Plain native-audio cut — no narration/music/SFX layers. */
+  async function handleNativeCut() {
+    const f = engineFilm.current;
+    if (!f) return;
+    await run(async () => {
+      await assembleReadyFilm(f, engineScenes.current, hooks);
+      setScreen('final');
+    }, { block: true });
+  }
+
+  /** Plan + generate the audio layers (narration / music / SFX). */
+  async function handlePrepareAudio() {
+    const f = engineFilm.current;
+    if (!f) return;
+    await run(() => prepareFilmAudioStage(f, engineScenes.current, hooks), { block: true });
+  }
+
+  /** One-click FINAL ASSEMBLY — existing clips + narration + music + SFX →
+   * FFmpeg. Never regenerates video. */
+  async function handleFinalAssembly(o: { captions: boolean }) {
+    const f = engineFilm.current;
+    if (!f) return;
+    await run(() => runFinalAssembly(f, engineScenes.current, hooks, { captions: o.captions }), { block: true });
+  }
+
+  const handleRetryLayer = (layer: 'narration' | 'music' | 'sfx') => {
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(() => retryAudioLayer(f, engineScenes.current, hooks, layer), { block: true });
+  };
+
+  const handleSkipLayer = (layer: 'music' | 'sfx') => {
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(() => skipAudioLayer(f, engineScenes.current, hooks, layer), { block: true });
+  };
+
+  const handleChangeVoice = (voiceId: string, voiceName?: string) => {
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(() => changeNarrationVoice(f, engineScenes.current, hooks, voiceId, voiceName), { block: true });
+  };
+
+  const handleChangeMusic = (preset: string) => {
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(() => changeMusicDirection(f, engineScenes.current, hooks, preset), { block: true });
+  };
+
+  async function handleDirect(scene: FilmScene, instruction: string): Promise<string> {
+    const f = engineFilm.current;
+    const engineScene = engineScenes.current.find((s) => s.id === scene.id);
+    if (!f || !engineScene) throw new Error('Open a film first.');
+    if (running.current) throw new Error('The pipeline is busy — wait for the current step to finish.');
+    running.current = true;
     try {
-      const res = await api.brief(project.id, answers);
-      setProject(res.project);
-      setBlueprint({ scenes: list<any>(res?.scenes), characters: list<any>(res?.characters), assumptions: list<string>(res?.assumptions) });
-      setScreen('blueprint');
-    } catch (e: any) { setError(String(e?.message || e)); }
-    finally { setBusy(false); }
+      await regenerateScenePrompt(f, engineScenes.current, engineScene, hooks, instruction);
+      return `Scene ${engineScene.idx + 1} has a new prompt — review it and generate when ready.`;
+    } finally {
+      running.current = false;
+    }
   }
 
-  async function handleStart() {
-    if (!project) return;
-    setError('');
+  async function openFilm(f: Film) {
+    setError(''); setNote(''); setAssembly(null);
+    setAuto(false); autoRef.current = false;
+    advancedFor.current = null; postKickedFor.current = null;
     try {
-      const res = await api.start(project.id);
-      setProject(res.project);
-      setScreen('run');
-      refreshStatus(res.project.id);
+      const list = await db.listScenes(f.id);
+      adopt(f, list);
+      const scenesDone = allScenesDone(list);
+      if (f.status === 'ready' && f.final_video_url) { setScreen('final'); advancedFor.current = f.id; }
+      else if (scenesDone) {
+        // Scenes are complete — land directly in post-production, and resume
+        // the audio pipeline automatically when Auto-complete is on.
+        setScreen('final');
+        advancedFor.current = f.id;
+        if (autoPostRef.current && !audioReady(f.audio) && !f.error && !running.current) {
+          postKickedFor.current = f.id;
+          void run(() => autoPostProduce(engineFilm.current!, engineScenes.current, hooks));
+        }
+      } else setScreen('board');
+      // Adopt in-flight renders and re-arm the pipeline head (prompt prep only —
+      // generation always waits for a click).
+      if (list.length && !running.current) {
+        const needsResume = list.some((s) => s.status === 'generating') || list.some((s) => s.status === 'waiting');
+        if (needsResume && f.status !== 'ready') {
+          void run(async () => {
+            await resumeFilm(engineFilm.current!, engineScenes.current, hooks);
+            await maybeAdvancePost();
+          });
+        }
+      }
     } catch (e: any) { setError(String(e?.message || e)); }
   }
-
-  function openProject(p: Project) {
-    setProject(p);
-    setScenes([]); setCharacters([]); setEvents([]);
-    if (p.status === 'briefing') { setQuestions(list<Question>(p.questions)); setScreen('brief'); }
-    else if (p.status === 'blueprint') { refreshStatus(p.id).then(() => setScreen('blueprint')); setBlueprint({ scenes: [], characters: [], assumptions: [] }); }
-    else if (p.status === 'review') setScreen('review');
-    else if (p.status === 'ready') setScreen('finish');
-    else setScreen('run');
-    refreshStatus(p.id);
-  }
-
-  const onActed = useCallback(() => { const p = projectRef.current; if (p) refreshStatus(p.id); }, [refreshStatus]);
 
   // ------- render -------
 
-  const showAgent = ['create', 'brief', 'blueprint', 'run', 'review', 'finish'].includes(screen);
   const showBack = screen !== 'library';
+  const showDirector = ['board', 'final'].includes(screen) && scenes.length > 0;
 
   return (
     <div className="s2v-app" style={{ position: 'relative', width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: T.canvas, fontFamily: T.sans, overflow: 'hidden' }}>
       <style>{APP_CSS}</style>
-      {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 20px', borderBottom: `1px solid ${T.raised}`, flexShrink: 0 }}>
         {showBack ? (
-          <button className="s2v-ghost" onClick={() => { setScreen('library'); setLegacyOpen(null); loadLibrary(); }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: T.muted, fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '6px 10px', margin: '-6px -10px', borderRadius: 8 }}>
+          <button className="s2v-ghost" onClick={() => { setScreen('library'); setLegacyOpen(null); setAuto(false); autoRef.current = false; loadLibrary(); }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: T.muted, fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '6px 10px', margin: '-6px -10px', borderRadius: 8 }}>
             <ArrowLeft size={15} /> Library
           </button>
         ) : (
@@ -235,12 +343,12 @@ function ScriptToVideoApp() {
           </div>
         )}
         <div style={{ marginLeft: 'auto', color: T.dim, fontSize: 11.5 }}>
-          Give it a word, a line, or a script. Come back to a finished video.
+          Opus 5 directs · one clip at a time · FFmpeg reads every final frame and cuts the film.
         </div>
       </div>
 
       {error ? (
-        <div className="s2v-fade-in" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'rgba(226,114,111,0.1)', borderBottom: '1px solid rgba(226,114,111,0.4)', color: T.fault, fontSize: 12.5, lineHeight: 1.5, padding: '9px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'rgba(226,114,111,0.1)', borderBottom: '1px solid rgba(226,114,111,0.4)', color: T.fault, fontSize: 12.5, lineHeight: 1.5, padding: '9px 20px' }}>
           <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>{error}</span>
         </div>
@@ -248,11 +356,11 @@ function ScriptToVideoApp() {
 
       {screen === 'library' ? (
         <Library
-          projects={projects}
+          films={films}
           legacy={legacy}
           loading={libLoading}
           onNew={() => { setQuickText(''); setScreen('create'); }}
-          onOpen={openProject}
+          onOpen={openFilm}
           onOpenLegacy={(l) => { setLegacyOpen(l); setScreen('legacy'); }}
           onQuickCreate={(t) => { setQuickText(t); setScreen('create'); }}
         />
@@ -260,90 +368,81 @@ function ScriptToVideoApp() {
 
       {screen === 'create' ? <CreateScreen initialText={quickText} busy={busy} onSubmit={handleCreate} /> : null}
 
-      {screen === 'brief' && project ? <BriefScreen questions={questions} busy={busy} onContinue={handleBrief} /> : null}
-
-      {screen === 'blueprint' && project ? (
-        <BlueprintScreen
-          project={project}
-          scenes={blueprint.scenes.length ? blueprint.scenes : scenes}
-          characters={characters.length ? characters : (blueprint.characters as any)}
-          assumptions={blueprint.assumptions}
-          onStart={handleStart}
-          onCancel={() => { setScreen('library'); loadLibrary(); }}
-          onEditScene={async (idx, patch) => { await api.editScene(project.id, idx, patch); refreshStatus(project.id); }}
-        />
-      ) : null}
-
-      {screen === 'run' && project ? (
+      {screen === 'board' && film ? (
         <RenderRoom
-          project={project}
+          film={film}
           scenes={scenes}
-          characters={characters}
-          events={events}
-          onRecast={async (key, appearance) => { await api.recast(project.id, key, appearance); refreshStatus(project.id); }}
-          onResume={async () => { try { const r = await api.resume(project.id); setProject(r.project); } catch (e: any) { setError(String(e?.message || e)); } }}
-          onReview={() => setScreen('review')}
+          note={note}
+          busy={busy}
+          auto={auto}
+          autoPost={autoPost}
+          onToggleAuto={handleToggleAuto}
+          onToggleAutoPost={handleToggleAutoPost}
+          onGenerate={handleGenerate}
+          onPrepare={handlePrepare}
+          onRetry={handleRetry}
+          onRegenPrompt={handleRegenPrompt}
+          onUseCharRef={handleUseCharRef}
+          onSkip={handleSkip}
         />
       ) : null}
 
-      {screen === 'review' && project ? (
-        <ReviewScreen
-          project={project}
+      {screen === 'final' && film ? (
+        <FinalScreen
+          film={film}
           scenes={scenes}
           busy={busy}
-          onRegen={async (idxs, note) => {
-            setBusy(true);
-            try { const r = await api.regen(project.id, idxs, note); setProject(r.project); refreshStatus(project.id); }
-            catch (e: any) { setError(String(e?.message || e)); }
-            finally { setBusy(false); }
-          }}
-          onCut={async (idxs) => { await api.cut(project.id, idxs); refreshStatus(project.id); }}
-          onAssemble={async () => {
-            setBusy(true);
-            try { const r = await api.assemble(project.id); setProject(r.project); if (r.project.status === 'ready') setScreen('finish'); }
-            catch (e: any) { setError(String(e?.message || e)); }
-            finally { setBusy(false); refreshStatus(project.id); }
-          }}
+          assembly={assembly}
+          captions={captions}
+          onCaptions={setCaptions}
+          onBackToBoard={() => setScreen('board')}
+          onPrepareAudio={handlePrepareAudio}
+          onFinalAssembly={handleFinalAssembly}
+          onRunLayer={handleRunLayer}
+          onRegenNarration={handleRegenNarration}
+          onRegenSfx={handleRegenSfx}
+          onRetryLayer={handleRetryLayer}
+          onSkipLayer={handleSkipLayer}
+          onChangeVoice={handleChangeVoice}
+          onChangeMusic={handleChangeMusic}
+          onNativeCut={handleNativeCut}
         />
       ) : null}
 
-      {screen === 'finish' && project ? (
-        <FinishScreen
-          project={project}
+      {screen === 'legacy' && legacyOpen ? <LegacyViewer legacy={legacyOpen} /> : null}
+
+      {showDirector ? <AgentPanel scenes={scenes} busy={busy} onDirect={handleDirect} /> : null}
+
+      {/* Persistent Final Assembly bar — in normal document flow BELOW the
+          chat input, so neither can ever cover the other on any viewport. */}
+      {(screen === 'board' || screen === 'final') && film && scenes.length ? (
+        <AssemblyBar
+          film={film}
           scenes={scenes}
+          assembly={assembly}
           busy={busy}
-          onApplyLayers={async (layers) => {
-            const r = await api.layers(project.id, layers);
-            setProject(r.project);
-            refreshStatus(project.id);
-          }}
-          onBackToReview={() => setScreen('review')}
+          screen={screen}
+          onFinalAssembly={() => { setScreen('final'); void handleFinalAssembly({ captions }); }}
+          onPrepareAudio={handlePrepareAudio}
+          onOpenFinal={() => setScreen('final')}
+          onOpenBoard={() => setScreen('board')}
         />
       ) : null}
-
-      {screen === 'legacy' && legacyOpen ? (
-        <LegacyViewer legacy={legacyOpen} />
-      ) : null}
-
-      {showAgent ? <AgentPanel projectId={project?.id} onActed={onActed} /> : null}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Legacy playback
+// Legacy playback (retired pipeline's finished films stay watchable)
 // ---------------------------------------------------------------------------
 
-function LegacyViewer({ legacy: legacyOpen }: { legacy: LegacyProject }) {
-  // A legacy row is whatever the old module happened to store, so every field
-  // the player reads is normalised before it is touched.
-  const clips = list<string>(legacyOpen?.clips).filter((c) => typeof c === 'string' && !!c);
-  const finalUrl = typeof legacyOpen?.final_url === 'string' ? legacyOpen.final_url : '';
+function LegacyViewer({ legacy: item }: { legacy: LegacyFilm }) {
+  const finalUrl = typeof item?.final_url === 'string' ? item.final_url : '';
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '22px 24px 80px' }}>
       <div style={{ maxWidth: 720, margin: '0 auto' }}>
-        <div style={{ color: T.bone, fontSize: 19, fontWeight: 700 }}>{legacyOpen?.title || 'Legacy video'}</div>
-        <div style={{ color: T.muted, fontSize: 12.5, marginTop: 4 }}>A project from the previous Script-to-Video — still fully accessible.</div>
+        <div style={{ color: T.bone, fontSize: 19, fontWeight: 700 }}>{item?.title || 'Legacy video'}</div>
+        <div style={{ color: T.muted, fontSize: 12.5, marginTop: 4 }}>A project from the previous Script-to-Video pipeline — still fully accessible.</div>
         {finalUrl ? (
           <div style={{ marginTop: 16 }}>
             <video src={finalUrl} controls style={{ maxWidth: '100%', maxHeight: 440, borderRadius: 12, background: '#000' }} />
@@ -353,20 +452,9 @@ function LegacyViewer({ legacy: legacyOpen }: { legacy: LegacyProject }) {
               </a>
             </div>
           </div>
-        ) : null}
-        {clips.length ? (
-          <div style={{ marginTop: 22 }}>
-            <div style={{ color: T.muted, fontSize: 13, marginBottom: 10 }}>Scene clips</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-              {clips.map((c, i) => (
-                <video key={i} src={c} controls style={{ width: '100%', borderRadius: 8, background: '#000' }} />
-              ))}
-            </div>
-          </div>
-        ) : null}
-        {!finalUrl && !clips.length ? (
-          <div style={{ color: T.dim, fontSize: 13, marginTop: 20 }}>This legacy project has no stored video files.</div>
-        ) : null}
+        ) : (
+          <div style={{ color: T.dim, fontSize: 13, marginTop: 20 }}>This legacy project has no stored video file.</div>
+        )}
       </div>
     </div>
   );
@@ -376,11 +464,6 @@ function LegacyViewer({ legacy: legacyOpen }: { legacy: LegacyProject }) {
 // Crash containment
 // ---------------------------------------------------------------------------
 
-// A throw anywhere below — including inside a <video> subtree or a CDN
-// dependency's own code — used to unmount the whole app and leave the customer
-// on a blank panel with a finished video they could not reach. The run itself
-// is server-side and untouched, so the honest recovery is to say so and offer
-// a retry that remounts the screens.
 class S2VBoundary extends Component<{ children?: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
   static getDerivedStateFromError(error: Error) { return { error }; }
@@ -395,10 +478,10 @@ class S2VBoundary extends Component<{ children?: ReactNode }, { error: Error | n
             </div>
             <div style={{ color: T.bone, fontSize: 16.5, fontWeight: 700, letterSpacing: -0.2, marginBottom: 8 }}>This screen hit a snag</div>
             <div style={{ color: T.muted, fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>
-              Your video is safe — the pipeline runs on our side and nothing stopped. Reopen the library to pick it up again.
+              Your film's progress is saved after every step — reopen it from the library and it picks up where it left off.
             </div>
-            <button onClick={() => this.setState({ error: null })} style={{ background: T.live, color: '#1A1205', border: 'none', borderRadius: 10, padding: '11px 24px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 10px rgba(232,163,60,0.25)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
-              Back to your videos
+            <button onClick={() => this.setState({ error: null })} style={{ background: T.live, color: '#1A1205', border: 'none', borderRadius: 10, padding: '11px 24px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
+              Back to your films
             </button>
           </div>
         </div>

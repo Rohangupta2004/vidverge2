@@ -18,7 +18,7 @@ import { OverlayElement, drawOverlays } from './overlayEngine';
 import type { AnalysisInsight } from './overlayEngine';
 import type { CaptionSegment } from './enhancerCore';
 import { drawCaptionOverlay } from './captionSuite';
-import type { CaptionStyleId } from './captionSuite';
+import type { CaptionStyleId, CaptionPosition } from './captionSuite';
 
 function msg(e: unknown): string { return e instanceof Error ? e.message : String(e); }
 export function clamp(v: number, lo: number, hi: number): number { return Math.min(hi, Math.max(lo, v)); }
@@ -61,6 +61,14 @@ export const ASPECT_PRESETS: { id: AspectPreset; label: string; ratio: number | 
 
 export const SPEED_OPTIONS = [0.5, 1, 1.25, 1.5, 2] as const;
 
+/**
+ * Backdrop framing: 'gradient' floats the footage on a dark brand gradient,
+ * 'blur' floats it on a blurred, darkened echo of itself (the classic
+ * background-softening / social frame look). Applied in the live preview and
+ * the export identically.
+ */
+export type BackdropMode = 'none' | 'gradient' | 'blur';
+
 export interface EffectsState {
   brightness: number;  // 0..200, 100 = neutral
   contrast: number;    // 0..200, 100 = neutral
@@ -68,12 +76,44 @@ export interface EffectsState {
   blur: number;        // 0..8 px
   vignette: number;    // 0..100 strength
   speed: number;       // one of SPEED_OPTIONS
+  /** Optional backdrop framing; older stored edits may omit it. */
+  backdrop?: BackdropMode;
 }
 
-export const DEFAULT_EFFECTS: EffectsState = { brightness: 100, contrast: 100, saturation: 100, blur: 0, vignette: 0, speed: 1 };
+export const DEFAULT_EFFECTS: EffectsState = { brightness: 100, contrast: 100, saturation: 100, blur: 0, vignette: 0, speed: 1, backdrop: 'none' };
 
 export function effectsAreNeutral(fx: EffectsState): boolean {
-  return fx.brightness === 100 && fx.contrast === 100 && fx.saturation === 100 && fx.blur === 0 && fx.vignette === 0 && fx.speed === 1;
+  return fx.brightness === 100 && fx.contrast === 100 && fx.saturation === 100 && fx.blur === 0 && fx.vignette === 0 && fx.speed === 1 && (!fx.backdrop || fx.backdrop === 'none');
+}
+
+/**
+ * Paint the backdrop frame behind a contained video. 'blur' draws a blurred,
+ * darkened cover-scaled echo of the current frame; 'gradient' (and any blur
+ * failure) draws the deep VidVerge gradient with a soft brand glow.
+ */
+export function drawBackdropFrame(ctx: CanvasRenderingContext2D, W: number, H: number, video: HTMLVideoElement, mode: BackdropMode): void {
+  if (mode === 'blur' && video.videoWidth && video.videoHeight) {
+    try {
+      const s = Math.max(W / video.videoWidth, H / video.videoHeight) * 1.12;
+      const bw = video.videoWidth * s, bh = video.videoHeight * s;
+      ctx.save();
+      ctx.filter = 'blur(' + Math.max(12, Math.round(Math.min(W, H) * 0.035)) + 'px) brightness(0.5) saturate(1.15)';
+      ctx.drawImage(video, (W - bw) / 2, (H - bh) / 2, bw, bh);
+      ctx.restore();
+      return;
+    } catch { /* fall through to the gradient */ }
+  }
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, '#101A30');
+  g.addColorStop(0.55, '#0A0F1E');
+  g.addColorStop(1, '#1B1340');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  const glow = ctx.createRadialGradient(W / 2, H * 0.35, Math.min(W, H) * 0.1, W / 2, H * 0.4, Math.max(W, H) * 0.7);
+  glow.addColorStop(0, 'rgba(61,139,255,0.16)');
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
 }
 
 /** CSS/canvas filter string for the current effect settings (vignette drawn separately). */
@@ -320,7 +360,7 @@ export interface RenderJobOptions {
   /** Optional generated music bed — mixed under/over the original audio. */
   music: { blob: Blob; volume: number } | null;
   /** Optional auto-generated captions — burned in at the same position as the live preview. */
-  captions: { segments: CaptionSegment[]; styleId: CaptionStyleId } | null;
+  captions: { segments: CaptionSegment[]; styleId: CaptionStyleId; position?: CaptionPosition } | null;
   /** One-shot sound-effect cues, fired the instant playback crosses their moment. */
   sfx: SfxExportCue[];
   format: ExportFormat;
@@ -460,20 +500,40 @@ export async function renderEditedVideo(
     const fCss = filterCss(opts.effects);
     const fullW = vw * scale, fullH = vh * scale;
     const offX = -crop.cx * scale, offY = -crop.cy * scale;
+    // Backdrop framing: the full frame floats contained on the backdrop with a
+    // small margin; overlays and texts stay anchored to the footage itself.
+    const backdrop: BackdropMode = opts.effects.backdrop && opts.effects.backdrop !== 'none' ? opts.effects.backdrop : 'none';
+    const fitScale = backdrop !== 'none' ? Math.min((W * 0.92) / vw, (H * 0.92) / vh) : 0;
+    const fitW = vw * fitScale, fitH = vh * fitScale;
+    const fitX = (W - fitW) / 2, fitY = (H - fitH) / 2;
 
     const paint = () => {
-      ctx.save();
-      if (fCss !== 'none') ctx.filter = fCss;
-      ctx.drawImage(video, crop.cx, crop.cy, crop.cw, crop.ch, 0, 0, W, H);
-      ctx.restore();
-      drawVignette(ctx, W, H, opts.effects.vignette);
-      ctx.save();
-      ctx.translate(offX, offY);
-      drawOverlays(ctx, fullW, fullH, video.currentTime, activeOverlays);
-      drawTextOverlays(ctx, fullW, fullH, video.currentTime, opts.texts);
-      ctx.restore();
+      if (backdrop !== 'none') {
+        drawBackdropFrame(ctx, W, H, video, backdrop);
+        ctx.save();
+        if (fCss !== 'none') ctx.filter = fCss;
+        ctx.drawImage(video, 0, 0, vw, vh, fitX, fitY, fitW, fitH);
+        ctx.restore();
+        drawVignette(ctx, W, H, opts.effects.vignette);
+        ctx.save();
+        ctx.translate(fitX, fitY);
+        drawOverlays(ctx, fitW, fitH, video.currentTime, activeOverlays);
+        drawTextOverlays(ctx, fitW, fitH, video.currentTime, opts.texts);
+        ctx.restore();
+      } else {
+        ctx.save();
+        if (fCss !== 'none') ctx.filter = fCss;
+        ctx.drawImage(video, crop.cx, crop.cy, crop.cw, crop.ch, 0, 0, W, H);
+        ctx.restore();
+        drawVignette(ctx, W, H, opts.effects.vignette);
+        ctx.save();
+        ctx.translate(offX, offY);
+        drawOverlays(ctx, fullW, fullH, video.currentTime, activeOverlays);
+        drawTextOverlays(ctx, fullW, fullH, video.currentTime, opts.texts);
+        ctx.restore();
+      }
       if (opts.captions && opts.captions.segments.length) {
-        drawCaptionOverlay(ctx, W, H, video.currentTime, opts.captions.segments, opts.captions.styleId);
+        drawCaptionOverlay(ctx, W, H, video.currentTime, opts.captions.segments, opts.captions.styleId, opts.captions.position);
       }
     };
 

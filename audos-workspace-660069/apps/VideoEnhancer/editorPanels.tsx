@@ -471,6 +471,17 @@ export function EffectsPanel({ effects, disabled, onChange }: {
         <SliderRow label="Vignette" value={effects.vignette} min={0} max={100} step={1} display={effects.vignette + '%'} accent={P.cyan} disabled={disabled} onChange={(v) => set({ vignette: v })} />
       </div>
       <div style={{ ...panelCard, marginTop: 12 }}>
+        <PanelHeader icon={<SlidersHorizontal size={15} />} color={P.violet} title="Backdrop" />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Chip active={!effects.backdrop || effects.backdrop === 'none'} disabled={disabled} onClick={() => set({ backdrop: 'none' })} color={P.violet}>Off</Chip>
+          <Chip active={effects.backdrop === 'gradient'} disabled={disabled} onClick={() => set({ backdrop: 'gradient' })} color={P.violet}>Gradient</Chip>
+          <Chip active={effects.backdrop === 'blur'} disabled={disabled} onClick={() => set({ backdrop: 'blur' })} color={P.violet}>Soft blur</Chip>
+        </div>
+        <div style={{ fontSize: 11.5, color: P.muted, marginTop: 10, lineHeight: 1.5 }}>
+          Float your footage on a frame: <b style={{ color: P.sub }}>Gradient</b> puts it on a deep brand gradient, <b style={{ color: P.sub }}>Soft blur</b> replaces the hard edges with a blurred, darkened echo of the video itself — both preview live and export exactly as shown.
+        </div>
+      </div>
+      <div style={{ ...panelCard, marginTop: 12 }}>
         <PanelHeader icon={<Play size={15} />} color={P.amber} title="Playback speed" />
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {SPEED_OPTIONS.map((s) => (
@@ -712,14 +723,19 @@ export function MusicPanel({
         />
         <PrimaryButton
           onClick={onGenerate}
-          disabled={disabled || !prompt.trim()}
+          disabled={disabled}
           busy={busy}
           gradient={'linear-gradient(100deg, ' + P.mint + ', ' + P.cyan + ')'}
           shadow="0 12px 30px -14px rgba(52,224,176,0.7)"
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
-          {busy ? 'Composing your track…' : track ? 'Regenerate music' : 'Generate music'}
+          {busy ? 'Composing your track…' : track ? 'Regenerate music' : prompt.trim() ? 'Generate music' : 'Auto-match music'}
         </PrimaryButton>
+        {!prompt.trim() && (
+          <div style={{ fontSize: 11.5, color: P.muted, marginTop: 8, lineHeight: 1.5 }}>
+            No pick needed — leave this empty and the AI matches a mood to your footage automatically (running Enhance first makes the match smarter).
+          </div>
+        )}
         {busy && note && (
           <div className="ve-pulse" style={{ fontSize: 12, color: P.mint, marginTop: 9, display: 'flex', gap: 7, alignItems: 'center' }}>
             <Loader2 size={12} className="animate-spin" /> {note}

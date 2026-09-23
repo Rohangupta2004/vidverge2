@@ -24,6 +24,7 @@ import PlayerPreview from './PlayerPreview';
 import SceneTimeline from './SceneTimeline';
 import ControlsPanel from './ControlsPanel';
 import AgentBar from './AgentBar';
+import DemoDebugPanel from './DemoDebugPanel';
 import { Tilt } from './fx';
 
 const S = {
@@ -90,9 +91,23 @@ export default function Editor({ projectId, onBack, onEnhance }: {
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Developer/debug mode — shows the demo timeline inspector (scene / camera /
+  // cursor / interaction state from the SAME timeline math the render uses).
+  // Never shown to customers: only ?debug=1 or localStorage trackb_debug='1'.
+  const [demoDebug] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('debug') === '1'
+        || window.localStorage.getItem('trackb_debug') === '1';
+    } catch { return false; }
+  });
   const noticeTimer = useRef<number | null>(null);
   const generationStartedAt = useRef<number | null>(null);
   const resumedGenerationChecked = useRef(false);
+  // Self-healing render queue guards: a planned-and-ready project with no live
+  // render job is queued at most once per editor session, and the planned-idle
+  // watchdog needs a few consecutive confirmations before it acts.
+  const autoQueuedRender = useRef(false);
+  const plannedIdlePolls = useRef(0);
   // Snapshot of finished render outputs when a generation/re-render starts, so
   // completion is detected by a NEW output landing — an old preview URL from a
   // previous render never counts as "done" for a re-render.
@@ -103,6 +118,48 @@ export default function Editor({ projectId, onBack, onEnhance }: {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
     noticeTimer.current = window.setTimeout(() => setNotice(null), 6000);
   }, []);
+
+  // Self-healing render queue. THE 'building compositions' STALL: a project
+  // could sit 'planned' with every visual ready and NO render job at all (tab
+  // closed right after planning, an auto-queue that failed, or a render the
+  // watcher failed) — and the editor showed “Building compositions…” forever
+  // while nothing was actually queued. This queues the film render for that
+  // exact state. trackb-render is idempotent (ALREADY_RENDERING while a job is
+  // in flight), so racing the orchestrator is harmless; a project whose
+  // renders keep failing is NOT silently retried — the failure budget stops
+  // the loop and the notice says so out loud.
+  const queueRenderIfIdle = useCallback(async (target: TrackBProjectRow) => {
+    if (autoQueuedRender.current) return;
+    const sceneRows = target.project?.scenes ?? [];
+    if (!sceneRows.length) return;
+    const visualsReady = sceneRows.every((s) => (s.image_url ?? s.generated_image_url) || s.image_source === 'brand_tile');
+    if (!visualsReady) return;
+    const renders = (target.project?.renders ?? []) as unknown as { output?: string | null; failed_at?: string | null }[];
+    if (renders.some((r) => !r.output && !r.failed_at)) return; // a render is already in flight
+    autoQueuedRender.current = true;
+    const failedRenders = renders.filter((r) => r.failed_at).length;
+    if (failedRenders >= 4) {
+      setGenerating(false);
+      setGenerationStage(null);
+      showNotice('error', `Rendering failed ${failedRenders} times for this film, so it is not retried automatically any more. Click Export to try again, or simplify the scenes first.`);
+      return;
+    }
+    try {
+      const res = await trackB.renderFilm(target.id);
+      if ((res as MutationRejection).ok === false) {
+        const rej = res as MutationRejection;
+        setGenerating(false);
+        setGenerationStage(null);
+        showNotice('error', rej.explain ? `${rej.error}. ${rej.explain}` : rej.error);
+      } else {
+        generationStartedAt.current = Date.now();
+      }
+    } catch {
+      setGenerating(false);
+      setGenerationStage(null);
+      showNotice('error', 'The render could not be queued automatically — click Export to render.');
+    }
+  }, [showNotice]);
 
   const refresh = useCallback(async () => {
     const res = await trackB.get(projectId);
@@ -150,8 +207,11 @@ export default function Editor({ projectId, onBack, onEnhance }: {
       setGenerationStage(stageFromProject(row));
       setGenerating(true);
       setOverlayDismissed(true); // resume unobtrusively — the top-bar pill shows progress
+      // The planned-with-no-job stall is healed on open: queue the render
+      // instead of watching a stage that nothing is advancing.
+      if (/planned/.test(status)) void queueRenderIfIdle(row);
     }
-  }, [row]);
+  }, [row, queueRenderIfIdle]);
 
   // Poll the pipeline while generating (presentation only — the orchestrator owns the work).
   useEffect(() => {
@@ -160,7 +220,14 @@ export default function Editor({ projectId, onBack, onEnhance }: {
 
     const pollGeneration = async () => {
       try {
-        try { await trackB.renderStatus(projectId); } catch { /* best-effort sync; get() below still reads state */ }
+        let liveRender = true;
+        try {
+          const sync = await trackB.renderStatus(projectId);
+          if ((sync as MutationRejection).ok !== false) {
+            const s = sync as { rendering: boolean; completed?: boolean };
+            liveRender = Boolean(s.rendering || s.completed);
+          }
+        } catch { /* best-effort sync; get() below still reads state */ }
         const res = await trackB.get(projectId);
         if (cancelled) return;
         if ((res as MutationRejection).ok === false) throw new Error((res as MutationRejection).error);
@@ -169,6 +236,17 @@ export default function Editor({ projectId, onBack, onEnhance }: {
         if (!next) return; // transient empty response — the next poll retries
         setRow(next);
         setVersions(ok.versions ?? []);
+
+        // Planned-idle watchdog: several consecutive polls reporting no live
+        // render while the project sits 'planned' means “Building
+        // compositions…” is advancing nothing — queue the render.
+        const statusNow = `${next.status || ''} ${next.project?.status || ''}`.toLowerCase();
+        if (!liveRender && /planned/.test(statusNow)) {
+          plannedIdlePolls.current += 1;
+          if (plannedIdlePolls.current >= 3) { plannedIdlePolls.current = 0; void queueRenderIfIdle(next); }
+        } else {
+          plannedIdlePolls.current = 0;
+        }
 
         const outputs = (next.project?.renders ?? []).filter((r) => r.output).length;
         const base = renderBaseline.current;
@@ -203,7 +281,7 @@ export default function Editor({ projectId, onBack, onEnhance }: {
     void pollGeneration();
     const poll = window.setInterval(() => { void pollGeneration(); }, 4000);
     return () => { cancelled = true; window.clearInterval(poll); };
-  }, [generating, generationStage, projectId, showNotice]);
+  }, [generating, generationStage, projectId, showNotice, queueRenderIfIdle]);
 
   const project = row?.project ?? null;
   const scenes = project?.scenes ?? [];
@@ -687,6 +765,11 @@ export default function Editor({ projectId, onBack, onEnhance }: {
           busy={busy || generating}
         />
       </div>
+
+      {/* dev-only demo timeline inspector (?debug=1 / localStorage trackb_debug) */}
+      {demoDebug && scenes.length > 0 ? (
+        <DemoDebugPanel scenes={scenes} style={row.product_video_style} />
+      ) : null}
 
       {/* ---- zone 4: agent bar ---- */}
       <AgentBar row={row} disabled={busy} onRefresh={refresh} />

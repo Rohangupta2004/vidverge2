@@ -168,7 +168,8 @@ const DIRECTOR_SYSTEM = [
   '- Any "text" field is a SHORT annotation label (max 42 characters) — a name, a step title, a callout like "Watch the elbow angle" — never spoken words.',
   '- Choose element types that fit the content: a tutorial or physical demonstration wants step badges, motion arrows and highlight rings on the relevant body part or object; a product/screen video wants callouts, labels and highlight rings on UI regions; a process explanation wants a flow diagram.',
   '- Never cover a person\u2019s face: keep elements off the face region you can see in the frames.',
-  '- At most 2 elements visible at the same moment; 4 to 12 elements across the whole video; each visible 1.5 to 6 seconds.',
+  '- At most 2 elements visible at the same moment; 6 to 14 elements across the whole video; each visible 1.5 to 6 seconds.',
+  '- THE ANALYSIS MUST BE VISIBLE ON THE FOOTAGE, not just written down: every insight that carries a recommendation, score or comparison must ALSO be expressed as an on-video element (a callout, label, arrow or highlight) at the moment on the timeline it applies to.',
   '',
   'ELEMENT TYPES:',
   '- "arrow": a motion-path arrow that draws itself from (x,y) to (x2,y2) — use it to show direction of movement or to point at the thing being discussed.',
@@ -261,6 +262,54 @@ function sanitizeInsights(parsed: any): AnalysisInsight[] {
   return out;
 }
 
+// VISUAL-FIRST GUARANTEE (Sep 20 2026): the analysis must never come back as
+// text-only advice. When the model returns too few overlay elements, the
+// findings themselves are converted into deterministic on-video graphics —
+// score labels, recommendation callouts, step flow diagrams — spread across
+// the timeline in safe screen corners, so something always shows ON the video.
+const SAFE_SPOTS: { x: number; y: number }[] = [
+  { x: 0.30, y: 0.18 }, { x: 0.70, y: 0.18 }, { x: 0.30, y: 0.80 }, { x: 0.70, y: 0.80 },
+];
+export function synthesizeElementsFromInsights(insights: AnalysisInsight[], duration: number, existing: OverlayElement[], minCount = 5): OverlayElement[] {
+  const out = existing.slice();
+  if (!insights.length || out.length >= minCount) return out;
+  const need = Math.min(insights.length, minCount - out.length);
+  const span = Math.max(2.4, (duration - 1) / Math.max(1, need));
+  for (let i = 0; i < need; i++) {
+    const ins = insights[i];
+    const start = clamp(0.5 + i * span, 0, Math.max(0, duration - 2));
+    const end = clamp(start + Math.min(4.5, Math.max(2, span * 0.8)), start + 1.5, duration || start + 2);
+    const spot = SAFE_SPOTS[i % SAFE_SPOTS.length];
+    let kind: OverlayKind = 'label';
+    let text = (ins.title || ins.text || '').slice(0, 42);
+    let x2: number | undefined;
+    let y2: number | undefined;
+    if (Number.isFinite(ins.score as number)) {
+      kind = 'label';
+      text = ((ins.title || 'Score') + ' \u00b7 ' + Math.round(Number(ins.score)) + '/100').slice(0, 42);
+    } else if (Array.isArray(ins.steps) && ins.steps.length >= 2) {
+      kind = 'diagram';
+      text = ins.steps.slice(0, 3).map((s) => s.split(/\s+/).slice(0, 2).join(' ')).join(' \u2192 ').slice(0, 46);
+    } else if (ins.recommendation) {
+      kind = 'callout';
+      text = ins.recommendation.slice(0, 42);
+      x2 = 0.5; y2 = 0.5;
+    } else if (ins.compare) {
+      kind = 'diagram';
+      text = (ins.compare.before + ' \u2192 ' + ins.compare.after).slice(0, 46);
+    }
+    if (!text) continue;
+    out.push({
+      id: 'ins-ov-' + i + '-' + Math.random().toString(36).slice(2, 6),
+      kind, start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10,
+      x: spot.x, y: spot.y, x2, y2, text,
+      emphasis: 'medium', color: OVERLAY_COLORS[kind], enabled: true,
+    });
+  }
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
 async function callOpusWithFrames(frames: FrameSample[], duration: number): Promise<any> {
   const token = String((window as any).__workspaceDb?.token || '');
   if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
@@ -306,11 +355,14 @@ export async function analyzeFrames(frames: FrameSample[], duration: number, onN
     try {
       onNote?.('The AI is studying ' + attempt.length + ' frames of your footage…');
       const parsed = await callOpusWithFrames(attempt, duration);
-      const elements = sanitizeElements(parsed, duration);
-      if (!elements.length) throw new Error('The analysis returned no usable overlay elements — try again.');
+      const insights = sanitizeInsights(parsed);
+      // Visual-first: pad thin element sets from the findings themselves, so
+      // the analysis always lands as graphics ON the video, never text alone.
+      const elements = synthesizeElementsFromInsights(insights, duration, sanitizeElements(parsed, duration));
+      if (!elements.length && !insights.length) throw new Error('The analysis returned no usable findings — try again.');
       return {
         summary: typeof parsed?.summary === 'string' ? parsed.summary.trim().slice(0, 300) : '',
-        insights: sanitizeInsights(parsed),
+        insights,
         elements,
         framesUsed: attempt.length,
       };

@@ -1,233 +1,349 @@
 /**
- * Screen 5 — The run (hero screen). Six fixed stage rows, a live frame,
- * a pulsing dot, a counting clock, an advancing bar, a filling shot strip and
- * a self-rewriting status line. Nothing on this screen is ever still (§9.1).
- * Elapsed counts up, scenes-remaining counts down — never a ceiling, never a
- * countdown to a cutoff that does not exist.
+ * Sequential production board — the live view of a film generating clip by
+ * clip. Left rail: every scene with its live status. Right panel: THE ACTIVE
+ * SCENE only — its duration, continuity decision, reference assets and full
+ * prepared prompt, with the explicit [Generate Video] trigger. Future scenes'
+ * prompts are never shown (they do not exist yet — the director prepares one
+ * clip at a time). Failed scenes offer per-scene recovery that never touches
+ * completed clips.
  */
-import { useEffect, useMemo, useState } from 'react';
-import { Check, Loader2, Play } from 'lucide-react';
-import { CharacterRow, Project, SceneRow, AgentEvent, T, fmtClock } from './api';
+import { useEffect, useState } from 'react';
+import {
+  AlertTriangle, ArrowRight, Check, Circle, CircleDot,
+  Loader2, Play, RefreshCw, SkipForward, Sparkles, UserRound, Wand2, Zap,
+} from 'lucide-react';
+import { Film, FilmScene, T } from './api';
+import { audioReady, musicReady, narrationReady, sfxReady } from './pipeline/audio';
 
-function isFrameDiagnostic(message: unknown): boolean {
-  return /platform ffmpeg|video\/frames|browser fallback|browser frame|tail[- ]frame|frame extraction|frame extractor|hard stop.*frame/i.test(String(message || ''));
+const DONE = new Set(['completed', 'skipped']);
+
+function statusMeta(s: FilmScene): { word: string; color: string; icon: any } {
+  switch (String(s.status)) {
+    case 'completed': return { word: 'Completed', color: T.done, icon: <Check size={13} /> };
+    case 'ready': return { word: 'Ready to generate', color: T.live, icon: <CircleDot size={13} /> };
+    case 'generating': return { word: 'Generating', color: T.live, icon: <Loader2 size={13} className="animate-spin" /> };
+    case 'failed': return { word: 'Failed', color: T.fault, icon: <AlertTriangle size={13} /> };
+    case 'skipped': return { word: 'Skipped', color: T.dim, icon: <SkipForward size={13} /> };
+    default: return { word: 'Waiting', color: T.dim, icon: <Circle size={12} /> };
+  }
 }
 
-function customerEventMessage(message: string): string {
-  if (/scene reference/i.test(message)) return 'Shot checked using scene reference. Tap to review.';
-  if (isFrameDiagnostic(message)) return "We couldn't check this shot yet. Retrying…";
-  return message;
-}
-
-function sceneColor(s: SceneRow): string {
-  if (['passed', 'auto_fixed'].includes(s.status)) return T.done;
-  if (['unchecked', 'rendering', 'judging', 'prepping'].includes(s.status)) return T.live;
-  if (['needs_attention', 'failed'].includes(s.status)) return T.fault;
-  if (s.status === 'cut') return 'transparent';
-  return T.dim;
+function referenceLabel(s: FilmScene, scenes: FilmScene[]): string {
+  const prev = [...scenes].filter((x) => x.idx < s.idx && x.status === 'completed').sort((a, b) => b.idx - a.idx)[0];
+  switch (String(s.reference_type || '')) {
+    case 'previous_final_frame': return prev ? `Scene ${prev.idx + 1} final frame` : 'Previous final frame';
+    case 'character_reference': return 'Locked character reference';
+    case 'scene_reference': return 'Scene reference image';
+    default: return 'None — prompt only';
+  }
 }
 
 export default function RenderRoom(props: {
-  project: Project;
-  scenes: SceneRow[];
-  characters: CharacterRow[];
-  events: AgentEvent[];
-  onRecast: (charKey: string, appearance: string) => Promise<void>;
-  onResume: () => void;
-  onReview: () => void;
+  film: Film;
+  scenes: FilmScene[];
+  note: string;
+  busy: boolean;
+  auto: boolean;
+  autoPost: boolean;
+  onToggleAuto: (on: boolean) => void;
+  onToggleAutoPost: (on: boolean) => void;
+  onGenerate: (scene: FilmScene) => void;
+  onPrepare: (scene: FilmScene) => void;
+  onRetry: (scene: FilmScene) => void;
+  onRegenPrompt: (scene: FilmScene) => void;
+  onUseCharRef: (scene: FilmScene) => void;
+  onSkip: (scene: FilmScene) => void;
 }) {
-  const { project: p, onRecast, onResume, onReview } = props;
-  // The live run screen reads server state that can arrive partially: treat
-  // every list as possibly missing so a slow status call shows the empty run
-  // room instead of taking the app down.
-  const scenes = Array.isArray(props.scenes) ? props.scenes.filter(Boolean) : [];
-  const characters = Array.isArray(props.characters) ? props.characters.filter(Boolean) : [];
-  const events = Array.isArray(props.events) ? props.events.filter(Boolean) : [];
-  const [nowMs, setNowMs] = useState(Date.now());
-  const [recastKey, setRecastKey] = useState<string | null>(null);
-  const [recastText, setRecastText] = useState('');
-  useEffect(() => {
-    const t = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const { film, note, busy, auto, autoPost } = props;
+  const scenes = [...(Array.isArray(props.scenes) ? props.scenes : [])].sort((a, b) => a.idx - b.idx);
+  const completed = scenes.filter((s) => s.status === 'completed');
+  const generating = scenes.find((s) => s.status === 'generating') || null;
+  const active = scenes.find((s) => !DONE.has(String(s.status))) || null;
+  const allDone = scenes.length > 0 && scenes.every((s) => DONE.has(String(s.status)));
+  const assembling = film.status === 'assembling';
 
-  const elapsed = p.render_started_at ? nowMs - new Date(p.render_started_at).getTime() : 0;
-  const doneScenes = scenes.filter((s) => ['passed', 'auto_fixed', 'unchecked', 'needs_attention', 'failed', 'cut'].includes(s.status));
-  const activeScene = scenes.find((s) => ['rendering', 'judging', 'prepping'].includes(s.status));
-  const liveFrame = useMemo(() => {
-    const withFrames = [...scenes].filter((s) => s.last_frame_url || s.open_image_url || s.first_frame_url).sort((a, b) => b.idx - a.idx);
-    const c = characters.find((ch) => ch.ref_image_url);
-    return withFrames[0]?.last_frame_url || withFrames[0]?.open_image_url || withFrames[0]?.first_frame_url || c?.ref_image_url || null;
-  }, [scenes, characters]);
-
-  const castDone = characters.length === 0 || characters.every((c) => c.status === 'ready');
-  const castBlocked = characters.filter((c) => c.status === 'blocked');
-  const filmingDone = scenes.length > 0 && doneScenes.length === scenes.length;
-  const layers = p.layers && typeof p.layers === 'object' && !Array.isArray(p.layers) ? p.layers : {};
-  const stalled = p.status === 'stalled';
-  const rawStatus = stalled ? p.error || 'No progress for a while.' : p.stage_note || '…';
-  const statusMessage = isFrameDiagnostic(rawStatus) ? "We couldn't check this shot yet. Retrying…" : rawStatus;
-  const recentEvents = events.slice(-12).map((event) => ({ ...event, customerMessage: customerEventMessage(event.message) }));
-  const displayEvents = recentEvents.filter((event, index) => index === 0 || event.customerMessage !== recentEvents[index - 1].customerMessage).slice(-6);
-  const technicalEvents = events.filter((event) => isFrameDiagnostic(event.message));
-
-  const stageRows = [
-    {
-      key: 'script', label: 'Shot plan locked', state: 'done',
-      note: `${p.scene_count || scenes.length} dynamic shots from your ${p.input_shape === 'url' ? 'link' : p.input_shape || 'brief'} · max 8s each`,
-    },
-    {
-      key: 'cast', label: 'Cast locked',
-      state: castDone ? 'done' : p.status === 'casting' ? 'live' : 'dim',
-      note: characters.length ? `${characters.filter((c) => c.status === 'ready').length} of ${characters.length} characters saved to your library` : 'no recurring characters needed',
-    },
-    {
-      key: 'film', label: 'Chaining shots',
-      state: filmingDone ? 'done' : ['rendering'].includes(p.status) ? 'live' : 'dim',
-      note: filmingDone ? `${scenes.length} shots · every ending analyzed` : activeScene ? `shot ${activeScene.idx} of ${scenes.length} · extracting and analyzing its ending` : `${doneScenes.length} of ${scenes.length || '…'} done`,
-    },
-    {
-      key: 'text', label: 'Text and graphics',
-      state: layers.graphics && layers.graphics !== 'off' ? (layers.state === 'applied' ? 'done' : 'live') : 'optional',
-      note: layers.graphics && layers.graphics !== 'off' ? 'end card on' : 'optional · off',
-    },
-    {
-      key: 'music', label: 'Music and effects',
-      state: layers.music && layers.music !== 'off' ? (layers.state === 'applied' ? 'done' : 'live') : 'optional',
-      note: layers.music === 'keep' ? 'keeping the film’s own sound' : layers.music === 'score' ? 'scored' : 'optional · off',
-    },
-    {
-      key: 'assemble', label: 'Make it together',
-      state: p.status === 'ready' ? 'done' : p.status === 'assembling' || p.status === 'post' ? 'live' : 'dim',
-      note: p.status === 'ready' ? 'joins checked' : 'joins checked before you see it',
-    },
-  ];
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  useEffect(() => { setSelectedId(active ? active.id : (scenes[scenes.length - 1]?.id ?? null)); }, [active?.id, scenes.length]);
+  const selected = scenes.find((s) => s.id === selectedId) || active || scenes[0] || null;
+  const selectedIsActive = !!selected && !!active && selected.id === active.id;
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 150px' }}>
-      {/* Full-bleed media */}
-      <div style={{ position: 'relative', width: '100%', height: 300, background: '#0C0C0F', overflow: 'hidden' }}>
-        {liveFrame ? (
-          <img src={liveFrame} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.92 }} />
-        ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.dim, fontSize: 13 }}>
-            The first frames will appear here.
+    <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      {/* —— Scene rail —— */}
+      <div style={{ width: 268, flexShrink: 0, borderRight: `1px solid ${T.raised}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={{ padding: '16px 16px 10px' }}>
+          <div style={{ color: T.bone, fontSize: 14.5, fontWeight: 700, letterSpacing: -0.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{film.title || 'Your film'}</div>
+          <div style={{ color: T.muted, fontSize: 11.5, marginTop: 4 }}>{completed.length} of {scenes.length} clips completed</div>
+          <div style={{ marginTop: 8, height: 4, background: T.raised, borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${scenes.length ? Math.round((completed.length / scenes.length) * 100) : 2}%`, background: T.live, transition: 'width 0.6s ease' }} />
           </div>
-        )}
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', padding: '14px 18px', background: 'linear-gradient(rgba(12,12,15,0.75), transparent)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 99, background: stalled ? T.fault : T.live, animation: stalled ? 'none' : 's2v-pulse 1.4s ease-in-out infinite' }} />
-            <span style={{ color: T.bone, fontSize: 12.5, fontFamily: T.mono }}>
-              {activeScene ? `shot ${activeScene.idx} of ${scenes.length}` : `${doneScenes.length} of ${scenes.length} shots`}
-            </span>
-          </div>
-          <span style={{ color: T.bone, fontSize: 12.5, fontFamily: T.mono }}>{fmtClock(elapsed)}</span>
         </div>
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 4, background: 'rgba(255,255,255,0.08)' }}>
-          <div style={{ height: '100%', width: `${scenes.length ? Math.round((doneScenes.length / scenes.length) * 100) : 4}%`, background: T.live, transition: 'width 0.8s ease' }} />
+        <div style={{ flex: 1, overflowY: 'auto', padding: '2px 8px 12px' }}>
+          {scenes.map((s) => {
+            const meta = statusMeta(s);
+            const isSel = selected?.id === s.id;
+            return (
+              <button
+                key={s.id}
+                className="s2v-row"
+                onClick={() => setSelectedId(s.id)}
+                style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', background: isSel ? 'rgba(255,255,255,0.05)' : 'transparent', border: `1px solid ${isSel ? T.dim : 'transparent'}`, borderRadius: 10, padding: '9px 10px', cursor: 'pointer', marginBottom: 2 }}
+              >
+                <span style={{ color: meta.color, display: 'flex', flexShrink: 0 }}>{meta.icon}</span>
+                <span style={{ color: isSel ? T.bone : T.muted, fontFamily: T.mono, fontSize: 12, flexShrink: 0 }}>Scene {String(s.idx + 1).padStart(2, '0')}</span>
+                <span style={{ color: meta.color, fontSize: 11.5, marginLeft: 'auto', whiteSpace: 'nowrap' }}>{meta.word}</span>
+              </button>
+            );
+          })}
+        </div>
+        {/* Generation states + auto modes (the Final Assembly control lives in
+            the persistent bottom bar, never buried down here) */}
+        <div style={{ padding: '10px 14px 14px', borderTop: `1px solid ${T.raised}`, display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <GenerationStates film={film} scenes={scenes} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }} title="Prepare → generate → extract frame → decide continuity → next — still strictly one clip at a time.">
+            <input type="checkbox" checked={auto} onChange={(e) => props.onToggleAuto(e.target.checked)} style={{ accentColor: T.live }} />
+            <Zap size={13} color={auto ? T.live : T.dim} />
+            <span style={{ color: auto ? T.bone : T.muted, fontSize: 12.5, fontWeight: 600 }}>Auto-generate</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }} title="After the last scene completes: narration → music → SFX run automatically until Ready for Final Assembly. Off = trigger each post-production step yourself.">
+            <input type="checkbox" checked={autoPost} onChange={(e) => props.onToggleAutoPost(e.target.checked)} style={{ accentColor: T.live }} />
+            <Wand2 size={13} color={autoPost ? T.live : T.dim} />
+            <span style={{ color: autoPost ? T.bone : T.muted, fontSize: 12.5, fontWeight: 600 }}>Auto-complete post-production</span>
+          </label>
         </div>
       </div>
 
-      <div style={{ maxWidth: 680, margin: '0 auto', padding: '22px 24px 0' }}>
-        <div style={{ color: T.bone, fontSize: 21, fontWeight: 700, letterSpacing: -0.3 }}>
-          {p.status === 'ready' ? 'Your video is ready' : stalled ? 'The run stalled' : 'Making your video'}
-        </div>
-        <div style={{ color: stalled ? T.fault : T.live, fontSize: 13.5, marginTop: 5, minHeight: 20 }}>
-          {statusMessage}
-        </div>
-        {scenes.length > 12 ? (
-          <div style={{ color: T.muted, fontSize: 12.5, marginTop: 4 }}>
-            This plan needs {scenes.length} shots to preserve the story and joins. We’ll keep going even if you close this tab.
+      {/* —— Active scene panel —— */}
+      <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, padding: '18px 22px 28px' }}>
+        <div style={{ maxWidth: 720, margin: '0 auto' }}>
+          {/* Live pipeline note */}
+          <div style={{ color: generating || assembling ? T.live : T.muted, fontSize: 12.5, minHeight: 18, marginBottom: 4 }}>
+            {note || film.stage_note || '…'}
           </div>
-        ) : null}
-
-        {/* Shot strip */}
-        {scenes.length ? (
-          <div style={{ display: 'flex', gap: 3, marginTop: 16, flexWrap: 'wrap' }}>
-            {scenes.map((s) => (
-              <div key={s.idx} title={`Shot ${s.idx} · source ${s.source_scene_id || '?'} · ${s.status}${s.last_frame_url ? ' · last frame stored' : ''}${s.end_state ? ' · ending analyzed' : ''}`} style={{ width: Math.max(10, Math.min(26, Math.floor(500 / scenes.length))), height: 7, borderRadius: 2, background: sceneColor(s), border: s.status === 'cut' ? `1px dashed ${T.dim}` : 'none', transition: 'background 0.5s' }} />
-            ))}
-          </div>
-        ) : null}
-
-        {/* Stage list */}
-        <div style={{ marginTop: 26 }}>
-          {stageRows.map((r) => (
-            <div key={r.key} style={{ display: 'flex', gap: 14, alignItems: 'flex-start', padding: '11px 0' }}>
-              <div style={{ width: 20, display: 'flex', justifyContent: 'center', paddingTop: 1 }}>
-                {r.state === 'done' ? <Check size={15} color={T.done} /> :
-                 r.state === 'live' ? <Loader2 size={15} color={T.live} className="animate-spin" /> :
-                 <span style={{ width: 9, height: 9, borderRadius: 99, border: `1.5px solid ${T.dim}`, marginTop: 3 }} />}
-              </div>
-              <div style={{ flex: 1 }}>
-                <span style={{ color: r.state === 'dim' || r.state === 'optional' ? T.dim : T.bone, fontSize: 14, fontWeight: 600 }}>{r.label}</span>
-                <span style={{ color: r.state === 'live' ? T.live : T.muted, fontSize: 12.5, marginLeft: 12 }}>{r.note}</span>
-                {r.key === 'film' && r.state === 'live' ? (
-                  <div style={{ marginTop: 7, height: 3, background: T.raised, borderRadius: 2, overflow: 'hidden', maxWidth: 300 }}>
-                    <div style={{ height: '100%', width: '45%', background: T.live, animation: 's2v-rail 1.8s ease-in-out infinite alternate' }} />
-                  </div>
-                ) : null}
-              </div>
+          {film.error ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, margin: '6px 0 10px', background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '9px 13px' }}>
+              <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{film.error}</span>
             </div>
-          ))}
-        </div>
+          ) : null}
 
-        {/* Blocked characters — the one failure that waits for the user */}
-        {castBlocked.map((c) => (
-          <div key={c.id} style={{ background: 'rgba(226,114,111,0.09)', border: '1px solid rgba(226,114,111,0.4)', borderRadius: 12, padding: 16, marginTop: 14 }}>
-            <div style={{ color: T.fault, fontSize: 13.5, fontWeight: 600 }}>{c.name} is blocked by the likeness guard</div>
-            <div style={{ color: T.muted, fontSize: 12.5, marginTop: 4 }}>{c.blocked_reason}</div>
-            {recastKey === c.char_key ? (
-              <div style={{ marginTop: 10 }}>
-                <textarea value={recastText} onChange={(e) => setRecastText(e.target.value)} rows={2} placeholder={`Describe ${c.name} differently…`} style={{ width: '100%', background: T.canvas, border: `1px solid ${T.dim}`, borderRadius: 8, color: T.bone, fontSize: 13, padding: 10, outline: 'none' }} />
-                <button onClick={async () => { await onRecast(c.char_key, recastText); setRecastKey(null); setRecastText(''); }} style={{ marginTop: 8, background: T.bone, color: T.canvas, border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Recast and continue</button>
-              </div>
+          {allDone && !selected ? (
+            <div style={{ color: T.done, fontSize: 14, marginTop: 30, textAlign: 'center' }}>All scenes are complete — assemble the final film.</div>
+          ) : null}
+
+          {selected ? <ScenePanel scene={selected} scenes={scenes} film={film} isActive={selectedIsActive} busy={busy} auto={auto} {...props} /> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The pipeline's post-scene steps — REAL backend states, never faked: a ✓
+ * appears only when that layer's asset actually exists, a failure shows as a
+ * failure, and “queued” vs “generating” reflect the machine state. */
+function GenerationStates({ film, scenes }: { film: Film; scenes: FilmScene[] }) {
+  const completed = scenes.filter((s) => s.status === 'completed').length;
+  const allDone = scenes.length > 0 && scenes.every((s) => DONE.has(String(s.status)));
+  const sceneFailed = scenes.some((s) => s.status === 'failed');
+  const audio = film.audio || null;
+  const assembling = film.status === 'assembling';
+  const finalReady = !!film.final_video_url && film.machine_state === 'FINAL_VIDEO';
+  const continuity = scenes.some((s) => s.keyframe_url);
+  const audioRunning = film.machine_state === 'AUDIO_PLANNING' || film.machine_state === 'AUDIO_GENERATING';
+  const nReady = !!audio && narrationReady(audio);
+  const nFailed = !!audio && audio.narration.some((n) => n.status === 'failed');
+  const mReady = !!audio && musicReady(audio);
+  const mFailed = audio?.music?.status === 'failed';
+  const sReady = !!audio && sfxReady(audio);
+  const sFailed = audio?.sfx_status === 'failed';
+
+  type RowState = 'done' | 'active' | 'failed' | 'todo';
+  const layer = (ready: boolean, failed: boolean, active: boolean, labels: { done: string; failed: string; active: string; todo: string }): { label: string; state: RowState } =>
+    ready ? { label: labels.done, state: 'done' }
+      : failed ? { label: labels.failed, state: 'failed' }
+        : active ? { label: labels.active, state: 'active' }
+          : { label: labels.todo, state: 'todo' };
+
+  const rows: { label: string; state: RowState }[] = [
+    { label: 'Script analyzed', state: film.plan ? 'done' : 'active' },
+    { label: `Video scenes (${completed}/${scenes.length})`, state: allDone ? 'done' : sceneFailed ? 'failed' : 'active' },
+    { label: 'Character continuity', state: continuity ? 'done' : 'todo' },
+    layer(nReady, nFailed, audioRunning && !nReady, { done: 'Narration ready', failed: 'Narration failed', active: 'Generating narration…', todo: audio ? 'Narration queued' : 'Narration' }),
+    layer(mReady, !!mFailed, audioRunning && nReady && !mReady, { done: audio?.music?.status === 'skipped' ? 'Music skipped' : 'Music selected', failed: 'Music failed', active: 'Selecting music…', todo: audio ? 'Music queued' : 'Music' }),
+    layer(sReady, !!sFailed, audioRunning && nReady && mReady && !sReady, { done: audio?.sfx_status === 'skipped' ? 'SFX skipped' : audio?.sfx_status === 'none' ? 'No SFX needed' : 'SFX prepared', failed: 'SFX failed', active: 'Preparing SFX…', todo: audio ? 'SFX queued' : 'SFX' }),
+    finalReady
+      ? { label: 'Final video ready', state: 'done' as const }
+      : assembling
+        ? { label: 'Assembling final video…', state: 'active' as const }
+        : { label: 'Ready for Final Assembly', state: allDone && !!audio && audioReady(audio) ? 'done' as const : 'todo' as const },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ color: r.state === 'done' ? T.done : r.state === 'active' ? T.live : r.state === 'failed' ? T.fault : T.dim, display: 'flex', flexShrink: 0 }}>
+            {r.state === 'done' ? <Check size={11} /> : r.state === 'active' ? <CircleDot size={11} /> : r.state === 'failed' ? <AlertTriangle size={11} /> : <Circle size={10} />}
+          </span>
+          <span style={{ color: r.state === 'todo' ? T.dim : r.state === 'failed' ? T.fault : T.muted, fontSize: 11 }}>{r.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MetaRow({ label, children }: { label: string; children: any }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+      <span style={{ color: T.dim, fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', width: 92, flexShrink: 0 }}>{label}</span>
+      <span style={{ color: T.bone, fontSize: 12.5, lineHeight: 1.5, minWidth: 0 }}>{children}</span>
+    </div>
+  );
+}
+
+function ScenePanel(props: {
+  scene: FilmScene;
+  scenes: FilmScene[];
+  film: Film;
+  isActive: boolean;
+  busy: boolean;
+  auto: boolean;
+  onGenerate: (scene: FilmScene) => void;
+  onPrepare: (scene: FilmScene) => void;
+  onRetry: (scene: FilmScene) => void;
+  onRegenPrompt: (scene: FilmScene) => void;
+  onUseCharRef: (scene: FilmScene) => void;
+  onSkip: (scene: FilmScene) => void;
+}) {
+  const { scene: s, scenes, film, isActive, busy } = props;
+  const meta = statusMeta(s);
+  const prev = [...scenes].filter((x) => x.idx < s.idx && x.status === 'completed').sort((a, b) => b.idx - a.idx)[0] || null;
+  const refs = Array.isArray(s.reference_assets) ? s.reference_assets : [];
+  const working = busy || s.status === 'generating';
+
+  return (
+    <div style={{ background: T.raised, border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, padding: '18px 20px', marginTop: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ color: T.bone, fontSize: 17, fontWeight: 800, letterSpacing: 0.5, fontFamily: T.mono }}>SCENE {String(s.idx + 1).padStart(2, '0')}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: meta.color, fontSize: 11.5, fontWeight: 700, border: `1px solid ${meta.color}`, borderRadius: 999, padding: '2px 10px' }}>{meta.icon} {meta.word}</span>
+      </div>
+
+      <div style={{ color: T.muted, fontSize: 12.5, lineHeight: 1.55, fontStyle: 'italic', marginTop: 12 }}>“{String(s.script_segment || '').slice(0, 320)}{String(s.script_segment || '').length > 320 ? '…' : ''}”</div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
+        <MetaRow label="Duration">{Math.round(Number(s.duration_s) || 6)}s</MetaRow>
+        {s.prompt ? (
+          <MetaRow label="Continuity">
+            {s.continuation ? (
+              <span style={{ color: T.done }}><Check size={12} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} />Continuing from Scene {prev ? String(prev.idx + 1).padStart(2, '0') : '—'}</span>
             ) : (
-              <button onClick={() => { setRecastKey(c.char_key); setRecastText(c.appearance || ''); }} style={{ marginTop: 10, background: T.raised, color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 8, padding: '8px 14px', fontSize: 12.5, cursor: 'pointer' }}>Re-describe {c.name}</button>
+              <span>Independent scene{prev ? ' — the previous frame is deliberately NOT used' : ''}</span>
             )}
-          </div>
-        ))}
+          </MetaRow>
+        ) : null}
+        {s.prompt ? <MetaRow label="Reference">{referenceLabel(s, scenes)}</MetaRow> : null}
+        {(s.spec as any)?.reasoning ? <MetaRow label="Director">{String((s.spec as any).reasoning)}</MetaRow> : null}
+      </div>
 
-        {/* Failure / repair feed — visible but calm */}
-        <div style={{ marginTop: 22 }}>
-          {displayEvents.map((e) => (
-            <div key={e.id} style={{ color: e.level === 'error' ? T.fault : e.level === 'warn' ? T.live : T.muted, fontSize: 12, lineHeight: 1.7, fontFamily: T.mono }}>
-              {e.customerMessage}
+      {refs.length ? (
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          {refs.map((r, i) => (
+            <div key={i} style={{ textAlign: 'center' }}>
+              <img src={r.url} alt="" style={{ width: 84, height: 56, objectFit: 'cover', borderRadius: 7, border: `1px solid ${T.dim}` }} />
+              <div style={{ color: T.dim, fontSize: 10, marginTop: 3 }}>{r.role === 'first_frame' ? 'seed frame' : 'reference'}</div>
             </div>
           ))}
         </div>
+      ) : null}
 
-        {technicalEvents.length || (p.error && isFrameDiagnostic(p.error)) ? (
-          <details style={{ marginTop: 14, background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 8, padding: '9px 11px' }}>
-            <summary style={{ color: T.muted, fontSize: 12, cursor: 'pointer' }}>Details</summary>
-            <div style={{ marginTop: 8, color: T.dim, fontSize: 11, lineHeight: 1.6, fontFamily: T.mono, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-              {p.error && isFrameDiagnostic(p.error) ? <div>{p.error}</div> : null}
-              {technicalEvents.slice(-12).map((event) => <div key={event.id}>{event.message}</div>)}
-            </div>
-          </details>
-        ) : null}
-
-        {stalled ? (
-          <button className="s2v-lift" onClick={onResume} style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 20, background: T.live, color: '#1A1205', border: 'none', borderRadius: 11, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 12px rgba(232,163,60,0.25)' }}>
-            <Play size={15} /> Resume from the first missing scene
-          </button>
-        ) : null}
-
-        {p.status === 'review' || (filmingDone && p.status === 'rendering') ? (
-          <button className="s2v-lift" onClick={onReview} style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 20, background: T.bone, color: T.canvas, border: 'none', borderRadius: 11, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.3)' }}>
-            Review the scenes
-          </button>
-        ) : null}
-
-        <div style={{ color: T.dim, fontSize: 12, marginTop: 26 }}>
-          Leaving is safe. Rendering continues on our side — we’ll notify you when it’s done.
+      {/* Only the ACTIVE scene's full prompt is exposed — completed scenes keep
+          theirs for reference; future scenes have none yet. */}
+      {s.prompt ? (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ color: T.dim, fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Prompt</div>
+          <div style={{ background: '#0E0E11', border: `1px solid ${T.dim}`, borderRadius: 9, padding: '12px 14px', color: T.bone, fontSize: 12, lineHeight: 1.65, fontFamily: T.mono, maxHeight: 210, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{s.prompt}</div>
         </div>
+      ) : s.status === 'waiting' ? (
+        <div style={{ color: T.dim, fontSize: 12.5, marginTop: 14 }}>
+          {isActive ? 'The director prepares this scene\u2019s prompt after the previous clip lands (or prepare it now).' : 'Waiting its turn — the prompt is written one scene at a time, after the previous clip\u2019s final frame is known.'}
+        </div>
+      ) : null}
+
+      {s.status === 'failed' && s.error ? (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, marginTop: 14, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '9px 13px' }}>
+          <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{s.error}</span>
+        </div>
+      ) : null}
+
+      {/* Completed clip playback + final frame */}
+      {s.status === 'completed' && s.asset_url ? (
+        <div style={{ display: 'flex', gap: 12, marginTop: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <video key={s.asset_url} src={s.asset_url} controls preload="metadata" style={{ maxWidth: film.aspect_ratio === '9:16' ? 200 : 380, maxHeight: 300, borderRadius: 10, background: '#000', border: '1px solid rgba(255,255,255,0.06)' }} />
+          {s.keyframe_url ? (
+            <div>
+              <img src={s.keyframe_url} alt="" style={{ width: film.aspect_ratio === '9:16' ? 110 : 190, borderRadius: 8, border: `1px solid ${T.dim}`, display: 'block' }} />
+              <div style={{ color: T.dim, fontSize: 10.5, marginTop: 4 }}>Extracted final frame (continuity)</div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {s.status === 'completed' && s.validation && s.validation.pass === false ? (
+        <div style={{ color: T.fault, fontSize: 11.5, marginTop: 10 }}><AlertTriangle size={11} style={{ display: 'inline', marginRight: 5, verticalAlign: '-1px' }} />Director flag: {s.validation.issues || 'does not match the segment'} — use “New prompt” below to redo it.</div>
+      ) : null}
+
+      {/* —— Actions —— */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
+        {s.status === 'ready' && s.prompt ? (
+          <button
+            className="s2v-lift"
+            disabled={working}
+            onClick={() => props.onGenerate(s)}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, background: working ? T.raised : T.live, color: working ? T.dim : '#1A1205', border: 'none', borderRadius: 10, padding: '12px 26px', fontSize: 14, fontWeight: 700, cursor: working ? 'default' : 'pointer', boxShadow: working ? 'none' : '0 2px 12px rgba(232,163,60,0.25)' }}
+          >
+            <Play size={15} /> Generate Video
+          </button>
+        ) : null}
+        {s.status === 'waiting' && isActive ? (
+          <button className="s2v-ghost" disabled={working} onClick={() => props.onPrepare(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: T.canvas, border: `1px solid ${T.dim}`, color: T.bone, borderRadius: 9, padding: '10px 18px', fontSize: 13, cursor: 'pointer' }}>
+            <Wand2 size={13} /> Prepare this scene
+          </button>
+        ) : null}
+        {s.status === 'generating' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: T.live, fontSize: 13, fontWeight: 600, padding: '11px 4px' }}>
+            <Loader2 size={15} className="animate-spin" /> Generating — the clip, its real duration and its final frame land automatically…
+          </div>
+        ) : null}
+        {s.status === 'failed' ? (
+          <>
+            <button className="s2v-lift" disabled={working} onClick={() => props.onRetry(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: T.live, color: '#1A1205', border: 'none', borderRadius: 9, padding: '10px 16px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+              <RefreshCw size={13} /> Retry
+            </button>
+            <button className="s2v-ghost" disabled={working} onClick={() => props.onRegenPrompt(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.bone, borderRadius: 9, padding: '10px 16px', fontSize: 12.5, cursor: 'pointer' }}>
+              <Sparkles size={13} /> Regenerate prompt
+            </button>
+            <button className="s2v-ghost" disabled={working} onClick={() => props.onUseCharRef(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.bone, borderRadius: 9, padding: '10px 16px', fontSize: 12.5, cursor: 'pointer' }}>
+              <UserRound size={13} /> Use character reference
+            </button>
+            <button className="s2v-ghost" disabled={working} onClick={() => props.onSkip(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: 'none', color: T.muted, borderRadius: 9, padding: '10px 12px', fontSize: 12.5, cursor: 'pointer' }}>
+              <SkipForward size={13} /> Skip scene
+            </button>
+          </>
+        ) : null}
+        {s.status === 'ready' && s.prompt && !working ? (
+          <button className="s2v-ghost" onClick={() => props.onRegenPrompt(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 9, padding: '10px 16px', fontSize: 12.5, cursor: 'pointer' }}>
+            <Sparkles size={13} /> New prompt
+          </button>
+        ) : null}
+        {s.status === 'completed' && !working ? (
+          <button className="s2v-ghost" onClick={() => props.onRegenPrompt(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 9, padding: '9px 15px', fontSize: 12, cursor: 'pointer' }} title="Opus writes a fresh prompt for this scene; generate again to replace the clip. Other scenes are untouched.">
+            <RefreshCw size={12} /> Redo this scene
+          </button>
+        ) : null}
       </div>
-      <style>{`
-        @keyframes s2v-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.8); } }
-        @keyframes s2v-rail { from { transform: translateX(-30%); } to { transform: translateX(240%); } }
-        @media (prefers-reduced-motion: reduce) { [style*='s2v-pulse'], [style*='s2v-rail'] { animation: none !important; } }
-      `}</style>
+
+      {s.status === 'ready' && s.prompt && !props.auto ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: T.dim, fontSize: 11.5, marginTop: 12 }}>
+          <ArrowRight size={11} /> Generation starts only when you click — prompt preparation and rendering are separate steps.
+        </div>
+      ) : null}
     </div>
   );
 }

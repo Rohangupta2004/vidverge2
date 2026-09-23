@@ -811,8 +811,14 @@ async function tick(jobId: string): Promise<void> {
   // Still going (or a transient status hiccup): keep the visitor informed and
   // come back on the next poll. A failed status CALL is never treated as a
   // failed job.
+  // The hook's quality_check stage (all clips rendered, per-scene checks
+  // running, bounded server-side) maps to 'finishing' so the bar and copy say
+  // what is actually happening instead of a generic render line.
   patchJob({
-    phase: status.stage === 'stitching' || status.audio === 'pending' ? 'finishing' : 'rendering',
+    phase:
+      status.stage === 'stitching' || status.stage === 'quality_check' || status.audio === 'pending'
+        ? 'finishing'
+        : 'rendering',
     message: status.user_message || 'Generating your video…',
   });
   schedule(jobId);
@@ -834,6 +840,51 @@ function finish(jobId: string, downloadUrl: string): void {
   // series anchor while a series is live). Best-effort — a video host without
   // CORS simply yields no frames, never a failed job.
   void captureFramesForJob(jobId, downloadUrl);
+}
+
+/**
+ * AUDIO SELF-HEAL for a job that finished while this browser was away: a
+ * completed multi-clip render whose tab closed before the audio remux ran
+ * leaves video_stitches 'pending' and the delivered file as the silent (and
+ * geometry-cropped) fast platform cut. One status check on the restored job
+ * detects that state (audio 'pending' + clip_urls) and finishes the remux
+ * now, so reopening the app upgrades the video instead of leaving it degraded.
+ */
+async function healRestoredJobAudio(jobId: string): Promise<void> {
+  try {
+    const status = await checkVideoStatus(jobId);
+    if (!status.success) return;
+    if (
+      status.audio === 'pending' &&
+      Array.isArray(status.clip_urls) &&
+      status.clip_urls.length > 1 &&
+      status.workspace_uuid &&
+      remuxedJobId !== jobId
+    ) {
+      remuxedJobId = jobId;
+      const url = await remuxAndAttachAudio({
+        spaceId: scopedSpaceId(),
+        workspaceUuid: status.workspace_uuid,
+        jobId,
+        clipUrls: status.clip_urls,
+        sessionId: sessionId(),
+      });
+      if (state.job && state.job.jobId === jobId) {
+        patchJob({ downloadUrl: url, audio: 'ready', message: 'Your video is ready — soundtrack attached.' });
+        saveLastVideo({ videoUrl: url, jobId, timestamp: Date.now(), brief: briefTextOf(state) });
+      }
+    } else if (
+      status.download_url &&
+      state.job &&
+      state.job.jobId === jobId &&
+      state.job.downloadUrl !== status.download_url
+    ) {
+      // The server upgraded the delivered file (e.g. audio attached elsewhere).
+      patchJob({ downloadUrl: status.download_url });
+    }
+  } catch (e) {
+    console.warn('[Studio] restored-job audio heal skipped:', e);
+  }
 }
 
 async function captureFramesForJob(jobId: string, downloadUrl: string): Promise<void> {
@@ -1494,6 +1545,11 @@ if (typeof window !== 'undefined') {
   save(state);
   if (state.job && state.job.jobId && isJobActive(state.job)) {
     watchJob(state.job.jobId);
+  }
+  // A restored FINISHED job still gets one status check: if its audio remux
+  // never ran (tab closed mid-render), finish it now — see healRestoredJobAudio.
+  if (state.job && state.job.jobId && state.job.phase === 'ready') {
+    void healRestoredJobAudio(state.job.jobId);
   }
   // Any other surface that starts a render (the in-chat studio) announces it —
   // adopt the job so the studio shows the same progress the chat card does.

@@ -23,13 +23,28 @@ export class ClaudeRequestError extends Error {
   }
 }
 
-export async function claudeJson<T>(system: string, input: unknown, model = 'claude-opus-5', maxTokens = 8192): Promise<T> {
+// No Claude call may hang the pipeline forever: every request is aborted
+// after `timeoutMs` and surfaces as a retryable ClaudeRequestError, so a
+// dropped proxy connection becomes an error the caller can recover from
+// instead of a promise that never settles (the "spinner forever" failure).
+export const CLAUDE_TIMEOUT_MS = 180_000;
+
+async function claudeMessages<T>(system: string, content: unknown, model: string, maxTokens: number, timeoutMs: number): Promise<T> {
   const frontier = model.includes('opus');
-  const response = await fetch('/proxy/anthropic/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
-    body: JSON.stringify({ model, max_tokens: Math.min(8192, maxTokens), ...(frontier ? { thinking: { type: 'adaptive' }, output_config: { effort: 'medium' } } : { thinking: { type: 'disabled' } }), system, messages: [{ role: 'user', content: JSON.stringify(input) }] }),
-  });
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
+  let response: Response;
+  try {
+    response = await fetch('/proxy/anthropic/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
+      body: JSON.stringify({ model, max_tokens: Math.min(8192, maxTokens), ...(frontier ? { thinking: { type: 'adaptive' }, output_config: { effort: 'medium' } } : { thinking: { type: 'disabled' } }), system, messages: [{ role: 'user', content }] }),
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    if (controller.signal.aborted) throw new ClaudeRequestError(`The agent did not answer within ${Math.round(timeoutMs / 1000)} seconds. Try again.`, { code: 'timeout' });
+    throw e;
+  } finally { window.clearTimeout(timer); }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     // The proxy names the reason in `code` (body_too_large, input_too_large,
@@ -42,6 +57,27 @@ export async function claudeJson<T>(system: string, input: unknown, model = 'cla
   const text = (payload.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('').trim();
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] || text;
   try { return JSON.parse(fenced) as T; } catch { throw new ClaudeRequestError('The agent returned an invalid JSON response. Try again.', { code: 'invalid_json' }); }
+}
+
+export async function claudeJson<T>(system: string, input: unknown, model = 'claude-opus-5', maxTokens = 8192, timeoutMs = CLAUDE_TIMEOUT_MS): Promise<T> {
+  return claudeMessages<T>(system, JSON.stringify(input), model, maxTokens, timeoutMs);
+}
+
+export interface VisionImage { data: string; mediaType?: string }
+
+/**
+ * Vision call through the same proxy: base64 frames as Anthropic image blocks
+ * plus one text task. Used by the visual QA pipeline (lib/visualQa) to have
+ * the SAME model that directed a scene inspect its rendered frames. The proxy
+ * caps request bodies at 256 KB — callers must downscale frames before
+ * sending (visualQa keeps each frame small and drops frames if needed).
+ */
+export async function claudeVisionJson<T>(system: string, textPrompt: string, images: VisionImage[], model = 'claude-opus-5', maxTokens = 2048, timeoutMs = CLAUDE_TIMEOUT_MS): Promise<T> {
+  const content = [
+    ...images.map((image) => ({ type: 'image', source: { type: 'base64', media_type: image.mediaType || 'image/jpeg', data: image.data } })),
+    { type: 'text', text: textPrompt },
+  ];
+  return claudeMessages<T>(system, content, model, maxTokens, timeoutMs);
 }
 
 /**

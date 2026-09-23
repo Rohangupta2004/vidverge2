@@ -1,7 +1,9 @@
 /**
  * Product Studio — Track B (HyperFrames Product Video).
  *
- * App shell/router. Four surfaces:
+ * App shell/router. Surfaces:
+ *   - Ad Director    the AI Product Advertisement Director — URL in, a
+ *                    voice-timed, storyboarded, quality-checked ad out
  *   - My Videos      the project gallery; opening a project slides the
  *                    full-screen agentic editor in from the right
  *   - Saved Videos   the unified gallery of every FINISHED video from both
@@ -15,7 +17,9 @@
  * lib/trackB/api.ts.
  */
 import { useEffect, useState } from 'react';
-import { AudioLines, Bot, Film, Mic, Sparkles } from 'lucide-react';
+import { AudioLines, Bot, Clapperboard, Film, Mic, Sparkles, Wand2 } from 'lucide-react';
+import FilmStudio from './film/FilmStudio';
+import DesignStudio from './design/DesignStudio';
 import MyVideos from './MyVideos';
 import SavedVideos from './SavedVideos';
 import Editor from './Editor';
@@ -35,9 +39,19 @@ export interface EnhanceTarget {
   accent?: string | null;
 }
 
-type View = 'videos' | 'saved' | 'script' | 'scriptToVideo';
+type View = 'film' | 'design' | 'videos' | 'saved' | 'script' | 'scriptToVideo';
 
 const TABS: { id: View; label: string; icon: typeof Film; testId: string }[] = [
+  // Ad Director — the AI Product Advertisement Director (website URL → Opus 5
+  // research → ad strategy → voiceover script FIRST → per-scene TTS timing →
+  // visual storyboard → real-UI mockups / Omni Flash B-roll / GSAP diagrams →
+  // quality control → FFmpeg final ad + variations).
+  { id: 'film', label: 'Ad Director', icon: Clapperboard, testId: 'tab-ai-film' },
+  // Design with AI — upload a talking video; Opus 5 transcribes it, designs
+  // timestamped GSAP/SVG overlay graphics around the talking head, quality-
+  // checks itself, and hands over an editable timeline. Fully independent of
+  // the other flows; the original video is never modified.
+  { id: 'design', label: 'Design with AI', icon: Wand2, testId: 'tab-design-with-ai' },
   { id: 'videos', label: 'My Videos', icon: Film, testId: 'tab-my-videos' },
   { id: 'saved', label: 'Saved Videos', icon: Sparkles, testId: 'tab-saved-videos' },
   { id: 'script', label: 'Script Mode', icon: Mic, testId: 'tab-script-mode' },
@@ -46,7 +60,9 @@ const TABS: { id: View; label: string; icon: typeof Film; testId: string }[] = [
 
 export default function App() {
   const [openId, setOpenId] = useState<number | null>(null);
-  const [view, setView] = useState<View>('videos');
+  // The agentic AI Film studio is the headline surface; every previous
+  // surface stays one tab away.
+  const [view, setView] = useState<View>('film');
   // Enhance Studio — the merged Video Enhancer editor, opened on a READY video.
   const [enhance, setEnhance] = useState<EnhanceTarget | null>(null);
   // Sound Studio — ElevenLabs music, optional sound effects and optional
@@ -124,7 +140,11 @@ export default function App() {
               <Bot size={14} /> AI Video Agent
             </button>
           </div>
-          {view === 'videos' ? (
+          {view === 'film' ? (
+            <FilmStudio />
+          ) : view === 'design' ? (
+            <DesignStudio />
+          ) : view === 'videos' ? (
             <MyVideos
               onOpen={setOpenId}
               onStartWizard={setWizardStyle}
