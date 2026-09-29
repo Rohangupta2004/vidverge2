@@ -11,7 +11,7 @@ export const voxExplainer: ForgeStyle = {
   id: 'vox-explainer',
   name: 'Vox-style explainer',
   description: 'Paper-cut editorial collage: warm paper, ink type, one highlighter-yellow accent, torn edges and halftone texture.',
-  preview: 'linear-gradient(135deg,#F2EDE4 0 55%,#FFEB00 55% 82%,#1A1A1A 82%)',
+  preview: '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790666674272-izmvfp.png") center/cover no-repeat',
   palette: ['#F2EDE4', '#1A1A1A', '#FFEB00', '#E4572E', '#C9C2B6'],
   fonts: ['Archivo Black', 'Work Sans'],
   imagePromptPrefix: 'Paper-cut editorial collage artwork, flat 2D shapes with torn paper edges, desaturated duotone photography pulled into a warm cream and ink palette, halftone newsprint texture, paper background, near-black ink, a single highlighter-yellow accent, handcrafted magazine-spread look, no text,',

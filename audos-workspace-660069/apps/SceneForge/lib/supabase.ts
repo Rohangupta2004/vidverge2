@@ -105,16 +105,13 @@ export interface Asset { id: string; project_id: string; scene_id?: string; asse
 export interface ForgeSettings {
   /** The ONE orchestrator LLM behind the whole pipeline: script, scene manifest, image/video prompts, Remotion scene data, overlays and change-request routing. There are no per-stage models. */
   id?: string; workspace_id: string; llm_model: string; image_model: string;
-  /** Video engine for AI-video supporting scenes — the EXACT platform model id
-   * (e.g. gemini-omni-flash-preview, veo-3.1-fast-generate-preview). */
-  video_model?: string;
   heygen_api_key_secret_name: string; eleven_labs_voice_id?: string; default_avatar_id?: string; default_style?: string;
   default_language: string; default_target_length_sec: number; default_scene_share: 'low' | 'medium' | 'high'; default_aspect_ratio: '16:9' | '9:16'; heygen_defaults?: Record<string, unknown>;
 }
 export interface CheckResult { id: string; pass: boolean; label: string; detail: string }
 
 export const DEFAULT_SETTINGS: ForgeSettings = {
-  workspace_id: WORKSPACE_ID, llm_model: 'claude-opus-5', image_model: 'gemini-3.1-flash-image', video_model: 'gemini-omni-flash-preview',
+  workspace_id: WORKSPACE_ID, llm_model: 'claude-opus-5', image_model: 'gemini-3.1-flash-image',
   heygen_api_key_secret_name: 'HEYGEN_API_KEY', default_language: 'en', default_target_length_sec: 300, default_scene_share: 'medium', default_aspect_ratio: '9:16',
 };
 
@@ -184,14 +181,13 @@ export async function loadSettings(): Promise<ForgeSettings> {
   const row = result?.data?.[0] || {};
   // A settings row written before the single-LLM rework carries no llm_model;
   // its old script_model is the closest statement of intent.
-  return { ...DEFAULT_SETTINGS, ...row, llm_model: row.llm_model || row.script_model || DEFAULT_SETTINGS.llm_model, video_model: row.video_model || DEFAULT_SETTINGS.video_model };
+  return { ...DEFAULT_SETTINGS, ...row, llm_model: row.llm_model || row.script_model || DEFAULT_SETTINGS.llm_model };
 }
 export async function saveSettings(settings: ForgeSettings) {
   const payload = {
     workspace_id: WORKSPACE_ID,
     llm_model: settings.llm_model,
     image_model: settings.image_model,
-    video_model: settings.video_model || 'gemini-omni-flash-preview',
     heygen_api_key_secret_name: settings.heygen_api_key_secret_name,
     eleven_labs_voice_id: settings.eleven_labs_voice_id || '',
     default_avatar_id: settings.default_avatar_id || '',

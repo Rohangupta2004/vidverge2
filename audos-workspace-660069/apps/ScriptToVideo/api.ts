@@ -13,6 +13,8 @@
  * fingerprint, so regenerating one scene never touches the others.
  */
 
+import { LB } from '../../components/LightBeam';
+
 // ---------------------------------------------------------------------------
 // Session / auth plumbing
 // ---------------------------------------------------------------------------
@@ -548,17 +550,20 @@ export function frameSize(aspect: Aspect): { W: number; H: number } {
 }
 
 // ---------------------------------------------------------------------------
-// Design tokens — this app's own dark-editor surface palette (unchanged from
-// the previous S2V app so the shell experience stays consistent).
+// Design tokens — LightBeam (components/LightBeam.tsx): deep-navy canvas,
+// translucent cards, amber accent. Shared with the other studio apps so the
+// whole shell reads as one product.
 // ---------------------------------------------------------------------------
 
 export const T = {
-  canvas: '#131316',
-  raised: '#1C1C21',
+  canvas: LB.bg,                      // '#080c14'
+  raised: 'rgba(255,255,255,0.06)',   // card / divider surface on the LightBeam canvas
+  card: LB.bgCard,                    // 'rgba(255,255,255,0.04)' — LightBeam card bg
+  line: 'rgba(255,255,255,0.08)',     // LightBeam card border
   bone: '#EDEBE8',
-  muted: '#77757F',
-  dim: '#4A4852',
-  live: '#E8A33C',
+  muted: '#8A93A6',
+  dim: '#4C5568',
+  live: LB.accent,                    // '#f59e0b'
   done: '#7FD4B4',
   fault: '#E2726F',
   mono: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",

@@ -4,21 +4,21 @@
  * marketing_stock_image, product_campaign_image).
  *
  * Used by Creatables and by Ads Studio's Runway tools section. Contract:
- *  - a FREE quote is fetched and shown BEFORE the paid submit is enabled
+ *  - Generate submits straight to the provider — no quote step, no credit gate
  *  - every submit sends X-Workspace-DB-Token + a fresh Idempotency-Key
  *    (handled inside lib/videoEngineClient)
  *  - 503 generation_disabled renders the friendly "being enabled" message
  *  - 'uncertain' → never resubmit; failed/cancelled → auto-refund note
  *  - all media inputs must be public HTTPS URLs (validated before submit)
  */
-import { useMemo, useRef, useState } from 'react';
-import { Loader2, Upload, X, Play, Download, Calculator, AlertTriangle } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, Upload, X, Play, Download, AlertTriangle } from 'lucide-react';
 import {
   RUNWAY_RECIPES, RUNWAY_RATIOS, RUNWAY_LOCALIZATION_LANGUAGES, RUNWAY_DISABLED_MESSAGE,
   RunwayRecipeId, runwayRecipe,
 } from '../lib/videoEngines';
 import {
-  EngineError, isPublicHttpsUrl, isRunwayDisabledError, pollRunway, runwayQuote, runwaySubmitRecipe,
+  checkRunwayAvailability, EngineError, isPublicHttpsUrl, isRunwayDisabledError, pollRunway, runwaySubmitRecipe,
 } from '../lib/videoEngineClient';
 
 const S = {
@@ -192,37 +192,38 @@ function buildRecipeBody(id: RunwayRecipeId, f: RecipeForm): { body?: Record<str
 // The panel
 // ---------------------------------------------------------------------------
 
-type RunState = 'idle' | 'quoting' | 'quoted' | 'running' | 'done' | 'error';
+type RunState = 'idle' | 'running' | 'done' | 'error';
 
-export default function RunwayRecipesPanel({ uploadFile, initialRecipe }: {
+export default function RunwayRecipesPanel({ uploadFile, initialRecipe, allowedRecipes }: {
   uploadFile: (f: File) => Promise<string>;
   initialRecipe?: RunwayRecipeId;
+  /** Ads Studio only exposes the two pre-wired product recipes. */
+  allowedRecipes?: RunwayRecipeId[];
 }) {
   const [recipeId, setRecipeId] = useState<RunwayRecipeId>(initialRecipe || 'product_ad');
   const [form, setForm] = useState<RecipeForm>(emptyForm());
   const [state, setState] = useState<RunState>('idle');
-  const [quote, setQuote] = useState<{ priceUsd?: number; credits?: number } | null>(null);
   const [statusNote, setStatusNote] = useState('');
   const [error, setError] = useState('');
   const [disabled503, setDisabled503] = useState(false);
   const [outputs, setOutputs] = useState<string[]>([]);
   const [taskId, setTaskId] = useState('');
+  const [availability, setAvailability] = useState<'checking' | 'ready' | 'coming_soon'>('checking');
+  const visibleRecipes = RUNWAY_RECIPES.filter((item) => !allowedRecipes || allowedRecipes.includes(item.id));
   const recipe = runwayRecipe(recipeId)!;
-  const patch = (p: Partial<RecipeForm>) => { setForm((f) => ({ ...f, ...p })); setQuote(null); if (state === 'quoted') setState('idle'); };
+  const patch = (p: Partial<RecipeForm>) => { setForm((f) => ({ ...f, ...p })); };
+
+  useEffect(() => {
+    let live = true;
+    void checkRunwayAvailability().then((gate) => { if (live) setAvailability(gate.available ? 'ready' : 'coming_soon'); });
+    return () => { live = false; };
+  }, []);
 
   const validation = useMemo(() => buildRecipeBody(recipeId, form), [recipeId, form]);
 
-  async function getQuote() {
-    if (validation.error || !validation.body) { setError(validation.error || 'Fill the required fields first.'); return; }
-    setState('quoting'); setError('');
-    const q = await runwayQuote({ recipeId, ...validation.body });
-    if (!q.ok) { setState('idle'); setQuote(null); setError(q.error || 'The quote failed — check the inputs.'); return; }
-    setQuote({ priceUsd: q.priceUsd, credits: q.credits });
-    setState('quoted');
-  }
-
   async function run() {
-    if (state !== 'quoted' || !validation.body) return;
+    if (state === 'running') return;
+    if (validation.error || !validation.body) { setError(validation.error || 'Fill the required fields first.'); return; }
     setState('running'); setError(''); setOutputs([]); setStatusNote('Submitting to Runway…');
     try {
       const kick = await runwaySubmitRecipe(recipeId, validation.body);
@@ -238,7 +239,7 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe }: {
       setState('done');
       setStatusNote(result.mediaUrls.length ? 'Done — durable media below.' : 'Succeeded, but no media URL was found in the response.');
     } catch (e: any) {
-      if (isRunwayDisabledError(e)) { setDisabled503(true); setState('idle'); return; }
+      if (isRunwayDisabledError(e)) { setDisabled503(true); setAvailability('coming_soon'); setState('idle'); return; }
       setState('error');
       setError(e instanceof EngineError && e.code === 'runway_failed' ? e.message : String(e?.message || e));
     }
@@ -246,11 +247,24 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe }: {
 
   const videoRatios = recipeId === 'product_ugc' ? RUNWAY_RATIOS.filter((r) => ['720:1280', '832:1104'].includes(r.value)) : RUNWAY_RATIOS;
 
+  if (availability !== 'ready') {
+    return (
+      <div style={S.card}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--space-text-primary, #F8FAFC)' }}>Runway recipes</div>
+        <div style={S.warn}>
+          {availability === 'checking'
+            ? 'Checking the live Runway catalog and validating a free test quote…'
+            : RUNWAY_DISABLED_MESSAGE}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={S.card}>
+    <div style={S.card}> 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        {RUNWAY_RECIPES.map((r) => (
-          <button key={r.id} type="button" onClick={() => { setRecipeId(r.id); setForm(emptyForm()); setQuote(null); setState('idle'); setError(''); setOutputs([]); }}
+        {visibleRecipes.map((r) => (
+          <button key={r.id} type="button" onClick={() => { setRecipeId(r.id); setForm(emptyForm()); setState('idle'); setError(''); setOutputs([]); }}
             title={r.purpose}
             style={{ ...S.btn, padding: '6px 11px', fontSize: 11.5, ...(recipeId === r.id ? { background: 'var(--space-brand-primary-600, #2563EB)', color: '#fff', borderColor: 'transparent' } : {}) }}>
             {r.name}
@@ -377,17 +391,9 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe }: {
         ) : null}
       </div>
 
-      {/* Quote → Generate (a free quote ALWAYS precedes the paid submit) */}
+      {/* Generate — one press, straight to the provider */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 16, flexWrap: 'wrap' }}>
-        <button type="button" disabled={state === 'quoting' || state === 'running'} onClick={() => void getQuote()} style={S.btn}>
-          {state === 'quoting' ? <Loader2 size={13} className="animate-spin" /> : <Calculator size={13} />} Get free quote
-        </button>
-        {quote ? (
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--space-semantic-success-600, #4ADE80)' }}>
-            {quote.priceUsd !== undefined ? `$${quote.priceUsd.toFixed(2)}` : ''}{quote.credits !== undefined ? ` (${quote.credits} credits)` : ''} — exact price, quoted free
-          </span>
-        ) : <span style={{ fontSize: 11.5, color: 'var(--space-text-muted, #94A3B8)' }}>Quote first — the paid submit unlocks after a successful quote.</span>}
-        <button type="button" disabled={state !== 'quoted'} onClick={() => void run()} style={{ ...S.primary, opacity: state === 'quoted' ? 1 : 0.45, cursor: state === 'quoted' ? 'pointer' : 'default' }}>
+        <button type="button" disabled={state === 'running'} onClick={() => void run()} style={{ ...S.primary, opacity: state === 'running' ? 0.45 : 1, cursor: state === 'running' ? 'default' : 'pointer' }}>
           {state === 'running' ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Generate ({recipe.name})
         </button>
       </div>

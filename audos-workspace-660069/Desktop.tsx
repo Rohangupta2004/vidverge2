@@ -1,5 +1,5 @@
 import { useState, Suspense, LazyExoticComponent, ComponentType, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
-import { Bot, Folder, X, Activity, Clapperboard, Moon, Heart, Calendar, Users, FileText, BarChart, Settings as SettingsIcon, MessageCircle, Plane, TrendingUp, LineChart, Dumbbell, Brain, Target, Zap, Star, Clock, CheckCircle, List, BookOpen, Coffee, Music, Camera, MapPin, Wallet, ShoppingCart, Gift, Lightbulb, Sparkles, Rocket, Home, Building, Globe, Mail, Phone, Video, Mic, Image, Play, Pause, Volume2, Wifi, Cloud, Sun, Umbrella, Thermometer, Wind, Droplets, Leaf, Flower2, Film, Mountain, Waves, Compass, Map, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond, Gem, Key, Lock, Unlock, Shield, Eye, Search, Filter, SortAsc, Download, Upload, Share2, Link, ExternalLink, Copy, Clipboard, Trash2, Edit, Pencil, PenTool, Scissors, Bookmark, Flag, Bell, AlertCircle, Info, HelpCircle, XCircle, CheckCircle2, Circle, Square, Triangle, Hexagon, Octagon, Hash, AtSign, DollarSign, Percent, Calculator, Code, Terminal, Database, Server, Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker, Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote, PiggyBank, TrendingDown, AreaChart, PieChart } from 'lucide-react';
+import { Bot, Folder, X, Activity, Clapperboard, Moon, Heart, Calendar, Users, FileText, BarChart, Settings as SettingsIcon, MessageCircle, Plane, TrendingUp, LineChart, Dumbbell, Brain, Target, Zap, Star, Clock, CheckCircle, List, BookOpen, Coffee, Music, Camera, MapPin, Wallet, ShoppingCart, Gift, Lightbulb, Sparkles, Rocket, Home, Building, Globe, Mail, Phone, Video, Mic, Image, Play, Pause, Volume2, Wifi, Cloud, Sun, Umbrella, Thermometer, Wind, Droplets, Leaf, Flower2, Film, Mountain, Waves, Compass, Map, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond, Gem, Key, Lock, Unlock, Shield, Eye, Search, Filter, SortAsc, Download, Upload, Share2, Link, ExternalLink, Copy, Clipboard, Trash2, Edit, Pencil, PenTool, Scissors, Bookmark, Flag, Bell, AlertCircle, Info, HelpCircle, XCircle, CheckCircle2, Circle, Square, Triangle, Hexagon, Octagon, Hash, AtSign, DollarSign, Percent, Calculator, Code, Terminal, Database, Server, Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker, Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote, PiggyBank, TrendingDown, AreaChart, PieChart, FlaskConical } from 'lucide-react';
 import type { SpaceConfig, DesktopBranding, DesktopThemeTokens } from './types';
 import { useSpaceRuntime } from './SpaceRuntimeContext';
 import FileBrowser from './components/FileBrowser';
@@ -17,7 +17,9 @@ import {
 import type { PricingTrigger } from './lib/plans';
 import { tw } from './lib/colors';
 import { isTenantDelegationCanvas } from './lib/tenant-delegation-canvas';
-import { LauncherToolCard, LauncherFX } from './components/HomeLauncher';
+import { LauncherFX } from './components/HomeLauncher';
+import AgentChatView from './components/AgentChatView';
+import { useAgentChatRuntime } from './components/useAgentChatRuntime';
 
 const DESKTOP_VERSION = 2;
 
@@ -41,6 +43,16 @@ function useIsMobile() {
   }, []);
 
   return isMobile;
+}
+
+/**
+ * HeroAgentChat — the VidVerge agent as the hero of the main screen.
+ * Glue only: the platform-managed runtime hook + the per-space view
+ * (components/AgentChatView.tsx). Do not rebuild chat logic here.
+ */
+function HeroAgentChat({ spaceId }: { spaceId: string }) {
+  const runtime = useAgentChatRuntime({ spaceId });
+  return <AgentChatView runtime={runtime} />;
 }
 
 interface AppErrorBoundaryProps {
@@ -163,6 +175,7 @@ const baseIconMap: Record<string, ComponentType<any>> = {
   Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker,
   Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote,
   PiggyBank, TrendingDown, AreaChart, PieChart, Flower2, Clapperboard, Film,
+  FlaskConical,
 };
 
 // Create case-insensitive lookup with common aliases
@@ -665,26 +678,23 @@ export default function SpaceDesktop({
           className="hidden md:flex fixed top-4 right-4 items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold text-white transition-all hover:scale-105"
           style={{
             zIndex: 60,
-            background: isSubscriber
-              ? 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)'
-              : 'linear-gradient(90deg, #131320 0%, #0c0c12 100%)',
-            border: isSubscriber ? '1px solid rgba(96,165,250,0.7)' : '1px solid rgba(37,99,235,0.45)',
-            boxShadow: isSubscriber ? '0 6px 26px rgba(37,99,235,0.55)' : '0 6px 22px rgba(37,99,235,0.3)',
+            // Brand-neutral chrome: the amber primary CTA stays the ONE accent —
+            // the plan badge no longer competes in blue.
+            background: 'linear-gradient(90deg, #10141f 0%, #0b0e16 100%)',
+            border: isSubscriber ? '1px solid rgba(245,158,11,0.45)' : '1px solid rgba(148,163,184,0.28)',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
           }}
           title={planButtonTitle}
           data-testid="button-open-plans"
           data-plan-tier={userTier || 'unknown'}
         >
-          <Crown className="w-4 h-4" style={{ color: isSubscriber ? '#ffffff' : '#93c5fd' }} />
+          <Crown className="w-4 h-4" style={{ color: '#fbbf24' }} />
           {planLabel}
         </button>
 
         {/* Left Dock - Desktop Only - Animates away in launcher mode */}
-      <div className={`hidden md:flex fixed top-1/2 -translate-y-1/2 ${tw.dock.glass} p-4 z-50 transition-all duration-500 ease-in-out ${
-        isLauncherMode
-          ? '-left-24 opacity-0'
-          : 'left-4 opacity-100'
-      }`}>
+      {/* Always visible — the app nav lives here in every shell state, launcher included */}
+      <div className={`hidden md:flex fixed left-4 top-1/2 -translate-y-1/2 ${tw.dock.glass} p-4 z-50 max-h-[92vh] overflow-y-auto`}>
         <div className="flex flex-col gap-3">
           {/* Memory Icon - Hidden in customer mode (use Cmd+M to access for debugging) */}
           {mode === 'entrepreneur' && (
@@ -699,7 +709,7 @@ export default function SpaceDesktop({
             </button>
           )}
 
-          {/* App Icons */}
+          {/* App Icons — labeled, not icon-only, so the nav reads at a glance */}
           {config.apps.map(app => {
             const isActive = activeWindowId === app.id;
             const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
@@ -707,12 +717,13 @@ export default function SpaceDesktop({
               <button
                 key={app.id}
                 onClick={() => openApp(app.id)}
-                className={`p-3 rounded-xl transition-all ${
+                className={`flex flex-col items-center gap-1 px-1.5 py-2 rounded-xl transition-all ${
                   isActive ? tw.dock.active : tw.dock.inactive
                 }`}
                 title={app.name}
               >
                 <IconComponent className="w-6 h-6" />
+                <span className="text-[8px] font-semibold leading-tight text-center max-w-[56px] line-clamp-2">{app.name}</span>
               </button>
             );
           })}
@@ -723,64 +734,41 @@ export default function SpaceDesktop({
           {/* Settings Icon */}
           <button
             onClick={() => setActiveWindowId('settings')}
-            className={`p-3 rounded-xl transition-all ${
+            className={`flex flex-col items-center gap-1 px-1.5 py-2 rounded-xl transition-all ${
               activeWindowId === 'settings' ? tw.dock.active : tw.dock.inactive
             }`}
             title="Settings"
           >
             <SettingsIcon className="w-6 h-6" />
+            <span className="text-[8px] font-semibold leading-tight">Settings</span>
           </button>
         </div>
       </div>
 
       {/* Desktop: Main Content Area */}
       <div className="hidden md:block h-screen min-h-0 overflow-hidden">
-        {/* App Launcher Grid - Shows when in launcher mode */}
+        {/* Launcher = the VidVerge agent front and center, full height beside the dock */}
         {isLauncherMode && (
-          <div className="relative overflow-hidden flex flex-col items-center justify-center min-h-[calc(100vh-8rem)] px-6 animate-in fade-in duration-500">
+          <div className="relative h-screen flex flex-col overflow-hidden pl-28 pr-8 animate-in fade-in duration-500">
             <LauncherFX />
-            {/* Branding */}
-            {runtimeTheme.branding.name && (
-              <div className="relative text-center mb-12 vv-fade-up">
-                <h1 className="text-4xl font-bold text-[var(--space-text-primary)] mb-2" style={{ letterSpacing: '-0.02em' }}>
-                  <span className="vv-title-shimmer">{runtimeTheme.branding.name}</span>
-                </h1>
-                {runtimeTheme.branding.tagline && (
-                  <p className="text-lg text-[var(--space-text-secondary)]">
-                    {runtimeTheme.branding.tagline}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* App Grid */}
-            <div className="relative grid grid-cols-2 gap-6 w-full max-w-4xl">
-              {/* App Cards */}
-              {config.apps.map((app, appIndex) => (
-                <LauncherToolCard
-                  key={app.id}
-                  app={app}
-                  index={appIndex}
-                  variant="desktop"
-                  onOpen={() => openApp(app.id)}
-                />
-              ))}
-
-              {/* Memory Card - Hidden in customer mode (use Cmd+M to access for debugging) */}
-              {mode === 'entrepreneur' && (
-                <button
-                  onClick={() => setActiveWindowId('files')}
-                  className="group flex flex-col items-center p-6 bg-[var(--space-surface-panel)] backdrop-blur-md rounded-2xl border border-[var(--space-border-default)] shadow-lg hover:bg-[var(--space-surface-panel-strong)] hover:shadow-xl hover:scale-105 transition-all duration-300 cursor-pointer"
-                >
-                  <div className="w-16 h-16 flex items-center justify-center bg-[var(--space-surface-accent-soft)] rounded-2xl mb-4 group-hover:brightness-95 transition-colors">
-                    <Folder className={`w-8 h-8 ${tw.appIcon.files}`} />
-                  </div>
-                  <h3 className="text-base font-semibold text-[var(--space-text-primary)] mb-1">Memory</h3>
-                  <p className="text-xs text-[var(--space-text-secondary)] text-center line-clamp-2">
-                    Browse files and data
-                  </p>
-                </button>
+            {/* Headline above the hero chat */}
+            <div className="relative text-center pt-7 pb-4 vv-fade-up">
+              {runtimeTheme.branding.logoUrl && (
+                <img src={runtimeTheme.branding.logoUrl} alt="" aria-hidden="true" style={{ width: 118, height: 64, objectFit: 'cover', objectPosition: 'center', mixBlendMode: 'screen', filter: 'drop-shadow(0 0 22px rgba(245,158,11,.46))', margin: '0 auto 6px' }} />
               )}
+              <h1 className="text-3xl font-bold text-[var(--space-text-primary)]" style={{ letterSpacing: '-0.02em' }}>
+                <span className="vv-title-shimmer">What would you like to make today?</span>
+              </h1>
+              <p className="mt-1.5 text-sm text-[var(--space-text-secondary)]">
+                Tell the {runtimeTheme.branding.name || 'VidVerge'} agent your idea — or pick a studio from the dock on the left.
+              </p>
+            </div>
+
+            {/* Hero agent chat — the dominant element of the main screen */}
+            <div className="relative flex-1 min-h-0 w-full max-w-5xl mx-auto pb-6 vv-fade-up">
+              <div className="h-full rounded-3xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] overflow-hidden shadow-[0_30px_80px_-24px_rgba(0,0,0,0.85)]">
+                <HeroAgentChat spaceId={spaceId} />
+              </div>
             </div>
           </div>
         )}
@@ -856,29 +844,42 @@ export default function SpaceDesktop({
       <div className="md:hidden fixed inset-0 flex flex-col pb-16 overflow-hidden">
         {/* Main content - two-app home or active app */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Mobile two-app home */}
+          {/* Mobile home — agent chat hero with a labeled app nav strip above it */}
           {!activeWindowId && isMobile && (
-            <div className="relative h-full overflow-y-auto px-5 py-10 bg-[var(--space-surface-bg)]">
+            <div className="relative h-full flex flex-col overflow-hidden bg-[var(--space-surface-bg)]">
               <LauncherFX compact />
-              <div className="relative mx-auto max-w-md">
-                <div className="mb-8 text-center vv-fade-up">
-                  <h1 className="text-3xl font-bold text-[var(--space-text-primary)]">
-                    <span className="vv-title-shimmer">{runtimeTheme.branding.name}</span>
-                  </h1>
-                  <p className="mt-2 text-sm text-[var(--space-text-secondary)]">
-                    {runtimeTheme.branding.tagline}
-                  </p>
+              <div className="relative px-5 pt-5 pb-1 text-center vv-fade-up">
+                {runtimeTheme.branding.logoUrl && (
+                  <img src={runtimeTheme.branding.logoUrl} alt="" aria-hidden="true" style={{ width: 96, height: 52, objectFit: 'cover', objectPosition: 'center', mixBlendMode: 'screen', filter: 'drop-shadow(0 0 18px rgba(245,158,11,.42))', margin: '0 auto 4px' }} />
+                )}
+                <h1 className="text-xl font-bold text-[var(--space-text-primary)]">
+                  <span className="vv-title-shimmer">What would you like to make today?</span>
+                </h1>
+              </div>
+
+              {/* App nav — every studio, icon + name, horizontally scrollable */}
+              <div className="relative px-3 pt-2 pb-1">
+                <div className="flex gap-2 overflow-x-auto py-1" style={{ scrollbarWidth: 'none' }}>
+                  {config.apps.map(app => {
+                    const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
+                    return (
+                      <button
+                        key={app.id}
+                        onClick={() => openApp(app.id)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] text-xs font-semibold text-[var(--space-text-primary)] whitespace-nowrap shrink-0"
+                      >
+                        <IconComponent className="w-4 h-4 text-[var(--space-text-brand)]" />
+                        {app.name}
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="grid gap-4">
-                  {config.apps.map((app, appIndex) => (
-                    <LauncherToolCard
-                      key={app.id}
-                      app={app}
-                      index={appIndex}
-                      variant="mobile"
-                      onOpen={() => openApp(app.id)}
-                    />
-                  ))}
+              </div>
+
+              {/* Hero agent chat */}
+              <div className="relative flex-1 min-h-0 px-3 pb-3 pt-1">
+                <div className="h-full rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] overflow-hidden">
+                  <HeroAgentChat spaceId={spaceId} />
                 </div>
               </div>
             </div>
@@ -938,13 +939,15 @@ export default function SpaceDesktop({
         </div>
 
         {/* Mobile Dock - Fixed to bottom */}
-        <div className="fixed bottom-0 left-0 right-0 bg-[var(--space-surface-card)] border-t border-[var(--space-border-default)] px-3 py-2 safe-bottom">
-          <div className="flex items-center justify-center gap-1">
+        <div className="fixed bottom-0 left-0 right-0 bg-[var(--space-surface-card)] border-t border-[var(--space-border-default)] px-1 py-2 safe-bottom">
+          <div className="flex items-center justify-center gap-0.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             {/* Files Icon - Hidden in customer mode (use Cmd+M to access for debugging) */}
             {mode === 'entrepreneur' && (
               <button
                 onClick={() => setActiveWindowId('files')}
-                className={`p-2.5 rounded-xl transition-all ${
+                aria-label="Memory"
+                title="Memory"
+                className={`p-1.5 rounded-xl transition-all ${
                   activeWindowId === 'files'
                     ? 'bg-[var(--space-brand-primary)] text-white'
                     : 'bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)]'
@@ -961,8 +964,10 @@ export default function SpaceDesktop({
               return (
                 <button
                   key={app.id}
-                  onClick={() => setActiveWindowId(app.id)}
-                  className={`p-2.5 rounded-xl transition-all ${
+                  onClick={() => openApp(app.id)}
+                  aria-label={app.name}
+                  title={app.name}
+                  className={`p-1.5 rounded-xl transition-all ${
                     isActive
                       ? 'bg-[var(--space-brand-primary)] text-white'
                       : 'bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)]'
@@ -976,7 +981,8 @@ export default function SpaceDesktop({
             {/* Plans */}
             <button
               onClick={() => setPricingTrigger('nav')}
-              className={`relative p-2.5 rounded-xl transition-all ${
+              aria-label="Plans"
+              className={`relative p-1.5 rounded-xl transition-all ${
                 isSubscriber
                   ? 'bg-[var(--space-brand-primary)] text-white'
                   : 'bg-[var(--space-surface-accent-soft)] text-[var(--space-text-brand)]'
@@ -991,7 +997,9 @@ export default function SpaceDesktop({
             {/* Settings Icon */}
             <button
               onClick={() => setActiveWindowId('settings')}
-              className={`p-2.5 rounded-xl transition-all ${
+              aria-label="Settings"
+              title="Settings"
+              className={`p-1.5 rounded-xl transition-all ${
                 activeWindowId === 'settings'
                   ? 'bg-[var(--space-brand-primary)] text-white'
                   : 'bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)]'

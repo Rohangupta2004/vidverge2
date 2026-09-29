@@ -13,6 +13,7 @@ import type { EnhanceTarget } from './App';
 import { Tilt } from './fx';
 import { VIDEO_STYLES, type VideoStyleId } from './videoStyles';
 import { writeLaunchSoundPrefs, type SoundTarget } from './SoundStudio';
+import { LB_SHIMMER_CSS } from '../../components/LightBeam';
 
 const STYLE_ICONS = { Scissors, Flame, Type, BookOpen, Gem };
 
@@ -52,7 +53,7 @@ function statusBadge(status?: string): { label: string; color: string; spin: boo
   const s = String(status || '').toLowerCase();
   if (/rendered|delivered|qa_passed/.test(s)) return { label: 'rendered', color: S.success, spin: false };
   if (/render|build|compos|queue|generat/.test(s)) return { label: 'rendering', color: '#fbbf24', spin: true };
-  if (/fail|error/.test(s)) return { label: 'failed', color: S.danger, spin: false };
+  if (/fail|error/.test(s)) return { label: 'stopped', color: S.danger, spin: false };
   if (/planned|validated/.test(s)) return { label: 'planned', color: '#94a3b8', spin: false };
   return { label: s || 'draft', color: '#94a3b8', spin: false };
 }
@@ -70,6 +71,14 @@ interface RenderInfo {
   failed?: boolean;
 }
 
+interface ShowcaseVideo {
+  id: string;
+  title: string;
+  style: string;
+  videoUrl: string;
+  thumbnailUrl: string | null;
+}
+
 const RENDERING_STATUS = /render|build|compos|queue|generat/i;
 
 export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound }: {
@@ -82,6 +91,7 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
 }) {
   const [projects, setProjects] = useState<Partial<TrackBProjectRow>[]>([]);
   const [renderInfo, setRenderInfo] = useState<Record<number, RenderInfo>>({});
+  const [showcase, setShowcase] = useState<ShowcaseVideo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [styleChoice, setStyleChoice] = useState<StyleChoice>('hyperframes');
@@ -150,6 +160,47 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
     const poll = window.setInterval(() => { void load(); }, 20000);
     return () => { window.clearInterval(poll); };
   }, [load]);
+
+  // Real-output trust strip: read-only, session-scoped WorkspaceDB reads from
+  // both finished-video sources. A real thumbnail wins; when one was not
+  // stored, the MP4 itself paints its first frame instead of a placeholder.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const wdb = (window as any).__workspaceDb;
+        if (!wdb) return;
+        const [savedResult, pvResult] = await Promise.allSettled([
+          wdb.from('saved_videos').orderBy('created_at', 'desc').limit(8).get(),
+          wdb.from('pv_projects').orderBy('created_at', 'desc').limit(8).get(),
+        ]);
+        const savedRows = savedResult.status === 'fulfilled' && Array.isArray(savedResult.value?.data) ? savedResult.value.data : [];
+        const pvRows = pvResult.status === 'fulfilled' && Array.isArray(pvResult.value?.data) ? pvResult.value.data : [];
+        const real: ShowcaseVideo[] = [
+          ...savedRows.filter((r: any) => r?.video_url).map((r: any) => ({
+            id: `saved-${r.id}`,
+            title: String(r.title || 'Finished product video'),
+            style: String(r.style_label || 'Product Video'),
+            videoUrl: String(r.video_url),
+            thumbnailUrl: r.thumbnail_url ? String(r.thumbnail_url) : null,
+          })),
+          ...pvRows.filter((r: any) => r?.video_url && String(r.status || '').toLowerCase() === 'completed').map((r: any) => ({
+            id: `pv-${r.id}`,
+            title: String(r.title || r.brief?.product_name || 'Finished ad'),
+            style: 'Ad Director',
+            videoUrl: String(r.video_url),
+            thumbnailUrl: r.thumbnail_url || r.final_thumb_url || null,
+          })),
+        ];
+        const seen = new Set<string>();
+        const unique = real.filter((v) => !seen.has(v.videoUrl) && !!seen.add(v.videoUrl)).slice(0, 5);
+        if (!cancelled) setShowcase(unique);
+      } catch {
+        if (!cancelled) setShowcase([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const onShotFiles = useCallback(async (files: FileList | null) => {
     if (!files || !files.length) return;
@@ -260,6 +311,7 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: 'clamp(16px, 3vw, 30px)', color: S.text, boxSizing: 'border-box' }}>
+      <style>{LB_SHIMMER_CSS}</style>
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
         <div>
           <h1 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 'clamp(20px, 3vw, 26px)', fontWeight: 800 }}>
@@ -287,15 +339,41 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 290px), 1fr))', gap: 20 }} aria-label="Loading your videos">
           {[0, 1, 2].map((i) => (
             <div key={i} className="ps-skeleton" style={{ overflow: 'hidden' }}>
-              <div style={{ aspectRatio: '16 / 9', background: 'var(--space-surface-muted)' }} />
+              <div className="lb-shimmer" style={{ aspectRatio: '16 / 9' }} />
               <div style={{ padding: '12px 14px 16px' }}>
-                <div style={{ height: 13, width: '65%', borderRadius: 5, background: 'var(--space-surface-muted)' }} />
-                <div style={{ height: 10, width: '40%', borderRadius: 5, background: 'var(--space-surface-muted)', marginTop: 8 }} />
+                <div className="lb-shimmer" style={{ height: 13, width: '65%', borderRadius: 5 }} />
+                <div className="lb-shimmer" style={{ height: 10, width: '40%', borderRadius: 5, marginTop: 8 }} />
               </div>
             </div>
           ))}
         </div>
       ) : projects.length === 0 ? (
+        <>
+          {showcase.length > 0 ? (
+            <section className="ps-fade-up" style={{ marginBottom: 18 }} aria-label="Real finished VidVerge renders" data-testid="real-output-showcase">
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 9 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>Real finished renders</h2>
+                  <p style={{ margin: '3px 0 0', color: S.muted, fontSize: 11.5 }}>Made in VidVerge — these are finished MP4s, not mockups.</p>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+                {showcase.map((v) => (
+                  <a key={v.id} href={v.videoUrl} target="_blank" rel="noreferrer" style={{ minWidth: 0, color: 'inherit', textDecoration: 'none', borderRadius: 12, overflow: 'hidden', border: `1px solid ${S.border}`, background: S.panel }}>
+                    <div style={{ position: 'relative', aspectRatio: '16 / 9', background: '#000', overflow: 'hidden' }}>
+                      {v.thumbnailUrl ? (
+                        <img src={v.thumbnailUrl} alt={`${v.title} first frame`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      ) : (
+                        <video src={v.videoUrl} preload="auto" muted playsInline aria-label={`${v.title} first frame`} onLoadedData={(e) => { try { e.currentTarget.currentTime = 0.05; } catch { /* first decodable frame is already visible */ } }} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      )}
+                      <span style={{ position: 'absolute', left: 7, bottom: 7, padding: '2px 7px', borderRadius: 999, color: '#fff', background: 'rgba(4,8,18,.75)', fontSize: 9.5, fontWeight: 800 }}>{v.style}</span>
+                    </div>
+                    <div style={{ padding: '8px 9px', fontSize: 11.5, fontWeight: 750, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{v.title}</div>
+                  </a>
+                ))}
+              </div>
+            </section>
+          ) : null}
         <div className="ps-fade-up" style={{ borderRadius: 18, border: `1px solid ${S.border}`, background: S.panel, padding: 'clamp(32px, 6vw, 56px)', textAlign: 'center' }} data-testid="empty-projects">
           <div aria-hidden="true" style={{ position: 'relative', width: 120, height: 84, margin: '0 auto 18px' }}>
             <span style={{ position: 'absolute', inset: '8px 18px', borderRadius: 12, background: 'linear-gradient(135deg, var(--space-brand-primary-700), var(--space-brand-primary-500))', transform: 'rotate(-7deg)', opacity: 0.5 }} />
@@ -312,11 +390,14 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
             <Sparkles size={15} /> Make your first video
           </button>
         </div>
+        </>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 290px), 1fr))', gap: 20 }}>
           {projects.map((p) => {
             const badge = statusBadge(p.status);
             const info = renderInfo[p.id as number];
+            const hasFailure = badge.label === 'stopped' || info?.failed === true;
+            const failureCause = info?.error || String((p as any).error || (p as any).last_error || 'The render stopped before a finished video was produced.');
             return (
               <Tilt
                 key={p.id}
@@ -338,14 +419,16 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
                       style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
                       data-testid={`video-thumb-${p.id}`}
                     />
+                  ) : badge.label === 'rendering' && !hasFailure ? (
+                    <div className="lb-shimmer" style={{ position: 'absolute', inset: 0, borderRadius: 0 }} aria-label="Video preview is loading" />
                   ) : (
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18, background: 'linear-gradient(135deg, var(--space-brand-primary-700), var(--space-brand-primary-500) 55%, var(--space-brand-highlight-600))' }} data-testid={`video-tile-${p.id}`}>
                       <span style={{ fontSize: 17, fontWeight: 900, color: '#fff', textAlign: 'center', textShadow: '0 2px 10px rgba(0,0,0,0.35)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>{p.title}</span>
                     </div>
                   )}
                   <span style={{ position: 'absolute', top: 10, left: 10, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: badge.color, background: `color-mix(in srgb, ${badge.color} 16%, rgba(4,8,18,0.72))`, border: `1px solid color-mix(in srgb, ${badge.color} 45%, transparent)` }} data-testid={`status-${p.id}`}>
-                    {badge.spin ? <Loader2 size={10} className="rc-spin" /> : null}
-                    {badge.label}
+                    {badge.spin && !hasFailure ? <Loader2 size={10} className="rc-spin" /> : null}
+                    {hasFailure ? 'stopped' : badge.label}
                   </span>
                 </div>
                 <div style={{ padding: '12px 14px 14px' }}>
@@ -353,12 +436,13 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
                   <span style={{ display: 'block', marginTop: 3, fontSize: 11.5, color: S.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {relativeTime(p.created_at)}{p.route ? ` · ${String(p.route).replace(/_/g, ' ')}` : ''}
                   </span>
-                  {info?.failed && info.error ? (
-                    <p style={{ margin: '8px 0 0', fontSize: 11.5, color: S.danger, lineHeight: 1.5 }} data-testid={`render-error-${p.id}`}>
-                      {info.error}
-                    </p>
+                  {hasFailure ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8, padding: '7px 8px', borderRadius: 8, color: S.danger, background: `color-mix(in srgb, ${S.danger} 9%, transparent)`, fontSize: 11.5, lineHeight: 1.4 }} data-testid={`render-error-${p.id}`}>
+                      <span style={{ flex: 1 }}>{failureCause}</span>
+                      <button type="button" className="ps-btn" onClick={(e) => { e.stopPropagation(); onOpen(p.id as number); }} style={{ ...actionBtn, flexShrink: 0, color: S.danger, padding: '4px 8px' }}>Open scene</button>
+                    </div>
                   ) : null}
-                  {badge.label === 'rendering' ? (
+                  {badge.label === 'rendering' && !hasFailure ? (
                     <div style={{ marginTop: 9 }} data-testid={`render-progress-${p.id}`}>
                       <div style={{ height: 5, borderRadius: 999, background: `color-mix(in srgb, ${S.border} 60%, transparent)`, overflow: 'hidden' }}>
                         <div

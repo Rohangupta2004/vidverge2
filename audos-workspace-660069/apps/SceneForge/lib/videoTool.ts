@@ -1,5 +1,7 @@
 import { updateScene, type Project, type Scene } from './supabase';
 import { sleep, workspaceToken } from './proxy';
+import { generateWithRunway } from '../../../lib/runwayAdapter';
+import { isRunwayModel } from '../../../lib/videoEngines';
 
 // VIDEO TOOL — not an agent. This module contains no LLM: the single
 // orchestrator LLM (agents/orchestrator.ts) writes every video prompt
@@ -13,6 +15,24 @@ import { sleep, workspaceToken } from './proxy';
 // the assembly timeline; no intermediate per-scene Remotion render exists
 // anywhere on this path.
 const VIDEO_MODEL = 'gemini-omni-flash-preview';
+
+// The engine every supporting scene films on. Omni Flash stays the default
+// because it is the one model that carries a character reference across
+// scenes, which is this app's whole point; Runway is offered for shots where
+// look matters more than cast continuity. The choice lives in localStorage
+// rather than on the project row: render_url and its siblings are server-only
+// columns, so a client-side preference must not pretend to be project data.
+const ENGINE_KEY = 'sceneforge:video-engine';
+
+export function sceneVideoEngine(): string {
+  if (typeof localStorage === 'undefined') return VIDEO_MODEL;
+  try { return localStorage.getItem(ENGINE_KEY) || VIDEO_MODEL; } catch { return VIDEO_MODEL; }
+}
+
+export function setSceneVideoEngine(id: string): void {
+  if (typeof localStorage === 'undefined') return;
+  try { localStorage.setItem(ENGINE_KEY, id || VIDEO_MODEL); } catch { /* preference is best-effort */ }
+}
 
 // Omni clips cap at 8 seconds; a scene window that runs longer simply loops
 // the clip inside the final composition, so the request never over-asks.
@@ -49,12 +69,33 @@ export async function generateSceneVideo(project: Project, scene: Scene, options
 
   const span = Number(scene.script_end_sec) - Number(scene.script_start_sec);
   const duration = Math.max(2, Math.min(MAX_CLIP_SECONDS, Math.round(Number.isFinite(span) && span > 0 ? span : MAX_CLIP_SECONDS)));
+  const engine = options.model || sceneVideoEngine();
+
+  if (isRunwayModel(engine)) {
+    // The Runway proxy is a different contract from /api/veo (promptText, a
+    // pixel-pair ratio, an Idempotency-Key per submit), so it goes through the
+    // shared adapter instead of the fetch below. A still already attached to
+    // the scene becomes the image-to-video seed.
+    const seed = /^https:\/\//.test(String(scene.render_url || '')) && !looksLikeVideo(scene.render_url)
+      ? String(scene.render_url)
+      : null;
+    const out = await generateWithRunway({
+      model: engine,
+      prompt: `${prompt}. Cinematic, high quality, no on-screen text or lettering, no watermark.`,
+      image: seed,
+      aspectRatio: project.aspect_ratio,
+      duration,
+    });
+    const videoUrl = out.mediaUrls[0];
+    await updateScene(scene.id, { render_url: videoUrl, video_prompt: prompt, status: 'ready' }, scene.project_id);
+    return { videoUrl, reused: false };
+  }
+
   const response = await fetch('/api/veo/generate/video', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
     body: JSON.stringify({
-      // Workspace-selectable engine (SceneForge settings) — Omni Flash default.
-      model: options.model || VIDEO_MODEL,
+      model: engine,
       prompt: `${prompt}. Cinematic, high quality, no on-screen text or lettering, no watermark.`,
       aspectRatio: project.aspect_ratio,
       duration,

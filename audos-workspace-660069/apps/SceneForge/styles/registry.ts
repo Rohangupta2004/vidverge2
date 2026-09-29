@@ -41,11 +41,29 @@ export const getEditingPreset = (id?: string) => EDITING_PRESETS.find((preset) =
 type ArchivedStyle = { name: string; look: string; colors: string[]; fonts: string[]; motionRules: string; promptTemplate: string };
 
 const slug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/** Real preview artwork per archived style — bespoke stills from the platform
+ * image engine plus picks from the stock-photos (Unsplash) integration. No
+ * gradients: every card shows an actual image matching its style. */
+const ARCHIVE_PREVIEWS: Record<string, string> = {
+  'Chalkboard': '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790666817354-1598xw.png") center/cover no-repeat',
+  'Neon Night': '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790666861271-cocpd3.png") center/cover no-repeat',
+  'Comic Panel': '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790667581526-uad6at.jpg") center/cover no-repeat',
+  'Clay World': '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790667619308-b64vaf.png") center/cover no-repeat',
+  'Watercolor': '#0b0d12 url("https://images.unsplash.com/photo-1654331046252-c1a938237ca4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080") center/cover no-repeat',
+  'Sticky Notes': '#0b0d12 url("https://images.unsplash.com/photo-1588856122867-363b0aa7f598?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080") center/cover no-repeat',
+  'Magazine Cutout': '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790667645282-zld04j.png") center/cover no-repeat',
+  // Deliberately a different, tighter crop of the paper-collage artwork so the
+  // two collage styles read as distinct cards.
+  'Paper Collage': '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790666798138-9bnj8w.png") 78% 72%/260% no-repeat',
+  'Your Face': '#0b0d12 url("https://images.unsplash.com/photo-1654723011680-0e037c2a4f18?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080") center/cover no-repeat',
+};
+
 const archivedStyles: ForgeStyle[] = (archived as ArchivedStyle[]).map((style) => ({
   id: `archive-${slug(style.name)}`,
   name: style.name,
   description: style.look,
-  preview: `linear-gradient(135deg,${style.colors.join(',')})`,
+  preview: ARCHIVE_PREVIEWS[style.name] || style.colors[0] || '#0b0d12',
   palette: style.colors,
   fonts: style.fonts,
   imagePromptPrefix: `${style.promptTemplate} Isolated compositing element on a transparent background,`,

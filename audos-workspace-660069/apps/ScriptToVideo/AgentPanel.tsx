@@ -2,8 +2,9 @@
  * Director panel — docked on the board and final screens. Pick a scene, say
  * what should change ("warmer light, closer framing", "make this scene
  * independent of the previous one"), and Opus 5 rewrites that ONE scene's
- * prompt from the full three-layer context; you then trigger the regeneration
- * yourself while every other clip stays untouched.
+ * prompt from the full three-layer context; auto-generate then picks the new
+ * prompt up (or you trigger it yourself with auto-generate off) while every
+ * other clip stays untouched.
  */
 import { useEffect, useRef, useState } from 'react';
 import { CornerDownLeft, Loader2, Sparkles } from 'lucide-react';

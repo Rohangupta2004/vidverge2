@@ -1,1382 +1,1189 @@
 /**
- * Video Enhancer — full AI editing suite.
+ * Video Enhancer — professional timeline NLE (Sep 27 2026 redesign).
  *
- * Upload footage → the editor opens with a proper dark editing interface:
- *   - ANALYZE  — claude-opus-5 watches sampled frames, reports findings
- *                (a supporting graphic appears ONLY when a finding carries a
- *                score, comparison, recommendation or multi-step explanation)
- *                and designs adaptive graphic overlays (arrows, callouts,
- *                steps, highlights, labels, diagrams — never captions).
- *   - TRIM     — timeline scrubber with in/out handles, playhead splitting,
- *                per-segment keep/cut.
- *   - EFFECTS  — brightness / contrast / saturation / blur / vignette and
- *                playback speed (0.5× – 2×).
- *   - TEXT     — timed text overlays, draggable on the player, with font
- *                size, color and duration controls.
- *   - FRAME    — aspect-ratio presets (16:9, 9:16, 1:1, 4:5) as a centered
- *                cover-crop, plus original-audio mute/volume.
- *   - MUSIC    — ElevenLabs music bed from a mood prompt or preset style;
- *                mixed into the export at an adjustable volume.
- *   - EXPORT   — prominent export with format (MP4/WebM) + quality options;
- *                the whole edit is composited in one canvas + MediaRecorder
- *                pass (editSuite.renderEditedVideo) and saved durably.
+ * Three-panel layout:
+ *   TOP     preview player (16:9) — play/pause, timecode, volume, fullscreen
+ *   MIDDLE  AI Tools (Gemini Describe · Generate B-roll · Add Captions ·
+ *           Style Transfer) + Properties (trim, speed, opacity, text overlay,
+ *           music bed, color grade)
+ *   BOTTOM  3-track timeline (Video / Audio / Captions) with drag-to-reorder,
+ *           trim handles, amber playhead and click-to-seek
  *
- * Uploads, the AI plan, and results persist via localStorage + the
- * account-scoped video_enhancer_jobs WorkspaceDB table (jobStore).
+ * React + CSS + canvas only. Heavy work runs in server hooks:
+ * veh-gemini-describe (frame analysis), veh-broll-generate (Auto Director or manual Group A model),
+ * veh-render (the whole edit → platform Remotion render → MP4).
+ *
+ * The SceneForge handoff contract is preserved: a fresh (<10 min)
+ * `sceneforge_handoff_v1` localStorage entry loads that video as the first
+ * clip, exactly like the previous editor did.
  */
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import {
-  UploadCloud, Loader2, Check, AlertCircle, Sparkles, Film, RefreshCw, Wand2,
-  Play, Pause, Scissors, SlidersHorizontal, Type, Crop, Music, Download, Captions, Zap,
-} from 'lucide-react';
-import { useSpaceRuntime } from '../../SpaceRuntimeContext';
-import {
-  MAX_UPLOAD_BYTES, uploadVideo, fetchVideoAsFile, workspaceToken, formatTime,
-  transcribeVideo, buildCaptionSegments, retimeSegmentText,
-} from './enhancerCore';
+import type { ReactNode } from 'react';
+import { AlertCircle, Download, Loader2, Maximize, Pause, Play, Rocket, Sparkles, UploadCloud, Volume2 } from 'lucide-react';
+import { LB_SHIMMER_CSS } from '../../components/LightBeam';
+import AgentStreak from '../../components/AgentStreak';
+import ProductSuiteHeader from '../../components/ProductSuiteHeader';
+import { MAX_UPLOAD_BYTES, WORKSPACE_UUID, buildCaptionSegments, fetchVideoAsFile, planEnhancements, transcribeVideo, uploadVideo } from './enhancerCore';
 import type { CaptionSegment } from './enhancerCore';
-import { createEnhancerJob, fetchLatestEnhancerJob, updateEnhancerJob } from './jobStore';
-import { OverlayElement, extractFrames, analyzeFrames, drawOverlays } from './overlayEngine';
-import type { AnalysisInsight } from './overlayEngine';
+import { decodeAudioMono, detectSilences } from './enhancerExtras';
 import {
-  P, clamp, EffectsState, DEFAULT_EFFECTS, filterCss, TextOverlayItem,
-  newTextOverlay, buildSegments, keptRanges, keptDuration, AspectPreset,
-  ASPECT_PRESETS, drawTextOverlays, drawVignette, drawBackdropFrame, renderEditedVideo, ExportFormat,
-  ExportQuality, TextHitRect,
-} from './editSuite';
-import { generateMusicBed, suggestMusicPrompt } from './musicSuite';
-import type { GeneratedMusic } from './musicSuite';
-import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE, DEFAULT_CAPTION_POSITION, drawCaptionOverlay, BRAND_CORAL } from './captionSuite';
-import type { CaptionStyleId, CaptionPosition } from './captionSuite';
-import { generateSfxClip, newSfxId } from './sfxSuite';
-import type { SfxCue } from './sfxSuite';
-import { AnalyzePanel, TrimPanel, EffectsPanel, TextPanel, FramePanel, MusicPanel, ExportPanel, ErrLine } from './editorPanels';
-import AiClipsPanel from './aiClipsPanel';
-import { CaptionsPanel } from './captionsPanel';
-import { SfxPanel } from './sfxPanel';
+  AspectId, COLOR_GRADES, ColorGradeId, DEFAULT_NLE_EFFECTS, GeminiAnalysis,
+  GraphicKind, LB, MUSIC_BEDS, MotionGraphic, MusicBedId, NleCaption, NleClip,
+  NleEffects, STYLE_TRANSFERS, callHook, captureFrameBase64,
+  clipStartOnTimeline, effectsFilterCss, estimateCaptions, fmtTimecode, locate,
+  newGraphic, newId, nleToken, replaceClipWithRanges, sourceToTimeline,
+  splitClipAt, timelineDuration,
+} from './nleCore';
+import GraphicOverlay from './nleGraphics';
+import NleTimeline from './nleTimeline';
+import { AiToolsPanel, PropertiesPanel } from './nleTools';
+import RunwayStudio from '../../components/RunwayStudio';
+import { engineDisplayName, usePersistentEngine } from '../../components/EngineSelector';
+import { isRunwayModel, routeShotIntent } from '../../lib/videoEngines';
+import { generateWithRunway } from '../../lib/runwayAdapter';
+import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
+import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
+import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
+// The full Product Studio suite (Brand Reel, Ad Director, galleries and the
+// studio-tools drawer) is merged into this app as the "Product Video" mode.
+// Its own file tree stays in place (apps/ProductStudio/*) — it is simply no
+// longer registered as a separate dock app in config.json.
+import ProductStudioApp from '../ProductStudio/App';
 
-function msg(e: unknown): string { return e instanceof Error ? e.message : String(e); }
-
-const VE_CSS = `
-@keyframes ve-spin { to { transform: rotate(360deg); } }
-.animate-spin { animation: ve-spin 1s linear infinite; }
-@keyframes ve-fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.ve-fade { animation: ve-fadeIn .3s ease both; }
-.ve-panel { animation: ve-fadeIn .24s ease both; }
-@keyframes ve-glowPulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
-.ve-pulse { animation: ve-glowPulse 1.6s ease-in-out infinite; }
-@keyframes ve-sheen { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
-.ve-gradient-text { background: linear-gradient(100deg, ${P.blue}, ${P.mint} 35%, ${P.amber} 65%, ${P.coral}); background-size: 220% 100%; animation: ve-sheen 7s ease infinite; -webkit-background-clip: text; background-clip: text; color: transparent; }
-.ve-btn { transition: filter .15s ease, transform .15s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease; }
-.ve-btn:hover:not(:disabled) { filter: brightness(1.14); }
-.ve-btn:active:not(:disabled) { transform: scale(0.97); }
-.ve-btn:focus-visible { outline: 2px solid ${P.blue}; outline-offset: 2px; }
-.ve-input { transition: border-color .16s ease, box-shadow .16s ease; outline: none; }
-.ve-input:focus { border-color: ${P.blue} !important; box-shadow: 0 0 0 3px rgba(61,139,255,0.18); }
-.ve-drop { transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
-.ve-chip { transition: background .15s ease, border-color .15s ease, opacity .15s ease, color .15s ease; }
-.ve-elcard { transition: border-color .15s ease, background .15s ease, opacity .2s ease; cursor: pointer; }
-.ve-elcard:hover { border-color: rgba(255,255,255,0.22); }
-.ve-tab { transition: background .16s ease, color .16s ease, border-color .16s ease, transform .16s ease; }
-.ve-tab:hover:not(:disabled) { background: rgba(140,155,255,0.10) !important; }
-.ve-editor-grid { display: grid; grid-template-columns: 76px minmax(0, 1fr) 356px; gap: 14px; align-items: start; }
-.ve-rail { display: flex; flex-direction: column; gap: 6px; position: sticky; top: 10px; }
-@media (max-width: 1140px) {
-  .ve-editor-grid { grid-template-columns: minmax(0, 1fr); }
-  .ve-rail { flex-direction: row; flex-wrap: wrap; position: static; }
+function msg(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  const named = raw
+    .replace(/gemini-omni-flash-preview/g, engineDisplayName('gemini-omni-flash-preview'))
+    .replace(/veo-3\.1-fast-generate-preview/g, engineDisplayName('veo-3.1-fast-generate-preview'))
+    .replace(/veo-3\.1-generate-preview/g, engineDisplayName('veo-3.1-generate-preview'))
+    .replace(/openrouter\/bytedance\/seedance-2\.0-fast/g, engineDisplayName('openrouter/bytedance/seedance-2.0-fast'));
+  if (/no_credentials|\b401\b/i.test(named)) return 'Your workspace session is not ready for this tool yet. Try again in a moment.';
+  if (/insufficient|payment|required|\b402\b/i.test(named)) return 'This generation needs more workspace credits before it can start.';
+  if (/rate.?limit|\b429\b/i.test(named)) return 'The generation service is busy right now. Wait a moment, then try again.';
+  if (/provider[_ -]?error|\b50[0234]\b|service unavailable/i.test(named)) return 'The generation service is temporarily unavailable. Your edit is safe; try this step again shortly.';
+  return named;
 }
+
+/**
+ * Film one b-roll clip on whichever engine is selected. Group A models go
+ * through the veh-broll-generate hook, which is the only thing it accepts;
+ * Runway models are submitted straight to the Runway proxy because the hook
+ * has no Runway route at all. Either way the caller just gets a clip URL or a
+ * message it can show next to the engine picker.
+ */
+async function filmBrollClip(
+  model: string,
+  prompt: string,
+  durationS: number,
+  alive: () => boolean,
+): Promise<{ videoUrl: string; error: string }> {
+  if (isRunwayModel(model)) {
+    try {
+      const out = await generateWithRunway({ model, prompt, duration: durationS, aspectRatio: '16:9' });
+      return { videoUrl: out.mediaUrls[0] || '', error: '' };
+    } catch (e) {
+      return { videoUrl: '', error: msg(e) };
+    }
+  }
+  let out = await callHook('veh-broll-generate', { model, prompt, aspect: '16:9', durationS });
+  while (alive() && out?.status === 'generating' && out.operationId) {
+    out = await callHook('veh-broll-generate', { operationId: out.operationId });
+  }
+  if (out?.status === 'completed' && out.videoUrl) return { videoUrl: String(out.videoUrl), error: '' };
+  return { videoUrl: '', error: String(out?.error || 'The b-roll generation failed.') };
+}
+
+const NLE_CSS = `
+@keyframes nle-spin { to { transform: rotate(360deg); } }
+.animate-spin { animation: nle-spin 1s linear infinite; }
+.nle-btn { transition: filter .15s ease, background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease; }
+.nle-btn:hover:not(:disabled) { filter: brightness(1.15); }
+.nle-btn:disabled { opacity: .55; cursor: default; }
+.nle-input:focus { border-color: rgba(245,158,11,0.5) !important; box-shadow: 0 0 0 3px rgba(245,158,11,0.12); }
+${LB_SHIMMER_CSS}
+@keyframes nle-progress { 0% { background-position: 0 0; } 100% { background-position: 28px 0; } }
+.nle-progress-fill { background-image: linear-gradient(45deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%, transparent); background-size: 28px 28px; animation: nle-progress .9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .animate-spin, .nle-progress-fill { animation: none !important; } .nle-btn { transition: none !important; } }
 `;
 
-const cardStyle: CSSProperties = {
-  background: 'linear-gradient(160deg, ' + P.panel + ', ' + P.card + ')',
-  border: '1px solid ' + P.border,
-  borderRadius: 16,
-  boxShadow: '0 22px 50px -38px rgba(0,0,0,0.9)',
-};
+function VideoEnhancerNle() {
+  // ---- Timeline state ----
+  const [clips, setClips] = useState<NleClip[]>([]);
+  const clipsRef = useRef<NleClip[]>([]);
+  useEffect(() => { clipsRef.current = clips; }, [clips]);
+  const [captions, setCaptions] = useState<NleCaption[]>([]);
+  const [captionOffset, setCaptionOffset] = useState(0);
+  const [musicBedId, setMusicBedId] = useState<MusicBedId | 'custom'>('none');
+  const [gradeId, setGradeId] = useState<ColorGradeId>('none');
+  const [styleId, setStyleId] = useState<string | null>(null);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [effects, setEffects] = useState<NleEffects>({ ...DEFAULT_NLE_EFFECTS });
+  const [graphics, setGraphics] = useState<MotionGraphic[]>([]);
+  const [selectedGraphicId, setSelectedGraphicId] = useState<string | null>(null);
+  const [aspect, setAspect] = useState<AspectId>('16:9');
 
-type ToolId = 'analyze' | 'aiclips' | 'trim' | 'effects' | 'text' | 'captions' | 'frame' | 'music' | 'sfx' | 'export';
+  // ---- Player state ----
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const activeIndexRef = useRef(0);
+  useEffect(() => { activeIndexRef.current = activeIndex; }, [activeIndex]);
+  const [playhead, setPlayhead] = useState(0);
+  const playheadRef = useRef(0);
+  useEffect(() => { playheadRef.current = playhead; }, [playhead]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const isPlayingRef = useRef(false);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  const [volume, setVolume] = useState(1);
+  const pendingSourceT = useRef<number | null>(null);
 
-const TOOLS: { id: ToolId; label: string; icon: any; color: string }[] = [
-  { id: 'analyze', label: 'Analyze', icon: Sparkles, color: P.blue },
-  { id: 'aiclips', label: 'AI Clips', icon: Wand2, color: P.violet },
-  { id: 'trim', label: 'Trim', icon: Scissors, color: P.amber },
-  { id: 'effects', label: 'Effects', icon: SlidersHorizontal, color: P.coral },
-  { id: 'text', label: 'Text', icon: Type, color: P.violet },
-  { id: 'captions', label: 'Captions', icon: Captions, color: BRAND_CORAL },
-  { id: 'frame', label: 'Frame', icon: Crop, color: P.cyan },
-  { id: 'music', label: 'Music', icon: Music, color: P.mint },
-  { id: 'sfx', label: 'Sound FX', icon: Zap, color: BRAND_CORAL },
-  { id: 'export', label: 'Download', icon: Download, color: P.mint },
-];
-
-// ---------------------------------------------------------------------------
-// Persistence
-// ---------------------------------------------------------------------------
-
-const VE_SNAPSHOT_KEY = 've-editor-studio-v2';
-const VE_AUTH_SESSION_KEY = 'vidverge_ve_session';
-
-function readVeAuthSession(): { userId?: string } {
-  try {
-    const raw = window.localStorage.getItem(VE_AUTH_SESSION_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch { return {}; }
-}
-
-function fallbackSessionId(): string {
-  try {
-    const KEY = 'vidverge_ve_anon_id';
-    let id = window.localStorage.getItem(KEY);
-    if (!id) {
-      id = 've-' + Math.random().toString(36).slice(2, 10) + '-' + Date.now().toString(36);
-      window.localStorage.setItem(KEY, id);
-    }
-    return id;
-  } catch { return 've-anon'; }
-}
-
-interface StoredPlan { summary: string; elements: OverlayElement[]; insights: AnalysisInsight[] }
-
-function parseStoredPlan(raw: unknown): StoredPlan | null {
-  try {
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as any).elements)) return null;
-    const els = (parsed as any).elements.filter((e: any) => e && typeof e.id === 'string' && typeof e.kind === 'string');
-    const ins = Array.isArray((parsed as any).insights)
-      ? (parsed as any).insights.filter((i: any) => i && typeof i.id === 'string' && typeof i.text === 'string')
-      : [];
-    return { summary: String((parsed as any).summary || ''), elements: els as OverlayElement[], insights: ins as AnalysisInsight[] };
-  } catch { return null; }
-}
-
-interface EditSnapshot {
-  inPoint?: number; outPointRaw?: number; splits?: number[]; removedKeys?: string[];
-  effects?: EffectsState; texts?: TextOverlayItem[]; aspect?: AspectPreset;
-  muteOriginal?: boolean; originalVolume?: number; musicVolume?: number;
-  format?: ExportFormat; quality?: ExportQuality;
-  captionsOn?: boolean; captionStyleId?: CaptionStyleId; captionPos?: CaptionPosition;
-}
-
-// ---------------------------------------------------------------------------
-// Main app
-// ---------------------------------------------------------------------------
-
-function VideoEnhancerApp() {
-  // Account identity (a missing runtime provider must never crash the app).
-  let sessionId = '';
-  let subscription: { contactId?: string | null } | null = null;
-  try {
-    const runtime = useSpaceRuntime() as { sessionId?: string; subscription?: { contactId?: string | null } | null } | null;
-    sessionId = runtime?.sessionId || '';
-    subscription = runtime?.subscription || null;
-  } catch { /* provider missing — fall through to the persisted session */ }
-  const storedAccountId = useMemo(() => readVeAuthSession().userId || '', []);
-  const accountUserId = subscription?.contactId || sessionId || storedAccountId || fallbackSessionId();
-  const accountUserIdRef = useRef(accountUserId);
-  useEffect(() => { accountUserIdRef.current = accountUserId; }, [accountUserId]);
-  useEffect(() => {
-    if (!accountUserId) return;
-    try { window.localStorage.setItem(VE_AUTH_SESSION_KEY, JSON.stringify({ userId: accountUserId, updatedAt: Date.now() })); } catch { /* no-op */ }
-  }, [accountUserId]);
-
-  // ---- Source footage ----
-  const [file, setFile] = useState<File | null>(null);
-  const [localUrl, setLocalUrl] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [uploadedUrl, setUploadedUrl] = useState('');
-  const [uploadErr, setUploadErr] = useState('');
+  // ---- Upload / AI / export state ----
   const [dragOver, setDragOver] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [jobRowId, setJobRowId] = useState<number | null>(null);
-  const jobRowIdRef = useRef<number | null>(null);
-  useEffect(() => { jobRowIdRef.current = jobRowId; }, [jobRowId]);
-
-  // ---- AI analysis ----
+  const [uploading, setUploading] = useState(false);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [analysis, setAnalysis] = useState<GeminiAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [analyzeNote, setAnalyzeNote] = useState('');
-  const [analyzeErr, setAnalyzeErr] = useState('');
-  const [summary, setSummary] = useState('');
-  const [insights, setInsights] = useState<AnalysisInsight[]>([]);
-  const [elements, setElements] = useState<OverlayElement[]>([]);
-  const elementsRef = useRef<OverlayElement[]>([]);
-  useEffect(() => { elementsRef.current = elements; }, [elements]);
-
-  // ---- Editor state ----
-  const [activeTool, setActiveTool] = useState<ToolId>('analyze');
-  const [inPoint, setInPoint] = useState(0);
-  const [outPointRaw, setOutPointRaw] = useState(0); // 0 = "to the end"
-  const [splits, setSplits] = useState<number[]>([]);
-  const [removedKeys, setRemovedKeys] = useState<string[]>([]);
-  const [effects, setEffects] = useState<EffectsState>({ ...DEFAULT_EFFECTS });
-  const [texts, setTexts] = useState<TextOverlayItem[]>([]);
-  const textsRef = useRef<TextOverlayItem[]>([]);
-  useEffect(() => { textsRef.current = texts; }, [texts]);
-  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
-  const selectedTextIdRef = useRef<string | null>(null);
-  useEffect(() => { selectedTextIdRef.current = selectedTextId; }, [selectedTextId]);
-  const [aspect, setAspect] = useState<AspectPreset>('original');
-  const [muteOriginal, setMuteOriginal] = useState(false);
-  const [originalVolume, setOriginalVolume] = useState(1);
-
-  // ---- Music ----
-  const [musicPrompt, setMusicPrompt] = useState('');
-  const [musicBusy, setMusicBusy] = useState(false);
-  const [musicNote, setMusicNote] = useState('');
-  const [musicErr, setMusicErr] = useState('');
-  const [musicTrack, setMusicTrack] = useState<GeneratedMusic | null>(null);
-  const [musicUrl, setMusicUrl] = useState('');
-  const [musicVolume, setMusicVolume] = useState(0.35);
-
-  // ---- Captions ----
-  const [captionSegments, setCaptionSegments] = useState<CaptionSegment[]>([]);
-  const captionSegmentsRef = useRef<CaptionSegment[]>([]);
-  useEffect(() => { captionSegmentsRef.current = captionSegments; }, [captionSegments]);
-  const [captionsOn, setCaptionsOn] = useState(false);
-  const captionsOnRef = useRef(false);
-  useEffect(() => { captionsOnRef.current = captionsOn; }, [captionsOn]);
-  const [captionStyleId, setCaptionStyleId] = useState<CaptionStyleId>(DEFAULT_CAPTION_STYLE);
-  const captionStyleIdRef = useRef<CaptionStyleId>(DEFAULT_CAPTION_STYLE);
-  useEffect(() => { captionStyleIdRef.current = captionStyleId; }, [captionStyleId]);
-  const [captionPos, setCaptionPos] = useState<CaptionPosition>(DEFAULT_CAPTION_POSITION);
-  const captionPosRef = useRef<CaptionPosition>(DEFAULT_CAPTION_POSITION);
-  useEffect(() => { captionPosRef.current = captionPos; }, [captionPos]);
+  const [brollBusy, setBrollBusy] = useState(false);
+  const [brollPrompt, setBrollPrompt] = useState('');
+  // The manual b-roll engine persists for the browser session, so the
+  // last-used model stays selected across generations and reopened panels.
+  const [brollModel, setBrollModel] = usePersistentEngine('video-enhancer:broll-engine', 'gemini-omni-flash-preview');
+  const [brollModelMode, setBrollModelMode] = useState<'auto' | 'manual'>('auto');
+  const [openRouterHealthy, setOpenRouterHealthy] = useState(false);
+  const [mediaAvailability, setMediaAvailability] = useState({ runwayEnabled: false, klingEnabled: false });
+  const [aiEditBusy, setAiEditBusy] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
-  const [transcribeNote, setTranscribeNote] = useState('');
-  const [transcribeErr, setTranscribeErr] = useState('');
-
-  // ---- Sound effects ----
-  const [sfxCues, setSfxCues] = useState<SfxCue[]>([]);
-  const sfxCuesRef = useRef<SfxCue[]>([]);
-  useEffect(() => { sfxCuesRef.current = sfxCues; }, [sfxCues]);
-  const [sfxBusy, setSfxBusy] = useState(false);
-  const [sfxNote, setSfxNote] = useState('');
-  const [sfxErr, setSfxErr] = useState('');
-  const prevSfxTRef = useRef(0);
-
-  // ---- Export ----
-  const [format, setFormat] = useState<ExportFormat>('auto');
-  const [quality, setQuality] = useState<ExportQuality>('standard');
+  const [musicGenBusy, setMusicGenBusy] = useState(false);
+  const [customMusic, setCustomMusic] = useState<{ url: string; label: string } | null>(null);
+  const [appliedSuggestions, setAppliedSuggestions] = useState<string[]>([]);
+  // Original Files per clip id — AI Edit and transcription read the real bytes.
+  const sourceFiles = useRef<Map<string, File>>(new Map());
   const [exporting, setExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState(0);
-  const [exportNote, setExportNote] = useState('');
-  const [exportErr, setExportErr] = useState('');
-  const [outputUrl, setOutputUrl] = useState('');
-  const [outputExt, setOutputExt] = useState('webm');
-  const [viewOriginal, setViewOriginal] = useState(false);
-  // A visible explanation whenever the enhanced output cannot be shown — the
-  // player must never present a blank rectangle as a valid state.
-  const [outputIssue, setOutputIssue] = useState('');
-
+  const [exportStartedAt, setExportStartedAt] = useState(0);
+  const [exportTick, setExportTick] = useState(0);
+  const [renderUrl, setRenderUrl] = useState('');
+  const [exportError, setExportError] = useState('');
+  // Runway Enhance — generative clips beside the editor. Collapsed by default
+  // so the timeline stays the focus, and nothing it makes reaches the timeline
+  // until the customer presses Add to timeline.
+  const [runwayOpen, setRunwayOpen] = useState(false);
   const aliveRef = useRef(true);
   useEffect(() => () => { aliveRef.current = false; }, []);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const previewAreaRef = useRef<HTMLDivElement | null>(null);
-  const timelineRef = useRef<HTMLDivElement | null>(null);
-  const [playheadT, setPlayheadT] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [previewArea, setPreviewArea] = useState({ w: 0, h: 0 });
-
-  useEffect(() => () => { if (localUrl && localUrl.startsWith('blob:')) URL.revokeObjectURL(localUrl); }, [localUrl]);
-  useEffect(() => () => { if (musicUrl) { try { URL.revokeObjectURL(musicUrl); } catch { /* no-op */ } } }, [musicUrl]);
-
-  const showingOutput = !!outputUrl && !viewOriginal;
-  const playerSrc = showingOutput ? outputUrl : localUrl;
-
-  // ---- Derived trim state ----
-  const outPoint = outPointRaw > 0 && duration > 0 ? Math.min(outPointRaw, duration) : duration;
-  const segments = useMemo(
-    () => (duration > 0 ? buildSegments(inPoint, outPoint || duration, splits, removedKeys) : []),
-    [duration, inPoint, outPoint, splits, removedKeys],
-  );
-  const segmentsRef = useRef(segments);
-  useEffect(() => { segmentsRef.current = segments; }, [segments]);
-  const keptSecs = keptDuration(segments) || duration;
-  const keptSecsRef = useRef(keptSecs);
-  useEffect(() => { keptSecsRef.current = keptSecs; }, [keptSecs]);
-  const hasEdits = segments.some((s) => !s.kept) || inPoint > 0.05 || (outPointRaw > 0 && duration > 0 && outPointRaw < duration - 0.05);
-
-  const aspectRatioNum = useMemo(() => {
-    const preset = ASPECT_PRESETS.find((a) => a.id === aspect);
-    if (preset && preset.ratio) return preset.ratio;
-    const v = videoRef.current;
-    if (v && v.videoWidth && v.videoHeight) return v.videoWidth / v.videoHeight;
-    return 16 / 9;
-  }, [aspect, duration]);
-
-  // Preview box sized to the available area at the chosen aspect ratio (16:9 default).
   useEffect(() => {
-    const el = previewAreaRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver((entries) => {
-      for (const en of entries) setPreviewArea({ w: en.contentRect.width, h: en.contentRect.height });
+    let live = true;
+    void callHook('vv-media-capabilities', {})
+      .then((caps) => {
+        if (!live) return;
+        setMediaAvailability({
+          runwayEnabled: Boolean(caps?.runway?.available && caps?.runway?.generationEnabled !== false),
+          // The catalogue answering 200 is not enough: routeShotIntent only
+          // accepts Kling after a real submit succeeds, and this surface does
+          // not spend credits merely to probe it.
+          klingEnabled: false,
+        });
+      })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+
+  const brollRoute = routeShotIntent('fast_broll', { ...mediaAvailability, openRouterHealthy });
+  const brollAutoId = brollRoute.engineId || 'gemini-omni-flash-preview';
+  const concreteBrollModel = brollModelMode === 'auto' ? brollAutoId : brollModel;
+  const concreteBrollName = engineDisplayName(concreteBrollModel);
+
+  const duration = Math.max(0.1, timelineDuration(clips));
+  const activeClip = clips[Math.min(activeIndex, clips.length - 1)] || null;
+  const selectedClip = clips.find((c) => c.id === selectedClipId) || null;
+  const styleCss = STYLE_TRANSFERS.find((s) => s.id === styleId)?.css || '';
+  const gradeCss = COLOR_GRADES.find((g) => g.id === gradeId)?.css || 'none';
+  const baseLook = styleCss && styleCss !== 'none' ? styleCss : gradeCss;
+  const previewFilter = [effectsFilterCss(effects), baseLook === 'none' ? '' : baseLook].filter(Boolean).join(' ') || 'none';
+
+  // ---------------------------------------------------------------------------
+  // Footage intake
+  // ---------------------------------------------------------------------------
+
+  const probeDuration = (url: string): Promise<number> => new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    const done = (d: number) => { v.removeAttribute('src'); try { v.load(); } catch { /* no-op */ } resolve(d); };
+    v.addEventListener('loadedmetadata', () => done(Number.isFinite(v.duration) ? v.duration : 0), { once: true });
+    v.addEventListener('error', () => done(0), { once: true });
+    v.src = url;
+  });
+
+  const addClipFromUrl = useCallback(async (url: string, previewUrl: string, label: string, kind: 'source' | 'broll', atIndex?: number) => {
+    const d = (await probeDuration(previewUrl)) || (await probeDuration(url)) || 5;
+    const clip: NleClip = {
+      id: newId('clip'), label, url, previewUrl, sourceDuration: d,
+      in: 0, out: d, speed: 1, opacity: 1, text: '', textSize: 56, textColor: '#ffffff', kind,
+    };
+    setClips((list) => {
+      if (atIndex == null || atIndex >= list.length) return [...list, clip];
+      const next = [...list];
+      next.splice(Math.max(0, atIndex), 0, clip);
+      return next;
     });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [localUrl]);
-  const boxH = Math.max(200, previewArea.h || 400);
-  let pvW = Math.min(previewArea.w || 640, boxH * aspectRatioNum);
-  let pvH = pvW / aspectRatioNum;
-  if (pvH > boxH) { pvH = boxH; pvW = pvH * aspectRatioNum; }
+    setSelectedClipId(clip.id);
+    return clip;
+  }, []);
 
-  // ---- Source duration, independent of what the player is showing ----
-  // Every timing control (trim, splits, text in/out) and the export gate is
-  // derived from the SOURCE duration. The visible player only reports the
-  // metadata of whatever it is playing, so a session restored with a finished
-  // export on screen used to leave duration at 0 and disable the whole editor
-  // with nothing on screen explaining why. Read it off a detached element
-  // instead, so it is known whichever view is up.
-  useEffect(() => {
-    if (!localUrl || duration > 0) return;
-    let cancelled = false;
-    const probe = document.createElement('video');
-    probe.preload = 'metadata';
-    probe.muted = true;
-    const done = () => {
-      if (!cancelled && Number.isFinite(probe.duration) && probe.duration > 0) setDuration(probe.duration);
-      cleanup();
-    };
-    const cleanup = () => {
-      probe.removeEventListener('loadedmetadata', done);
-      probe.removeEventListener('error', cleanup);
-      probe.removeAttribute('src');
-      try { probe.load(); } catch { /* no-op */ }
-    };
-    probe.addEventListener('loadedmetadata', done);
-    probe.addEventListener('error', cleanup);
-    probe.src = localUrl;
-    return () => { cancelled = true; cleanup(); };
-  }, [localUrl, duration]);
+  const runDescribe = useCallback(async (srcUrl?: string) => {
+    const source = srcUrl || clipsRef.current[0]?.previewUrl || clipsRef.current[0]?.url;
+    if (!source) return;
+    setAnalyzing(true);
+    setError('');
+    setNote('Gemini is reading a frame…');
+    try {
+      const frame = await captureFrameBase64(source, 1);
+      const out = await callHook('veh-gemini-describe', { frameBase64: frame.base64, mimeType: frame.mimeType, wt: nleToken() });
+      if (!aliveRef.current) return;
+      const a: GeminiAnalysis = {
+        subject: String(out.subject || ''),
+        dominantColors: Array.isArray(out.dominantColors) ? out.dominantColors.map(String) : [],
+        backgroundType: String(out.backgroundType || ''),
+        lightingStyle: String(out.lightingStyle || ''),
+        mood: String(out.mood || ''),
+        suggestedEnhancements: Array.isArray(out.suggestedEnhancements) ? out.suggestedEnhancements.map(String) : [],
+      };
+      setAnalysis(a);
+      setNote('');
+      if (a.subject) setBrollPrompt((p) => p || `Cinematic b-roll that complements: ${a.subject}. ${a.mood ? `Mood: ${a.mood}.` : ''}`);
+    } catch (e) {
+      if (aliveRef.current) { setNote(''); setError(msg(e)); }
+    } finally {
+      if (aliveRef.current) setAnalyzing(false);
+    }
+  }, []);
 
-  // ---- SceneForge handoff: a finished SceneForge video opened "in the
-  // Editor" or "sent to the Enhancer" from that app's done screen lands here.
-  // The key is written immediately before the shell switches apps, so only a
-  // fresh (<10 min) handoff loads — and it wins over the snapshot restore
-  // below because it runs first and sets state unconditionally.
+  const handleFile = useCallback(async (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('video/')) { setError('That file is not a video.'); return; }
+    if (file.size > MAX_UPLOAD_BYTES) { setError('Videos up to 500 MB are supported.'); return; }
+    setError('');
+    const localUrl = URL.createObjectURL(file);
+    const clip = await addClipFromUrl('', localUrl, file.name, 'source');
+    sourceFiles.current.set(clip.id, file);
+    // The durable copy uploads in the background — export needs it, preview does not.
+    setUploading(true);
+    setNote('Uploading your footage…');
+    void (async () => {
+      try {
+        const up = await uploadVideo(file);
+        if (!aliveRef.current) return;
+        setClips((list) => list.map((c) => (c.id === clip.id ? { ...c, url: up.url } : c)));
+        setNote('');
+      } catch (e) {
+        if (aliveRef.current) { setNote(''); setError(`The upload failed — preview still works, but export needs it. ${msg(e)}`); }
+      } finally {
+        if (aliveRef.current) setUploading(false);
+      }
+    })();
+    // 2B: uploading auto-triggers Gemini Describe on the local copy.
+    void runDescribe(localUrl);
+  }, [addClipFromUrl, runDescribe]);
+
+  // SceneForge handoff — same contract as the previous editor.
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem('sceneforge_handoff_v1');
       if (!raw) return;
       window.localStorage.removeItem('sceneforge_handoff_v1');
-      const h = JSON.parse(raw) as { url?: string; title?: string; mode?: string; ts?: number } | null;
+      const h = JSON.parse(raw) as { url?: string; title?: string; ts?: number } | null;
       if (!h || typeof h.url !== 'string' || !/^https?:\/\//.test(h.url)) return;
       if (!h.ts || Date.now() - h.ts > 10 * 60 * 1000) return;
-      setUploadedUrl(h.url);
-      setLocalUrl(h.url);
-      setActiveTool(h.mode === 'enhance' ? 'analyze' : 'trim');
+      void (async () => {
+        await addClipFromUrl(h.url!, h.url!, h.title || 'SceneForge video', 'source');
+        void runDescribe(h.url!);
+      })();
     } catch { /* localStorage unavailable — nothing to hand off */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- Restore: localStorage snapshot, then the account's latest job ----
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(VE_SNAPSHOT_KEY);
-      if (!raw) return;
-      const snap = JSON.parse(raw) as { uploadedUrl?: string; outputUrl?: string; summary?: string; elements?: OverlayElement[]; insights?: AnalysisInsight[]; edit?: EditSnapshot } | null;
-      if (!snap || typeof snap !== 'object') return;
-      // blob: URLs die with the tab that created them — restoring one would
-      // put a permanently blank video in the player. Only durable https URLs
-      // survive a restore; a tab-local output simply counts as "no output yet".
-      if (snap.uploadedUrl && !String(snap.uploadedUrl).startsWith('blob:')) {
-        setUploadedUrl((cur) => cur || (snap.uploadedUrl as string));
-        setLocalUrl((cur) => cur || (snap.uploadedUrl as string));
-      }
-      if (snap.outputUrl && !String(snap.outputUrl).startsWith('blob:')) setOutputUrl((cur) => cur || (snap.outputUrl as string));
-      if (snap.summary) setSummary((cur) => cur || (snap.summary as string));
-      if (Array.isArray(snap.elements) && snap.elements.length) setElements((cur) => (cur.length ? cur : (snap.elements as OverlayElement[])));
-      if (Array.isArray(snap.insights) && snap.insights.length) setInsights((cur) => (cur.length ? cur : (snap.insights as AnalysisInsight[])));
-      const ed = snap.edit;
-      if (ed && typeof ed === 'object') {
-        if (Number.isFinite(ed.inPoint)) setInPoint(Math.max(0, Number(ed.inPoint)));
-        if (Number.isFinite(ed.outPointRaw)) setOutPointRaw(Math.max(0, Number(ed.outPointRaw)));
-        if (Array.isArray(ed.splits)) setSplits(ed.splits.filter((s) => Number.isFinite(s)));
-        if (Array.isArray(ed.removedKeys)) setRemovedKeys(ed.removedKeys.filter((k) => typeof k === 'string'));
-        if (ed.effects && typeof ed.effects === 'object') setEffects({ ...DEFAULT_EFFECTS, ...ed.effects });
-        if (Array.isArray(ed.texts)) setTexts(ed.texts.filter((t) => t && typeof t.id === 'string'));
-        if (ed.aspect && ASPECT_PRESETS.some((a) => a.id === ed.aspect)) setAspect(ed.aspect);
-        if (typeof ed.muteOriginal === 'boolean') setMuteOriginal(ed.muteOriginal);
-        if (Number.isFinite(ed.originalVolume)) setOriginalVolume(clamp(Number(ed.originalVolume), 0, 1));
-        if (Number.isFinite(ed.musicVolume)) setMusicVolume(clamp(Number(ed.musicVolume), 0, 1));
-        if (ed.format === 'auto' || ed.format === 'mp4' || ed.format === 'webm') setFormat(ed.format);
-        if (ed.quality === 'high' || ed.quality === 'standard' || ed.quality === 'compact') setQuality(ed.quality);
-        if (typeof ed.captionsOn === 'boolean') setCaptionsOn(ed.captionsOn);
-        if (ed.captionStyleId && CAPTION_STYLES.some((s) => s.id === ed.captionStyleId)) setCaptionStyleId(ed.captionStyleId);
-        if (ed.captionPos === 'top' || ed.captionPos === 'middle' || ed.captionPos === 'bottom') setCaptionPos(ed.captionPos);
-      }
-    } catch { /* localStorage unavailable — the DB restore still runs */ }
-  }, []);
+  // ---------------------------------------------------------------------------
+  // Playback engine — one <video> element walks the clip sequence
+  // ---------------------------------------------------------------------------
 
-  useEffect(() => {
-    if (!uploadedUrl && !outputUrl && !elements.length && !texts.length) return;
-    try {
-      const edit: EditSnapshot = { inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality, captionsOn, captionStyleId, captionPos };
-      window.localStorage.setItem(VE_SNAPSHOT_KEY, JSON.stringify({ uploadedUrl, outputUrl, summary, elements, insights, edit, updatedAt: Date.now() }));
-    } catch { /* no-op */ }
-  }, [uploadedUrl, outputUrl, summary, elements, insights, inPoint, outPointRaw, splits, removedKeys, effects, texts, aspect, muteOriginal, originalVolume, musicVolume, format, quality, captionsOn, captionStyleId, captionPos]);
-
-  useEffect(() => {
-    if (!accountUserId) return;
-    let cancelled = false;
-    void fetchLatestEnhancerJob(accountUserId)
-      .then((row) => {
-        if (cancelled || !row || jobRowIdRef.current) return;
-        setJobRowId(row.id);
-        jobRowIdRef.current = row.id;
-        if (row.video_url) {
-          setUploadedUrl((cur) => cur || (row.video_url as string));
-          setLocalUrl((cur) => cur || (row.video_url as string));
-        }
-        if (row.result_url) setOutputUrl((cur) => cur || (row.result_url as string));
-        const stored = parseStoredPlan(row.caption_text);
-        if (stored) {
-          setSummary((cur) => cur || stored.summary);
-          setElements((cur) => (cur.length ? cur : stored.elements));
-          setInsights((cur) => (cur.length ? cur : stored.insights));
-        }
-      })
-      .catch((e) => { if (!cancelled) console.warn('[VideoEnhancer] could not restore the latest job:', e); });
-    return () => { cancelled = true; };
-  }, [accountUserId]);
-
-  useEffect(() => {
-    if (!accountUserId || !jobRowId) return;
-    void updateEnhancerJob(jobRowId, { user_id: accountUserId }).catch((e) => {
-      console.warn('[VideoEnhancer] could not attach the job to the account:', e);
-    });
-  }, [accountUserId, jobRowId]);
-
-  // ---- Preview playback settings (speed / audio follow the edit) ----
+  // Keep the element on the active clip's source, trim window and rate.
   useEffect(() => {
     const v = videoRef.current;
-    if (!v) return;
-    v.playbackRate = showingOutput ? 1 : clamp(effects.speed || 1, 0.25, 4);
-    v.muted = showingOutput ? false : muteOriginal;
-    v.volume = showingOutput ? 1 : clamp(originalVolume, 0, 1);
-  }, [effects.speed, muteOriginal, originalVolume, showingOutput, playerSrc]);
-
-  // ---- Live overlay preview loop (+ cut-region skipping) ----
-  const previewMapRef = useRef({ ox: 0, oy: 0, cw: 1, ch: 1, dpr: 1 });
-  const hitRectsRef = useRef<Map<string, TextHitRect>>(new Map());
-  const skipGuardRef = useRef(0);
-  const aspectRef = useRef<AspectPreset>('original');
-  useEffect(() => { aspectRef.current = aspect; }, [aspect]);
-  const effectsRef = useRef(effects);
-  useEffect(() => { effectsRef.current = effects; }, [effects]);
-  const trimRef = useRef({ inPoint: 0, outPoint: 0 });
-  useEffect(() => { trimRef.current = { inPoint, outPoint: outPoint || duration }; }, [inPoint, outPoint, duration]);
-
-  useEffect(() => {
-    let raf = 0;
-    const loop = () => {
-      const v = videoRef.current;
-      const c = overlayCanvasRef.current;
-      if (v && c && v.videoWidth) {
-        const rect = c.getBoundingClientRect();
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
-        const w = Math.max(2, Math.round(rect.width * dpr));
-        const h = Math.max(2, Math.round(rect.height * dpr));
-        if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
-        const ctx = c.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, w, h);
-          if (!showingOutput) {
-            const vw = v.videoWidth, vh = v.videoHeight;
-            const fx = effectsRef.current;
-            const backdrop = fx.backdrop && fx.backdrop !== 'none' ? fx.backdrop : null;
-            let ox = 0, oy = 0, cw = w, ch = h;
-            if (backdrop) {
-              // Backdrop framing previews LIVE: the canvas paints the backdrop
-              // and the contained footage itself (covering the element under
-              // it), so what you see is exactly what exports.
-              drawBackdropFrame(ctx, w, h, v, backdrop);
-              const fit = Math.min((w * 0.92) / vw, (h * 0.92) / vh);
-              cw = vw * fit; ch = vh * fit;
-              ox = (w - cw) / 2; oy = (h - ch) / 2;
-              ctx.save();
-              const fCss = filterCss(fx);
-              if (fCss !== 'none') ctx.filter = fCss;
-              ctx.drawImage(v, ox, oy, cw, ch);
-              ctx.restore();
-              drawVignette(ctx, w, h, fx.vignette);
-            } else {
-              const cover = aspectRef.current !== 'original';
-              const s = cover ? Math.max(rect.width / vw, rect.height / vh) : Math.min(rect.width / vw, rect.height / vh);
-              cw = vw * s * dpr; ch = vh * s * dpr;
-              ox = (w - cw) / 2; oy = (h - ch) / 2;
-            }
-            previewMapRef.current = { ox, oy, cw, ch, dpr };
-            ctx.save();
-            ctx.translate(ox, oy);
-            drawOverlays(ctx, cw, ch, v.currentTime, elementsRef.current.filter((e) => e.enabled));
-            drawTextOverlays(ctx, cw, ch, v.currentTime, textsRef.current, hitRectsRef.current, selectedTextIdRef.current);
-            if (captionsOnRef.current && captionSegmentsRef.current.length) {
-              drawCaptionOverlay(ctx, cw, ch, v.currentTime, captionSegmentsRef.current, captionStyleIdRef.current, captionPosRef.current);
-            }
-            ctx.restore();
-          }
-        }
-        // Skip cut regions while playing the original.
-        if (!showingOutput && !v.paused && !v.seeking && performance.now() > skipGuardRef.current) {
-          const segs = segmentsRef.current;
-          if (segs.length) {
-            const t = v.currentTime;
-            const { inPoint: tin, outPoint: tout } = trimRef.current;
-            const inCut = segs.find((sg) => !sg.kept && t >= sg.start && t < sg.end - 0.02);
-            if (t < tin - 0.05) {
-              skipGuardRef.current = performance.now() + 350;
-              v.currentTime = tin;
-            } else if (inCut) {
-              const next = segs.find((sg) => sg.kept && sg.start >= inCut.end - 0.05);
-              skipGuardRef.current = performance.now() + 350;
-              if (next) v.currentTime = next.start + 0.02;
-              else { v.pause(); v.currentTime = tin; }
-            } else if (tout > 0 && t > tout + 0.02) {
-              skipGuardRef.current = performance.now() + 350;
-              v.pause();
-            }
-          }
-        }
-        // One-shot sound-effect cues: fire the instant playback crosses their moment.
-        if (!showingOutput && !v.paused && !v.seeking) {
-          const t = v.currentTime;
-          const prevT = prevSfxTRef.current;
-          if (prevT <= t) {
-            for (const cue of sfxCuesRef.current) {
-              if (cue.status === 'ready' && cue.url && prevT < cue.at && t >= cue.at) {
-                try { const a = new Audio(cue.url); a.volume = clamp(cue.volume, 0, 1); void a.play().catch(() => undefined); } catch { /* no-op */ }
-              }
-            }
-          }
-          prevSfxTRef.current = t;
-        } else {
-          prevSfxTRef.current = v.currentTime;
-        }
-        setPlayheadT((prev) => (Math.abs(prev - v.currentTime) > 0.08 ? v.currentTime : prev));
-        setIsPlaying((prev) => (prev === !v.paused ? prev : !v.paused));
-      }
-      raf = requestAnimationFrame(loop);
+    if (!v || !activeClip) return;
+    const src = activeClip.previewUrl || activeClip.url;
+    const seekTo = pendingSourceT.current != null ? pendingSourceT.current : activeClip.in;
+    pendingSourceT.current = null;
+    const apply = () => {
+      try { v.currentTime = Math.max(activeClip.in, Math.min(activeClip.out, seekTo)); } catch { /* not seekable yet */ }
+      v.playbackRate = activeClip.speed;
+      if (isPlayingRef.current) void v.play().catch(() => setIsPlaying(false));
     };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [showingOutput]);
-
-  // ---- Text dragging on the preview ----
-  const textDragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
-  const canvasPointFromEvent = useCallback((e: { clientX: number; clientY: number }) => {
-    const c = overlayCanvasRef.current;
-    if (!c) return null;
-    const rect = c.getBoundingClientRect();
-    const m = previewMapRef.current;
-    const px = (e.clientX - rect.left) * m.dpr;
-    const py = (e.clientY - rect.top) * m.dpr;
-    return { nx: (px - m.ox) / m.cw, ny: (py - m.oy) / m.ch, px: px - m.ox, py: py - m.oy };
-  }, []);
-
-  const onCanvasPointerDown = useCallback((e: ReactPointerEvent<HTMLCanvasElement>) => {
-    const pt = canvasPointFromEvent(e);
-    if (!pt) return;
-    const entries = [...hitRectsRef.current.entries()].reverse();
-    for (const [id, r] of entries) {
-      if (pt.px >= r.x && pt.px <= r.x + r.w && pt.py >= r.y && pt.py <= r.y + r.h) {
-        const item = textsRef.current.find((t) => t.id === id);
-        if (!item) continue;
-        setSelectedTextId(id);
-        textDragRef.current = { id, dx: pt.nx - item.x, dy: pt.ny - item.y };
-        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* no-op */ }
-        e.preventDefault();
-        return;
-      }
+    if (v.getAttribute('data-src') !== src) {
+      v.setAttribute('data-src', src);
+      v.src = src;
+      v.addEventListener('loadedmetadata', apply, { once: true });
+      v.load();
+    } else {
+      apply();
     }
-    setSelectedTextId(null);
-  }, [canvasPointFromEvent]);
+  }, [activeClip?.id, activeClip?.previewUrl, activeClip?.speed]);
 
-  const onCanvasPointerMove = useCallback((e: ReactPointerEvent<HTMLCanvasElement>) => {
-    const drag = textDragRef.current;
-    if (!drag) return;
-    const pt = canvasPointFromEvent(e);
-    if (!pt) return;
-    setTexts((cur) => cur.map((t) => (t.id === drag.id ? { ...t, x: clamp(pt.nx - drag.dx, 0.02, 0.98), y: clamp(pt.ny - drag.dy, 0.03, 0.97) } : t)));
-  }, [canvasPointFromEvent]);
+  useEffect(() => { const v = videoRef.current; if (v) v.volume = volume; }, [volume]);
 
-  const onCanvasPointerUp = useCallback(() => { textDragRef.current = null; }, []);
-
-  // ---- Upload flow ----
-  const startUpload = useCallback(async (f: File) => {
-    setUploading(true); setUploadErr('');
-    let rowId: number | null = null;
-    try {
-      const userId = accountUserIdRef.current || fallbackSessionId();
-      const job = await createEnhancerJob(userId);
-      rowId = job.id;
-      setJobRowId(job.id); jobRowIdRef.current = job.id;
-      const up = await uploadVideo(f);
-      if (!aliveRef.current) return;
-      setUploadedUrl(up.url);
-      await updateEnhancerJob(job.id, { status: 'processing', video_url: up.url, result_url: null });
-    } catch (e) {
-      if (rowId) void updateEnhancerJob(rowId, { status: 'error' }).catch(() => undefined);
-      if (aliveRef.current) setUploadErr(msg(e));
-    }
-    if (aliveRef.current) setUploading(false);
-  }, []);
-
-  const handleFile = useCallback((f: File | null | undefined) => {
-    if (!f) return;
-    if (!f.type.startsWith('video/')) { setUploadErr('Please choose a video file (MP4, WebM or MOV).'); return; }
-    if (f.size > MAX_UPLOAD_BYTES) { setUploadErr('That file is over 500 MB — trim or compress it first, then upload again.'); return; }
-    setUploadErr(''); setOutputUrl(''); setViewOriginal(false); setOutputIssue(''); setDuration(0);
-    setElements([]); setInsights([]); setSummary(''); setAnalyzeErr(''); setExportErr(''); setExportProgress(0); setExportNote('');
-    setInPoint(0); setOutPointRaw(0); setSplits([]); setRemovedKeys([]);
-    setTexts([]); setSelectedTextId(null);
-    setCaptionSegments([]); setCaptionsOn(false); setTranscribeErr(''); setTranscribeNote('');
-    setSfxCues((cur) => { cur.forEach((c) => { if (c.url) { try { URL.revokeObjectURL(c.url); } catch { /* no-op */ } } }); return []; });
-    setSfxErr(''); setSfxNote('');
-    setActiveTool('analyze');
-    setFile(f);
-    setLocalUrl(URL.createObjectURL(f));
-    void startUpload(f);
-  }, [startUpload]);
-
-  const resetAll = useCallback(() => {
-    setFile(null); setLocalUrl(''); setUploading(false); setUploadedUrl(''); setUploadErr(''); setDuration(0);
-    setJobRowId(null); jobRowIdRef.current = null;
-    setOutputUrl(''); setViewOriginal(false); setOutputExt('webm'); setOutputIssue('');
-    setAnalyzing(false); setAnalyzeNote(''); setAnalyzeErr(''); setSummary(''); setInsights([]); setElements([]);
-    setExporting(false); setExportProgress(0); setExportNote(''); setExportErr('');
-    setInPoint(0); setOutPointRaw(0); setSplits([]); setRemovedKeys([]);
-    setEffects({ ...DEFAULT_EFFECTS }); setTexts([]); setSelectedTextId(null);
-    setAspect('original'); setMuteOriginal(false); setOriginalVolume(1);
-    setMusicTrack(null); setMusicErr(''); setMusicNote(''); setMusicPrompt('');
-    setMusicUrl((prev) => { if (prev) { try { URL.revokeObjectURL(prev); } catch { /* no-op */ } } return ''; });
-    setCaptionSegments([]); setCaptionsOn(false);
-    setCaptionStyleId(DEFAULT_CAPTION_STYLE); setTranscribing(false); setTranscribeNote(''); setTranscribeErr('');
-    setSfxCues((cur) => { cur.forEach((c) => { if (c.url) { try { URL.revokeObjectURL(c.url); } catch { /* no-op */ } } }); return []; });
-    setSfxBusy(false); setSfxNote(''); setSfxErr('');
-    setActiveTool('analyze');
-    try { window.localStorage.removeItem(VE_SNAPSHOT_KEY); } catch { /* no-op */ }
-  }, []);
-
-  const ensureSourceFile = useCallback(async (note: (n: string) => void): Promise<File> => {
-    if (file) return file;
-    if (!uploadedUrl) throw new Error('Upload your footage first.');
-    note('Fetching your stored video…');
-    const restored = await fetchVideoAsFile(uploadedUrl);
-    if (aliveRef.current) setFile(restored);
-    return restored;
-  }, [file, uploadedUrl]);
-
-  // ---- claude-opus-5 analysis ----
-  const runAnalyze = useCallback(async () => {
-    if (analyzing || exporting) return;
-    if (!workspaceToken()) { setAnalyzeErr('Your workspace session is still loading — try again in a moment.'); return; }
-    setAnalyzing(true); setAnalyzeErr(''); setAnalyzeNote('Preparing the footage…');
-    try {
-      const src = await ensureSourceFile((n) => { if (aliveRef.current) setAnalyzeNote(n); });
-      const sampled = await extractFrames(src, 8, 512, (n) => { if (aliveRef.current) setAnalyzeNote(n); });
-      if (!aliveRef.current) return;
-      setDuration((d) => d || sampled.duration);
-      const result = await analyzeFrames(sampled.frames, sampled.duration, (n) => { if (aliveRef.current) setAnalyzeNote(n); });
-      if (!aliveRef.current) return;
-      setSummary(result.summary);
-      setInsights(result.insights);
-      setElements(result.elements);
-      setViewOriginal(true);
-      // Auto-suggest the music mood from what the footage actually shows, so
-      // adding music never requires a manual pick.
-      setMusicPrompt((cur) => (cur.trim() ? cur : suggestMusicPrompt(result.summary)));
-      void updateEnhancerJob(jobRowIdRef.current, {
-        status: 'done',
-        caption_text: JSON.stringify({ summary: result.summary, elements: result.elements, insights: result.insights }),
-      }).catch(() => undefined);
-    } catch (e) {
-      if (aliveRef.current) setAnalyzeErr(msg(e));
-    }
-    if (aliveRef.current) { setAnalyzing(false); setAnalyzeNote(''); }
-  }, [analyzing, exporting, ensureSourceFile]);
-
-  // ---- Export ----
-  const canExport = (!!file || !!uploadedUrl) && duration > 0 && keptSecs > 0.1;
-  const runExport = useCallback(async () => {
-    if (exporting || analyzing) return;
-    setExporting(true); setExportErr(''); setOutputIssue(''); setExportProgress(0); setExportNote('Preparing the footage…');
-    try {
-      const src = await ensureSourceFile((n) => { if (aliveRef.current) setExportNote(n); });
-      const segs = segmentsRef.current.length ? keptRanges(segmentsRef.current) : [{ start: 0, end: duration || 1 }];
-      setExportNote('Compositing your edit — the video plays through once…');
-      const readySfx = sfxCuesRef.current.filter((c) => c.status === 'ready' && c.blob);
-      const result = await renderEditedVideo(
-        src,
-        {
-          segments: segs,
-          effects: effectsRef.current,
-          overlays: elementsRef.current,
-          texts: textsRef.current,
-          aspect: aspectRef.current,
-          muteOriginal,
-          originalVolume,
-          music: musicTrack ? { blob: musicTrack.blob, volume: musicVolume } : null,
-          captions: captionsOn && captionSegmentsRef.current.length ? { segments: captionSegmentsRef.current.filter((s) => s.enabled), styleId: captionStyleId, position: captionPos } : null,
-          sfx: readySfx.map((c) => ({ id: c.id, at: c.at, volume: c.volume, blob: c.blob as Blob })),
-          format,
-          quality,
-        },
-        (p) => { if (aliveRef.current) setExportProgress(p); },
-        (n) => { if (aliveRef.current) setExportNote(n); },
-      );
-      if (!aliveRef.current) return;
-      setOutputExt(result.extension);
-      let url = '';
-      const base = (src.name || 'footage').replace(/\.[a-z0-9]+$/i, '');
-      if (result.blob.size <= MAX_UPLOAD_BYTES) {
-        setExportNote('Saving the enhanced video to durable storage…');
-        try {
-          const up = await uploadVideo(new File([result.blob], base + '-enhanced.' + result.extension, { type: result.mimeType }));
-          url = up.url;
-          void updateEnhancerJob(jobRowIdRef.current, { status: 'done', result_url: url }).catch(() => undefined);
-        } catch (e) {
-          url = URL.createObjectURL(result.blob);
-          setExportNote('Cloud save failed (' + msg(e) + ') — the output lives in this tab only.');
+  // rAF loop: playhead sync + clip advance + music sync.
+  useEffect(() => {
+    if (!isPlaying) return;
+    let raf = 0;
+    const step = () => {
+      const v = videoRef.current;
+      const list = clipsRef.current;
+      const i = activeIndexRef.current;
+      const c = list[i];
+      if (v && c) {
+        const start = clipStartOnTimeline(list, i);
+        const t = start + Math.max(0, (v.currentTime - c.in)) / Math.max(0.1, c.speed);
+        setPlayhead(Math.min(t, timelineDuration(list)));
+        if (v.currentTime >= c.out - 0.04 || v.ended) {
+          if (i < list.length - 1) {
+            pendingSourceT.current = list[i + 1].in;
+            setActiveIndex(i + 1);
+          } else {
+            v.pause();
+            setIsPlaying(false);
+            setPlayhead(timelineDuration(list));
+          }
         }
-      } else {
-        url = URL.createObjectURL(result.blob);
-        setExportNote('The output is over the 500 MB storage cap — it lives in this tab; download it now to keep it.');
       }
-      if (!aliveRef.current) return;
-      setOutputUrl(url);
-      setViewOriginal(false);
-      setExportProgress(1);
-    } catch (e) {
-      if (aliveRef.current) setExportErr(msg(e));
-    }
-    if (aliveRef.current) setExporting(false);
-  }, [exporting, analyzing, ensureSourceFile, duration, muteOriginal, originalVolume, musicTrack, musicVolume, format, quality, captionsOn, captionStyleId, captionPos]);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [isPlaying]);
 
-  // ---- Music ----
-  const runMusic = useCallback(async () => {
-    if (musicBusy) return;
-    setMusicBusy(true); setMusicErr(''); setMusicNote('Composing your track…');
-    try {
-      // Music never requires a manual pick: an empty prompt falls back to the
-      // AI-suggested mood derived from the analysis summary (or a solid default).
-      const effectivePrompt = musicPrompt.trim() || suggestMusicPrompt(summary);
-      if (!musicPrompt.trim()) setMusicPrompt(effectivePrompt);
-      const res = await generateMusicBed(effectivePrompt, keptSecsRef.current || duration || 30, (n) => { if (aliveRef.current) setMusicNote(n); });
-      if (!aliveRef.current) return;
-      setMusicTrack(res);
-      setMusicUrl((prev) => { if (prev) { try { URL.revokeObjectURL(prev); } catch { /* no-op */ } } return URL.createObjectURL(res.blob); });
-    } catch (e) {
-      if (aliveRef.current) setMusicErr(msg(e));
-    }
-    if (aliveRef.current) { setMusicBusy(false); setMusicNote(''); }
-  }, [musicBusy, musicPrompt, duration, summary]);
+  // Music bed preview follows play/pause and the playhead.
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    const bed = musicBedId === 'custom'
+      ? (customMusic ? { url: customMusic.url } : null)
+      : (MUSIC_BEDS.find((m) => m.id === musicBedId) || null);
+    if (!bed) { a.pause(); a.removeAttribute('src'); return; }
+    if (a.getAttribute('data-src') !== bed.url) { a.setAttribute('data-src', bed.url); a.src = bed.url; a.loop = true; }
+    a.volume = 0.3 * volume;
+    if (isPlaying) { try { a.currentTime = playheadRef.current % Math.max(1, a.duration || 62); } catch { /* no-op */ } void a.play().catch(() => undefined); }
+    else a.pause();
+  }, [musicBedId, customMusic, isPlaying, volume]);
 
-  const removeMusic = useCallback(() => {
-    setMusicTrack(null);
-    setMusicUrl((prev) => { if (prev) { try { URL.revokeObjectURL(prev); } catch { /* no-op */ } } return ''; });
-  }, []);
-
-  // ---- Captions ----
-  const runGenerateCaptions = useCallback(async () => {
-    if (transcribing || exporting) return;
-    setTranscribing(true); setTranscribeErr(''); setTranscribeNote('Preparing the audio…');
-    try {
-      const src = await ensureSourceFile((n) => { if (aliveRef.current) setTranscribeNote(n); });
-      const result = await transcribeVideo(src, (n) => { if (aliveRef.current) setTranscribeNote(n); });
-      if (!aliveRef.current) return;
-      if (result.words.length) {
-        const segs = buildCaptionSegments(result.words);
-        setCaptionSegments(segs);
-        setCaptionsOn(true);
-        setTranscribeNote(segs.length + ' caption line' + (segs.length === 1 ? '' : 's') + ' ready.');
-      } else if (result.transcript.trim()) {
-        setCaptionSegments([]);
-        setTranscribeNote('Transcribed, but without word timings captions can\u2019t be timed to the video — try again.');
-      } else {
-        setCaptionSegments([]);
-        setTranscribeNote('No speech was detected in this video.');
-      }
-    } catch (e) {
-      if (aliveRef.current) setTranscribeErr(msg(e));
-    }
-    if (aliveRef.current) setTranscribing(false);
-  }, [transcribing, exporting, ensureSourceFile]);
-
-  const toggleCaptionSegment = useCallback((id: string) => {
-    setCaptionSegments((cur) => cur.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)));
-  }, []);
-  const deleteCaptionSegment = useCallback((id: string) => {
-    setCaptionSegments((cur) => cur.filter((s) => s.id !== id));
-  }, []);
-  const editCaptionSegment = useCallback((id: string, text: string) => {
-    setCaptionSegments((cur) => cur.map((s) => (s.id === id ? retimeSegmentText(s, text) : s)));
-  }, []);
-
-  // ---- Sound effects ----
-  const addSfxCue = useCallback(async (label: string, prompt: string, seconds: number) => {
-    if (sfxBusy) return;
-    setSfxBusy(true); setSfxErr(''); setSfxNote('Generating \u201c' + label + '\u201d\u2026');
-    const id = newSfxId();
-    const at = clamp(Math.round(playheadT * 10) / 10, 0, Math.max(0, (duration || playheadT) - 0.05));
-    const placeholder: SfxCue = { id, label, prompt, at, duration: seconds, volume: 0.85, blob: null, url: '', status: 'generating' };
-    setSfxCues((cur) => [...cur, placeholder]);
-    try {
-      const res = await generateSfxClip(prompt, seconds, (n) => { if (aliveRef.current) setSfxNote(n); });
-      if (!aliveRef.current) return;
-      const url = URL.createObjectURL(res.blob);
-      setSfxCues((cur) => cur.map((c) => (c.id === id ? { ...c, blob: res.blob, url, status: 'ready', source: res.source } : c)));
-      setSfxNote(res.note);
-    } catch (e) {
-      if (aliveRef.current) {
-        setSfxCues((cur) => cur.map((c) => (c.id === id ? { ...c, status: 'error', error: msg(e) } : c)));
-        setSfxErr(msg(e));
-        setSfxNote('');
-      }
-    }
-    if (aliveRef.current) setSfxBusy(false);
-  }, [sfxBusy, playheadT, duration]);
-
-  const updateSfxCue = useCallback((id: string, patch: Partial<SfxCue>) => {
-    setSfxCues((cur) => cur.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-  }, []);
-  const removeSfxCue = useCallback((id: string) => {
-    setSfxCues((cur) => {
-      const target = cur.find((c) => c.id === id);
-      if (target?.url) { try { URL.revokeObjectURL(target.url); } catch { /* no-op */ } }
-      return cur.filter((c) => c.id !== id);
-    });
-  }, []);
-
-  // ---- Element / text / trim actions ----
-  const toggleElement = useCallback((id: string) => {
-    setElements((cur) => cur.map((e) => (e.id === id ? { ...e, enabled: !e.enabled } : e)));
-  }, []);
-  const deleteElement = useCallback((id: string) => {
-    setElements((cur) => cur.filter((e) => e.id !== id));
-  }, []);
-  const seekTo = useCallback((t: number) => {
-    const v = videoRef.current;
-    if (v && Number.isFinite(t)) { skipGuardRef.current = performance.now() + 500; v.currentTime = Math.max(0, t + 0.02); setPlayheadT(v.currentTime); }
-  }, []);
-  const togglePlay = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) void v.play().catch(() => undefined);
-    else v.pause();
-  }, []);
-
-  const addText = useCallback(() => {
-    const item = newTextOverlay(playheadT, duration || 10);
-    setTexts((cur) => [...cur, item]);
-    setSelectedTextId(item.id);
-    setActiveTool('text');
-  }, [playheadT, duration]);
-  const updateText = useCallback((id: string, patch: Partial<TextOverlayItem>) => {
-    setTexts((cur) => cur.map((t) => (t.id === id ? { ...t, ...patch } : t)));
-  }, []);
-  const removeText = useCallback((id: string) => {
-    setTexts((cur) => cur.filter((t) => t.id !== id));
-    setSelectedTextId((cur) => (cur === id ? null : cur));
-  }, []);
-
-  const setInAtPlayhead = useCallback(() => {
-    setInPoint(clamp(Math.round(playheadT * 10) / 10, 0, Math.max(0, (outPoint || duration) - 0.5)));
-  }, [playheadT, outPoint, duration]);
-  const setOutAtPlayhead = useCallback(() => {
-    setOutPointRaw(clamp(Math.round(playheadT * 10) / 10, inPoint + 0.5, duration || playheadT));
-  }, [playheadT, inPoint, duration]);
-  const resetTrim = useCallback(() => { setInPoint(0); setOutPointRaw(0); setSplits([]); setRemovedKeys([]); }, []);
-  const splitAtPlayhead = useCallback(() => {
-    const t = Math.round(playheadT * 10) / 10;
-    const hi = outPoint || duration;
-    if (t <= inPoint + 0.2 || t >= hi - 0.2) return;
-    setSplits((cur) => (cur.some((s) => Math.abs(s - t) < 0.15) ? cur : [...cur, t].sort((a, b) => a - b)));
-  }, [playheadT, inPoint, outPoint, duration]);
-  const clearSplits = useCallback(() => { setSplits([]); setRemovedKeys([]); }, []);
-  const toggleSegment = useCallback((key: string) => {
-    setRemovedKeys((cur) => {
-      const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
-      const segs = buildSegments(inPoint, outPoint || duration, splits, next);
-      if (!segs.some((s) => s.kept)) return cur; // never allow cutting everything
-      return next;
-    });
-  }, [inPoint, outPoint, duration, splits]);
-
-  // ---- Timeline scrubber with in/out handles ----
-  const timelineDragRef = useRef<null | 'seek' | 'in' | 'out'>(null);
-  const timeFromPointer = useCallback((clientX: number) => {
-    const el = timelineRef.current;
-    if (!el || !duration) return 0;
-    const r = el.getBoundingClientRect();
-    return clamp((clientX - r.left) / Math.max(1, r.width), 0, 1) * duration;
-  }, [duration]);
-
-  const applyTimelineDrag = useCallback((mode: 'seek' | 'in' | 'out', t: number) => {
-    if (mode === 'in') setInPoint(clamp(Math.round(t * 10) / 10, 0, Math.max(0, (outPointRaw > 0 ? outPointRaw : duration) - 0.5)));
-    else if (mode === 'out') setOutPointRaw(clamp(Math.round(t * 10) / 10, inPoint + 0.5, duration));
+  const seek = useCallback((t: number) => {
+    const list = clipsRef.current;
+    if (!list.length) return;
+    const clamped = Math.max(0, Math.min(timelineDuration(list), t));
+    const loc = locate(list, clamped);
+    if (!loc) return;
+    setPlayhead(clamped);
+    pendingSourceT.current = loc.sourceT;
+    if (loc.index !== activeIndexRef.current) setActiveIndex(loc.index);
     else {
       const v = videoRef.current;
-      if (v) { skipGuardRef.current = performance.now() + 500; v.currentTime = t; setPlayheadT(t); }
+      if (v) { try { v.currentTime = loc.sourceT; } catch { /* no-op */ } }
+      pendingSourceT.current = null;
     }
-  }, [duration, inPoint, outPointRaw]);
+  }, []);
 
-  const onTimelinePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!duration || showingOutput) return;
-    const el = timelineRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const pps = r.width / duration;
-    const t = timeFromPointer(e.clientX);
-    const nearIn = Math.abs(t - inPoint) * pps < 9;
-    const nearOut = Math.abs(t - (outPoint || duration)) * pps < 9;
-    const mode: 'seek' | 'in' | 'out' = nearIn && (!nearOut || Math.abs(t - inPoint) <= Math.abs(t - (outPoint || duration))) ? 'in' : nearOut ? 'out' : 'seek';
-    timelineDragRef.current = mode;
-    try { el.setPointerCapture(e.pointerId); } catch { /* no-op */ }
-    applyTimelineDrag(mode, t);
-    e.preventDefault();
-  }, [duration, showingOutput, inPoint, outPoint, timeFromPointer, applyTimelineDrag]);
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || !clipsRef.current.length) return;
+    if (isPlayingRef.current) { v.pause(); setIsPlaying(false); }
+    else {
+      if (playheadRef.current >= timelineDuration(clipsRef.current) - 0.05) seek(0);
+      setIsPlaying(true);
+      void v.play().catch(() => setIsPlaying(false));
+    }
+  }, [seek]);
 
-  const onTimelinePointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    const mode = timelineDragRef.current;
-    if (!mode) return;
-    applyTimelineDrag(mode, timeFromPointer(e.clientX));
-  }, [timeFromPointer, applyTimelineDrag]);
+  // ---------------------------------------------------------------------------
+  // Edit operations
+  // ---------------------------------------------------------------------------
 
-  const onTimelinePointerUp = useCallback(() => { timelineDragRef.current = null; }, []);
+  const onReorder = useCallback((from: number, to: number) => {
+    setClips((list) => {
+      const next = [...list];
+      const [moved] = next.splice(from, 1);
+      next.splice(Math.max(0, Math.min(next.length, to)), 0, moved);
+      return next;
+    });
+  }, []);
+  const onTrim = useCallback((id: string, nextIn: number, nextOut: number) => {
+    setClips((list) => list.map((c) => (c.id === id ? { ...c, in: nextIn, out: nextOut } : c)));
+  }, []);
+  const onSpeed = useCallback((id: string, speed: number) => {
+    setClips((list) => list.map((c) => (c.id === id ? { ...c, speed } : c)));
+  }, []);
+  const onOpacity = useCallback((id: string, opacity: number) => {
+    setClips((list) => list.map((c) => (c.id === id ? { ...c, opacity } : c)));
+  }, []);
+  const onText = useCallback((id: string, patch: { text?: string; textSize?: number; textColor?: string }) => {
+    setClips((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }, []);
 
-  const previewFilter = showingOutput ? 'none' : filterCss(effects);
-  const editDisabled = exporting || duration <= 0;
-  const timelineDur = duration || 0;
-  const effOut = outPoint || timelineDur;
+  // ---- Graphics, cut tools, AI Edit, transcription, custom music ----
 
-  // -----------------------------------------------------------------------------
+  function onAddGraphic(kind: GraphicKind) {
+    const g = newGraphic(kind, playheadRef.current);
+    setGraphics((l) => [...l, g]);
+    setSelectedGraphicId(g.id);
+    setSelectedClipId(null);
+  }
+  function onGraphicChange(id: string, patch: Partial<MotionGraphic>) {
+    setGraphics((l) => l.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  }
+  function onGraphicDelete(id: string) {
+    setGraphics((l) => l.filter((x) => x.id !== id));
+    setSelectedGraphicId(null);
+  }
+  function onMoveGraphic(id: string, start: number) {
+    onGraphicChange(id, { start: Math.round(start * 10) / 10 });
+  }
+
+  function onSplitAtPlayhead() {
+    const list = clipsRef.current;
+    const loc = locate(list, playheadRef.current);
+    if (!loc) return;
+    const clip = list[loc.index];
+    const next = splitClipAt(list, clip.id, loc.sourceT);
+    if (next === list) return;
+    const f = sourceFiles.current.get(clip.id);
+    if (f) next.forEach((c) => { if (c.previewUrl === clip.previewUrl && !sourceFiles.current.has(c.id)) sourceFiles.current.set(c.id, f); });
+    setClips(next);
+    setSelectedClipId(null);
+  }
+  function onDeleteClip(id: string) {
+    setClips((l) => l.filter((c) => c.id !== id));
+    setSelectedClipId(null);
+  }
+
+  async function fileForClip(clip: NleClip): Promise<File> {
+    const cached = sourceFiles.current.get(clip.id);
+    if (cached) return cached;
+    const f = await fetchVideoAsFile(clip.previewUrl || clip.url);
+    sourceFiles.current.set(clip.id, f);
+    return f;
+  }
+
+  /** Detect silences in the source audio and cut them out of the clip as real
+   * timeline cuts. Returns true when something was cut. */
+  async function cutSilences(target: NleClip, file: File): Promise<boolean> {
+    const decoded = await decodeAudioMono(file);
+    const silences = detectSilences(decoded.samples, decoded.sampleRate, -38, 0.6);
+    if (!silences.length) return false;
+    const PAD = 0.12;
+    const keeps: { start: number; end: number }[] = [];
+    let cursor = 0;
+    silences.forEach((s) => {
+      if (s.start + PAD > cursor + 0.35) keeps.push({ start: cursor, end: s.start + PAD });
+      cursor = Math.max(cursor, s.end - PAD);
+    });
+    if (decoded.duration - cursor > 0.2) keeps.push({ start: cursor, end: decoded.duration });
+    const next = replaceClipWithRanges(clipsRef.current, target.id, keeps);
+    if (next === clipsRef.current) return false;
+    next.forEach((c) => { if (c.previewUrl === target.previewUrl && !sourceFiles.current.has(c.id)) sourceFiles.current.set(c.id, file); });
+    clipsRef.current = next;
+    setClips(next);
+    return true;
+  }
+
+  /** Map word-timed caption segments (SOURCE seconds of `srcUrl`) onto the
+   * timeline — segments that fall inside cut-away silences are dropped. */
+  function applyCaptionsFromSegments(segs: CaptionSegment[], srcUrl: string) {
+    const list = clipsRef.current;
+    const caps: NleCaption[] = [];
+    segs.forEach((s) => {
+      if (!String(s.text || '').trim()) return;
+      const a = sourceToTimeline(list, srcUrl, s.start);
+      const b = sourceToTimeline(list, srcUrl, s.end);
+      if (a == null && b == null) return;
+      const start = a == null ? Math.max(0, (b as number) - (s.end - s.start)) : a;
+      const end = b == null ? start + (s.end - s.start) : b;
+      if (end - start >= 0.25) caps.push({ id: newId('cap'), text: s.text, start, end });
+    });
+    setCaptions(caps);
+    setCaptionOffset(0);
+  }
+
+  async function runTranscribe() {
+    const list = clipsRef.current;
+    if (!list.length || transcribing || aiEditBusy) return;
+    setTranscribing(true);
+    setError('');
+    setNote('Transcribing the footage (AI, word-timed)…');
+    try {
+      const first = list[0];
+      const file = await fileForClip(first);
+      const res = await transcribeVideo(file, (n) => setNote(n));
+      if (!res.words.length) {
+        setNote('');
+        setError('The transcription service returned no word timings — paste the transcript manually instead.');
+        return;
+      }
+      const segs = buildCaptionSegments(res.words);
+      applyCaptionsFromSegments(segs, first.previewUrl);
+      setNote(`${segs.length} captions transcribed with word-accurate timing.`);
+    } catch (e) {
+      setError(msg(e));
+      setNote('');
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
+  /** ONE-CLICK AI EDIT — transcribe → cut dead air → word-timed captions →
+   * AI-planned motion graphics. Every step degrades gracefully. */
+  async function runAiEdit() {
+    const list = clipsRef.current;
+    if (!list.length || aiEditBusy) return;
+    setAiEditBusy(true);
+    setError('');
+    try {
+      const first = list[0];
+      const file = await fileForClip(first);
+
+      setNote('AI Edit 1/4 — transcribing the footage…');
+      let words: { word: string; start: number; end: number }[] = [];
+      let transcript = '';
+      try {
+        const t = await transcribeVideo(file, (n) => setNote(n));
+        words = t.words;
+        transcript = t.transcript;
+      } catch (e) {
+        setNote(`Transcription unavailable (${msg(e).slice(0, 90)}) — continuing with the silence cut.`);
+      }
+
+      setNote('AI Edit 2/4 — listening for dead air…');
+      try {
+        await cutSilences(first, file);
+      } catch (e) {
+        setNote(`Silence analysis skipped (${msg(e).slice(0, 80)}).`);
+      }
+
+      let segs: CaptionSegment[] = [];
+      if (words.length) {
+        setNote('AI Edit 3/4 — laying word-timed captions…');
+        segs = buildCaptionSegments(words);
+        applyCaptionsFromSegments(segs, first.previewUrl);
+      }
+
+      if (transcript && segs.length) {
+        setNote('AI Edit 4/4 — planning motion graphics…');
+        try {
+          const plan = await planEnhancements(transcript, segs, first.sourceDuration);
+          const mapped: MotionGraphic[] = [];
+          plan.graphics.forEach((cue) => {
+            const at = sourceToTimeline(clipsRef.current, first.previewUrl, cue.at);
+            if (at == null) return;
+            const g = newGraphic(cue.kind === 'title' ? 'hook' : 'pop', at);
+            g.text = cue.text;
+            g.duration = Math.max(1.2, Math.min(3.5, cue.duration));
+            mapped.push(g);
+          });
+          if (mapped.length) setGraphics((l) => [...l, ...mapped]);
+          // \"Apply b-roll in between too\": film the FIRST suggested cutaway
+          // (one Omni Flash render, wallet-billed) and insert it at its
+          // suggested moment between the cut clips — applied, not just listed.
+          const slot = Array.isArray(plan.broll) && plan.broll.length ? plan.broll[0] : null;
+          if (slot && slot.prompt) {
+            setNote(`AI Edit — filming one suggested b-roll cutaway on ${concreteBrollName} (1–3 min)…`);
+            try {
+              const cut = await filmBrollClip(
+                concreteBrollModel,
+                String(slot.prompt),
+                Math.min(6, Math.max(4, Math.round(slot.duration) || 5)),
+                () => aliveRef.current,
+              );
+              if (cut.videoUrl) {
+                const at = sourceToTimeline(clipsRef.current, first.previewUrl, slot.at);
+                const loc = at != null ? locate(clipsRef.current, at) : null;
+                await addClipFromUrl(cut.videoUrl, cut.videoUrl, 'B-roll: ' + String(slot.prompt).slice(0, 28), 'broll', loc ? loc.index + 1 : undefined);
+              }
+            } catch { /* the cutaway is a bonus — the edit stands without it */ }
+          }
+        } catch { /* the graphics plan is a bonus — captions and cuts stand */ }
+      }
+
+      setNote('AI Edit complete — dead air cut, captions laid, graphics placed, and a suggested b-roll cutaway inserted in between. Review the timeline, then Render & Export.');
+      seek(0);
+    } catch (e) {
+      setError(msg(e));
+      setNote('');
+    } finally {
+      setAiEditBusy(false);
+    }
+  }
+
+  async function onGenerateMusic(prompt: string) {
+    if (musicGenBusy) return;
+    setMusicGenBusy(true);
+    setError('');
+    setNote('ElevenLabs is composing your track (10–30s)…');
+    try {
+      const token = nleToken();
+      if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
+      const lengthMs = Math.min(120000, Math.max(15000, Math.round(timelineDuration(clipsRef.current) * 1000) || 30000));
+      const compose = async (provider?: string): Promise<string> => {
+        const res = await fetch(`/api/workspaces/${WORKSPACE_UUID}/audio/music/custom`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
+          body: JSON.stringify({ prompt, lengthMs, instrumental: true, ...(provider ? { provider } : {}) }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.audioUrl) {
+          const code = data?.code ? ` [${data.code}]` : '';
+          throw new Error(`${String(data?.error || `HTTP ${res.status}`)}${code}`);
+        }
+        return String(data.audioUrl);
+      };
+      let url = '';
+      let elevenErr = '';
+      try {
+        url = await compose();
+      } catch (e) {
+        elevenErr = msg(e);
+      }
+      if (!url) {
+        // The ElevenLabs engine refused — fall back to the Gemini (Lyria)
+        // music engine on the same platform endpoint before giving up.
+        setNote('ElevenLabs refused — trying the Gemini music engine…');
+        try {
+          url = await compose('gemini');
+        } catch (e2) {
+          throw new Error(`Music generation failed on both engines. ElevenLabs: ${elevenErr} — Gemini: ${msg(e2)}`);
+        }
+      }
+      setCustomMusic({ url, label: prompt.slice(0, 40) });
+      setMusicBedId('custom');
+      setNote('Custom track ready — it plays under the preview and mixes into the export.');
+    } catch (e) {
+      setError(msg(e));
+      setNote('');
+    } finally {
+      setMusicGenBusy(false);
+    }
+  }
+
+  /** ONE-CLICK APPLY for a Gemini suggestion — the fix is executed on the
+   * edit (effects, grade, captions, music, cuts, b-roll), not just displayed. */
+  function applySuggestion(s: string) {
+    const t = s.toLowerCase();
+    let what = '';
+    if (/(too bright|overexpos|blown)/.test(t)) { setEffects((e) => ({ ...e, brightness: Math.max(50, e.brightness - 12) })); what = 'lowered brightness'; }
+    else if (/(brighten|bright|light|dark|underexpos|dim|exposure)/.test(t)) { setEffects((e) => ({ ...e, brightness: Math.min(160, e.brightness + 14) })); what = 'raised brightness'; }
+    else if (/contrast/.test(t)) { setEffects((e) => ({ ...e, contrast: Math.min(160, e.contrast + 12) })); what = 'boosted contrast'; }
+    else if (/(black.?and.?white|monochrome|b&w)/.test(t)) { setGradeId('bw'); setStyleId(null); what = 'applied the BW grade'; }
+    else if (/(satur|vibran|vivid|colou?r)/.test(t)) { setEffects((e) => ({ ...e, saturation: Math.min(200, e.saturation + 20) })); what = 'boosted saturation'; }
+    else if (/(teal|orange|cinematic|film look|grade)/.test(t)) { setGradeId('tealorange'); setStyleId(null); what = 'applied the Teal+Orange cinematic grade'; }
+    else if (/(warm|golden|vintage)/.test(t)) { setGradeId('film'); setStyleId(null); what = 'applied the warm Film grade'; }
+    else if (/vignette/.test(t)) { setEffects((e) => ({ ...e, vignette: Math.max(e.vignette, 35) })); what = 'added a vignette'; }
+    else if (/(sharpen|crisp|clarity|punch)/.test(t)) { setEffects((e) => ({ ...e, contrast: Math.min(160, e.contrast + 8), saturation: Math.min(200, e.saturation + 8) })); what = 'added punch (contrast + saturation)'; }
+    else if (/(caption|subtitle|transcri|on.?screen text)/.test(t)) { void runTranscribe(); what = 'started auto-captions'; }
+    else if (/(b.?roll|cutaway|insert (footage|clips?)|supplement)/.test(t)) {
+      const p = `Cinematic b-roll cutaway, no on-screen text: ${s}`;
+      setBrollPrompt(p);
+      void onBroll(p);
+      what = 'filming a b-roll cutaway to insert at the playhead';
+    }
+    else if (/(music|soundtrack|score|audio bed)/.test(t)) { setMusicBedId('inspiring'); what = 'added the Inspiring music bed'; }
+    else if (/(cut|trim|silence|dead air|pacing|tighten)/.test(t)) {
+      const first = clipsRef.current[0];
+      if (!first) return;
+      what = 'cutting dead air';
+      void (async () => {
+        try {
+          setNote('Cutting dead air…');
+          const file = await fileForClip(first);
+          const did = await cutSilences(first, file);
+          setNote(did ? 'Dead air cut out of the timeline.' : 'No long silences found to cut.');
+        } catch (e) { setError(msg(e)); }
+      })();
+    }
+    else if (/(vertical|9:16|portrait|reels?|tiktok|shorts?)/.test(t)) { setAspect('9:16'); what = 'switched to the 9:16 TikTok frame'; }
+    else if (/(stabiliz|shak)/.test(t)) { setNote('Stabilization is not available in this editor yet — that one stays manual.'); return; }
+    else { setNote('That suggestion has no one-click control yet — use the Properties panel on the right.'); return; }
+    setAppliedSuggestions((l) => (l.includes(s) ? l : [...l, s]));
+    setNote(`Applied: ${what}.`);
+  }
+
+  const onCaptionsFromTranscript = useCallback((transcript: string) => {
+    const caps = estimateCaptions(transcript, timelineDuration(clipsRef.current));
+    setCaptions(caps);
+    setCaptionOffset(0);
+    setNote(caps.length ? `${caps.length} captions estimated across the cut.` : '');
+  }, []);
+
+  const onBroll = useCallback(async (overridePrompt?: string) => {
+    const prompt = (overridePrompt || brollPrompt).trim();
+    if (prompt.length < 10 || brollBusy) return;
+    setBrollBusy(true);
+    setError('');
+    setNote(`${concreteBrollName} is filming your b-roll (1–3 minutes)…`);
+    try {
+      const shot = await filmBrollClip(concreteBrollModel, prompt, 6, () => aliveRef.current);
+      if (!aliveRef.current) return;
+      if (shot.videoUrl) {
+        if (concreteBrollModel.startsWith('openrouter/')) setOpenRouterHealthy(true);
+        // Insert IN BETWEEN: right after the clip under the playhead, not at the end.
+        const loc = locate(clipsRef.current, playheadRef.current);
+        await addClipFromUrl(shot.videoUrl, shot.videoUrl, 'B-roll: ' + prompt.slice(0, 32), 'broll', loc ? loc.index + 1 : undefined);
+        setNote('B-roll inserted in between, right after the clip under the playhead.');
+      } else {
+        setError(shot.error);
+        setNote('');
+      }
+    } catch (e) {
+      if (aliveRef.current) { setError(msg(e)); setNote(''); }
+    } finally {
+      if (aliveRef.current) setBrollBusy(false);
+    }
+  }, [brollPrompt, brollBusy, concreteBrollModel, concreteBrollName, addClipFromUrl]);
+
+  const onStyle = useCallback((id: string) => {
+    setStyleId((prev) => (prev === id ? null : id));
+    const s = STYLE_TRANSFERS.find((x) => x.id === id);
+    if (s) setGradeId(s.grade);
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Export — veh-render (server-side Remotion render)
+  // ---------------------------------------------------------------------------
+
+  const onExport = useCallback(async () => {
+    if (exporting) return;
+    const list = clipsRef.current;
+    if (!list.length) return;
+    const missing = list.filter((c) => !/^https:\/\//.test(c.url));
+    if (missing.length) { setExportError(uploading ? 'The footage is still uploading — give it a moment, then render again.' : 'A clip has no durable copy (its upload failed) — remove it or re-upload the file.'); return; }
+    setExporting(true);
+    setExportError('');
+    setRenderUrl('');
+    setExportStartedAt(Date.now());
+    try {
+      const payload = {
+        clips: list.map((c) => ({ url: c.url, in: c.in, out: c.out, speed: c.speed, opacity: c.opacity, text: c.text, textSize: c.textSize, textColor: c.textColor })),
+        captions: captions.map((c) => ({ text: c.text, start: c.start + captionOffset, end: c.end + captionOffset })),
+        graphics: graphics.map((g) => ({ kind: g.kind, text: g.text, sub: g.sub, value: g.value, start: g.start, duration: g.duration, accent: g.accent, position: g.position })),
+        effects,
+        aspect,
+        colorGrade: gradeId,
+        musicUrl: musicBedId === 'custom' && customMusic ? customMusic.url : undefined,
+        musicBedId: musicBedId === 'custom' ? undefined : musicBedId,
+        musicVolume: 0.3,
+      };
+      let out = await callHook('veh-render', payload);
+      while (aliveRef.current && out?.status === 'rendering' && out.operationId) {
+        out = await callHook('veh-render', { operationId: out.operationId });
+      }
+      if (!aliveRef.current) return;
+      if (out?.status === 'complete' && out.renderUrl) setRenderUrl(String(out.renderUrl));
+      else setExportError(String(out?.error || 'The render failed.'));
+    } catch (e) {
+      if (aliveRef.current) setExportError(msg(e));
+    } finally {
+      if (aliveRef.current) setExporting(false);
+    }
+  }, [exporting, uploading, captions, captionOffset, gradeId, musicBedId, graphics, effects, aspect, customMusic]);
+
+  // Progress ticker (CSS-only bar — the % is an honest elapsed-time estimate).
+  useEffect(() => {
+    if (!exporting) return;
+    const timer = setInterval(() => setExportTick((n) => n + 1), 800);
+    return () => clearInterval(timer);
+  }, [exporting]);
+  const exportPct = exporting ? Math.min(92, Math.round(((Date.now() - exportStartedAt) / 150000) * 100)) : renderUrl ? 100 : 0;
+  void exportTick;
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
+  const currentCaption = useMemo(() => {
+    const t = playhead - captionOffset;
+    return captions.find((c) => t >= c.start && t <= c.end) || null;
+  }, [captions, playhead, captionOffset]);
+
+  const hasFootage = clips.length > 0;
+  // Runway only accepts public references, so the durable upload is the source
+  // — never the local blob: URL the preview plays from.
+  const runwaySource = (clips.filter((c) => /^https:\/\//i.test(c.url))[0] || { url: '' }).url;
+  const musicBed = musicBedId === 'custom'
+    ? (customMusic ? { id: 'custom', label: customMusic.label } : null)
+    : (MUSIC_BEDS.find((m) => m.id === musicBedId) || null);
+  const selectedGraphic = graphics.find((g) => g.id === selectedGraphicId) || null;
+  const canSplit = (() => {
+    const loc = locate(clips, playhead);
+    if (!loc) return false;
+    const c = clips[loc.index];
+    return !!c && loc.sourceT - c.in > 0.2 && c.out - loc.sourceT > 0.2;
+  })();
+  // The streak pulses faster while the agent is actually working — the
+  // at-a-glance difference between WORKING and WAITING.
+  const agentWorking = aiEditBusy || transcribing || brollBusy || exporting || musicGenBusy || analyzing || uploading;
+
+  // The preview stage's live pixel width — graphic type sizes scale off it so
+  // the preview matches the 1920/608-wide render stages proportionally.
+  const stageBoxRef = useRef<HTMLDivElement | null>(null);
+  const [stageW, setStageW] = useState(0);
+  useEffect(() => {
+    const el = stageBoxRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => { for (const en of entries) setStageW(en.contentRect.width); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasFootage, aspect]);
+
+  // Vidverge Agent — the floating orb assistant. It reads the editor's key
+  // inputs and can run the one-click tools (AI Edit, transcription, b-roll,
+  // music, export) on the customer's behalf.
+  const agentContext = {
+    appId: 'video-enhancer',
+    appName: 'Video Enhancer',
+    currentInputs: {
+      clipsOnTimeline: String(clips.length),
+      brollPrompt,
+      musicBed: String(musicBedId),
+      colorGrade: gradeId,
+      aspect,
+    },
+    onFillField: (field: string, value: string) => {
+      if (field === 'brollPrompt') setBrollPrompt(value);
+      else if (field === 'aspect' && (value === '16:9' || value === '9:16')) setAspect(value);
+      else if (field === 'colorGrade') { setGradeId(value as ColorGradeId); setStyleId(null); }
+      else if (field === 'musicBed') setMusicBedId(value as MusicBedId);
+    },
+    onTriggerAction: (action: string, params?: Record<string, unknown>) => {
+      const p = params || {};
+      if (action === 'enhance' || action === 'aiEdit') void runAiEdit();
+      else if (action === 'transcribe' || action === 'captions') void runTranscribe();
+      else if (action === 'describe') void runDescribe();
+      else if (action === 'broll') void onBroll(typeof p.prompt === 'string' ? p.prompt : undefined);
+      else if (action === 'generateMusic' && typeof p.prompt === 'string') void onGenerateMusic(p.prompt);
+      else if (action === 'export' || action === 'render') void onExport();
+    },
+    promptHint: [
+      'The user uploads a video to enhance on a timeline editor. Suggest enhancement options and run them.',
+      'Fields you can fill: brollPrompt (a cinematic b-roll description), aspect (16:9 | 9:16), colorGrade (none | film | kodak | tealorange | bw), musicBed (none | inspiring | cinematic | energetic | calm | luxury).',
+      'Actions you can trigger: enhance (one-click AI Edit: transcribe, cut dead air, captions, motion graphics), transcribe (word-timed captions), describe (Gemini frame analysis), broll with {"prompt":"..."}, generateMusic with {"prompt":"..."}, export (render the final MP4).',
+      'If clipsOnTimeline is 0, ask the user to upload footage first — actions need footage on the timeline.',
+    ].join('\n'),
+  };
+
   return (
-    <div style={{
-      height: '100%', overflowY: 'auto', color: P.text, fontFamily: "'Inter', system-ui, sans-serif",
-      background: 'radial-gradient(900px 480px at 8% -6%, rgba(61,139,255,0.14), transparent 55%), radial-gradient(760px 420px at 96% 0%, rgba(52,224,176,0.10), transparent 52%), radial-gradient(700px 500px at 50% 110%, rgba(167,139,250,0.08), transparent 60%), ' + P.bg,
-    }}>
-      <style>{VE_CSS}</style>
-      <div style={{ maxWidth: 1460, margin: '0 auto', padding: 'clamp(14px, 2.5vw, 24px) clamp(12px, 2.5vw, 22px) 48px' }}>
+    <div style={{ minHeight: '100%', background: LB.bg, fontFamily: 'system-ui, -apple-system, sans-serif', padding: '16px 18px 28px', boxSizing: 'border-box' }}>
+      <style>{NLE_CSS}</style>
+      <audio ref={audioRef} style={{ display: 'none' }} />
 
-        {/* Header */}
-        <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', padding: '14px 18px', marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 13, minWidth: 0 }}>
-            <div style={{ width: 42, height: 42, borderRadius: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, rgba(61,139,255,0.22), rgba(52,224,176,0.16))', border: '1px solid rgba(61,139,255,0.35)', flexShrink: 0 }}>
-              <Wand2 size={21} style={{ color: P.blue }} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div className="ve-gradient-text" style={{ fontSize: 'clamp(18px, 2.4vw, 22px)', fontWeight: 850, letterSpacing: -0.4 }}>Video Enhancer</div>
-              <div style={{ fontSize: 12, color: P.sub, marginTop: 2 }}>
-                AI analysis · trim & cut · effects · text · auto captions · aspect ratios · AI music & sound effects · one-click download
+      <div style={{ maxWidth: 1240, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <ProductSuiteHeader
+          name="Video Enhancer"
+          voice="I polish your footage, shape the pacing, and finish a clean export with you."
+          working={agentWorking}
+          actions={(
+            <>
+              <details>
+                <summary style={{ cursor: 'pointer', color: LB.textSecondary, fontSize: 11.5, fontWeight: 700, listStylePosition: 'inside' }}>
+                  Advanced <span style={{ color: LB.textMuted, fontWeight: 500 }}>— format: {aspect}</span>
+                </summary>
+                <div style={{ display: 'inline-flex', gap: 4, marginTop: 7, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 999, padding: 3 }}>
+                  {(['16:9', '9:16'] as AspectId[]).map((a) => (
+                    <button key={a} className="nle-btn" onClick={() => setAspect(a)} title={a === '9:16' ? 'Vertical — TikTok / Reels / Shorts framing' : 'Widescreen'} style={{ background: aspect === a ? LB.accent : 'transparent', color: aspect === a ? '#241503' : LB.textSecondary, border: 'none', borderRadius: 999, padding: '5px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
+                      {a === '16:9' ? '16:9' : '9:16 TikTok'}
+                    </button>
+                  ))}
+                </div>
+              </details>
+              <label className="nle-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: LB.textSecondary, borderRadius: 10, padding: '8px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+                <UploadCloud size={14} /> {hasFootage ? 'Add footage' : 'Upload video'}
+                <input type="file" accept="video/*" style={{ display: 'none' }} onChange={(e) => { void handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+              </label>
+              <button
+                className="nle-btn"
+                disabled={!hasFootage || exporting}
+                onClick={() => void onExport()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: LB.accentGradient, color: '#241503', border: 'none', borderRadius: 10, padding: '9px 18px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 14px rgba(245,158,11,0.3)' }}
+              >
+                {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {exporting ? 'Rendering…' : 'Render & Export'}
+              </button>
+            </>
+          )}
+        />
+
+        {(hasFootage || note || error) ? (
+          <details style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, background: 'rgba(255,255,255,0.03)', padding: '9px 12px' }}>
+            <summary style={{ cursor: 'pointer', color: error ? '#f87171' : LB.textSecondary, fontSize: 12, fontWeight: 700, listStylePosition: 'inside' }}>
+              Production status <span style={{ color: error ? '#f87171' : LB.textMuted, fontWeight: 500 }}>— {error ? 'Needs attention' : note || (renderUrl ? 'Video ready' : exporting ? 'Rendering the final video' : 'Waiting for you')}</span>
+            </summary>
+            <div style={{ display: 'grid', gap: 6, color: error ? '#f87171' : LB.textMuted, fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {error ? <AlertCircle size={13} style={{ flexShrink: 0 }} /> : agentWorking ? <AgentStreak working size={16} /> : null}
+                <span>{error || note}</span>
               </div>
+              <div>{hasFootage ? '✓ Footage loaded on the timeline' : '○ Waiting for footage'}</div>
+              <div>{renderUrl ? '✓ Final video rendered' : exporting ? '• Rendering the final video' : '• Waiting for you to review the timeline and choose Render & Export'}</div>
             </div>
+          </details>
+        ) : null}
+
+        {/* TOP — preview */}
+        <div ref={stageRef} style={{ background: '#0d1117', borderRadius: 12, padding: 16 }}>
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); void handleFile(e.dataTransfer.files?.[0] || null); }}
+            style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: '#000', borderRadius: 10, overflow: 'hidden', border: dragOver ? '2px dashed #f59e0b' : '1px solid rgba(255,255,255,0.08)' }}
+          >
+            {hasFootage ? (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {/* The stage — 16:9 fills the frame, 9:16 is the centered TikTok canvas (matches the render). */}
+                <div ref={stageBoxRef} style={{ position: 'relative', height: '100%', aspectRatio: aspect === '9:16' ? '9 / 16' : '16 / 9', maxWidth: '100%', background: '#000', overflow: 'hidden' }}>
+                  <video
+                    ref={videoRef}
+                    playsInline
+                    onClick={togglePlay}
+                    style={{ width: '100%', height: '100%', objectFit: aspect === '9:16' ? 'cover' : 'contain', filter: previewFilter, opacity: activeClip ? activeClip.opacity : 1, cursor: 'pointer' }}
+                  />
+                  {effects.vignette > 0 ? (
+                    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: `radial-gradient(ellipse at center, rgba(0,0,0,0) 52%, rgba(0,0,0,${((effects.vignette / 100) * 0.85).toFixed(3)}) 100%)` }} />
+                  ) : null}
+                  {activeClip?.text ? (
+                    <div style={{ position: 'absolute', top: '7%', left: 0, right: 0, textAlign: 'center', pointerEvents: 'none', color: activeClip.textColor, fontSize: Math.max(13, Math.round((stageW || 600) * (activeClip.textSize / 1920) * (aspect === '9:16' ? 2.4 : 1))), fontWeight: 700, textShadow: '0 2px 14px rgba(0,0,0,0.85)', padding: '0 4%' }}>
+                      {activeClip.text}
+                    </div>
+                  ) : null}
+                  {graphics.map((g) => (playhead >= g.start && playhead <= g.start + g.duration
+                    ? <GraphicOverlay key={g.id} g={g} t={playhead - g.start} sw={stageW || 600} />
+                    : null))}
+                  {currentCaption ? (
+                    <div style={{ position: 'absolute', bottom: aspect === '9:16' ? '20%' : '8%', left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', padding: '0 6%' }}>
+                      <span style={{ color: LB.accent, fontSize: Math.max(12, Math.round((stageW || 600) * (aspect === '9:16' ? 0.052 : 0.024))), fontWeight: 700, textShadow: '0 2px 12px rgba(0,0,0,0.85)', background: 'rgba(0,0,0,0.35)', padding: '6px 16px', borderRadius: 10, textAlign: 'center' }}>
+                        {currentCaption.text}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <label style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, cursor: 'pointer', color: LB.textSecondary }}>
+                <AgentStreak working={false} size={34} />
+                <UploadCloud size={34} color={LB.accent} />
+                <span style={{ fontSize: 14, fontWeight: 600, color: LB.textPrimary }}>Drop a video here, or click to choose</span>
+                <span style={{ fontSize: 11.5, color: LB.textMuted }}>MP4 / WebM / MOV up to 500 MB — it loads into the player and the Video track, and Gemini describes it automatically.</span>
+                <input type="file" accept="video/*" style={{ display: 'none' }} onChange={(e) => { void handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+              </label>
+            )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            {localUrl && (
-              <button onClick={resetAll} disabled={exporting || analyzing} className="ve-btn" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700, color: P.sub, background: P.panelSoft, border: '1px solid ' + P.border, borderRadius: 10, padding: '9px 13px', cursor: exporting || analyzing ? 'not-allowed' : 'pointer' }}>
-                <RefreshCw size={13} /> Start over
-              </button>
-            )}
-            {localUrl && (
-              /* PRD 3.4 — Enhance video (analysis + improvement pass) sits apart
-                 from Download and carries a different visual weight. */
-              <button
-                onClick={() => { setActiveTool('analyze'); void runAnalyze(); }}
-                disabled={analyzing || exporting || (!file && !uploadedUrl)}
-                className="ve-btn"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 800, borderRadius: 11,
-                  padding: '10px 18px', border: 'none', cursor: analyzing || exporting ? 'not-allowed' : 'pointer',
-                  background: analyzing ? P.panelSoft : 'linear-gradient(100deg, ' + P.blue + ', ' + P.violet + ')',
-                  color: analyzing ? P.muted : '#fff',
-                  boxShadow: analyzing ? 'none' : '0 12px 30px -14px rgba(61,139,255,0.7)',
-                }}
-              >
-                {analyzing ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-                {analyzing ? 'Enhancing…' : 'Enhance video'}
-              </button>
-            )}
-            {localUrl && (
-              <button
-                onClick={() => setActiveTool('export')}
-                disabled={exporting}
-                className="ve-btn"
-                title="Prepare and download the finished file"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 800, borderRadius: 11,
-                  padding: '10px 18px', border: 'none', cursor: exporting ? 'not-allowed' : 'pointer',
-                  background: exporting ? P.panelSoft : 'linear-gradient(100deg, ' + P.mint + ', ' + P.cyan + ')',
-                  color: exporting ? P.muted : '#04241B',
-                  boxShadow: exporting ? 'none' : '0 12px 30px -14px rgba(52,224,176,0.75)',
-                }}
-              >
-                {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                {exporting ? 'Preparing ' + Math.round(exportProgress * 100) + '%' : 'Download'}
-              </button>
-            )}
+
+          {/* Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+            <button className="nle-btn" disabled={!hasFootage} onClick={togglePlay} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, background: LB.accent, color: '#241503', border: 'none', borderRadius: 999, cursor: 'pointer' }}>
+              {isPlaying ? <Pause size={16} /> : <Play size={16} style={{ marginLeft: 2 }} />}
+            </button>
+            <span style={{ color: LB.textPrimary, fontSize: 13, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
+              {fmtTimecode(playhead)} <span style={{ color: LB.textMuted }}>/ {fmtTimecode(duration)}</span>
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginLeft: 8 }}>
+              <Volume2 size={14} color={LB.textSecondary} />
+              <input type="range" min={0} max={100} value={Math.round(volume * 100)} onChange={(e) => setVolume(Number(e.target.value) / 100)} style={{ width: 110, accentColor: LB.accent }} />
+            </span>
+            <button
+              className="nle-btn"
+              disabled={!hasFootage}
+              onClick={() => { const el = stageRef.current; if (el?.requestFullscreen) void el.requestFullscreen().catch(() => undefined); }}
+              style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: LB.textSecondary, borderRadius: 8, padding: '7px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
+            >
+              <Maximize size={13} /> Fullscreen
+            </button>
           </div>
+
+          {/* Export progress / result */}
+          {exporting || renderUrl || exportError ? (
+            <details style={{ marginTop: 12 }}>
+              <summary style={{ cursor: 'pointer', color: exportError ? '#f87171' : LB.textSecondary, fontSize: 11.5, fontWeight: 700, listStylePosition: 'inside' }}>
+                Production status — {exporting ? 'Rendering your final video' : renderUrl ? 'Video ready' : 'Render needs attention'}
+              </summary>
+              <div style={{ marginTop: 8 }}>
+              {exporting || renderUrl ? (
+                <div style={{ height: 8, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
+                  <div className={exporting ? 'nle-progress-fill' : undefined} style={{ height: '100%', width: `${exportPct}%`, background: LB.accent, transition: 'width 0.8s ease' }} />
+                </div>
+              ) : null}
+              {exporting ? <div style={{ color: LB.textMuted, fontSize: 11.5, marginTop: 6 }}>Rendering on the platform (Remotion, 1080p)… you can keep editing.</div> : null}
+              {renderUrl ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+                  <span style={{ color: '#7FD4B4', fontSize: 12.5, fontWeight: 700 }}>✓ Render complete</span>
+                  <a className="nle-btn" href={renderUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: LB.accent, color: '#241503', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                    <Download size={13} /> Download MP4
+                  </a>
+                </div>
+              ) : null}
+              {exportError ? <div style={{ color: '#f87171', fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>{exportError}</div> : null}
+              </div>
+            </details>
+          ) : null}
         </div>
 
-        {!localUrl ? (
-          /* ---------- Drag & drop upload zone ---------- */
-          <div style={{ ...cardStyle, padding: 12 }}>
-            <label
-              className="ve-drop"
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files?.[0]); }}
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12,
-                minHeight: 380, borderRadius: 14, cursor: 'pointer', textAlign: 'center', padding: '36px 28px',
-                border: '2px dashed ' + (dragOver ? P.blue : P.border),
-                background: dragOver ? 'rgba(61,139,255,0.10)' : 'linear-gradient(150deg, rgba(61,139,255,0.05), rgba(167,139,250,0.04) 55%, rgba(52,224,176,0.05))',
-                boxShadow: dragOver ? '0 0 0 1px ' + P.blue + ' inset, 0 0 34px rgba(61,139,255,0.25) inset' : 'none',
-              }}
-            >
-              <input type="file" accept="video/mp4,video/webm,video/quicktime" style={{ display: 'none' }} onChange={(e) => handleFile(e.target.files?.[0])} />
-              <div style={{ width: 66, height: 66, borderRadius: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(61,139,255,0.14)', border: '1px solid rgba(61,139,255,0.4)' }}>
-                <UploadCloud size={30} style={{ color: P.blue }} />
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.2 }}>Drop your footage here, or click to choose</div>
-              <div style={{ fontSize: 13, color: P.muted, maxWidth: 480, lineHeight: 1.55 }}>
-                MP4, WebM or MOV up to 500 MB. Then trim, grade, add text, reframe, drop in an AI music bed — and let the AI design graphic overlays that fit what is actually happening in your video.
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 4 }}>
-                {TOOLS.slice(1).map((t) => {
-                  const Icon = t.icon;
-                  return (
-                    <span key={t.id} className="ve-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: t.color, background: 'rgba(7,10,18,0.6)', border: '1px solid ' + t.color + '55', borderRadius: 999, padding: '4px 10px' }}>
-                      <Icon size={11} /> {t.label}
-                    </span>
-                  );
-                })}
-              </div>
-              {uploadErr && <ErrLine>{uploadErr}</ErrLine>}
-            </label>
-          </div>
-        ) : (
-          /* ---------- Editor: tool rail | preview + timeline | active panel ---------- */
-          <div className="ve-editor-grid">
-
-            {/* Tool rail */}
-            <div className="ve-rail">
-              {TOOLS.map((t) => {
-                const Icon = t.icon;
-                const active = activeTool === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setActiveTool(t.id)}
-                    className="ve-tab ve-btn"
-                    title={t.label}
-                    style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                      padding: '11px 6px', borderRadius: 12, cursor: 'pointer', minWidth: 64,
-                      background: active ? 'rgba(140,155,255,0.13)' : 'transparent',
-                      border: '1px solid ' + (active ? t.color + '66' : 'transparent'),
-                      color: active ? t.color : P.muted,
-                    }}
-                  >
-                    <Icon size={17} />
-                    <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.3 }}>{t.label}</span>
-                  </button>
-                );
-              })}
+        {/* MIDDLE — tools + properties */}
+        <div style={{ display: 'grid', gap: 14 }}>
+          <AiToolsPanel
+            hasFootage={hasFootage}
+            analysis={analysis}
+            analyzing={analyzing}
+            aiEditBusy={aiEditBusy}
+            transcribing={transcribing}
+            brollBusy={brollBusy}
+            brollPrompt={brollPrompt}
+            onBrollPrompt={setBrollPrompt}
+            brollModel={brollModel}
+            brollModelMode={brollModelMode}
+            brollAutoName={engineDisplayName(brollAutoId)}
+            brollAutoReason={brollRoute.reason}
+            onBrollAuto={() => setBrollModelMode('auto')}
+            onBrollModel={(id) => { setBrollModel(id); setBrollModelMode('manual'); }}
+            styleId={styleId}
+            onAiEdit={() => void runAiEdit()}
+            onTranscribe={() => void runTranscribe()}
+            onDescribe={() => void runDescribe()}
+            onBroll={() => void onBroll()}
+            onCaptions={onCaptionsFromTranscript}
+            onStyle={onStyle}
+            onAddGraphic={onAddGraphic}
+            appliedSuggestions={appliedSuggestions}
+            onApplySuggestion={applySuggestion}
+          />
+          <details style={{ background: '#0d1117', borderRadius: 12, padding: 14 }}>
+            <summary style={{ cursor: 'pointer', color: LB.textPrimary, fontSize: 13.5, fontWeight: 700, listStylePosition: 'inside' }}>
+              Advanced <span style={{ color: LB.textMuted, fontSize: 11.5, fontWeight: 500 }}>— clip properties, effects, music and colour grade</span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <PropertiesPanel
+                clip={selectedClip}
+                graphic={selectedGraphic}
+                effects={effects}
+                musicBedId={musicBedId}
+                customMusicLabel={customMusic ? customMusic.label : ''}
+                musicGenBusy={musicGenBusy}
+                gradeId={gradeId}
+                canSplit={canSplit}
+                onSplit={onSplitAtPlayhead}
+                onDeleteClip={onDeleteClip}
+                onTrim={onTrim}
+                onSpeed={onSpeed}
+                onOpacity={onOpacity}
+                onText={onText}
+                onGraphicChange={onGraphicChange}
+                onGraphicDelete={onGraphicDelete}
+                onEffects={(patch) => setEffects((e) => ({ ...e, ...patch }))}
+                onMusic={(id) => setMusicBedId(id)}
+                onGenerateMusic={(p) => void onGenerateMusic(p)}
+                onGrade={(g) => { setGradeId(g); setStyleId(null); }}
+              />
             </div>
+          </details>
+        </div>
 
-            {/* Preview column */}
-            <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ ...cardStyle, padding: 12 }}>
-                {/* The preview is the centrepiece: with the transport and
-                    scrubber below it, this card occupies roughly 60% of the
-                    viewport height, and the clamp keeps short windows usable. */}
-                <div ref={previewAreaRef} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 'clamp(300px, 56vh, 620px)', background: '#020409', borderRadius: 12, overflow: 'hidden' }}>
-                  <div style={{ position: 'relative', width: Math.max(120, pvW), height: Math.max(80, pvH), background: '#000', overflow: 'hidden', borderRadius: 4 }}>
-                    <video
-                      ref={videoRef}
-                      src={playerSrc}
-                      playsInline
-                      onClick={togglePlay}
-                      onError={() => {
-                        // A broken enhanced output must never sit as a blank
-                        // rectangle: fall back to the original and say why.
-                        if (showingOutput) {
-                          setViewOriginal(true);
-                          setOutputIssue('The enhanced video could not be loaded, so the player switched back to your original. Open the Export tab and export again to rebuild it.');
-                        }
-                      }}
-                      onLoadedMetadata={(e) => {
-                        // Only the SOURCE defines the edit timeline; the
-                        // exported output has its own (shorter) length.
-                        if (showingOutput) return;
-                        const v = e.currentTarget;
-                        if (Number.isFinite(v.duration) && v.duration > 0) setDuration(v.duration);
-                      }}
-                      style={{
-                        position: 'absolute', inset: 0, width: '100%', height: '100%',
-                        objectFit: showingOutput ? 'contain' : (aspect === 'original' ? 'contain' : 'cover'),
-                        filter: previewFilter, background: '#000', cursor: 'pointer',
-                      }}
-                    />
-                    {!showingOutput && effects.vignette > 0 && (
-                      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'radial-gradient(ellipse at center, rgba(0,0,0,0) 52%, rgba(0,0,0,' + (0.62 * effects.vignette / 100).toFixed(3) + ') 100%)' }} />
-                    )}
-                    {!showingOutput && (
-                      <canvas
-                        ref={overlayCanvasRef}
-                        onPointerDown={onCanvasPointerDown}
-                        onPointerMove={onCanvasPointerMove}
-                        onPointerUp={onCanvasPointerUp}
-                        onPointerCancel={onCanvasPointerUp}
-                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: activeTool === 'text' ? 'auto' : 'none', touchAction: 'none', cursor: activeTool === 'text' ? 'move' : 'default' }}
-                      />
-                    )}
-                    {/* Render-in-progress state: the player says what is happening instead of going quiet. */}
-                    {exporting ? (
-                      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'rgba(2,4,9,0.72)', textAlign: 'center', padding: 16 }} data-testid="export-overlay">
-                        <Loader2 size={26} className="animate-spin" style={{ color: P.mint }} />
-                        <div style={{ fontSize: 13.5, fontWeight: 800 }}>Exporting {Math.round(exportProgress * 100)}%</div>
-                        <div style={{ fontSize: 12, color: P.sub, maxWidth: 360, lineHeight: 1.5 }}>{exportNote || 'Compositing your edit…'}</div>
-                      </div>
-                    ) : null}
-                    <div style={{ position: 'absolute', top: 10, left: 10, right: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, pointerEvents: 'none' }}>
-                      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, padding: '4px 9px', borderRadius: 7, background: showingOutput ? 'rgba(52,224,176,0.28)' : 'rgba(0,0,0,0.55)', border: '1px solid ' + (showingOutput ? P.mint : 'rgba(255,255,255,0.25)'), color: showingOutput ? P.mint : '#fff' }}>
-                        {showingOutput ? 'ENHANCED OUTPUT' : 'LIVE PREVIEW'}
-                      </div>
-                      {outputUrl && (
-                        <button
-                          onClick={() => setViewOriginal((v) => !v)}
-                          className="ve-btn"
-                          style={{ pointerEvents: 'auto', fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, padding: '4px 10px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(0,0,0,0.55)', color: '#fff', cursor: 'pointer' }}
-                        >
-                          {showingOutput ? 'View original' : 'View output'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
+        {/* RUNWAY ENHANCE — generation that sits beside the editor rather than
+            inside it: the loaded footage is offered as the swap source, and a
+            finished clip only joins the timeline when the customer says so. */}
+        <div style={{ background: '#0d1117', borderRadius: 12, padding: 14 }}>
+          <button
+            type="button"
+            className="nle-btn"
+            onClick={() => setRunwayOpen((open) => !open)}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', background: 'none', border: 'none', color: LB.textPrimary, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', flexWrap: 'wrap' }}
+            data-testid="toggle-runway-enhance"
+          >
+            <Sparkles size={15} color={LB.accent} />
+            Runway Enhance
+            <span style={{ fontSize: 11.5, fontWeight: 500, color: LB.textMuted }}>
+              Swap the product inside your footage, or generate a fresh clip from a prompt or a still.
+            </span>
+            <span style={{ marginLeft: 'auto', color: LB.textMuted, fontSize: 12, fontWeight: 600 }}>{runwayOpen ? 'Hide' : 'Show'}</span>
+          </button>
+          {runwayOpen ? (
+            <div style={{ marginTop: 14 }}>
+              <RunwayStudio
+                bare
+                modes={['product_swap', 'text_to_video', 'image_to_video']}
+                theme={{
+                  panel: 'rgba(255,255,255,0.05)',
+                  card: '#11161f',
+                  line: 'rgba(255,255,255,0.09)',
+                  lineStrong: 'rgba(255,255,255,0.17)',
+                  ink: LB.textPrimary,
+                  soft: LB.textSecondary,
+                  muted: LB.textMuted,
+                  accent: LB.accent,
+                  onAccent: '#241503',
+                  good: '#7FD4B4',
+                  bad: '#f87171',
+                  font: 'system-ui, -apple-system, sans-serif',
+                }}
+                prefill={{ sourceVideo: runwaySource }}
+                adoptLabel="Add to timeline"
+                onAdopt={(url) => { void addClipFromUrl(url, url, 'Runway clip', 'broll'); }}
+              />
+              {hasFootage && !runwaySource ? (
+                <div style={{ color: LB.textMuted, fontSize: 11.5, marginTop: 10, lineHeight: 1.5 }}>
+                  Your footage is still uploading — the swap source appears here once the durable copy lands.
                 </div>
-
-                {/* The editor is gated on the source duration — say so rather
-                    than presenting a row of dead controls. */}
-                {localUrl && duration <= 0 && !uploading ? (
-                  <div style={{ display: 'flex', gap: 7, alignItems: 'flex-start', marginTop: 10, padding: '9px 12px', borderRadius: 10, fontSize: 12, lineHeight: 1.5, color: P.amber, background: 'rgba(255,178,36,0.08)', border: '1px solid rgba(255,178,36,0.35)' }} data-testid="duration-pending">
-                    <Loader2 size={14} className="animate-spin" style={{ flexShrink: 0, marginTop: 1 }} />
-                    Reading your video's length — trim, text timing and export unlock as soon as it loads. If this stays put, the file may be unreadable in this browser; try Start over with an MP4.
-                  </div>
-                ) : null}
-
-                {outputIssue ? (
-                  <div style={{ display: 'flex', gap: 7, alignItems: 'flex-start', marginTop: 10, padding: '9px 12px', borderRadius: 10, fontSize: 12, lineHeight: 1.5, color: P.coral, background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.35)' }} data-testid="output-issue">
-                    <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} /> {outputIssue}
-                  </div>
-                ) : null}
-
-                {/* Transport */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-                  <button
-                    onClick={togglePlay}
-                    className="ve-btn"
-                    title={isPlaying ? 'Pause' : 'Play'}
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: 11, border: '1px solid ' + P.border, background: P.panelSoft, color: P.text, cursor: 'pointer', flexShrink: 0 }}
-                  >
-                    {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-                  </button>
-                  <span style={{ fontSize: 12.5, color: P.sub, fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
-                    {formatTime(playheadT)} <span style={{ color: P.muted }}>/ {formatTime(timelineDur)}</span>
-                  </span>
-                  {effects.speed !== 1 && !showingOutput && (
-                    <span style={{ fontSize: 10.5, fontWeight: 800, color: P.amber, background: 'rgba(255,178,36,0.10)', border: '1px solid rgba(255,178,36,0.4)', borderRadius: 999, padding: '3px 9px' }}>{effects.speed}×</span>
-                  )}
-                  {hasEdits && !showingOutput && (
-                    <span style={{ fontSize: 10.5, fontWeight: 800, color: P.blue, background: 'rgba(61,139,255,0.10)', border: '1px solid rgba(61,139,255,0.4)', borderRadius: 999, padding: '3px 9px' }}>{formatTime(keptSecs)} kept</span>
-                  )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: P.sub, background: P.panelSoft, border: '1px solid ' + P.borderSoft, borderRadius: 8, padding: '5px 10px', minWidth: 0, marginLeft: 'auto' }}>
-                    <Film size={12} style={{ flexShrink: 0, color: P.violet }} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{file?.name || 'Saved source video'}</span>
-                  </div>
-                  {uploading && <span style={{ fontSize: 11.5, color: P.blue, display: 'flex', gap: 5, alignItems: 'center' }}><Loader2 size={12} className="animate-spin" /> Uploading…</span>}
-                  {uploadedUrl && !uploading && <span style={{ fontSize: 11.5, color: P.mint, display: 'flex', gap: 4, alignItems: 'center' }}><Check size={12} /> Stored</span>}
-                  {uploadErr && <span style={{ fontSize: 11.5, color: P.coral, display: 'flex', gap: 4, alignItems: 'center' }}><AlertCircle size={12} /> {uploadErr}</span>}
-                </div>
-
-                {/* Timeline scrubber with in/out handles */}
-                {timelineDur > 0 && (
-                  <div style={{ marginTop: 10, opacity: showingOutput ? 0.35 : 1, transition: 'opacity .2s ease' }}>
-                    <div
-                      ref={timelineRef}
-                      onPointerDown={onTimelinePointerDown}
-                      onPointerMove={onTimelinePointerMove}
-                      onPointerUp={onTimelinePointerUp}
-                      onPointerCancel={onTimelinePointerUp}
-                      style={{ position: 'relative', height: 38, background: P.panelSoft, border: '1px solid ' + P.borderSoft, borderRadius: 9, overflow: 'hidden', cursor: showingOutput ? 'default' : 'pointer', touchAction: 'none' }}
-                    >
-                      {/* Outside in/out shading */}
-                      <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: (inPoint / timelineDur) * 100 + '%', background: 'rgba(2,4,9,0.72)' }} />
-                      <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: (100 - (effOut / timelineDur) * 100) + '%', background: 'rgba(2,4,9,0.72)' }} />
-                      {/* Cut segments */}
-                      {segments.filter((s) => !s.kept).map((s) => (
-                        <div key={s.key} style={{ position: 'absolute', top: 0, bottom: 0, left: (s.start / timelineDur) * 100 + '%', width: ((s.end - s.start) / timelineDur) * 100 + '%', background: 'repeating-linear-gradient(45deg, rgba(255,107,107,0.16), rgba(255,107,107,0.16) 5px, rgba(2,4,9,0.6) 5px, rgba(2,4,9,0.6) 10px)' }} />
-                      ))}
-                      {/* Split markers */}
-                      {splits.map((s) => (
-                        <div key={s} style={{ position: 'absolute', top: 0, bottom: 0, width: 1.5, background: 'rgba(255,178,36,0.8)', left: (s / timelineDur) * 100 + '%' }} />
-                      ))}
-                      {/* Overlay element markers */}
-                      {elements.map((el) => (
-                        <div
-                          key={el.id}
-                          title={el.text || el.kind}
-                          style={{
-                            position: 'absolute', top: 4, height: 7, borderRadius: 3,
-                            left: (el.start / timelineDur) * 100 + '%',
-                            width: Math.max(0.6, ((el.end - el.start) / timelineDur) * 100) + '%',
-                            background: el.color + (el.enabled ? 'CC' : '33'),
-                          }}
-                        />
-                      ))}
-                      {/* Text overlay markers */}
-                      {texts.map((t) => (
-                        <div
-                          key={t.id}
-                          title={t.text}
-                          style={{
-                            position: 'absolute', bottom: 4, height: 7, borderRadius: 3,
-                            left: (t.start / timelineDur) * 100 + '%',
-                            width: Math.max(0.6, ((t.end - t.start) / timelineDur) * 100) + '%',
-                            background: t.color + 'B8',
-                            outline: t.id === selectedTextId ? '1px solid #fff' : 'none',
-                          }}
-                        />
-                      ))}
-                      {/* In / out handles */}
-                      <div style={{ position: 'absolute', top: 0, bottom: 0, width: 10, marginLeft: -5, left: (inPoint / timelineDur) * 100 + '%', cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div style={{ width: 4, height: '78%', borderRadius: 3, background: P.mint, boxShadow: '0 0 8px rgba(52,224,176,0.8)' }} />
-                      </div>
-                      <div style={{ position: 'absolute', top: 0, bottom: 0, width: 10, marginLeft: -5, left: (effOut / timelineDur) * 100 + '%', cursor: 'ew-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div style={{ width: 4, height: '78%', borderRadius: 3, background: P.mint, boxShadow: '0 0 8px rgba(52,224,176,0.8)' }} />
-                      </div>
-                      {/* Playhead */}
-                      <div style={{ position: 'absolute', top: 0, bottom: 0, width: 2, background: '#FFFFFF', opacity: 0.95, left: (playheadT / timelineDur) * 100 + '%', pointerEvents: 'none' }} />
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, color: P.muted, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
-                      <span>0:00</span>
-                      <span style={{ color: P.sub }}>drag the mint handles to trim · drag anywhere to scrub</span>
-                      <span>{formatTime(timelineDur)}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
+              ) : null}
             </div>
+          ) : null}
+        </div>
 
-            {/* Active tool panel */}
-            <div style={{ minWidth: 0, maxHeight: 'calc(100vh - 120px)', overflowY: 'auto', paddingRight: 2 }} key={activeTool}>
-              {activeTool === 'analyze' && (
-                <AnalyzePanel
-                  analyzing={analyzing} analyzeNote={analyzeNote} analyzeErr={analyzeErr}
-                  summary={summary} insights={insights} elements={elements}
-                  canAnalyze={!!file || !!uploadedUrl} exporting={exporting}
-                  onAnalyze={() => { void runAnalyze(); }}
-                  onToggleElement={toggleElement} onDeleteElement={deleteElement} onSeek={seekTo}
-                />
-              )}
-              {activeTool === 'aiclips' && <AiClipsPanel />}
-              {activeTool === 'trim' && (
-                <TrimPanel
-                  duration={timelineDur} inPoint={inPoint} outPoint={effOut} playheadT={playheadT}
-                  segments={segments} splits={splits} keptSeconds={keptSecs} disabled={editDisabled}
-                  onSetIn={setInAtPlayhead} onSetOut={setOutAtPlayhead} onResetTrim={resetTrim}
-                  onSplit={splitAtPlayhead} onClearSplits={clearSplits} onToggleSegment={toggleSegment} onSeek={seekTo}
-                />
-              )}
-              {activeTool === 'effects' && (
-                <EffectsPanel effects={effects} disabled={editDisabled} onChange={setEffects} />
-              )}
-              {activeTool === 'text' && (
-                <TextPanel
-                  texts={texts} selectedId={selectedTextId} duration={timelineDur} playheadT={playheadT}
-                  disabled={editDisabled} onSelect={setSelectedTextId} onAdd={addText}
-                  onUpdate={updateText} onRemove={removeText}
-                />
-              )}
-              {activeTool === 'captions' && (
-                <CaptionsPanel
-                  captionsOn={captionsOn} styleId={captionStyleId} position={captionPos} segments={captionSegments}
-                  transcribing={transcribing} note={transcribeNote} err={transcribeErr}
-                  hasVideo={!!file || !!uploadedUrl} disabled={exporting}
-                  onToggleOn={setCaptionsOn} onStyle={setCaptionStyleId} onPosition={setCaptionPos} onGenerate={() => { void runGenerateCaptions(); }}
-                  onToggleSegment={toggleCaptionSegment} onDeleteSegment={deleteCaptionSegment}
-                  onEditSegment={editCaptionSegment} onSeek={seekTo}
-                />
-              )}
-              {activeTool === 'frame' && (
-                <FramePanel
-                  aspect={aspect} muteOriginal={muteOriginal} originalVolume={originalVolume}
-                  disabled={exporting} onAspect={setAspect} onMute={setMuteOriginal} onVolume={setOriginalVolume}
-                />
-              )}
-              {activeTool === 'music' && (
-                <MusicPanel
-                  track={musicTrack} trackUrl={musicUrl} musicVolume={musicVolume}
-                  busy={musicBusy} note={musicNote} err={musicErr} prompt={musicPrompt}
-                  keptSeconds={keptSecs || timelineDur} disabled={exporting}
-                  onPrompt={setMusicPrompt} onGenerate={() => { void runMusic(); }}
-                  onVolume={setMusicVolume} onRemove={removeMusic}
-                />
-              )}
-              {activeTool === 'sfx' && (
-                <SfxPanel
-                  cues={sfxCues} busy={sfxBusy} note={sfxNote} err={sfxErr}
-                  playheadT={playheadT} duration={timelineDur} disabled={exporting}
-                  onAdd={(label, prompt, secs) => { void addSfxCue(label, prompt, secs); }}
-                  onUpdate={updateSfxCue} onRemove={removeSfxCue} onSeek={seekTo}
-                />
-              )}
-              {activeTool === 'export' && (
-                <ExportPanel
-                  format={format} quality={quality} exporting={exporting} progress={exportProgress}
-                  note={exportNote} err={exportErr} outputUrl={outputUrl}
-                  canExport={canExport} disabled={analyzing}
-                  keptSeconds={keptSecs || timelineDur} speed={effects.speed}
-                  overlayCount={elements.filter((e) => e.enabled).length} textCount={texts.length}
-                  hasMusic={!!musicTrack} aspect={aspect} downloadExt={outputExt}
-                  hasCaptions={captionsOn && captionSegments.some((s) => s.enabled)}
-                  sfxCount={sfxCues.filter((c) => c.status === 'ready').length}
-                  onFormat={setFormat} onQuality={setQuality} onExport={() => { void runExport(); }}
-                />
-              )}
-            </div>
-          </div>
-        )}
+        {/* BOTTOM — timeline */}
+        <NleTimeline
+          clips={clips}
+          captions={captions}
+          captionOffset={captionOffset}
+          graphics={graphics}
+          selectedGraphicId={selectedGraphicId}
+          musicBed={musicBed}
+          duration={duration}
+          playhead={playhead}
+          selectedClipId={selectedClipId}
+          onSelectClip={(id) => { setSelectedClipId(id); if (id) setSelectedGraphicId(null); }}
+          onSelectGraphic={(id) => { setSelectedGraphicId(id); if (id) setSelectedClipId(null); }}
+          onMoveGraphic={onMoveGraphic}
+          onSeek={seek}
+          onReorder={onReorder}
+          onTrim={onTrim}
+          onCaptionOffset={setCaptionOffset}
+        />
       </div>
+      <AgentChatProvider appContext={agentContext}>
+        <AgentChatButton />
+        <AgentChatPanel />
+      </AgentChatProvider>
     </div>
   );
 }
 
-interface VEBoundaryState { error: Error | null }
+// ---------------------------------------------------------------------------
+// Crash containment
+// ---------------------------------------------------------------------------
 
-/** Error boundary: an unexpected runtime error renders a recovery card instead
- * of a blank screen. Upload, plan, edit state and output are persisted, so
- * remounting restores the session. */
-class VideoEnhancerBoundary extends Component<{ children?: ReactNode }, VEBoundaryState> {
-  state: VEBoundaryState = { error: null };
-  static getDerivedStateFromError(error: Error): VEBoundaryState { return { error }; }
-  componentDidCatch(error: Error, info: unknown) {
-    console.error('[VideoEnhancer] crashed:', error, info);
-  }
+class VeBoundary extends Component<{ children?: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: unknown) { console.error('[VideoEnhancer] crashed:', error, info); }
   render() {
     if (this.state.error) {
       return (
-        <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, color: P.text, background: P.bg }}>
-          <div style={{ maxWidth: 460, textAlign: 'center', background: P.panel, border: '1px solid ' + P.border, borderRadius: 16, padding: '28px 24px' }}>
-            <AlertCircle size={28} style={{ color: P.coral, display: 'block', margin: '0 auto 10px' }} />
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>Video Enhancer hit a snag</div>
-            <div style={{ fontSize: 13, color: P.muted, lineHeight: 1.5, marginBottom: 14 }}>
-              Your upload and edit are saved — nothing is lost. Reload the editor to pick up where you left off.
-            </div>
-            <button onClick={() => this.setState({ error: null })} style={{ fontSize: 13, fontWeight: 800, color: '#fff', background: P.blue, border: 'none', borderRadius: 10, padding: '10px 18px', cursor: 'pointer' }}>
-              Reload editor
+        <div style={{ minHeight: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: LB.bg, fontFamily: 'system-ui, sans-serif' }}>
+          <div style={{ maxWidth: 440, textAlign: 'center', background: LB.bgCard, border: LB.border, borderRadius: 16, padding: '30px 26px' }}>
+            <AlertCircle size={26} color="#f87171" style={{ margin: '0 auto 10px' }} />
+            <div style={{ color: LB.textPrimary, fontSize: 15.5, fontWeight: 600, marginBottom: 8 }}>The editor hit a snag</div>
+            <div style={{ color: LB.textSecondary, fontSize: 12.5, lineHeight: 1.6, marginBottom: 16 }}>{this.state.error.message}</div>
+            <button onClick={() => this.setState({ error: null })} style={{ background: LB.accent, color: '#241503', border: 'none', borderRadius: 10, padding: '10px 22px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+              Reload the editor
             </button>
           </div>
         </div>
@@ -1386,10 +1193,61 @@ class VideoEnhancerBoundary extends Component<{ children?: ReactNode }, VEBounda
   }
 }
 
+type EnhancerMode = 'enhance' | 'product';
+
+const MODE_TABS: { id: EnhancerMode; label: string; icon: typeof Sparkles; blurb: string; testId: string }[] = [
+  // Enhance — the original timeline NLE for footage you already have.
+  { id: 'enhance', label: 'Enhance', icon: Sparkles, blurb: 'Polish footage you already have on the timeline editor', testId: 've-mode-enhance' },
+  // Product Video — the full Product Studio suite merged in: Brand Reel,
+  // Ad Director, the video galleries and the studio-tools drawer.
+  { id: 'product', label: 'Product Video', icon: Rocket, blurb: 'Paste a product URL for a branded video, direct an ad, or open the studio tools', testId: 've-mode-product' },
+];
+
 export default function App() {
+  // The Enhancer now leads with two modes: the original Enhance NLE and the
+  // merged Product Video suite. BOTH stay mounted (hidden with display, never
+  // unmounted) so an in-flight render, upload or half-typed URL on either side
+  // survives a switch; the hidden tree's floating agent orb is hidden with it.
+  const [mode, setMode] = useState<EnhancerMode>('enhance');
+  const activeBlurb = MODE_TABS.find((t) => t.id === mode)?.blurb || '';
   return (
-    <VideoEnhancerBoundary>
-      <VideoEnhancerApp />
-    </VideoEnhancerBoundary>
+    <VeBoundary>
+      <div style={{ height: '100%', minHeight: 0, background: LB.bg, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flexShrink: 0, borderBottom: LB.border, background: 'rgba(8,12,20,0.92)' }}>
+          <div style={{ maxWidth: 1240, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 18px' }}>
+            <div role="tablist" aria-label="Video Enhancer mode" style={{ display: 'inline-flex', gap: 4, padding: 4, borderRadius: 12, border: LB.border, background: LB.bgCard }}>
+              {MODE_TABS.map((t) => {
+                const Icon = t.icon;
+                const active = mode === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    title={t.blurb}
+                    onClick={() => setMode(t.id)}
+                    className="nle-btn"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 16px', borderRadius: 9, border: 'none', background: active ? LB.accentGradient : 'transparent', color: active ? '#241503' : LB.textSecondary, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}
+                    data-testid={t.testId}
+                  >
+                    <Icon size={14} /> {t.label}
+                  </button>
+                );
+              })}
+            </div>
+            <span style={{ color: LB.textMuted, fontSize: 11.5, fontWeight: 500, minWidth: 0 }}>{activeBlurb}</span>
+          </div>
+        </div>
+        {/* Both modes stay mounted; only the active one is shown. The .nle-btn
+            class comes from the always-mounted Enhance tree's <style> block. */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: mode === 'enhance' ? 'block' : 'none' }}>
+          <VideoEnhancerNle />
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: mode === 'product' ? 'block' : 'none' }}>
+          <ProductStudioApp />
+        </div>
+      </div>
+    </VeBoundary>
   );
 }

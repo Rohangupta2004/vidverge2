@@ -3,7 +3,7 @@
  * projects from the retired s2v-run pipeline (their finished MP4s stay
  * watchable; nothing new is ever written to the old tables).
  */
-import { Clapperboard, Play, Plus, Sparkles } from 'lucide-react';
+import { Clapperboard, Play, Plus, Sparkles, Wand2 } from 'lucide-react';
 import { Film, T } from './api';
 
 export interface LegacyFilm { id: number; title: string; final_url: string | null; created_at: string }
@@ -32,8 +32,9 @@ export default function Library(props: {
   onOpen: (f: Film) => void;
   onOpenLegacy: (l: LegacyFilm) => void;
   onQuickCreate: (text: string) => void;
+  onOpenStudio: () => void;
 }) {
-  const { loading, onNew, onOpen, onOpenLegacy, onQuickCreate } = props;
+  const { loading, onNew, onOpen, onOpenLegacy, onQuickCreate, onOpenStudio } = props;
   const films = Array.isArray(props.films) ? props.films : [];
   const legacy = Array.isArray(props.legacy) ? props.legacy : [];
   const ordered = [...films.filter((f) => ACTIVE.includes(String(f.status))), ...films.filter((f) => !ACTIVE.includes(String(f.status)))];
@@ -64,6 +65,13 @@ export default function Library(props: {
             {starters.map((s) => (
               <button key={s} className="s2v-ghost" onClick={() => onQuickCreate(s)} style={{ background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 999, padding: '7px 14px', fontSize: 12, cursor: 'pointer' }}>{s}</button>
             ))}
+          </div>
+          <div style={{ color: T.dim, fontSize: 12, marginTop: 22, lineHeight: 1.6 }}>
+            Just want one clip rather than a whole film?{' '}
+            <button className="s2v-ghost" onClick={onOpenStudio} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', color: T.live, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+              <Wand2 size={12} /> Open Agent Studio
+            </button>{' '}
+            — one prompt, any Runway model, a downloadable video in minutes.
           </div>
         </div>
       </div>
@@ -109,7 +117,7 @@ export default function Library(props: {
                 <div style={{ color: T.bone, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.title || 'Untitled film'}</div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
                   <span style={{ color: T.muted, fontSize: 11, border: `1px solid ${T.dim}`, borderRadius: 5, padding: '2px 7px' }}>{f.aspect_ratio || '16:9'}</span>
-                  <span style={{ color: T.muted, fontSize: 12, fontFamily: T.mono }}>{sceneCount ? `${sceneCount} scenes` : '—'}</span>
+                  <span style={{ color: T.muted, fontSize: 12, fontFamily: T.mono }}>{sceneCount ? `${sceneCount} scenes` : 'Scenes pending'}</span>
                   {f.duration_s ? <span style={{ color: T.muted, fontSize: 12, fontFamily: T.mono }}>{Math.round(Number(f.duration_s))}s</span> : null}
                   <StatusWord f={f} />
                 </div>

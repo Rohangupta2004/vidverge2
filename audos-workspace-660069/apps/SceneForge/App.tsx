@@ -39,8 +39,22 @@ import { defaultOverlay, visualKindOf, type VisualKind } from './lib/effects';
 import { isVideoUrl, sceneKind, sceneNeedsGeneration, sceneSettled } from './lib/sceneState';
 import { forgeApi } from './lib/forge';
 import { sleep, workspaceToken } from './lib/proxy';
+import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
+import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
+import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
+import { videoEngine } from '../../lib/videoEngines';
 
 type View = 'library' | 'project' | 'settings';
+
+function friendlyErrorText(value: unknown): string {
+  const raw = String(value || 'This step could not be completed.');
+  const named = raw.replace(/(?:openrouter\/[^\s,;]+|gemini-omni-flash-preview|veo-[\w.-]+)/g, (id) => videoEngine(id)?.label || 'the selected video engine');
+  if (/no_credentials|\b401\b/i.test(named)) return 'Your workspace session is not ready yet. Try again in a moment.';
+  if (/insufficient|payment|required|\b402\b/i.test(named)) return 'This generation needs more workspace credits before it can start.';
+  if (/rate.?limit|\b429\b/i.test(named)) return 'The production service is busy right now. Wait a moment, then try again.';
+  if (/provider[_ -]?error|\b50[0234]\b|service unavailable/i.test(named)) return 'A production service is temporarily unavailable. Your completed work is safe; retry this step shortly.';
+  return named;
+}
 
 function pipelineLog(stage: 'script-llm' | 'assets' | 'scene-media' | 'joiner', event: string, details: Record<string, unknown> = {}) {
   console.info(`[SceneForge pipeline] ${stage}:${event}`, details);
@@ -565,7 +579,7 @@ export default function App() {
           try {
             const kind = sceneKind(scene);
             if (kind === 'ai_video') {
-              const made = await generateSceneVideo(project, scene, { model: settings.video_model });
+              const made = await generateSceneVideo(project, scene);
               markScene(scene.id, { render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' });
               pipelineLog('scene-media', 'scene-video-ready', { projectId: project.id, sceneIndex: scene.scene_index, reused: made.reused });
             } else if (kind === 'motion_graphic' || kind === 'text_overlay') {
@@ -686,7 +700,7 @@ export default function App() {
     try {
       const kind = sceneKind(scene);
       if (kind === 'ai_video') {
-        const made = await generateSceneVideo(project, scene, { force: true, model: settings.video_model });
+        const made = await generateSceneVideo(project, scene, { force: true });
         setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' as const } : item));
       } else if (kind === 'motion_graphic' || kind === 'text_overlay') {
         const made = await produceMotionScene(project, scene, { force: true, onNote: setNote });
@@ -758,7 +772,7 @@ export default function App() {
     setGeneratingSceneId(scene.id); setSceneImageError('');
     setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, status: 'generating' as const } : item));
     try {
-      const made = await generateSceneVideo(project, scene, { model: settings.video_model });
+      const made = await generateSceneVideo(project, scene);
       setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' as const } : item));
     } catch (e: any) {
       setSceneImageError(e.message || String(e));
@@ -1110,9 +1124,10 @@ export default function App() {
     };
   }
 
-  async function askVerger() {
-    if (!project || !vergerText.trim()) return; setBusy(true);
-    const request = vergerText.trim();
+  async function askVerger(override?: string) {
+    const requested = (override ?? vergerText).trim();
+    if (!project || !requested) return; setBusy(true);
+    const request = requested;
     setVergerText('');
     setVergerMessages((all) => [...all, { role: 'user', text: request }]);
     const say = (text: string) => setVergerMessages((all) => [...all, { role: 'verger', text }]);
@@ -1144,7 +1159,7 @@ export default function App() {
         }
       }
       else { say('I routed the request to assembly — rebuilding the final timeline now.'); await assemble(); }
-    } catch (e: any) { say(e.message || String(e)); } finally { setBusy(false); }
+    } catch (e: any) { say(friendlyErrorText(e.message || String(e))); } finally { setBusy(false); }
   }
 
   // AI status panel above the chat: plain pipeline facts (what is done, what
@@ -1162,6 +1177,41 @@ export default function App() {
       { label: 'Delivery checks', state: project.status === 'done' ? 'done' as const : project.status === 'checks' && project.assembled_video_url ? 'active' as const : 'todo' as const },
     ];
   })();
+
+  // Vidverge Agent — the floating orb assistant. SceneForge's natural-language
+  // control surface is Verger, so the agent drafts instructions and routes
+  // them straight into the Verger pipeline on the customer's behalf.
+  const agentContext = {
+    appId: 'sceneforge',
+    appName: 'SceneForge',
+    currentInputs: {
+      view,
+      projectTopic: project ? String(project.topic || '').slice(0, 160) : 'none',
+      projectStatus: project ? String(project.status || '') : 'none',
+      vergerDraft: vergerText.slice(0, 400),
+    },
+    onFillField: (field: string, value: string) => {
+      if (field === 'instruction' || field === 'vergerText') { setVergerText(value); setVergerOpen(true); }
+    },
+    onTriggerAction: (action: string, params?: Record<string, unknown>) => {
+      const p = params || {};
+      if (action === 'sendToVerger') {
+        if (!project) { setError('Open or start a project first — Verger works on the current project.'); return; }
+        setVergerOpen(true);
+        const instruction = typeof p.instruction === 'string' ? p.instruction : undefined;
+        void askVerger(instruction);
+      } else if (action === 'openVerger') setVergerOpen(true);
+      else if (action === 'openAssetStudio') { if (project) setAssetStudioOpen(true); }
+      else if (action === 'assemble') { if (project) void assemble(); }
+      else if (action === 'newProject') { setProject(null); setView('project'); }
+    },
+    promptHint: [
+      'The user composes multi-scene avatar explainer films. Verger (the in-app orchestrator) applies plain-English changes to the open project: script rewrites, scene additions, scene type/description changes, style switches, re-assembly.',
+      'Fields you can fill: instruction (drafts a Verger instruction into its panel for the user to review).',
+      'Actions you can trigger: sendToVerger with {"instruction":"..."} (routes the change straight into the pipeline — use this to add scenes, e.g. "add a scene after scene 2 showing a bar chart of adoption", or to regenerate), openVerger, openAssetStudio (generate still assets for scenes), assemble (rebuild the final film), newProject (start a fresh topic).',
+      'sendToVerger, openAssetStudio and assemble need an open project — check projectStatus first; when it is "none", guide the user to start or open a project.',
+    ].join('\n'),
+  };
 
   const content = () => {
     if (view === 'settings') return <SettingsPanel />;
@@ -1185,20 +1235,22 @@ export default function App() {
       // "this render failed, and here is why"; the live error covers the
       // attempt that just happened in front of the customer.
       const noted = String(project.stage_note || '');
-      const failure = busy || project.assembled_video_url ? '' : noted.startsWith(ASSEMBLY_FAILED_PREFIX) ? noted.slice(ASSEMBLY_FAILED_PREFIX.length).trim() : error;
+      const failure = busy || project.assembled_video_url ? '' : friendlyErrorText(noted.startsWith(ASSEMBLY_FAILED_PREFIX) ? noted.slice(ASSEMBLY_FAILED_PREFIX.length).trim() : error);
       return <AssemblyProgress busy={busy} note={note} failure={failure} project={project} scenes={scenes} checks={project.checks || []} musicBusy={musicBusy} musicNote={musicNote} onRetry={() => void assemble()} onCancel={cancelAssembly} onContinue={openEditor} onGenerateMusic={(value) => void makeMusic(value)} onMixMusic={() => void mixMusic()} onDraftEdited={() => void bumpDraftVersion()} />;
     }
     if (project.status === 'editing') return <EditorHandoff project={project} scenes={scenes} onOpen={openEditor} />;
     return <Working text="Restoring this project" />;
   };
 
-  return <div className="relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]">
-    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-5"><button onClick={() => { setView('library'); setProject(null); void refreshLibrary(); }} className="flex items-center gap-2.5 rounded-xl px-1.5 py-1 font-bold tracking-tight transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--space-brand-primary-600)] shadow-[0_2px_10px_color-mix(in_srgb,var(--space-brand-primary-600)_45%,transparent)]"><Film className="h-5 w-5 text-white" /></span>SceneForge</button><span className="hidden text-sm text-[var(--space-text-muted)] sm:block">Avatar-first explainers, directed scene by scene</span><div className="ml-auto flex gap-2">{project ? <button onClick={() => setAssetStudioOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><ImagePlus className="h-4 w-4" />Asset Studio</button> : null}<button onClick={() => setVergerOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><MessageSquareText className="h-4 w-4" />Verger</button><button aria-label="Settings" onClick={() => setView('settings')} className="rounded-xl border border-[var(--space-border-default)] p-2 transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Settings className="h-4 w-4" /></button></div></header>
-    {error ? <div className="flex items-center justify-between gap-3 border-b border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_14%,transparent)] px-5 py-2.5 text-sm leading-relaxed text-[var(--space-semantic-danger)]"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded-lg p-1 transition-colors hover:bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_18%,transparent)]"><X className="h-4 w-4" /></button></div> : null}
+  return <div className="sceneforge-app relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]">
+    <style>{`@media (prefers-reduced-motion: reduce) { .sceneforge-app *, .sceneforge-app *::before, .sceneforge-app *::after { animation: none !important; transition-duration: 0.01ms !important; } }`}</style>
+    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-5"><button onClick={() => { setView('library'); setProject(null); void refreshLibrary(); }} className="flex items-center gap-2.5 rounded-xl px-1.5 py-1 font-bold tracking-tight transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]">SceneForge</button><span className="hidden text-sm text-[var(--space-text-muted)] sm:block">Avatar-first explainers, directed scene by scene</span><div className="ml-auto flex gap-2">{project ? <button onClick={() => setAssetStudioOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><ImagePlus className="h-4 w-4" />Asset Studio</button> : null}<button onClick={() => setVergerOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><MessageSquareText className="h-4 w-4" />Verger</button><button aria-label="Settings" onClick={() => setView('settings')} className="rounded-xl border border-[var(--space-border-default)] p-2 transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Settings className="h-4 w-4" /></button></div></header>
+    {error ? <div className="flex items-center justify-between gap-3 border-b border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_14%,transparent)] px-5 py-2.5 text-sm leading-relaxed text-[var(--space-semantic-danger)]"><span>{friendlyErrorText(error)}</span><button aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded-lg p-1 transition-colors hover:bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_18%,transparent)]"><X className="h-4 w-4" /></button></div> : null}
+    {project && vergerSteps.length ? <details className="shrink-0 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2.5"><summary className="cursor-pointer text-xs font-semibold text-[var(--space-text-secondary)]">Production status — <span className="font-normal text-[var(--space-text-muted)]">{project.stage_note || note || (busy ? 'Working on the current stage' : 'Waiting for you')}</span></summary><div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">{vergerSteps.map((step) => <span key={step.label} className="flex items-center gap-2 text-xs">{step.state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--space-semantic-success)]" /> : step.state === 'active' ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--space-text-brand)]" /> : <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)]" />}<span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span></span>)}</div></details> : null}
     <main className="flex-1 overflow-y-auto">{content()}</main>
-    {sceneImageError ? <div role="alert" className="absolute bottom-5 right-5 z-30 flex max-w-sm items-start gap-3 rounded-xl border border-[var(--space-semantic-danger)] bg-[var(--space-surface-card)] p-4 text-sm text-[var(--space-text-primary)] shadow-2xl"><span>{sceneImageError}</span><button aria-label="Dismiss image generation error" onClick={() => setSceneImageError('')}><X className="h-4 w-4" /></button></div> : null}
+    {sceneImageError ? <div role="alert" className="absolute bottom-5 right-5 z-30 flex max-w-sm items-start gap-3 rounded-xl border border-[var(--space-semantic-danger)] bg-[var(--space-surface-card)] p-4 text-sm text-[var(--space-text-primary)] shadow-2xl"><span>{friendlyErrorText(sceneImageError)}</span><button aria-label="Dismiss image generation error" onClick={() => setSceneImageError('')}><X className="h-4 w-4" /></button></div> : null}
     {vergerOpen ? <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-xl flex-col border-l border-[var(--space-border-default)] bg-[var(--space-surface-card)] shadow-2xl">
-      <div className="flex items-center justify-between border-b border-[var(--space-border-default)] px-6 py-4"><div><h2 className="text-lg font-bold tracking-tight">Verger</h2><p className="mt-0.5 text-xs text-[var(--space-text-muted)]">The orchestrator LLM — it knows this project, its scenes and its timeline</p></div><button aria-label="Close Verger" onClick={() => setVergerOpen(false)} className="rounded-lg p-1.5 transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_7%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><X className="h-5 w-5" /></button></div>
+      <div className="flex items-center justify-between border-b border-[var(--space-border-default)] px-6 py-4"><div><h2 className="text-lg font-bold tracking-tight">Verger</h2><p className="mt-0.5 text-xs text-[var(--space-text-muted)]">Your project director — it knows this project, its scenes and its timeline</p></div><button aria-label="Close Verger" onClick={() => setVergerOpen(false)} className="rounded-lg p-1.5 transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_7%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><X className="h-5 w-5" /></button></div>
       {project && vergerSteps.length ? <div className="border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-6 py-3">
         <p className="text-[10px] font-bold uppercase tracking-[.18em] text-[var(--space-text-muted)]">Pipeline status</p>
         <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">{vergerSteps.map((step) => <span key={step.label} className="flex items-center gap-2 text-xs">{step.state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--space-semantic-success)]" /> : step.state === 'active' ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--space-text-brand)]" /> : <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)]" />}<span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span></span>)}</div>
@@ -1216,6 +1268,10 @@ export default function App() {
       </div>
     </aside> : null}
     {assetStudioOpen && project ? <AssetStudio project={project} scenes={scenes} onAdopted={(sceneId, url) => setScenes((all) => all.map((scene) => scene.id === sceneId ? { ...scene, render_url: url, status: 'ready' as const } : scene))} onClose={() => setAssetStudioOpen(false)} /> : null}
+    <AgentChatProvider appContext={agentContext}>
+      <AgentChatButton />
+      <AgentChatPanel />
+    </AgentChatProvider>
   </div>;
 }
 

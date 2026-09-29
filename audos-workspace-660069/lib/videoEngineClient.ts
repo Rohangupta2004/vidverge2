@@ -6,23 +6,20 @@
  *           Content-Type only; no extra token header needed)
  *           GET  /api/veo/status/:operationId      poll every 5s
  *
- *  RUNWAY   POST /api/generate/runway/video        (X-Workspace-DB-Token +
+ *  RUNWAY   POST /api/generate/runway/quote        (free — NO auth)
+ *           POST /api/generate/runway/video        (X-Workspace-DB-Token +
  *           POST /api/generate/runway/recipes/:id   fresh Idempotency-Key)
  *           GET  /api/generate/runway/status/:id    poll every 5s (with token)
  *
  * Error contract implemented here for every surface:
  *   400 → name the offending field from the Zod `details` array
  *   401 → session problem            402 → wallet too low (link to wallet)
- *   429 → absorbed here (auto-retried); never blocks a submit
- *   502 → transient, safe to retry
+ *   429 → show retry-after           502 → transient, safe to retry
  *   503 → provider not enabled ("Runway generation is being enabled — check back soon.")
  * `uncertain` Runway status → do NOT resubmit. failed/cancelled → auto-refund.
- *
- * Generation is deliberately UNGATED: there is no cooldown, no quote step and
- * no credit check between the user pressing Generate and the provider call.
  */
 
-import { RUNWAY_DISABLED_MESSAGE, capPromptText, groupAModel, validateGroupAInputs } from './videoEngines';
+import { RUNWAY_DISABLED_MESSAGE, capPromptText, validateGroupAInputs } from './videoEngines';
 
 export class EngineError extends Error {
   code: string;
@@ -30,16 +27,13 @@ export class EngineError extends Error {
   /** True when an identical retry can plausibly succeed (429/502/network). */
   retryable: boolean;
   retryAfterSeconds?: number;
-  /** The raw provider/proxy payload, kept so a rejection can be diagnosed. */
-  detail?: unknown;
-  constructor(message: string, opts: { code?: string; status?: number; retryable?: boolean; retryAfterSeconds?: number; detail?: unknown } = {}) {
+  constructor(message: string, opts: { code?: string; status?: number; retryable?: boolean; retryAfterSeconds?: number } = {}) {
     super(message);
     this.name = 'EngineError';
     this.code = opts.code || 'error';
     this.status = opts.status || 0;
     this.retryable = Boolean(opts.retryable);
     this.retryAfterSeconds = opts.retryAfterSeconds;
-    this.detail = opts.detail;
   }
 }
 
@@ -73,7 +67,7 @@ export function describeHttpError(status: number, data: any, context = 'The requ
   }
   if (status === 429) {
     const after = Number(data?.retryAfterSeconds) || undefined;
-    return new EngineError(`${context} could not get through to the provider after several automatic retries.`, { code: code || 'rate_limited', status, retryable: true, retryAfterSeconds: after });
+    return new EngineError(`The service is rate-limited right now${after ? ` — retry in about ${after}s` : ' — wait a minute and retry'}.`, { code: code || 'rate_limited', status, retryable: true, retryAfterSeconds: after });
   }
   if (status === 502) {
     return new EngineError('The provider hiccuped (502). This one is safe to retry.', { code: code || 'bad_gateway', status, retryable: true });
@@ -115,41 +109,6 @@ function wsToken(): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * POST JSON and absorb the throttles that are not decisions about the request:
- * a 429 or 502 is waited out and submitted again (up to MAX_ATTEMPTS) instead
- * of being handed to the user as "come back later". Headers are passed in
- * already built so a Runway retry reuses the SAME Idempotency-Key — the key
- * exists precisely so an identical resend cannot double-charge.
- */
-async function postJson(path: string, body: unknown, headers: Record<string, string>, service: string): Promise<{ res: Response; data: any }> {
-  const MAX_ATTEMPTS = 5;
-  let networkError: EngineError | null = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    let res: Response;
-    try {
-      res = await fetch(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify(body),
-      });
-    } catch (e: any) {
-      networkError = new EngineError(`Could not reach ${service}: ${String(e?.message || e)}`, { code: 'network', retryable: true });
-      if (attempt === MAX_ATTEMPTS) throw networkError;
-      await sleep(attempt * 2000);
-      continue;
-    }
-    const data = await res.json().catch(() => null);
-    if ((res.status === 429 || res.status === 502) && attempt < MAX_ATTEMPTS) {
-      const after = Number(data?.retryAfterSeconds);
-      await sleep(Math.min(20000, Number.isFinite(after) && after > 0 ? after * 1000 : attempt * 2000));
-      continue;
-    }
-    return { res, data };
-  }
-  throw networkError || new EngineError(`${service} did not answer.`, { code: 'network', retryable: true });
-}
-
 // ---------------------------------------------------------------------------
 // GROUP A — /api/veo
 // ---------------------------------------------------------------------------
@@ -172,95 +131,51 @@ export interface GroupAKickoff {
   generationId?: string;
   cost?: string;
   estimatedDuration?: string;
-  /** The model the accepted job actually rendered on. */
-  modelUsed: string;
-  /** Set when the requested engine was refused and another one took the job. */
-  fallbackFrom?: string;
-  /** Why the requested engine was refused — shown next to the running job. */
-  fallbackReason?: string;
 }
 
-/**
- * Engines whose provider route is known to accept a submit. When the chosen
- * engine is refused, the same brief is resubmitted on the first of these the
- * inputs are legal on, so a dead provider route costs the user a note rather
- * than their generation.
- */
-const SUBMIT_FALLBACK_MODELS = [
-  'gemini-omni-flash-preview',
-  'veo-3.1-fast-generate-preview',
-  'veo-3.1-generate-preview',
-];
-
-function groupABody(model: string, params: GroupASubmitParams): Record<string, unknown> {
+export async function submitGroupA(params: GroupASubmitParams): Promise<GroupAKickoff> {
+  const violation = validateGroupAInputs(params.model, params);
+  if (violation) throw new EngineError(violation, { code: 'combining_rules', status: 400 });
   const body: Record<string, unknown> = {
-    model,
+    model: params.model,
     prompt: capPromptText(params.prompt, 1000),
     aspectRatio: params.aspectRatio || '16:9',
     generateAudio: Boolean(params.generateAudio),
+    // The default safety level false-positives on seeded reference frames.
+    safetyFilterLevel: 'block_only_high',
   };
-  // safetyFilterLevel is a Google-native control (the default level
-  // false-positives on seeded reference frames). Sora and the OpenRouter-hosted
-  // models have no equivalent, so it only travels on the Google routes.
-  if (/^(gemini-|veo-)/.test(model)) body.safetyFilterLevel = 'block_only_high';
   if (params.duration) body.duration = Math.max(4, Math.min(25, Math.round(params.duration)));
   if (params.negativePrompt) body.negativePrompt = capPromptText(params.negativePrompt, 500);
   if (params.resolution) body.resolution = params.resolution;
   if (params.imageData) body.imageData = params.imageData;
   if (params.referenceImages?.length) body.referenceImages = params.referenceImages.slice(0, 3);
   if (params.lastFrameImage) body.lastFrameImage = params.lastFrameImage;
-  return body;
-}
 
-async function submitGroupAOnce(model: string, params: GroupASubmitParams): Promise<GroupAKickoff> {
-  const { res, data } = await postJson('/api/veo/generate/video', groupABody(model, params), {}, 'the video service');
+  let res: Response;
+  try {
+    res = await fetch('/api/veo/generate/video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e: any) {
+    throw new EngineError(`Could not reach the video service: ${String(e?.message || e)}`, { code: 'network', retryable: true });
+  }
+  const data = await res.json().catch(() => null);
   if (!res.ok) throw describeHttpError(res.status, data, 'The video request');
-  const operationId = String((data && (data.operationId || data.operation_id)) || '');
-  // The proxy answers 200 OK with a SYNTHETIC operation id (and status
-  // 'failed') when the provider route itself refused the job. Those bodies
-  // routinely carry no error text at all, so log and attach the whole payload
-  // rather than swallowing it behind a generic sentence.
+  const operationId = data && (data.operationId || data.operation_id);
+  // The proxy can answer 200 OK with a placeholder error id or status:'failed'
+  // when the provider submission itself failed.
   const failed = String(data?.status || '').toLowerCase() === 'failed';
-  const synthetic = /^(veo_video_error_|openrouter_error_)/.test(operationId);
-  if (!operationId || failed || synthetic) {
-    console.error(`[videoEngineClient] ${model} refused at submit (HTTP ${res.status})`, data);
-    const reported = String(data?.errorMessage || data?.error?.message || (typeof data?.error === 'string' ? data.error : '') || '');
-    const route = operationId.startsWith('openrouter_error_') ? 'the OpenRouter route' : 'the provider route';
-    const dump = data ? JSON.stringify(data).slice(0, 400) : 'no response body';
-    throw new EngineError(
-      `${groupAModel(model)?.name || model}: ${route} refused the job${reported ? ` — ${reported}` : ' and returned no reason'}`
-      + ` (HTTP ${res.status}${operationId ? `, ${operationId}` : ''}). Response: ${dump}`,
-      { code: 'provider_rejected', status: res.status, detail: data },
-    );
+  if (typeof operationId !== 'string' || !operationId || failed || /^(veo_video_error_|openrouter_error_)/.test(operationId)) {
+    throw new EngineError(String(data?.errorMessage || data?.error || 'The provider did not accept this generation.'), { code: 'provider_rejected', status: res.status });
   }
   return {
     operationId,
-    modelUsed: model,
     generationId: data?.generationId ? String(data.generationId) : undefined,
     cost: data?.cost !== undefined ? String(data.cost) : undefined,
     estimatedDuration: data?.estimatedDuration ? String(data.estimatedDuration) : undefined,
   };
-}
-
-export async function submitGroupA(params: GroupASubmitParams): Promise<GroupAKickoff> {
-  const violation = validateGroupAInputs(params.model, params);
-  if (violation) throw new EngineError(violation, { code: 'combining_rules', status: 400 });
-  try {
-    return await submitGroupAOnce(params.model, params);
-  } catch (refusal) {
-    if (!(refusal instanceof EngineError) || refusal.code !== 'provider_rejected') throw refusal;
-    for (const alt of SUBMIT_FALLBACK_MODELS) {
-      if (alt === params.model || validateGroupAInputs(alt, params)) continue;
-      try {
-        const kick = await submitGroupAOnce(alt, params);
-        return { ...kick, fallbackFrom: params.model, fallbackReason: refusal.message };
-      } catch (next) {
-        if (next instanceof EngineError && next.code === 'provider_rejected') continue;
-        throw next;
-      }
-    }
-    throw refusal;
-  }
 }
 
 export interface GroupAStatus {
@@ -299,11 +214,62 @@ export async function pollGroupA(operationId: string, opts: { onProgress?: (p: n
 }
 
 // ---------------------------------------------------------------------------
-// RUNWAY — submit / poll
+// RUNWAY — quote / submit / poll
 // ---------------------------------------------------------------------------
+
+export interface RunwayQuote {
+  ok: boolean;
+  /** Price in USD when the quote endpoint reports one. */
+  priceUsd?: number;
+  credits?: number;
+  raw: any;
+  error?: string;
+}
+
+/** FREE validation + exact price — no auth, no billing, no provider work.
+ * Body: a /video body, or { recipeId, ...recipeFields }. */
+export async function runwayQuote(body: Record<string, unknown>): Promise<RunwayQuote> {
+  let res: Response;
+  try {
+    res = await fetch('/api/generate/runway/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e: any) {
+    return { ok: false, raw: null, error: `Could not reach the quote service: ${String(e?.message || e)}` };
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = describeHttpError(res.status, data, 'The quote request');
+    return { ok: false, raw: data, error: err.message };
+  }
+  const credits = Number(data?.credits ?? data?.totalCredits ?? data?.quote?.credits);
+  const priceRaw = data?.priceUsd ?? data?.price ?? data?.totalUsd ?? data?.quote?.priceUsd ?? data?.quote?.price;
+  let priceUsd = Number(priceRaw);
+  // Platform catalog prices provider credits at $0.01 / credit.
+  if (!Number.isFinite(priceUsd) && Number.isFinite(credits)) priceUsd = credits * 0.01;
+  return { ok: true, priceUsd: Number.isFinite(priceUsd) ? priceUsd : undefined, credits: Number.isFinite(credits) ? credits : undefined, raw: data };
+}
+
+/** Live, free provider gate used by every Auto Director surface. A successful
+ * quote proves the Runway contract is accepting this session's inputs without
+ * submitting provider work or spending wallet credits. */
+export async function checkRunwayAvailability(): Promise<{ available: boolean; reason?: string }> {
+  const quote = await runwayQuote({
+    model: 'gen4.5',
+    promptText: 'Slow cinematic product reveal in warm studio light.',
+    ratio: '1280:720',
+    duration: 5,
+  });
+  return quote.ok
+    ? { available: true }
+    : { available: false, reason: quote.error || RUNWAY_DISABLED_MESSAGE };
+}
 
 function runwayHeaders(): Record<string, string> {
   return {
+    'Content-Type': 'application/json',
     'X-Workspace-DB-Token': wsToken(),
     // Fresh UUID per submit — reusing one with different input answers 409.
     'Idempotency-Key': (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -318,7 +284,13 @@ export interface RunwayKickoff {
 }
 
 async function runwaySubmit(path: string, body: Record<string, unknown>, context: string): Promise<RunwayKickoff> {
-  const { res, data } = await postJson(path, body, runwayHeaders(), 'Runway');
+  let res: Response;
+  try {
+    res = await fetch(path, { method: 'POST', headers: runwayHeaders(), body: JSON.stringify(body) });
+  } catch (e: any) {
+    throw new EngineError(`Could not reach Runway: ${String(e?.message || e)}`, { code: 'network', retryable: true });
+  }
+  const data = await res.json().catch(() => null);
   // A provider timeout is a 202 with status 'uncertain' — never resubmit it.
   if (!res.ok && res.status !== 202) throw describeHttpError(res.status, data, context);
   const taskId = String(data?.taskId || data?.id || data?.task_id || '');
@@ -329,9 +301,8 @@ async function runwaySubmit(path: string, body: Record<string, unknown>, context
   return { taskId, status, uncertain: status === 'uncertain', raw: data };
 }
 
-/** Submit a base Runway video (gen4.5 t2v / i2v, gen4_turbo i2v). Goes
- * straight to the provider — no quote step. Validate every reference URL with
- * isPublicHttpsUrl BEFORE calling. */
+/** Submit a base Runway video (gen4.5 t2v / i2v, gen4_turbo i2v). Validate
+ * every reference URL with isPublicHttpsUrl BEFORE calling. */
 export function runwaySubmitVideo(body: Record<string, unknown>): Promise<RunwayKickoff> {
   return runwaySubmit('/api/generate/runway/video', body, 'The Runway video request');
 }

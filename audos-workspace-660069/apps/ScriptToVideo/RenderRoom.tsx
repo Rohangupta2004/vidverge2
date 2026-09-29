@@ -14,8 +14,19 @@ import {
 } from 'lucide-react';
 import { Film, FilmScene, T } from './api';
 import { audioReady, musicReady, narrationReady, sfxReady } from './pipeline/audio';
+import { videoEngine } from '../../lib/videoEngines';
 
 const DONE = new Set(['completed', 'skipped']);
+
+function customerError(value: unknown): string {
+  const raw = String(value || 'This step could not be completed.');
+  const named = raw.replace(/(?:openrouter\/[^\s,;]+|gemini-omni-flash-preview|veo-[\w.-]+)/g, (id) => videoEngine(id)?.label || 'the selected video engine');
+  if (/no_credentials|\b401\b/i.test(named)) return 'Your workspace session is not ready yet. Try again in a moment.';
+  if (/insufficient|payment|required|\b402\b/i.test(named)) return 'This generation needs more workspace credits before it can start.';
+  if (/rate.?limit|\b429\b/i.test(named)) return 'The video service is busy right now. Wait a moment, then retry this scene.';
+  if (/provider[_ -]?error|\b50[0234]\b|service unavailable/i.test(named)) return 'The video service is temporarily unavailable. Your completed scenes are safe; retry this scene shortly.';
+  return named;
+}
 
 function statusMeta(s: FilmScene): { word: string; color: string; icon: any } {
   switch (String(s.status)) {
@@ -51,6 +62,8 @@ export default function RenderRoom(props: {
   onPrepare: (scene: FilmScene) => void;
   onRetry: (scene: FilmScene) => void;
   onRegenPrompt: (scene: FilmScene) => void;
+  onRedo: (scene: FilmScene) => void;
+  redoingId: number | null;
   onUseCharRef: (scene: FilmScene) => void;
   onSkip: (scene: FilmScene) => void;
 }) {
@@ -99,8 +112,10 @@ export default function RenderRoom(props: {
         {/* Generation states + auto modes (the Final Assembly control lives in
             the persistent bottom bar, never buried down here) */}
         <div style={{ padding: '10px 14px 14px', borderTop: `1px solid ${T.raised}`, display: 'flex', flexDirection: 'column', gap: 9 }}>
-          <GenerationStates film={film} scenes={scenes} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }} title="Prepare → generate → extract frame → decide continuity → next — still strictly one clip at a time.">
+          <details>
+            <summary style={{ cursor: 'pointer', color: T.muted, fontSize: 12, fontWeight: 700, listStylePosition: 'inside' }}>Advanced — automation</summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 9 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }} title="Prepare → generate → extract frame → decide continuity → next — still strictly one clip at a time. Remembered per film, so reopening this one picks up where it left off.">
             <input type="checkbox" checked={auto} onChange={(e) => props.onToggleAuto(e.target.checked)} style={{ accentColor: T.live }} />
             <Zap size={13} color={auto ? T.live : T.dim} />
             <span style={{ color: auto ? T.bone : T.muted, fontSize: 12.5, fontWeight: 600 }}>Auto-generate</span>
@@ -110,19 +125,24 @@ export default function RenderRoom(props: {
             <Wand2 size={13} color={autoPost ? T.live : T.dim} />
             <span style={{ color: autoPost ? T.bone : T.muted, fontSize: 12.5, fontWeight: 600 }}>Auto-complete post-production</span>
           </label>
+            </div>
+          </details>
         </div>
       </div>
 
       {/* —— Active scene panel —— */}
       <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, padding: '18px 22px 28px' }}>
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
-          {/* Live pipeline note */}
-          <div style={{ color: generating || assembling ? T.live : T.muted, fontSize: 12.5, minHeight: 18, marginBottom: 4 }}>
-            {note || film.stage_note || '…'}
-          </div>
+          {/* Persisted pipeline stage, collapsed so the active scene remains the focus. */}
+          <details style={{ marginBottom: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${T.raised}`, borderRadius: 10, padding: '9px 12px' }}>
+            <summary style={{ cursor: 'pointer', color: generating || assembling ? T.live : T.muted, fontSize: 12.5, fontWeight: 700, listStylePosition: 'inside' }}>
+              Production status — {note || film.stage_note || (active ? 'Waiting for the next scene' : 'Waiting for you')}
+            </summary>
+            <div style={{ marginTop: 9 }}><GenerationStates film={film} scenes={scenes} /></div>
+          </details>
           {film.error ? (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, margin: '6px 0 10px', background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '9px 13px' }}>
-              <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{film.error}</span>
+              <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{customerError(film.error)}</span>
             </div>
           ) : null}
 
@@ -210,6 +230,8 @@ function ScenePanel(props: {
   onPrepare: (scene: FilmScene) => void;
   onRetry: (scene: FilmScene) => void;
   onRegenPrompt: (scene: FilmScene) => void;
+  onRedo: (scene: FilmScene) => void;
+  redoingId: number | null;
   onUseCharRef: (scene: FilmScene) => void;
   onSkip: (scene: FilmScene) => void;
 }) {
@@ -218,22 +240,29 @@ function ScenePanel(props: {
   const prev = [...scenes].filter((x) => x.idx < s.idx && x.status === 'completed').sort((a, b) => b.idx - a.idx)[0] || null;
   const refs = Array.isArray(s.reference_assets) ? s.reference_assets : [];
   const working = busy || s.status === 'generating';
+  // LightBeam: the ACTIVE scene card carries the amber focus glow.
+  const activeGlow = isActive && !DONE.has(String(s.status));
 
   return (
-    <div style={{ background: T.raised, border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, padding: '18px 20px', marginTop: 6 }}>
+    <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '18px 20px', marginTop: 6, boxShadow: activeGlow ? '0 0 0 2px #f59e0b, 0 0 20px rgba(245,158,11,0.3)' : 'none', transition: 'box-shadow 0.3s ease' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ color: T.bone, fontSize: 17, fontWeight: 800, letterSpacing: 0.5, fontFamily: T.mono }}>SCENE {String(s.idx + 1).padStart(2, '0')}</span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: meta.color, fontSize: 11.5, fontWeight: 700, border: `1px solid ${meta.color}`, borderRadius: 999, padding: '2px 10px' }}>{meta.icon} {meta.word}</span>
       </div>
 
-      <div style={{ color: T.muted, fontSize: 12.5, lineHeight: 1.55, fontStyle: 'italic', marginTop: 12 }}>“{String(s.script_segment || '').slice(0, 320)}{String(s.script_segment || '').length > 320 ? '…' : ''}”</div>
+      {/* An empty segment used to render as a pair of bare quote marks. */}
+      <div style={{ color: T.muted, fontSize: 12.5, lineHeight: 1.55, fontStyle: 'italic', marginTop: 12 }}>
+        {String(s.script_segment || '').trim()
+          ? `“${String(s.script_segment).slice(0, 320)}${String(s.script_segment).length > 320 ? '…' : ''}”`
+          : 'This clip carries no spoken line — it is a visual beat the director wrote from the surrounding story.'}
+      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
         <MetaRow label="Duration">{Math.round(Number(s.duration_s) || 6)}s</MetaRow>
         {s.prompt ? (
           <MetaRow label="Continuity">
             {s.continuation ? (
-              <span style={{ color: T.done }}><Check size={12} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} />Continuing from Scene {prev ? String(prev.idx + 1).padStart(2, '0') : '—'}</span>
+              <span style={{ color: T.done }}><Check size={12} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} />{prev ? `Continuing from Scene ${String(prev.idx + 1).padStart(2, '0')}` : 'Continuing from the previous clip'}</span>
             ) : (
               <span>Independent scene{prev ? ' — the previous frame is deliberately NOT used' : ''}</span>
             )}
@@ -267,9 +296,18 @@ function ScenePanel(props: {
         </div>
       ) : null}
 
+      {/* Skeleton shimmer while the clip renders (pure CSS keyframes). */}
+      {s.status === 'generating' ? (
+        <div style={{ marginTop: 14 }}>
+          <div className="lb-shimmer" style={{ width: film.aspect_ratio === '9:16' ? 200 : 380, height: film.aspect_ratio === '9:16' ? 300 : 214, borderRadius: 12 }} />
+          <div className="lb-shimmer" style={{ width: 260, height: 12, marginTop: 10 }} />
+          <div className="lb-shimmer" style={{ width: 180, height: 12, marginTop: 6 }} />
+        </div>
+      ) : null}
+
       {s.status === 'failed' && s.error ? (
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, marginTop: 14, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '9px 13px' }}>
-          <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{s.error}</span>
+          <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{customerError(s.error)}</span>
         </div>
       ) : null}
 
@@ -296,7 +334,7 @@ function ScenePanel(props: {
             className="s2v-lift"
             disabled={working}
             onClick={() => props.onGenerate(s)}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, background: working ? T.raised : T.live, color: working ? T.dim : '#1A1205', border: 'none', borderRadius: 10, padding: '12px 26px', fontSize: 14, fontWeight: 700, cursor: working ? 'default' : 'pointer', boxShadow: working ? 'none' : '0 2px 12px rgba(232,163,60,0.25)' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, background: working ? T.raised : T.live, color: working ? T.dim : '#1A1205', border: 'none', borderRadius: 10, padding: '12px 26px', fontSize: 14, fontWeight: 700, cursor: working ? 'default' : 'pointer', boxShadow: working ? 'none' : '0 2px 12px rgba(245,158,11,0.25)' }}
           >
             <Play size={15} /> Generate Video
           </button>
@@ -332,16 +370,23 @@ function ScenePanel(props: {
             <Sparkles size={13} /> New prompt
           </button>
         ) : null}
-        {s.status === 'completed' && !working ? (
-          <button className="s2v-ghost" onClick={() => props.onRegenPrompt(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 9, padding: '9px 15px', fontSize: 12, cursor: 'pointer' }} title="Opus writes a fresh prompt for this scene; generate again to replace the clip. Other scenes are untouched.">
+        {s.status === 'completed' && props.redoingId === s.id ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: T.live, fontSize: 12.5, fontWeight: 600, padding: '10px 4px' }}>
+            <Loader2 size={14} className="animate-spin" /> Redoing — the director is writing a fresh prompt, then the clip re-renders. Other scenes are untouched.
+          </div>
+        ) : s.status === 'completed' && !working ? (
+          <button className="s2v-ghost" disabled={props.redoingId != null} onClick={() => props.onRedo(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 9, padding: '9px 15px', fontSize: 12, cursor: props.redoingId != null ? 'default' : 'pointer', opacity: props.redoingId != null ? 0.5 : 1 }} title="Opus writes a fresh prompt and the clip re-renders in place. Other scenes are untouched.">
             <RefreshCw size={12} /> Redo this scene
           </button>
         ) : null}
       </div>
 
-      {s.status === 'ready' && s.prompt && !props.auto ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: T.dim, fontSize: 11.5, marginTop: 12 }}>
-          <ArrowRight size={11} /> Generation starts only when you click — prompt preparation and rendering are separate steps.
+      {s.status === 'ready' && s.prompt ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: props.auto ? T.live : T.dim, fontSize: 11.5, marginTop: 12 }}>
+          {props.auto ? <Zap size={11} /> : <ArrowRight size={11} />}
+          {props.auto
+            ? 'Auto-generate is on — this clip starts rendering by itself, then the next prompt is prepared.'
+            : 'Generation starts only when you click — prompt preparation and rendering are separate steps.'}
         </div>
       ) : null}
     </div>

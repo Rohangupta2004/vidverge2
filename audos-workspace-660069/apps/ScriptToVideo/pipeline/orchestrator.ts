@@ -3,7 +3,7 @@
  * pipeline (Sep 2026 rebuild).
  *
  *   SCRIPT_RECEIVED → ANALYZING_SCRIPT → SEGMENTING_SCRIPT → PREPARING_SCENE
- *   → PROMPT_READY → (user clicks Generate) → GENERATING_VIDEO → VIDEO_COMPLETED
+ *   → PROMPT_READY → (auto-generate, or a click) → GENERATING_VIDEO → VIDEO_COMPLETED
  *   → EXTRACTING_FINAL_FRAME → FRAME_READY → DETERMINE_NEXT_REFERENCE
  *   → PREPARE_NEXT_SCENE → PROMPT_READY → …
  *   → ALL_SCENES_COMPLETED → FFMPEG_ASSEMBLY → FINAL_VIDEO
@@ -11,9 +11,12 @@
  * Core rules enforced here:
  * - Opus understands the WHOLE story first (one segmentation pass), then
  *   prepares exactly ONE clip prompt at a time.
- * - Prompt preparation and video generation are SEPARATE operations — the
- *   user (or the optional auto mode) triggers each generation explicitly, and
- *   dependent clips are never generated simultaneously.
+ * - Prompt preparation and video generation are SEPARATE operations — each
+ *   generation is triggered from PROMPT_READY, by auto-generate or by a click,
+ *   and dependent clips are never generated simultaneously.
+ * - The frame stage cannot hang: every step of it is bounded, and a film found
+ *   stranded at EXTRACTING_FINAL_FRAME is recovered from the clip that already
+ *   rendered rather than re-rendered.
  * - After every clip: read the REAL duration from media metadata, extract and
  *   validate the final frame with FFmpeg, then let Opus decide whether the
  *   NEXT scene continues from that frame or opens independently.
@@ -71,6 +74,54 @@ async function patchScene(scene: FilmScene, hooks: RunHooks, patch: Partial<Film
 async function setState(film: Film, hooks: RunHooks, state: MachineState, note?: string): Promise<void> {
   await patchFilm(film, hooks, { machine_state: state, ...(note ? { stage_note: note } : {}) });
   if (note) say(hooks, note);
+}
+
+// ---------------------------------------------------------------------------
+// Stall protection for the frame stage
+// ---------------------------------------------------------------------------
+
+/** The frame stage runs entirely in the browser (FFmpeg.wasm, <video> decode,
+ * upload) and none of those steps time out on their own, so a wedged decode
+ * used to strand a film at EXTRACTING_FINAL_FRAME forever. The clip itself has
+ * already rendered and is stored by then, so every step of the stage is now
+ * bounded and a blown budget degrades to "no keyframe" instead of hanging. */
+export const FRAME_EXTRACTION_TIMEOUT_MS = 5 * 60 * 1000;
+/** How long a film may sit in EXTRACTING_FINAL_FRAME before it counts as stalled. */
+export const FRAME_STALL_MS = 5 * 60 * 1000;
+const PROBE_TIMEOUT_MS = 90_000;
+const DIRECTOR_TIMEOUT_MS = 120_000;
+/** A recovery pass re-reads a clip that already exists, so it degrades fast
+ * rather than spending the full budget a second time. */
+const RECOVERY_FRAME_TIMEOUT_MS = 90_000;
+
+function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} did not finish within ${Math.round(ms / 1000)}s.`)), ms);
+    work.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+/** Milliseconds since the film row was last written. An unreadable timestamp
+ * reads as "just updated", so nothing is ever recovered on a guess. */
+export function msSinceFilmUpdate(film: Film): number {
+  const at = Date.parse(String(film.updated_at || ''));
+  return Number.isFinite(at) ? Math.max(0, Date.now() - at) : 0;
+}
+
+/** The scene whose clip landed but whose frame stage never finished. */
+export function stalledFrameScene(scenes: FilmScene[]): FilmScene | null {
+  return orderedScenes(scenes).find((s) => s.status === 'generating' && !!s.asset_url && !s.keyframe_url) || null;
+}
+
+/** True when the film has been sitting in the frame stage past the budget with
+ * a rendered clip and nothing to show for it. */
+export function isFrameExtractionStalled(film: Film, scenes: FilmScene[], stalledForMs: number): boolean {
+  if (film.machine_state !== 'EXTRACTING_FINAL_FRAME') return false;
+  if (stalledForMs < FRAME_STALL_MS) return false;
+  return !!stalledFrameScene(scenes);
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +295,8 @@ export async function prepareScene(
     // scene NEVER receives the previous frame — visual contamination is a bug.
     const assets: ReferenceAsset[] = [];
     let referenceType = prepared.reference_type;
-    if (prepared.continuation && prev?.keyframe_url) {
+    let continuation = prepared.continuation;
+    if (continuation && prev?.keyframe_url) {
       assets.push({ role: 'first_frame', url: prev.keyframe_url });
       if (prepared.needs_character) {
         const character = await ensureCharacterRef(film, prepared.needs_character, hooks);
@@ -259,6 +311,20 @@ export async function prepareScene(
     } else if (referenceType === 'scene_reference') {
       referenceType = 'none';
     }
+    // The previous scene's keyframe can legitimately be missing: extraction
+    // failed, timed out, or the scene was recovered without one. A scene must
+    // never claim previous_final_frame with no seed attached — fall back to the
+    // locked character reference, and to no reference at all when there is none.
+    if (referenceType === 'previous_final_frame' && !assets.some((a) => a.role === 'first_frame')) {
+      continuation = false;
+      const character = await ensureCharacterRef(film, prepared.needs_character, hooks);
+      if (character?.url) {
+        assets.push({ role: 'reference', url: character.url });
+        referenceType = 'character_reference';
+      } else {
+        referenceType = 'none';
+      }
+    }
 
     const spec: VideoClipSpec = {
       ...((scene.spec || {}) as VideoClipSpec),
@@ -269,7 +335,7 @@ export async function prepareScene(
       status: 'ready',
       error: null,
       prompt: prepared.prompt,
-      continuation: prepared.continuation,
+      continuation,
       reference_type: referenceType,
       reference_assets: assets,
       spec,
@@ -292,7 +358,13 @@ export async function prepareScene(
 // ---------------------------------------------------------------------------
 
 export async function generateScene(film: Film, scenes: FilmScene[], scene: FilmScene, hooks: RunHooks): Promise<void> {
-  if (!scene.prompt || scene.status !== 'ready') throw new Error(`Scene ${scene.idx + 1} has no prepared prompt yet — prepare it first.`);
+  // A scene counts as prepared when it actually HAS a prompt — the prompt
+  // field itself is the authority. The old guard also required the status
+  // flag to read 'ready', and when that flag lagged behind the written prompt
+  // it threw a false "no prepared prompt" error (and silently blocked
+  // generation) on scenes whose prompt was plainly visible on the card.
+  const preparedPrompt = typeof scene.prompt === 'string' ? scene.prompt.trim() : '';
+  if (!preparedPrompt) throw new Error(`Scene ${scene.idx + 1} has no prepared prompt yet — prepare it first.`);
   if (scenes.some((s) => s.status === 'generating')) throw new Error('Another scene is already generating — clips render one at a time.');
 
   await patchFilm(film, hooks, { status: 'producing', error: null });
@@ -301,7 +373,7 @@ export async function generateScene(film: Film, scenes: FilmScene[], scene: Film
   try {
     const spec = (scene.spec || {}) as VideoClipSpec;
     const job = await VideoModelService.createVideo({
-      prompt: scene.prompt,
+      prompt: preparedPrompt,
       negative: spec.negative,
       aspect: (film.aspect_ratio || '16:9') as Aspect,
       durationS: Number(scene.duration_s) || 6,
@@ -325,34 +397,50 @@ export async function generateScene(film: Film, scenes: FilmScene[], scene: Film
 }
 
 /** Real duration → FFmpeg final frame → continuity attributes → director check
- * → scene completed → next scene's reference decided and prompt prepared. */
-async function finalizeScene(film: Film, scenes: FilmScene[], scene: FilmScene, hooks: RunHooks, videoUrl: string): Promise<void> {
+ * → scene completed → next scene's reference decided and prompt prepared.
+ *
+ * Every step is bounded. By the time this runs the clip has rendered and is
+ * stored, so no step here may strand the film at EXTRACTING_FINAL_FRAME: one
+ * that blows its budget or throws degrades instead (no keyframe, no
+ * attributes, accepted on trust) and the scene still completes. */
+async function finalizeScene(
+  film: Film,
+  scenes: FilmScene[],
+  scene: FilmScene,
+  hooks: RunHooks,
+  videoUrl: string,
+  opts: { frameTimeoutMs?: number } = {},
+): Promise<void> {
   const aspect = (film.aspect_ratio || '16:9') as Aspect;
+  const frameBudget = opts.frameTimeoutMs ?? FRAME_EXTRACTION_TIMEOUT_MS;
   await setState(film, hooks, 'EXTRACTING_FINAL_FRAME', `Scene ${scene.idx + 1}: reading the real clip duration and extracting the final frame…`);
 
-  const realDuration = await probeVideoDuration(videoUrl);
+  let realDuration = 0;
+  try { realDuration = await withTimeout(probeVideoDuration(videoUrl), PROBE_TIMEOUT_MS, 'Reading the clip duration'); } catch { realDuration = 0; }
   let finalFrameUrl: string | null = null;
   let frameNote = '';
   try {
-    const frame = await extractFinalFrame(videoUrl, aspect);
+    const frame = await withTimeout(extractFinalFrame(videoUrl, aspect), frameBudget, 'Final frame extraction');
     finalFrameUrl = frame.url;
   } catch (e: any) {
-    frameNote = `The final frame could not be extracted (${String(e?.message || e).slice(0, 140)}) — the next scene will fall back to the character reference.`;
+    frameNote = `The final frame could not be extracted (${String(e?.message || e).slice(0, 140)}) — scene ${scene.idx + 1} is kept and the next scene opens without a keyframe.`;
   }
   let firstFrameUrl: string | null = null;
-  try { firstFrameUrl = await canvasExtractFrame(videoUrl, 0.15); } catch { /* thumbnail only */ }
+  try { firstFrameUrl = await withTimeout(canvasExtractFrame(videoUrl, 0.15), PROBE_TIMEOUT_MS, 'Thumbnail capture'); } catch { /* thumbnail only */ }
 
   await setState(film, hooks, 'FRAME_READY', frameNote || `Scene ${scene.idx + 1}: final frame captured and validated.`);
 
   let attrs: any = null;
   if (finalFrameUrl) {
     say(hooks, `Scene ${scene.idx + 1}: reading the end state for continuity…`);
-    attrs = await extractVisualAttributes(finalFrameUrl);
+    try { attrs = await withTimeout(extractVisualAttributes(finalFrameUrl), DIRECTOR_TIMEOUT_MS, 'Reading the end state'); } catch { attrs = null; }
   }
   const frames = [firstFrameUrl, finalFrameUrl].filter(Boolean) as string[];
-  const verdict = frames.length
-    ? await validateScene(scene, frames)
-    : { pass: true, issues: 'No frame could be captured for review — accepted on trust.', method: 'trust' };
+  let verdict: { pass: boolean; issues: string; method: string } = { pass: true, issues: 'No frame could be captured for review — accepted on trust.', method: 'trust' };
+  if (frames.length) {
+    try { verdict = await withTimeout(validateScene(scene, frames), DIRECTOR_TIMEOUT_MS, 'The director’s review'); }
+    catch { verdict = { pass: true, issues: 'The review could not be completed in time — accepted on trust.', method: 'trust' }; }
+  }
 
   await patchScene(scene, hooks, {
     status: 'completed',
@@ -373,7 +461,10 @@ async function finalizeScene(film: Film, scenes: FilmScene[], scene: FilmScene, 
   const next = orderedScenes(scenes).find((s) => s.idx > scene.idx && !DONE.has(String(s.status)) && s.status !== 'generating');
   if (next) {
     try {
-      await prepareScene(film, scenes, next, hooks);
+      // No keyframe means there is nothing to continue FROM, so the next scene
+      // is prepared as an independent shot rather than one that claims a seed
+      // frame it will never receive.
+      await prepareScene(film, scenes, next, hooks, finalFrameUrl ? {} : { forceIndependent: true });
     } catch (e: any) {
       say(hooks, `Scene ${next.idx + 1} could not be prepared (${String(e?.message || e).slice(0, 140)}) — scene ${scene.idx + 1} is safely completed; retry the preparation from the board.`);
     }
@@ -386,11 +477,33 @@ async function finalizeScene(film: Film, scenes: FilmScene[], scene: FilmScene, 
 // Per-scene recovery — never restart the project, never lose completed scenes
 // ---------------------------------------------------------------------------
 
-/** [Retry] — rerun generation with the SAME prompt and references. */
+/** [Retry] — rerun generation with the SAME prompt and references.
+ *
+ * BUG FIX (Sep 27 2026): the old version flipped the scene to 'ready' and
+ * cleared its error BEFORE generateScene's pre-flight guards ran. When a
+ * guard threw ("Another scene is already generating"), the scene was left
+ * stranded at 'ready' with its failure context wiped — the Retry / New
+ * prompt / Skip recovery row disappeared even though nothing had been
+ * retried. The guard is now checked first, and a throw that happens before
+ * the render actually starts restores the failed state with its error. */
 export async function retryScene(film: Film, scenes: FilmScene[], scene: FilmScene, hooks: RunHooks): Promise<void> {
   if (!scene.prompt) { await prepareScene(film, scenes, scene, hooks); return; }
+  if (scenes.some((s) => s.id !== scene.id && s.status === 'generating')) {
+    throw new Error('Another scene is already generating — clips render one at a time. Wait for it to finish, then retry.');
+  }
+  const previousError = scene.error;
   await patchScene(scene, hooks, { status: 'ready', error: null });
-  await generateScene(film, scenes, scene, hooks);
+  try {
+    await generateScene(film, scenes, scene, hooks);
+  } catch (e: any) {
+    // generateScene marks a scene 'failed' itself when the render fails; only
+    // a pre-flight throw leaves it at 'ready' — restore the failed state so
+    // the recovery actions stay on screen with an honest reason.
+    if (scene.status === 'ready') {
+      await patchScene(scene, hooks, { status: 'failed', error: String(e?.message || e) || previousError });
+    }
+    throw e;
+  }
 }
 
 /** [Regenerate Prompt] — Opus re-analyzes the scene (with the failure or a
@@ -404,6 +517,47 @@ export async function regenerateScenePrompt(film: Film, scenes: FilmScene[], sce
  * and stage it on the locked character reference instead. */
 export async function useCharacterReferenceFallback(film: Film, scenes: FilmScene[], scene: FilmScene, hooks: RunHooks): Promise<void> {
   await prepareScene(film, scenes, scene, hooks, { forceIndependent: true, revisionNote: scene.error ? `Previous failure: ${scene.error}` : null });
+}
+
+/** RECOVERY — the film is stranded at EXTRACTING_FINAL_FRAME: the browser that
+ * was extracting the frame went away, or the decode wedged. The clip itself
+ * already rendered and is stored, so recovery NEVER re-renders (and never
+ * re-bills): it re-runs the frame stage from the stored clip on a short
+ * budget, and when that fails too the scene completes without a keyframe and
+ * the next scene opens with reference_type 'none'. */
+export async function recoverStalledFrameExtraction(film: Film, scenes: FilmScene[], hooks: RunHooks): Promise<void> {
+  const stalled = stalledFrameScene(scenes);
+  if (!stalled) {
+    // Nothing to salvage — re-arm the pipeline head instead of sitting stuck.
+    await resumeFilm(film, scenes, hooks);
+    return;
+  }
+  say(hooks, `Scene ${stalled.idx + 1}: the final-frame extraction stalled — picking it up again from the clip that already rendered.`);
+  try {
+    await finalizeScene(film, scenes, stalled, hooks, String(stalled.asset_url), { frameTimeoutMs: RECOVERY_FRAME_TIMEOUT_MS });
+    return;
+  } catch (e: any) {
+    say(hooks, `Scene ${stalled.idx + 1}: the retry could not finish (${String(e?.message || e).slice(0, 120)}) — keeping the clip and moving on without a keyframe.`);
+  }
+  // Last resort: the clip is good, only its keyframe is missing. Complete the
+  // scene and open the next one independently so the film keeps moving.
+  await patchScene(stalled, hooks, {
+    status: 'completed',
+    error: null,
+    keyframe_url: null,
+    validation: { pass: true, issues: 'The final frame could not be extracted — the clip is kept and continuity falls back to the character reference.', method: 'trust' },
+    duration_s: stalled.duration_s,
+  });
+  const next = orderedScenes(scenes).find((s) => s.idx > stalled.idx && !DONE.has(String(s.status)) && s.status !== 'generating');
+  if (next) {
+    try {
+      await prepareScene(film, scenes, next, hooks, { forceIndependent: true });
+    } catch (err: any) {
+      say(hooks, `Scene ${next.idx + 1} could not be prepared (${String(err?.message || err).slice(0, 140)}) — scene ${stalled.idx + 1} is safely completed; retry the preparation from the board.`);
+    }
+  } else if (allScenesDone(scenes)) {
+    await setState(film, hooks, 'ALL_SCENES_COMPLETED', 'All video scenes are complete — prepare the audio and run Final Assembly.');
+  }
 }
 
 /** [Skip Scene] — exclude this scene and move on; nothing else changes. */
@@ -886,7 +1040,15 @@ export async function runFinalAssembly(
 export async function resumeFilm(film: Film, scenes: FilmScene[], hooks: RunHooks): Promise<void> {
   for (const scene of orderedScenes(scenes)) {
     if (scene.status !== 'generating') continue;
-    if (scene.veo_operation_id) {
+    if (scene.asset_url) {
+      // The clip landed but the browser went away mid-frame-stage. Finish from
+      // the stored clip — re-rendering it would pay for the same video twice.
+      try {
+        await finalizeScene(film, scenes, scene, hooks, String(scene.asset_url), { frameTimeoutMs: RECOVERY_FRAME_TIMEOUT_MS });
+      } catch {
+        await recoverStalledFrameExtraction(film, scenes, hooks);
+      }
+    } else if (scene.veo_operation_id) {
       try {
         say(hooks, `Scene ${scene.idx + 1}: picking the render back up…`);
         const videoUrl = await VideoModelService.getVideoResult(scene.veo_operation_id);

@@ -19,28 +19,47 @@
  *   up to 3 referenceImages. Does NOT support lastFrameImage.
  * - 'openrouter' → the SAME /api/veo proxy with an openrouter/* model id
  *   (Seedance 2.0 Fast). Seed image only, no referenceImages.
+ * - 'runway' → POST /api/generate/runway/video + GET /api/generate/runway/status/:taskId,
+ *   straight from the browser: stv-scene-generate has no Runway route, and the
+ *   proxy needs its own X-Workspace-DB-Token + per-submit Idempotency-Key.
+ *   Runway job ids are stored with a 'runway:' prefix so polling routes
+ *   correctly across a reload, exactly like the kling: prefix below. The
+ *   registry lists the FULL Runway text-to-video roster from ../runwayRoster
+ *   (Gen 4.5, Veo 3.1, Seedance 2.0 / Fast / Mini / 2.5, MiniMax H3 and H3
+ *   Max, WAN 3.0 and 3.0 Prime, Grok Imagine Video 1.5, HappyHorse 1.0,
+ *   Gemini Omni Flash and Omni Flash 1.1, plus image-only Gen 4 Turbo).
+ *   THAT module owns the id spellings and resolves the platform's own spelling
+ *   from GET /api/generate/runway/capabilities, so a submit always carries the
+ *   id the proxy actually accepts. A model is refused before the round trip
+ *   only when the LIVE catalog was read and did not list it — never on a local
+ *   guess.
  * - 'kling' → POST /api/generate/kling/text-to-video (or image-to-video when
  *   a seed frame travels) + GET /api/generate/kling/status/:taskId. Kling
  *   durations are the strings '5' | '10'. Kling job ids are stored with a
  *   'kling:' prefix so status polling routes to the right endpoint even
  *   across a reload (resumeFilm only has the stored operation id).
  *
- * AVAILABILITY (catalog update, 23 Sep 2026): the full Group A catalog is
- * approved on /api/veo/generate/video — Omni Flash, Veo 3.1 / 3.1 Fast /
- * 3.0 / 3.0 Fast / 2.0, Sora 2 / 2 Pro, and the openrouter/* paths
- * (Seedance 2.0 Fast, Veo 3.1 / Fast / Lite). Kling is still platform-key
- * gated ("Kling is not configured on this platform") — its picker entries are
- * [Coming Soon] and disabled; the adapter below starts working the moment the
- * platform configures the key.
+ * AVAILABILITY (verified Sep 23 2026): Omni Flash works end-to-end. Kling
+ * answers every call with "Kling is not configured on this platform
+ * (KLING_API_KEY missing)" and every openrouter/* kickoff fails instantly at
+ * the provider — both need PLATFORM-side keys, nothing this workspace can fix.
+ * The adapters below are complete, so both models start working the moment
+ * the platform configures them; until then their picker entries carry an
+ * availability note and a submit fails with the provider's own plain reason.
  */
 
-import { Aspect, ReferenceAsset, uploadBlob, uploadDataUrl, wsToken } from '../api';
+import { Aspect, ReferenceAsset, appId, sessionId, uploadBlob, uploadDataUrl, wsToken } from '../api';
+import { checkRunway, runwaySubmitVideo } from '../../../lib/videoEngineClient';
+import {
+  RUNWAY_ROSTER, RunwayRosterModel, clampRosterDuration, rosterInputLabel,
+  rosterModel, rosterRatio, rosterState, submitModelId, syncRunwayRoster,
+} from '../runwayRoster';
 
 // ---------------------------------------------------------------------------
 // Central model registry — add or change models HERE and nowhere else.
 // ---------------------------------------------------------------------------
 
-export type VideoProvider = 'google' | 'openai' | 'openrouter' | 'kling';
+export type VideoProvider = 'google' | 'openrouter' | 'kling' | 'runway';
 
 export interface VideoModelConfig {
   /** Registry id — persisted on the film row (s2v_films.video_model). */
@@ -63,19 +82,11 @@ export interface VideoModelConfig {
   negativeMaxChars: number;
   pollIntervalMs: number;
   timeoutMs: number;
+  /** True when the model cannot start from a prompt alone — every clip needs
+   * a seed frame (Runway Gen 4 Turbo). */
+  imageToVideoOnly?: boolean;
   /** Availability hint surfaced in the picker (undefined = fully available). */
   availabilityNote?: string;
-  /** Picker badge: Fast / Standard / Cinematic / Lite / Character / Pro. */
-  tier?: 'Fast' | 'Standard' | 'Cinematic' | 'Lite' | 'Character' | 'Pro';
-  /** True = listed but DISABLED in the picker ([Coming Soon] — Kling). */
-  comingSoon?: boolean;
-  /** referenceImages are mutually exclusive with the seed frame (Veo 3.1 rule)
-   * — when both travel, the seed (continuity) wins and refs are dropped. */
-  refsExclusiveWithSeed?: boolean;
-  /** The model renders native audio when asked (OpenRouter paths do not). */
-  supportsAudio?: boolean;
-  /** '4k' resolution is honored (veo-3.1-generate-preview + fast only). */
-  supports4k?: boolean;
 }
 
 export const VIDEO_MODEL: VideoModelConfig = {
@@ -91,9 +102,49 @@ export const VIDEO_MODEL: VideoModelConfig = {
   negativeMaxChars: 500,
   pollIntervalMs: 5000,
   timeoutMs: 8 * 60 * 1000,
-  tier: 'Character',
-  supportsAudio: true,
 };
+
+/** Registry ids for Runway entries: legacy films stored 'runway-gen4.5' /
+ * 'runway-gen4-turbo' on their rows, so those two keep their historic ids;
+ * every other roster model registers as `runway-<roster id>`. */
+function runwayRegistryId(catalogId: string): string {
+  if (catalogId === 'gen4.5') return 'runway-gen4.5';
+  if (catalogId === 'gen4_turbo') return 'runway-gen4-turbo';
+  return `runway-${catalogId}`;
+}
+
+function runwayConfig(m: RunwayRosterModel): VideoModelConfig {
+  const id = runwayRegistryId(m.id);
+  const durations = [4, 5, 6, 8, 10].filter((d) => d >= m.minDurationS && d <= m.maxDurationS);
+  // An image-only model is the only entry that carries a note at build time:
+  // real availability is read live and recomputed by the pickers, never frozen
+  // into this registry.
+  const availabilityNote = m.inputType === 'image'
+    ? `${rosterInputLabel(m)} only — it animates a continuation scene’s seed frame. An opening scene has no seed frame, so start the film on a text-capable model such as Gen 4.5.`
+    : undefined;
+  return {
+    id,
+    label: m.label,
+    provider: 'runway',
+    model: id,
+    apiModel: m.id,
+    ...(m.inputType === 'image' ? { imageToVideoOnly: true } : {}),
+    supportedDurations: durations.length ? durations : [m.defaultDurationS],
+    safeMaxDuration: m.maxDurationS,
+    maxReferenceImages: 0,
+    promptMaxChars: 1000,
+    negativeMaxChars: 0,
+    pollIntervalMs: 5000,
+    timeoutMs: 15 * 60 * 1000,
+    ...(availabilityNote ? { availabilityNote } : {}),
+  };
+}
+
+/** Every Runway video model this app can run, in picker order. */
+export const RUNWAY_VIDEO_CONFIGS: VideoModelConfig[] = RUNWAY_ROSTER.map(runwayConfig);
+
+export const RUNWAY_GEN_4_5: VideoModelConfig = RUNWAY_VIDEO_CONFIGS.find((m) => m.apiModel === 'gen4.5') || RUNWAY_VIDEO_CONFIGS[0];
+export const RUNWAY_GEN_4_TURBO: VideoModelConfig = RUNWAY_VIDEO_CONFIGS.find((m) => m.apiModel === 'gen4_turbo') || RUNWAY_VIDEO_CONFIGS[0];
 
 export const SEEDANCE_2_0: VideoModelConfig = {
   id: 'seedance-2.0',
@@ -108,7 +159,7 @@ export const SEEDANCE_2_0: VideoModelConfig = {
   negativeMaxChars: 500,
   pollIntervalMs: 5000,
   timeoutMs: 10 * 60 * 1000,
-  tier: 'Fast',
+  availabilityNote: 'Provider key pending on the platform — submits fail until it lands.',
 };
 
 export const KLING_V2_MASTER: VideoModelConfig = {
@@ -124,54 +175,17 @@ export const KLING_V2_MASTER: VideoModelConfig = {
   negativeMaxChars: 2500,
   pollIntervalMs: 5000,
   timeoutMs: 10 * 60 * 1000,
-  tier: 'Cinematic',
-  comingSoon: true,
-  availabilityNote: 'Kling is being configured on the platform — it will activate automatically when ready.',
+  availabilityNote: 'Provider key pending on the platform — submits fail until it lands.',
 };
 
-/** Shorthand for the standard /api/veo proxy models (Group A). */
-function veoProxyModel(p: {
-  id: string; label: string; apiModel: string; provider: VideoProvider;
-  tier: VideoModelConfig['tier']; maxRefs?: number; refsExclusiveWithSeed?: boolean;
-  audio?: boolean; supports4k?: boolean; safeMax?: number;
-}): VideoModelConfig {
-  return {
-    id: p.id, label: p.label, provider: p.provider, model: p.id, apiModel: p.apiModel,
-    supportedDurations: [4, 6, 8, 10], safeMaxDuration: p.safeMax ?? 8,
-    maxReferenceImages: p.maxRefs ?? 0, promptMaxChars: 1000, negativeMaxChars: 500,
-    pollIntervalMs: 5000, timeoutMs: 10 * 60 * 1000,
-    tier: p.tier, refsExclusiveWithSeed: p.refsExclusiveWithSeed, supportsAudio: p.audio,
-    supports4k: p.supports4k,
-  };
-}
+/** Every model the pipeline can run on, in picker order. The Runway roster
+ * leads because Gen 4.5 is this app's default engine for a NEW film. */
+export const VIDEO_MODELS: VideoModelConfig[] = [...RUNWAY_VIDEO_CONFIGS, VIDEO_MODEL, SEEDANCE_2_0, KLING_V2_MASTER];
 
-export const VEO_31 = veoProxyModel({ id: 'veo-3.1', label: 'Veo 3.1', apiModel: 'veo-3.1-generate-preview', provider: 'google', tier: 'Cinematic', maxRefs: 3, refsExclusiveWithSeed: true, audio: true, supports4k: true });
-export const VEO_31_FAST = veoProxyModel({ id: 'veo-3.1-fast', label: 'Veo 3.1 Fast', apiModel: 'veo-3.1-fast-generate-preview', provider: 'google', tier: 'Fast', maxRefs: 3, refsExclusiveWithSeed: true, audio: true, supports4k: true });
-export const VEO_30 = veoProxyModel({ id: 'veo-3.0', label: 'Veo 3.0', apiModel: 'veo-3.0-generate-001', provider: 'google', tier: 'Standard', audio: true });
-export const VEO_30_FAST = veoProxyModel({ id: 'veo-3.0-fast', label: 'Veo 3.0 Fast', apiModel: 'veo-3.0-fast-generate-001', provider: 'google', tier: 'Fast', audio: true });
-export const VEO_20 = veoProxyModel({ id: 'veo-2.0', label: 'Veo 2.0', apiModel: 'veo-2.0-generate-001', provider: 'google', tier: 'Standard' });
-export const SORA_2 = veoProxyModel({ id: 'sora-2', label: 'Sora 2', apiModel: 'sora-2', provider: 'openai', tier: 'Cinematic', audio: true, safeMax: 10 });
-export const SORA_2_PRO = veoProxyModel({ id: 'sora-2-pro', label: 'Sora 2 Pro', apiModel: 'sora-2-pro', provider: 'openai', tier: 'Pro', audio: true, safeMax: 10 });
-export const OR_VEO_31 = veoProxyModel({ id: 'or-veo-3.1', label: 'Veo 3.1 (OpenRouter)', apiModel: 'openrouter/google/veo-3.1', provider: 'openrouter', tier: 'Cinematic' });
-export const OR_VEO_31_FAST = veoProxyModel({ id: 'or-veo-3.1-fast', label: 'Veo 3.1 Fast (OpenRouter)', apiModel: 'openrouter/google/veo-3.1-fast', provider: 'openrouter', tier: 'Fast' });
-export const OR_VEO_31_LITE = veoProxyModel({ id: 'or-veo-3.1-lite', label: 'Veo 3.1 Lite (OpenRouter)', apiModel: 'openrouter/google/veo-3.1-lite', provider: 'openrouter', tier: 'Lite' });
-
-const klingModel = (id: string, label: string, tier: VideoModelConfig['tier']): VideoModelConfig => ({
-  ...KLING_V2_MASTER, id, label, model: id, apiModel: id, tier, comingSoon: true,
-});
-export const KLING_V16 = klingModel('kling-v1-6', 'Kling v1.6', 'Standard');
-export const KLING_V15 = klingModel('kling-v1-5', 'Kling v1.5', 'Standard');
-export const KLING_V1 = klingModel('kling-v1', 'Kling v1', 'Lite');
-
-/** Every model the pipeline can run on, in picker order. The default stays
- * Omni Flash — existing films and untouched new films behave exactly as before. */
-export const VIDEO_MODELS: VideoModelConfig[] = [
-  VIDEO_MODEL,
-  VEO_31, VEO_31_FAST, VEO_30, VEO_30_FAST, VEO_20,
-  SORA_2, SORA_2_PRO,
-  SEEDANCE_2_0, OR_VEO_31, OR_VEO_31_FAST, OR_VEO_31_LITE,
-  KLING_V2_MASTER, KLING_V16, KLING_V15, KLING_V1,
-];
+/** The engine a NEW film starts on. Films created before the picker existed
+ * stored no id at all and were rendered on Omni Flash, so resolveVideoModel
+ * still falls back to VIDEO_MODEL for them — only new work defaults here. */
+export const DEFAULT_FILM_MODEL: VideoModelConfig = RUNWAY_GEN_4_5;
 
 /** Resolve a stored model id (s2v_films.video_model) onto its config.
  * Unknown/null ids fall back to the default so old films keep working. */
@@ -209,8 +223,6 @@ export interface CreateVideoParams {
   /** first_frame → seed image (continuation); reference → reference image. */
   referenceAssets?: ReferenceAsset[] | null;
   model?: VideoModelConfig;
-  /** Optional target resolution; '4k' only sticks on models that honor it. */
-  resolution?: '720p' | '1080p' | '4k';
 }
 
 export interface VideoJob { jobId: string; model: string }
@@ -224,10 +236,32 @@ export interface VideoJobStatus {
 
 const cancelled = new Set<string>();
 
-const KLING_PREFIX = 'kling:';
-
-function authHeaders(): Record<string, string> {
-  return { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': wsToken() };
+/**
+ * SERVER-SIDE GENERATION (Sep 2026): the browser never calls the generation
+ * proxies directly any more. Every submit and status check goes through the
+ * stv-scene-generate server function, which talks to the providers, applies
+ * the duration fallback, and normalizes the answers — so a closed laptop lid
+ * mid-submit can't strand a scene and the provider calls run server-side.
+ */
+async function callGenerateHook(payload: Record<string, unknown>): Promise<any> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/hooks/execute/${appId()}/stv-scene-generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(wsToken() ? { 'X-Workspace-DB-Token': wsToken() } : {}),
+        ...(sessionId() ? { 'X-Session-Id': sessionId() } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (e: any) {
+    throw new Error(`Could not reach the video service: ${String(e?.message || e)}`);
+  }
+  const raw = await res.json().catch(() => null);
+  const data = raw && typeof raw === 'object' && raw.response !== undefined && raw._meta !== undefined ? raw.response : raw;
+  if (!res.ok) throw new Error(String(data?.error || `The generation service answered HTTP ${res.status}.`));
+  return data || {};
 }
 
 function classifySubmitError(status: number, data: any): string {
@@ -240,65 +274,14 @@ function classifySubmitError(status: number, data: any): string {
   return raw || `Video submit failed (HTTP ${status}).`;
 }
 
-async function submitVeoProxyOnce(body: Record<string, unknown>): Promise<{ ok: true; jobId: string } | { ok: false; status: number; data: any }> {
-  let res: Response;
-  try {
-    res = await fetch('/api/veo/generate/video', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify(body),
-    });
-  } catch (e: any) {
-    return { ok: false, status: 0, data: { error: `Could not reach the video service: ${String(e?.message || e)}` } };
+/** Submit one generation through the server hook. The hook applies the
+ * duration fallback and rejects placeholder failure ids itself. */
+async function submitViaHook(provider: VideoProvider, body: Record<string, unknown>, safeMaxDuration: number): Promise<{ ok: true; jobId: string } | { ok: false; status: number; data: any }> {
+  const out = await callGenerateHook({ op: 'submit', provider, body, safeMaxDuration });
+  if (out?.status === 'submitted' && typeof out.operationId === 'string' && out.operationId) {
+    return { ok: true, jobId: String(out.operationId) };
   }
-  const data = await res.json().catch(() => null);
-  const jobId = data && (data.operationId || data.operation_id);
-  // The proxy can answer 200 OK with a placeholder id (veo_video_error_* /
-  // openrouter_error_*) or status: 'failed' when the provider submission
-  // itself failed — treating that as success would leave the scene polling a
-  // 404 forever.
-  const failed = String(data?.status || '').toLowerCase() === 'failed';
-  if (res.ok && typeof jobId === 'string' && jobId && !failed && !/^(veo_video_error_|openrouter_error_)/.test(jobId)) {
-    return { ok: true, jobId };
-  }
-  return { ok: false, status: res.status, data };
-}
-
-/** Kling kickoff — text-to-video, or image-to-video when a continuation seed
- * frame travels. Kling wants durations as the strings '5' | '10'. */
-async function submitKling(cfg: VideoModelConfig, params: CreateVideoParams, seedUrl: string | null): Promise<{ ok: true; jobId: string } | { ok: false; status: number; data: any }> {
-  const duration = String(snapDuration(params.durationS, cfg)) as '5' | '10';
-  const body: Record<string, unknown> = {
-    model: cfg.apiModel,
-    prompt: capText(params.prompt, cfg.promptMaxChars),
-    mode: 'std',
-    duration,
-    aspectRatio: params.aspect,
-  };
-  if (params.negative) body.negativePrompt = capText(params.negative, cfg.negativeMaxChars);
-  if (seedUrl) body.imageData = seedUrl;
-  const path = seedUrl ? '/api/generate/kling/image-to-video' : '/api/generate/kling/text-to-video';
-  let res: Response;
-  try {
-    res = await fetch(path, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
-  } catch (e: any) {
-    return { ok: false, status: 0, data: { error: `Could not reach the video service: ${String(e?.message || e)}` } };
-  }
-  const data = await res.json().catch(() => null);
-  const taskId = data && (data.taskId || data.task_id);
-  if (res.ok && typeof taskId === 'string' && taskId) return { ok: true, jobId: `${KLING_PREFIX}${taskId}` };
-  return { ok: false, status: res.status, data };
-}
-
-async function klingStatus(taskId: string): Promise<VideoJobStatus> {
-  const res = await fetch(`/api/generate/kling/status/${encodeURIComponent(taskId)}`, { headers: authHeaders() });
-  const data = await res.json().catch(() => null);
-  if (res.status === 404 || res.status === 403) return { status: 'failed', error: 'The video service has no record of this render. Retry the scene.' };
-  if (!res.ok) return { status: 'processing', error: String(data?.error || `status HTTP ${res.status}`) };
-  const status = String(data?.status || '').toLowerCase();
-  if (status === 'completed' && data?.videoUrl) return { status: 'completed', videoUrl: String(data.videoUrl), progress: 100 };
-  if (status === 'failed') return { status: 'failed', error: String(data?.errorMessage || data?.error || 'The render failed at the provider.') };
-  return { status: 'processing' };
+  return { ok: false, status: Number(out?.httpStatus) || 0, data: out?.data || { error: String(out?.error || 'Video submit failed.') } };
 }
 
 export const VideoModelService = {
@@ -314,8 +297,57 @@ export const VideoModelService = {
     const seed = assets.find((a) => a.role === 'first_frame') || null;
     const refs = assets.filter((a) => a.role === 'reference').slice(0, cfg.maxReferenceImages);
 
+    if (cfg.provider === 'runway') {
+      // Availability is live: the roster is refreshed from
+      // GET /api/generate/runway/capabilities (cached, never throws). A model
+      // is refused before the round trip ONLY when that read succeeded and did
+      // not list it — an unreadable catalog lets the submit through so the
+      // proxy answers for itself instead of a stale local guess blocking it.
+      await syncRunwayRoster();
+      const live = rosterModel(cfg.apiModel);
+      if (live && !live.available && rosterState() === 'live') {
+        throw new Error(live.unavailableReason || `${cfg.label} is not enabled on the Audos Runway proxy right now — pick another model for this film.`);
+      }
+      const seedUrl = String(seed?.url || '');
+      const imageOnly = live ? live.inputType === 'image' : Boolean(cfg.imageToVideoOnly);
+      if (imageOnly && !seedUrl) {
+        throw new Error(`${cfg.label} only animates an existing frame, and this scene has none. Render the opening scene on a text-capable model (Runway Gen 4.5 or Omni Flash) — image-to-video models can carry the continuations.`);
+      }
+      const runwayBody: Record<string, unknown> = {
+        // The platform's own spelling of the id whenever the live catalog
+        // supplied one — the canonical roster id otherwise.
+        model: live ? submitModelId(live) : cfg.apiModel,
+        promptText: capText(params.prompt, cfg.promptMaxChars),
+        ratio: rosterRatio(params.aspect, live, Boolean(seedUrl)),
+        duration: clampRosterDuration(params.durationS, live),
+      };
+      if (seedUrl) {
+        runwayBody.mode = 'image-to-video';
+        // promptImage is a bounded HTTPS string here, not a { uri } object —
+        // that shape belongs to the recipe media fields.
+        runwayBody.promptImage = seedUrl;
+      }
+      try {
+        const kickoff = await runwaySubmitVideo(runwayBody);
+        return { jobId: `runway:${kickoff.taskId}`, model: cfg.model };
+      } catch (e: any) {
+        throw new Error(classifySubmitError(Number(e?.status) || 0, { error: String(e?.message || e) }));
+      }
+    }
+
     if (cfg.provider === 'kling') {
-      const attempt = await submitKling(cfg, params, seed ? seed.url : null);
+      // Kling wants durations as the strings '5' | '10'; a seed frame routes
+      // the hook to the image-to-video endpoint.
+      const klingBody: Record<string, unknown> = {
+        model: cfg.apiModel,
+        prompt: capText(params.prompt, cfg.promptMaxChars),
+        mode: 'std',
+        duration: String(snapDuration(params.durationS, cfg)),
+        aspectRatio: params.aspect,
+      };
+      if (params.negative) klingBody.negativePrompt = capText(params.negative, cfg.negativeMaxChars);
+      if (seed) klingBody.imageData = seed.url;
+      const attempt = await submitViaHook('kling', klingBody, cfg.safeMaxDuration);
       if (!attempt.ok) throw new Error(classifySubmitError(attempt.status, attempt.data));
       return { jobId: attempt.jobId, model: cfg.model };
     }
@@ -329,44 +361,55 @@ export const VideoModelService = {
       // false-positives on seeded continuity frames.
       safetyFilterLevel: 'block_only_high',
     };
-    // Native audio where the model supports it; the OpenRouter paths are video-only.
-    body.generateAudio = Boolean(cfg.supportsAudio);
-    if (params.resolution) body.resolution = params.resolution === '4k' && !cfg.supports4k ? '1080p' : params.resolution;
+    // Omni renders native audio; the openrouter path is video-only.
+    if (cfg.provider === 'google') body.generateAudio = true;
     if (params.negative) body.negativePrompt = capText(params.negative, cfg.negativeMaxChars);
     if (seed) body.imageData = seed.url;
-    // Veo 3.1 refuses referenceImages combined with a seed frame — the seed
-    // (frame-chained continuity) wins and the refs are dropped on those models.
-    const usableRefs = cfg.refsExclusiveWithSeed && seed ? [] : refs;
-    if (usableRefs.length) body.referenceImages = usableRefs.map((r) => ({ imageData: r.url, referenceType: 'asset' }));
+    if (refs.length) body.referenceImages = refs.map((r) => ({ imageData: r.url, referenceType: 'asset' }));
 
-    let attempt = await submitVeoProxyOnce(body);
-    // Duration fallback: if the proxy rejects a long clip (e.g. 10s) with a 400,
-    // retry once at the known-safe maximum instead of failing the scene.
-    if (!attempt.ok && attempt.status === 400 && duration > cfg.safeMaxDuration) {
-      attempt = await submitVeoProxyOnce({ ...body, duration: cfg.safeMaxDuration });
-    }
+    // The hook retries once at safeMaxDuration when a long clip is rejected.
+    const attempt = await submitViaHook(cfg.provider, body, cfg.safeMaxDuration);
     if (!attempt.ok) throw new Error(classifySubmitError(attempt.status, attempt.data));
     return { jobId: attempt.jobId, model: cfg.model };
   },
 
-  /** One status check for a running job. Kling jobs carry a 'kling:' prefix on
-   * their stored id, so polling routes correctly even after a reload. */
+  /** One status check for a running job, answered by the server hook. Kling
+   * jobs carry a 'kling:' prefix on their stored id, so polling routes
+   * correctly even after a reload (the hook reads the prefix). */
   async getGenerationStatus(jobId: string): Promise<VideoJobStatus> {
-    if (jobId.startsWith(KLING_PREFIX)) return klingStatus(jobId.slice(KLING_PREFIX.length));
-    const res = await fetch(`/api/veo/status/${encodeURIComponent(jobId)}`);
-    const data = await res.json().catch(() => null);
-    if (res.status === 404) return { status: 'failed', error: 'The video service has no record of this render (404). Retry the scene.' };
-    if (!res.ok) return { status: 'processing', error: String(data?.error || `status HTTP ${res.status}`) };
-    const status = String(data?.status || '').toLowerCase();
-    if (status === 'completed' && data?.videoUrl) return { status: 'completed', videoUrl: String(data.videoUrl), progress: 100 };
-    if (status === 'failed' || status === 'error') return { status: 'failed', error: String(data?.errorMessage || data?.error || 'The render failed at the provider.') };
-    return { status: 'processing', progress: Number(data?.progress) || undefined };
+    if (jobId.indexOf('runway:') === 0) {
+      try {
+        const result = await checkRunway(jobId.slice('runway:'.length));
+        if (result.status === 'succeeded' && result.mediaUrls.length) {
+          return { status: 'completed', videoUrl: result.mediaUrls[0], progress: 100 };
+        }
+        if (result.status === 'failed' || result.status === 'cancelled') {
+          const reason = String(result.raw?.error?.message || result.raw?.error || 'no successful output');
+          return { status: 'failed', error: `Runway ended this clip ${result.status}: ${reason}. The credits were refunded automatically.` };
+        }
+        // 'uncertain' and 'persisting' keep polling on purpose and are NEVER
+        // resubmitted, so neither counts as an error here.
+        return { status: 'processing' };
+      } catch (e: any) {
+        return { status: 'processing', error: String(e?.message || e) };
+      }
+    }
+    let out: any;
+    try {
+      out = await callGenerateHook({ op: 'status', operationId: jobId });
+    } catch (e: any) {
+      return { status: 'processing', error: String(e?.message || e) };
+    }
+    const status = String(out?.status || '').toLowerCase();
+    if (status === 'completed' && out?.videoUrl) return { status: 'completed', videoUrl: String(out.videoUrl), progress: 100 };
+    if (status === 'failed') return { status: 'failed', error: String(out?.error || 'The render failed at the provider.') };
+    return { status: 'processing', progress: Number(out?.progress) || undefined, error: out?.error ? String(out.error) : undefined };
   },
 
   /** Poll a job to completion; resolves with the clip URL or throws with the
    * provider's reason. Times out so a dead job never hangs a scene forever. */
   async getVideoResult(jobId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number } = {}): Promise<string> {
-    const cfg = VIDEO_MODEL;
+    const cfg = jobId.indexOf('runway:') === 0 ? RUNWAY_GEN_4_5 : VIDEO_MODEL;
     const deadline = Date.now() + (opts.timeoutMs || cfg.timeoutMs);
     let misses = 0;
     while (Date.now() < deadline) {

@@ -3,18 +3,16 @@
   "name": "VidVerge",
   "description": "VidVerge brings two focused video workflows together: create polished product videos or enhance footage you already have.",
   "version": "1.0.0",
+  "agent": {
+    "name": "VidVerge Director",
+    "welcomeMessage": "Welcome to VidVerge. Bring me a product URL, a script, rough footage, or simply the outcome you want — I’ll help turn the brief into a polished, publish-ready video.",
+    "thinkingText": "VidVerge is shaping your video…"
+  },
   "apps": [
-    {
-      "id": "product-video",
-      "name": "Product Video",
-      "description": "Opens on the Ad Director tab — a full AI Product Advertisement Director: paste a website URL (optionally add real screenshots, a goal and a voice), answer one question — How do you want your product video to feel? Story-Driven (more AI-generated video, minimal motion graphics: cinematic storytelling where graphics are reserved for accurate information — numbers, statistics, pricing, product names, feature names, CTA, URLs, comparisons, precise diagrams) or Product-Focused (the product stays at the center with real UI, screenshots, feature graphics and demonstrations; AI video supports the problem, use case and outcome) — and one click runs the whole production with Claude Opus 5 as the single director brain. The style persists with the project and can be switched later: the storyboard re-plans and every finished clip whose treatment is unchanged is reused, so only redesigned scenes regenerate. It researches the product from the real website and screenshots (extracting the problem, features, benefits, pricing and CTA — never inventing features, pricing, testimonials or statistics), decides the ad strategy (problem / outcome / curiosity / demo hook plus an adapted HOOK→PROBLEM→AGITATION→SOLUTION→DEMO→MECHANISM→FEATURES→BENEFIT→PROOF→CTA structure), writes the complete scene-by-scene voiceover script FIRST, records real TTS audio per scene (ElevenLabs workspace voices with a tts-1 fallback) and measures it so every visual's duration is DERIVED from the voice timing — never arbitrary fixed lengths. It then storyboards the most understandable visual per line from 14 visual types (TEXT, PRODUCT_UI, UI_ANIMATION, AI_VIDEO, B_ROLL, IMAGE, MOTION_GRAPHIC, EDUCATIONAL_DIAGRAM, COMPARISON, PROCESS, TIMELINE, BEFORE_AFTER, PRODUCT_MOCKUP, SPLIT_SCREEN): real-screenshot device mockups with an animated travelling cursor, clicks, typing carets and callout labels for anything UI (generative video is never asked to recreate an interface — the crawler even captures a real website screenshot when none is uploaded), Google Omni Flash generative video strictly for B-roll/lifestyle/cinematic moments with the narration context baked into every production prompt and frame-chained continuity, GSAP + SVG motion graphics and educational diagrams that explain relationships and processes (INPUT → ANALYSIS → RESULT with animated arrows — never random floating word cards; on-screen text is minimal support, never the visual), and generated images with optional Omni image-to-video animation. Every render is Opus-inspected against its narration and storyboard intent with up to two automatic fix retakes, and QA never trusts the plan or prompt — the actual rendered file is the source of truth: each scene stores a required-content manifest at storyboard time, every rendered file is validated as a real, decodable, non-blank video (an API returning a URL is never success; blank AI videos fail and retake), frames extracted from the actual render are checked with OCR + vision against the manifest (required exact text must actually be readable; exact text on AI-video scenes renders as a deterministic SVG overlay composited over the footage, never left to the generative model), a final seven-point quality-control pass (generic visual, too much text, unclear explanation, fake UI, poor pacing, missing dialogue sync, weak CTA) regenerates only the weak scenes, and FFmpeg composes the final MP4 in-browser: per-scene voice mixed into its own segment with native footage audio ducked underneath, auto-generated captions from the actual voiceover transcript with smart line breaks and keyword emphasis, an ElevenLabs music bed chosen by strategy (energetic startup / modern tech / cinematic / minimal / premium) auto-ducked under narration, and an optional subtle SFX bed — then a FINAL-VIDEO QA re-inspects the actual composed MP4 per scene time-window (frame extraction + OCR + vision + blank-frame sweep + narration-audio check), catching overlays that vanish during composition, and the ad is only marked ready when it passes; any failure explains itself with expected / detected / cause / fix. The studio shows URL input → live analysis → the strategy summary → the script preview → the scene-by-scene storyboard where every card carries its narration line, visual-type badge, preview frame, voice-derived duration and status with Retake / Retake-with-note / Edit-narration (re-voiced, re-timed, re-rendered) / Swap-visual-type (Opus redesigns the scene for the new type) controls, plus a voice-timed timeline preview and export. After the main ad, one click has Opus plan AD VARIATIONS — different hook (a newly generated opening scene), faster cut, more cinematic, more educational, short social cut — each reusing the already-generated scenes and composing its own downloadable MP4. Auto Generate and Auto Mix are ON by default and user-switchable (Auto Generate off pauses after the storyboard until a Generate scenes click; Auto Mix off composes with narration only); an edited prompt is stored as a persistent override and used verbatim — never silently replaced by the director (a YOUR PROMPT badge marks the scene, Reset prompt returns to the AI prompt); GSAP capture is the default graphics engine with Remotion available as an opt-in secondary engine for complex frame-accurate compositions (same normalized scene spec, automatic GSAP fallback); every stage persists and resumes after reloads, and a background worker adopts finished renders and fails dead operations every ~15 minutes even while the tab is closed — no run sits at GENERATING forever. All previous flows remain one tab away: Track B: designed product films built with HyperFrames from your real product. Scenes made from real product screenshots render with the premium SaaS-demo treatment: cinematic establishing/close-up/return camera moves with eased pushes, an animated demo cursor that travels to UI regions and clicks, types, toggles or scrolls (press, ripple and caret effects — never teleporting), spotlight/outline feature highlights with background dimming, timeline-synced caption pills, chained camera/expand/focus scene transitions, and UI sound effects on the clicks and cuts — all driven by one deterministic per-scene timeline (retime a scene and its camera, cursor, highlights, captions and SFX retime together), responsive to 16:9, 9:16 and 1:1 framing. Lands on a My Videos gallery of 3D cards, then a full-screen agentic editor — live-autosaved text, timing, music, brand colours, drag-to-reorder scenes, credit-gated regeneration, and an 'Ask AI to edit' bar. Creation offers a Choose Style step with six options: the standard HyperFrames Product Launch film, plus five styled pipelines (Clip Style hand-cut paper collage, Cinematic Trailer, Text-to-Video (English) generated straight from a typed description, Documentary, Product Showcase), each with its own script strategy, image strategy, motion parameters and musical register. A styled pick opens a guided seven-step flow: style, product or typed description, length (which sets the scene budget), the SCRIPT REVIEW GATE where Claude writes a hook plus per-scene visual directions plus a call to action and nothing renders until the customer approves it, the frame prompts, the ElevenLabs sound (narration voiceover, background music, an optional sound-effects brief and an optional captions toggle, all previewable first), then generate. The server pipeline renders every shot, joins them, and lays the narration, music, sound effects and optional burned-in captions over the film in a final pass, with a .SRT caption file alongside. A Saved Videos tab is the unified, self-healing gallery of every finished video from both flows, persisted in the database; a Product Launch film gets the same sound and captions step from a Sound button on its card. Once initiated, the production pipeline self-drives to completion in the background — a 5-minute server sweep adopts finished renders and submits the next shot even with the tab closed. A separate Design with AI tab designs motion graphics onto a video the customer already has (typically a talking-head video): upload the video (up to 500MB, the original is never modified), auto-generate a word-timestamped transcript or import an SRT/VTT to skip retranscription (editable, SRT export), optionally set a visual style (Auto Brand / Minimal / Cinematic), a product URL for brand context and real screenshots — then one Design My Video click has Claude Opus 5 detect the talking-head position (graphics never cover the face), read the transcript, and design per-timestamp compositable overlay graphics — icons, animated diagrams, charts, stats, callout arrows, step flows, checklists, comparisons, progress bars, kinetic typography, lower thirds and real-screenshot cards, all deterministic GSAP + SVG (graphics-first, minimal text, no Remotion), plus real AI-footage cutaways (Omni) reserved for the few moments that genuinely need actual video — through Generating Visual Plan → Creating Graphics → Syncing to Transcript → an agentic Quality Check that inspects composited frames and fixes only flagged graphics. The result opens as a live preview (original video + overlays seeked in real time, no render wait) over an editable timeline where each graphic is independently movable, resizable, repositionable, restylable, duplicatable, deletable and AI-regenerable, with whole-design controls (Regenerate / More Dynamic / More Minimal / More Product-Focused / More Cinematic / More Professional / Change Brand Style, talking-head layout, density) — and Export composites everything in-browser and encodes a downloadable MP4 with FFmpeg. Runs persist per stage and resume after reloads.",
-      "icon": "Rocket",
-      "component": "apps/ProductStudio/App.tsx"
-    },
     {
       "id": "video-enhancer",
       "name": "Video Enhancer",
-      "description": "Full AI editing suite for footage you already have, in a dark editor around a centered preview. Analyze: an AI vision model watches sampled frames, reports smart findings (a supporting chart appears only when a finding carries a score, comparison, recommendation or multi-step explanation — plain findings stay text) and designs adaptive graphic overlays for that exact content — motion-path arrows, callouts with leader lines, numbered step badges, pulsing highlight rings, labels and mini flow diagrams (strictly graphics, never captions), each previewing live, color-coded, toggleable and click-to-seek. Full toolset: trim/cut with draggable in/out timeline handles, split-at-playhead and per-segment keep/cut; brightness/contrast/saturation/blur/vignette filters plus 0.5×–2× speed; draggable timed text overlays with size, color and duration; Auto Captions that transcribe the footage's own audio (word-timed) and render synced captions in four styles — Brand (VidVerge charcoal pill, warm white text, coral word-highlight, the default), Bold Pop, Karaoke and Minimal — with a master on/off toggle, per-line edit/delete and a caption position control (top, middle or bottom), shown live on the preview and burned into the export; 16:9, 9:16, 1:1 and 4:5 aspect presets as a centered cover-crop; original-audio mute/volume; an ElevenLabs music bed from a mood prompt, a preset style or an auto-suggested mood matched to the footage, with a music-vs-original volume slider; and a Sound FX library (applause, whoosh, notification, chime, camera shutter, pop, riser, drum hit, sparkle, rain, city and bird ambience, or a custom typed description) dropped at the playhead with its own volume, mixed alongside the original audio and music (music and sound effects use the founder's ELEVENLABS_API_KEY when configured, built-in engine otherwise). Effects include gradient and solid backdrop framing plus a background-softening focus mode. Export composites the whole edit — including captions and sound effects — in one pass into a downloadable MP4 (or WebM) with High/Standard/Compact quality options; the output is stored durably and replaces the raw upload in the player with a View-original toggle. Also the handoff target for SceneForge: a finished SceneForge video opened \"in the Editor\" or \"sent to the Enhancer\" loads here automatically, ready to trim, overlay, caption, add sound, rescore or enhance.",
+      "description": "Professional timeline editor (NLE) for footage you already have — a three-panel dark editor: a 16:9 preview player with play/pause, timecode, volume and fullscreen; an AI Tools + Properties band; and a four-track timeline (Video / Graphics / Audio / Captions) with clips as colored blocks, drag-to-reorder, split-at-playhead and per-clip delete, trim handles on every clip edge, an amber playhead synced to the player and click-to-seek, plus a 16:9 / 9:16 TikTok format toggle that carries through to the export. The headline tool is one-click AI EDIT: it transcribes the footage's own audio with word timestamps, cuts the dead air automatically (Web Audio silence detection becomes real timeline cuts), lays word-accurate amber captions, and places AI-planned kinetic motion graphics on the Graphics track. Individually: Gemini Describe analyzes a video frame (subject, dominant-color swatches, mood badge, suggested enhancements as amber pills) and fires automatically on upload; Generate B-roll turns a prompt into an Omni Flash clip on the Video track; Auto-transcribe makes word-timed captions on its own (manual transcript paste stays as a fallback); Style Transfer applies Cinematic / Vibrant / Dark / Vintage / Minimal looks; and five quality-first Quick Motion Graphics presets — Hook Title (word-by-word kinetic headline with an underline sweep), Keyword Pop (overshoot pop with an amber glow), Lower Third (name + handle on a growing accent bar), Big Stat (count-up number in a glowing ring) and CTA Banner (rising pill with a pulsing glow) — drop at the playhead, drag to retime, and are fully editable (text, sub line, value, duration, position). The preview and the server render share the same easing math, so what you see is what renders. Properties edit the selected clip (in/out trim, split at playhead, delete, 0.5×–2× speed, opacity, a text overlay) or the selected graphic, plus whole-video Effects (brightness / contrast / saturation / blur / vignette sliders, previewed live and applied identically in the render), the music bed (Inspiring / Cinematic Dark / Energetic / Calm / Luxury from the workspace's ElevenLabs library, or GENERATE YOUR OWN: describe a track and ElevenLabs composes it to the cut's length) and the color grade (None / Film / Kodak / Teal+Orange / BW). Upload by drag-and-drop or file picker (up to 500MB). Render & Export compiles the whole edit — cuts, trims, speed, opacity, text, motion graphics, captions, effects, grade, format and music — into a server-side Remotion render and hands back a downloadable 1080p MP4 (9:16 renders the centered TikTok stage). Also the handoff target for SceneForge: a finished SceneForge video opened \"in the Editor\" or \"sent to the Enhancer\" loads here automatically as the first clip.",
       "icon": "Sparkles",
       "component": "apps/VideoEnhancer/App.tsx"
     },
@@ -35,16 +33,23 @@
     {
       "id": "ads-studio",
       "name": "Ads Studio",
-      "description": "Agentic short-form ad engine: product URL + avatar + assets in, a finished professional ad out. A linear 8-step workflow (Product → Research → Angles → Script → Scene Plan → Generate → Review → Variations) with Claude Opus 5 as the single creative brain. Research crawls the product site (plus /reviews, /testimonials, /pricing and /about) and extracts a structured direct-response brief — features, pricing, pain points, desires, objections, mechanism, awareness level and real customer language, each marked [VERIFIED] or [INFERRED], never invented — that the user can correct inline. Opus then generates 8–12 genuinely different ad angles (selectable cards with an 'Opus picks best' judge), writes a 4–7 clip script (Hook → Problem → Agitate → Solution → Proof → Benefit → single CTA) under hard per-duration word limits (4s→9, 6s→13, 8s→17, 10s→22 words) with live word-count validation and per-clip duration selectors, and directs a full per-clip scene plan — camera, framing, micro-action, gesture, expression, environment, lighting, ONE locked voice description reused verbatim across all clips, continuity notes, overlay plan and an assembled production Veo prompt (clip 1 must open on a first-second pattern interrupt, never a static talking head). Generation is an agentic loop: each clip renders on the platform video model with the uploaded avatar as the character reference, Opus vision inspects the take against the plan (action, framing, flow, same character, clutter, composition), a rejected take auto-regenerates ONCE with the inspector's adjusted prompt (max 2 attempts), and the final frame of each clip is read by Opus into the next clip's continuity clause. Real screenshots are never recreated by the video model — they composite AFTER generation inside GSAP-animated phone/laptop/browser/tablet/monitor mockups, alongside kinetic text callouts, review cards, animated stat counters, CTA buttons, arrow highlights, a logo watermark and styled burned-in captions of each spoken line (all GSAP + SVG rendered to canvas, no Remotion). Final assembly runs FFmpeg.wasm in the browser — chroma-keyed overlay compositing, normalization, concat, faststart MP4 — with a progress bar, a collapsible FFmpeg debug log and a download button. A Variations step has Opus write alternative hooks, bodies and CTAs (up to 3×2×2 = 12 combinations); building a variation reuses every clip whose line is unchanged and regenerates only the clips whose spoken line differs, then re-assembles, each with its own download. The session persists to localStorage, so a refresh resumes mid-run. Standalone — shares nothing with Product Video, SceneForge, Video Enhancer or Script-to-Video.",
+      "description": "Agentic short-form ad engine: product URL + avatar + assets in, a finished professional ad out. A linear 8-step workflow (Product → Research → Angles → Script → Scene Plan → Generate → Review → Variations) with Claude Opus 5 as the single creative brain. Research crawls the product site (plus /reviews, /testimonials, /pricing and /about) and extracts a structured direct-response brief — features, pricing, pain points, desires, objections, mechanism, awareness level and real customer language, each marked [VERIFIED] or [INFERRED], never invented — that the user can correct inline. Opus then generates 8–12 genuinely different ad angles (selectable cards with an 'Opus picks best' judge), writes a 4–7 clip script (Hook → Problem → Agitate → Solution → Proof → Benefit → single CTA) under hard per-duration word limits (4s→9, 6s→13, 8s→17, 10s→22 words) with live word-count validation and per-clip duration selectors, and directs a full per-clip scene plan — camera, framing, micro-action, gesture, expression, environment, lighting, ONE locked voice description reused verbatim across all clips, continuity notes, overlay plan and an assembled production Veo prompt (clip 1 must open on a first-second pattern interrupt, never a static talking head). Generation is an agentic loop: each clip renders on the platform video model with the uploaded avatar as the character reference, Opus vision inspects the take against the plan (action, framing, flow, same character, clutter, composition), a rejected take auto-regenerates ONCE with the inspector's adjusted prompt (max 2 attempts), and the final frame of each clip is read by Opus into the next clip's continuity clause. Real screenshots are never recreated by the video model — they composite AFTER generation inside GSAP-animated phone/laptop/browser/tablet/monitor mockups, alongside kinetic text callouts, review cards, animated stat counters, CTA buttons, arrow highlights, a logo watermark and styled burned-in captions of each spoken line (all GSAP + SVG rendered to canvas, no Remotion). Final assembly runs FFmpeg.wasm in the browser — chroma-keyed overlay compositing, normalization, concat, faststart MP4 — with a progress bar, a collapsible FFmpeg debug log and a download button. A Variations step has Opus write alternative hooks, bodies and CTAs (up to 3×2×2 = 12 combinations); building a variation reuses every clip whose line is unchanged and regenerates only the clips whose spoken line differs, then re-assembles, each with its own download. The session persists to localStorage, so a refresh resumes mid-run. A RECIPES section in the left rail (below the eight steps) holds the Runway-powered recipe templates — Product Ads, UGC, Product Swaps, Multi-Shot films, Localized Ads, Campaign Imagery and Stock Images — plus raw text/image-to-video on the Runway Gen 4 models (Gen 4.5 and Gen 4 Turbo); every generation is quoted before anything is charged, and this is now the ONE place Runway recipes live (the standalone Runway tabs in Product Video, SceneForge and Script-to-Video were removed). Standalone — shares nothing with Product Video, SceneForge, Video Enhancer or Script-to-Video.",
       "icon": "Target",
       "component": "apps/AdsStudio/App.tsx"
     },
     {
-      "id": "creatables",
-      "name": "Creatables",
-      "description": "The unified video generation studio — all video engines, one place. Describe what you want, optionally upload media, pick an engine or press ✨ Recommend for me and the studio picks the best one with a one-line reason. Every approved model is exposed with per-model settings: 12 standard engines (Gemini Omni Flash for character consistency via reference images; Veo 3.1 and Veo 3.1 Fast with the ingredients workflow — up to 3 reference images OR a seed-frame + locked last frame, and true 4K; Veo 3.0 / 3.0 Fast / 2.0; OpenAI Sora 2 and Sora 2 Pro for surreal and complex multi-subject scenes; Seedance 2.0 Fast for cheap B-roll; and the OpenRouter Veo 3.1 / Fast / Lite paths, Lite being the lowest-cost Veo output). Runway is fully wired too: Gen 4.5 text-or-image-to-video and Gen 4 Turbo image-to-video (human-readable pixel-pair ratio labels), plus all 7 Runway Recipes — Product Ad, Product Swap, UGC Creator, Multi-Shot Video, Ad Localization (22 languages), Stock Image and Campaign Images — each with the right upload zones, and EVERY Runway call shows a free exact-price quote before anything is charged; if Runway answers 503 the studio says it is still being enabled and keeps working. Kling v2 Master / v1.6 / v1.5 / v1 appear as Coming Soon and activate automatically when the platform enables them. Per-model settings appear contextually (duration, aspect/ratio, resolution with 4K only where honored, audio toggle, negative prompt, reference/last-frame upload zones), the combining rules are enforced before submit, generation polls every 5 seconds with a progress bar and operation id, the output view has a player + download + model + time + actual cost, and the last 10 generations persist as a history rail. An Image Lab companion generates stills on gemini-3.1-flash-image (with image-to-image edits), DALL·E 3 and GPT Image 2.",
-      "icon": "Video",
-      "component": "apps/Creatables/App.tsx"
+      "id": "motionverger",
+      "name": "MotionVerger",
+      "description": "The dedicated SaaS LAUNCH VIDEO studio — one job, zero configuration: paste a product URL and get a 15–45 second kinetic product-demo film that is cut differently on every single run. The app reads the real page server-side via the ps-brand-scrape hook (product name, tagline, headlines, feature bullets, the site's exact CTA wording, logo, a live screenshot, and the brand colours the markup actually uses), then gpt-5.6-terra writes a LIBRARY of candidate lines out of that real copy (hooks, features, use cases, outcomes and any genuine social proof) and the app's own composition engine cuts it into a film. There is no scene blueprint any more: the arc, the scene count, their order, each shot's length (2–5s), the camera move, the transition and the colour grade are all rolled from a per-generation seed, so the same URL never renders the same film twice — a 'Shuffle the cut' button re-rolls the edit from the same page with no re-scrape, and every cut lands inside 15–45s. If the writer hiccups the page's own mined copy still composes a complete film, so a run never dead-ends. The customer can edit every headline, supporting line and duration, pick a music bed from the shared cached ElevenLabs library (or turn music off), then Generate renders a deterministic Remotion composition server-side via the pv-render-composition hook (1920x1080, 30fps MP4): a living brand-tinted gradient background with drifting glow blobs and a subtle grid, word-by-word spring kinetic typography, feature cards with growing accent bars, the customer's REAL screenshot inside a drawn browser frame being USED — a cursor travels to a control, clicks, the work runs on a progress bar and a result chip lands — under a pulling-BACK camera (every move in the film is a zoom-out or a pan; nothing ever zooms in) and a light sweep (a brand-coloured interface skeleton when the page gave none), and a pulsing CTA plate carrying the site's exact call-to-action and host — all in the CLIENT's own colour and logo, never VidVerge amber. NO narration, NO image model, NO invented UI: every visual is drawn in code, so nothing that is not theirs can appear in the film. Projects persist to the mv_projects table; an in-flight render survives tab close and reload and resumes polling on reopen; finished films live in a 'Your launch videos' gallery with a Download MP4 button and one-click re-render. Distinct from Product Video: MotionVerger is the fast single-purpose launch-film path, while Product Video remains the deeper multi-workflow studio.",
+      "icon": "Zap",
+      "component": "apps/MotionVerger/App.tsx"
+    },
+    {
+      "id": "character-generator",
+      "name": "Character Generator",
+      "description": "Design reusable video characters for the whole VidVerge suite. Describe a character (name, appearance, personality, style tags) and optionally upload a reference photo — VidVerge reads the photo with AI vision and pre-writes the appearance. Generate renders a consistent character card with an AI portrait (platform image pipeline, 3:4, portrait-safe negative prompts), previewed live as a card with the name and style tags. Saving writes the character to the shared vv_characters WorkspaceDB table (name, description, style, image_url, reference_images) so SceneForge, Script-to-Video and Ads Studio can reuse the exact same person across every scene. Previously generated characters appear in a grid below with Reuse (loads the character back into the form to tweak and regenerate) and Delete. LightBeam dark UI, amber accent, session-scoped rows.",
+      "icon": "Users",
+      "component": "apps/CharacterGenerator/App.tsx"
     }
   ],
   "terminology": {
@@ -56,8 +61,8 @@
   },
   "desktop": {
     "theme": {
-      "gradient": "from-[#101A30] to-[#0A0F1E]",
-      "accentColor": "#3B82F6",
+      "gradient": "from-[#0d1220] to-[#080c14]",
+      "accentColor": "#f59e0b",
       "dockStyle": "glass"
     },
     "themeTokens": {
@@ -67,50 +72,50 @@
         "fontFamily": "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
       },
       "shell": {
-        "accentColor": "#3B82F6",
+        "accentColor": "#f59e0b",
         "dockStyle": "glass",
-        "pageBackground": "radial-gradient(1100px 560px at 50% -10%, rgba(59,130,246,0.18), transparent 60%), #0A0F1E",
-        "gateBackground": "radial-gradient(1200px 620px at 50% -12%, rgba(59,130,246,0.20), transparent 62%), #0A0F1E",
-        "panelBackground": "rgba(16,24,42,0.92)",
-        "panelStrongBackground": "#18243A"
+        "pageBackground": "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(245,158,11,0.12) 0%, transparent 60%), #080c14",
+        "gateBackground": "radial-gradient(ellipse 80% 55% at 50% -5%, rgba(245,158,11,0.16) 0%, transparent 62%), #080c14",
+        "panelBackground": "rgba(14,19,31,0.92)",
+        "panelStrongBackground": "#161d2c"
       },
       "cssVariables": {
-        "--space-surface-bg": "#0A0F1E",
-        "--space-surface-gradient-from": "#101A30",
-        "--space-surface-gradient-via": "#0A0F1E",
-        "--space-surface-gradient-to": "#0D1528",
-        "--space-surface-card": "#10182A",
-        "--space-surface-panel": "#121C30",
-        "--space-surface-panel-strong": "#18243A",
-        "--space-surface-muted": "#111B2E",
-        "--space-surface-accent-soft": "rgba(59,130,246,0.16)",
-        "--space-border-default": "rgba(148,163,184,0.16)",
-        "--space-border-strong": "rgba(148,163,184,0.28)",
-        "--space-text-primary": "#F8FAFC",
+        "--space-surface-bg": "#080c14",
+        "--space-surface-gradient-from": "#0d1220",
+        "--space-surface-gradient-via": "#080c14",
+        "--space-surface-gradient-to": "#0a0e18",
+        "--space-surface-card": "#0e131f",
+        "--space-surface-panel": "#101623",
+        "--space-surface-panel-strong": "#161d2c",
+        "--space-surface-muted": "#0d1220",
+        "--space-surface-accent-soft": "rgba(245,158,11,0.14)",
+        "--space-border-default": "rgba(148,163,184,0.14)",
+        "--space-border-strong": "rgba(148,163,184,0.26)",
+        "--space-text-primary": "#f1f5f9",
         "--space-text-secondary": "#CBD5E1",
         "--space-text-muted": "#94A3B8",
-        "--space-text-brand": "#60A5FA",
-        "--space-text-accent": "#5eead4",
-        "--space-text-on-primary": "#ffffff",
-        "--space-text-on-highlight": "#ffffff",
-        "--space-brand-primary": "#2563eb",
-        "--space-brand-primary-50": "rgba(37,99,235,0.08)",
-        "--space-brand-primary-100": "rgba(37,99,235,0.14)",
-        "--space-brand-primary-200": "rgba(37,99,235,0.26)",
-        "--space-brand-primary-500": "#3b82f6",
-        "--space-brand-primary-600": "#2563eb",
-        "--space-brand-primary-700": "#1d4ed8",
-        "--space-brand-primary-900": "#1e3a8a",
-        "--space-brand-highlight": "#2563eb",
-        "--space-brand-highlight-50": "rgba(45,212,191,0.08)",
-        "--space-brand-highlight-100": "rgba(45,212,191,0.16)",
-        "--space-brand-highlight-200": "rgba(45,212,191,0.28)",
-        "--space-brand-highlight-500": "#2dd4bf",
-        "--space-brand-highlight-600": "#14b8a6",
-        "--space-brand-highlight-700": "#0d9488",
-        "--space-brand-highlight-900": "#134e4a",
-        "--space-shell-dock-text": "#ffffff",
-        "--space-shell-icon": "#60a5fa",
+        "--space-text-brand": "#fbbf24",
+        "--space-text-accent": "#fcd34d",
+        "--space-text-on-primary": "#180f02",
+        "--space-text-on-highlight": "#180f02",
+        "--space-brand-primary": "#f59e0b",
+        "--space-brand-primary-50": "rgba(245,158,11,0.08)",
+        "--space-brand-primary-100": "rgba(245,158,11,0.14)",
+        "--space-brand-primary-200": "rgba(245,158,11,0.26)",
+        "--space-brand-primary-500": "#f59e0b",
+        "--space-brand-primary-600": "#d97706",
+        "--space-brand-primary-700": "#b45309",
+        "--space-brand-primary-900": "#78350f",
+        "--space-brand-highlight": "#fbbf24",
+        "--space-brand-highlight-50": "rgba(251,191,36,0.08)",
+        "--space-brand-highlight-100": "rgba(251,191,36,0.16)",
+        "--space-brand-highlight-200": "rgba(251,191,36,0.28)",
+        "--space-brand-highlight-500": "#fbbf24",
+        "--space-brand-highlight-600": "#f59e0b",
+        "--space-brand-highlight-700": "#d97706",
+        "--space-brand-highlight-900": "#92400e",
+        "--space-shell-dock-text": "#180f02",
+        "--space-shell-icon": "#fbbf24",
         "--space-semantic-success": "#4ade80",
         "--space-semantic-success-50": "rgba(74,222,128,0.10)",
         "--space-semantic-success-100": "rgba(74,222,128,0.20)",
@@ -131,7 +136,8 @@
     },
     "branding": {
       "name": "VidVerge",
-      "tagline": "Create a product video or enhance existing footage.",
+      "tagline": "Turn any idea into a publish-ready video — brief to video in one shot",
+      "logoUrl": "https://storage.googleapis.com/audos-images/attachments/general/c0902809-6dc4-4e0c-b04e-1f60e01b31e6.png",
       "headingFont": "Inter",
       "bodyFont": "Inter"
     }

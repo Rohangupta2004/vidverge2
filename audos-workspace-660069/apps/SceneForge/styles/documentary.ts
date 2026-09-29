@@ -4,7 +4,7 @@ export const documentary: ForgeStyle = {
   id: 'documentary',
   name: 'Documentary',
   description: 'Desaturated photography, film grain and patient Ken Burns movement.',
-  preview: 'linear-gradient(135deg,#1F2933,#8D8478 58%,#D6CFC4)',
+  preview: '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790666737117-owobix.png") center/cover no-repeat',
   palette: ['#1F2933', '#8D8478', '#D6CFC4', '#F2EEE8', '#B44C43'],
   fonts: ['Libre Baskerville', 'Inter'],
   imagePromptPrefix: 'Desaturated archival documentary photography, natural available light, subtle 35mm grain, restrained contrast, transparent isolated subject when possible, no text,',

@@ -81,6 +81,32 @@ function ClapperArt() {
   );
 }
 
+// Ads Studio — pulsing target board with an orbiting spark (campaign lock-on).
+function AdsArt() {
+  return (
+    <div className="vv-art vv-art-ads" aria-hidden="true">
+      <div className="vv-ads-ring vv-ads-ring-outer" />
+      <div className="vv-ads-ring vv-ads-ring-mid" />
+      <div className="vv-ads-core" />
+      <div className="vv-ads-orbit"><span className="vv-ads-sat" /></div>
+    </div>
+  );
+}
+
+// MotionVerger — a rising launch bolt with exhaust streaks and a green-for-go glow.
+function LaunchArt() {
+  return (
+    <div className="vv-art vv-art-launch" aria-hidden="true">
+      <div className="vv-launch-glow" />
+      <div className="vv-launch-streak vv-launch-streak-a" />
+      <div className="vv-launch-streak vv-launch-streak-b" />
+      <svg className="vv-launch-bolt" viewBox="0 0 24 24">
+        <path d="M13 2L4.5 13.5h5L9.5 22 19 10h-5.5L13 2z" fill="currentColor" />
+      </svg>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Tool identity registry                                              */
 /* ------------------------------------------------------------------ */
@@ -94,7 +120,7 @@ interface ToolIdentity {
 const TOOL_IDENTITIES: Record<string, ToolIdentity> = {
   'product-video': {
     accent: '#3b82f6',
-    tagline: 'Cinematic product films — scripted, scored, and rendered from your real product.',
+    tagline: 'SaaS launch videos & cinematic product films — paste your URL, pick a script, get the film.',
     Art: LensArt,
   },
   'video-enhancer': {
@@ -111,6 +137,16 @@ const TOOL_IDENTITIES: Record<string, ToolIdentity> = {
     accent: '#f59e0b',
     tagline: 'Talking-head studio with documentary-style motion graphics.',
     Art: ClapperArt,
+  },
+  'ads-studio': {
+    accent: '#f43f5e',
+    tagline: 'Give a product URL — an AI creative director researches, scripts, shoots and cuts the ad.',
+    Art: AdsArt,
+  },
+  motionverger: {
+    accent: '#22c55e',
+    tagline: 'Your SaaS launch video — URL in, a 40-second kinetic launch film out, in your brand.',
+    Art: LaunchArt,
   },
 };
 
@@ -502,6 +538,55 @@ const LAUNCHER_CSS = `
   animation: vv-filmroll 2.4s linear infinite;
 }
 @keyframes vv-filmroll { to { background-position: 16px 0; } }
+
+/* ===== Ads Studio: pulsing target + orbiting spark ===== */
+.vv-art-ads { display: flex; align-items: center; justify-content: center; }
+.vv-ads-ring { position: absolute; border-radius: 9999px; border: 1.5px solid rgba(251,113,133,0.55); }
+.vv-ads-ring-outer { inset: 2px; animation: vv-ads-pulse 3.2s ease-in-out infinite; }
+.vv-ads-ring-mid { inset: 11px; border-color: rgba(253,164,175,0.6); animation: vv-ads-pulse 3.2s ease-in-out infinite; animation-delay: 0.5s; }
+@keyframes vv-ads-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+.vv-ads-core {
+  position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 38% 32%, #fda4af 0%, #f43f5e 55%, #7f1d1d 100%);
+  box-shadow: 0 0 12px rgba(244,63,94,0.7);
+  animation: vv-ads-pulse 3.2s ease-in-out infinite; animation-delay: 1s;
+}
+.vv-ads-orbit { position: absolute; inset: -2px; animation: vv-spin 7s linear infinite; }
+.vv-ads-sat {
+  position: absolute; top: -2px; left: 50%; width: 6px; height: 6px; margin-left: -3px;
+  border-radius: 9999px; background: #fecdd3;
+  box-shadow: 0 0 8px rgba(253,164,175,0.9);
+}
+
+/* ===== MotionVerger: rising launch bolt ===== */
+.vv-art-launch { display: flex; align-items: center; justify-content: center; }
+.vv-launch-bolt {
+  position: relative; width: 30px; height: 30px; color: #bbf7d0;
+  filter: drop-shadow(0 0 9px rgba(34,197,94,0.85));
+  animation: vv-launch-rise 3s ease-in-out infinite;
+}
+@keyframes vv-launch-rise { 0%, 100% { transform: translateY(3px); } 50% { transform: translateY(-4px); } }
+.vv-launch-glow {
+  position: absolute; inset: 4px; border-radius: 9999px;
+  background: radial-gradient(circle, rgba(34,197,94,0.38), transparent 70%);
+  animation: vv-ads-pulse 3s ease-in-out infinite;
+}
+.vv-launch-streak {
+  position: absolute; width: 2px; height: 12px; border-radius: 2px;
+  background: rgba(187,247,208,0.8);
+  animation: vv-launch-streak 2.2s linear infinite;
+}
+.vv-launch-streak-a { left: 9px; animation-delay: 0s; }
+.vv-launch-streak-b { right: 9px; animation-delay: 1.1s; }
+@keyframes vv-launch-streak {
+  0% { top: 44px; opacity: 0; }
+  15% { opacity: 0.9; }
+  100% { top: -8px; opacity: 0; }
+}
 
 /* ===== Reduced motion: everything settles into its static state ===== */
 @media (prefers-reduced-motion: reduce) {

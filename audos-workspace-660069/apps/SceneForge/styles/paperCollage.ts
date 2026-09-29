@@ -4,7 +4,7 @@ export const paperCollage: ForgeStyle = {
   id: 'paper-collage',
   name: 'Paper collage',
   description: 'Torn paper, hand-drawn marks and warm layered editorial texture.',
-  preview: 'linear-gradient(135deg,#E9DFC8,#E2725B 52%,#1E1A16)',
+  preview: '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790666798138-9bnj8w.png") center/cover no-repeat',
   palette: ['#E9DFC8', '#E2725B', '#1E1A16', '#C59B36', '#F4F2EE'],
   fonts: ['Libre Baskerville', 'Inter', 'Courier New'],
   imagePromptPrefix: 'Hand-cut editorial paper collage, torn white edges, halftone print, warm off-white paper, tactile drop shadows, transparent background, no generated text,',

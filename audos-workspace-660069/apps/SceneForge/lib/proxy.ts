@@ -29,6 +29,11 @@ export class ClaudeRequestError extends Error {
 // instead of a promise that never settles (the "spinner forever" failure).
 export const CLAUDE_TIMEOUT_MS = 180_000;
 
+// Every claudeMessages caller parses the reply as JSON, so the format demand
+// is enforced ONCE here rather than trusted to each task prompt — preamble
+// ("Here is the plan:") and markdown fences were breaking JSON.parse.
+const STRICT_JSON_SUFFIX = ' OUTPUT FORMAT (hard): reply with PURE JSON only — the very first character of your reply is { or [. No preamble, no commentary, no markdown code fences.';
+
 async function claudeMessages<T>(system: string, content: unknown, model: string, maxTokens: number, timeoutMs: number): Promise<T> {
   const frontier = model.includes('opus');
   const controller = new AbortController();
@@ -38,7 +43,7 @@ async function claudeMessages<T>(system: string, content: unknown, model: string
     response = await fetch('/proxy/anthropic/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
-      body: JSON.stringify({ model, max_tokens: Math.min(8192, maxTokens), ...(frontier ? { thinking: { type: 'adaptive' }, output_config: { effort: 'medium' } } : { thinking: { type: 'disabled' } }), system, messages: [{ role: 'user', content }] }),
+      body: JSON.stringify({ model, max_tokens: Math.min(8192, maxTokens), ...(frontier ? { thinking: { type: 'adaptive' }, output_config: { effort: 'medium' } } : { thinking: { type: 'disabled' } }), system: system + STRICT_JSON_SUFFIX, messages: [{ role: 'user', content }] }),
       signal: controller.signal,
     });
   } catch (e: any) {
@@ -63,8 +68,57 @@ async function claudeMessages<T>(system: string, content: unknown, model: string
     throw new ClaudeRequestError(message, { code: payload?.code, status: response.status, retryAfterSeconds: Number(payload?.retryAfterSeconds) || undefined });
   }
   const text = (payload.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('').trim();
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] || text;
-  try { return JSON.parse(fenced) as T; } catch { throw new ClaudeRequestError('The agent returned an invalid JSON response. Try again.', { code: 'invalid_json' }); }
+  const candidate = extractJsonPayload(text);
+  try {
+    if (!candidate) throw new Error('the reply contains no JSON object or array');
+    return JSON.parse(candidate) as T;
+  } catch (parseError) {
+    // The raw reply is the evidence: log it so an unparsable response is
+    // diagnosable from the console instead of hiding behind a generic line.
+    const cutOff = payload?.stop_reason === 'max_tokens';
+    console.error('[SceneForge] The agent reply could not be parsed as JSON', { model, stopReason: payload?.stop_reason || null, parseError: String((parseError as any)?.message || parseError), replyPreview: text.slice(0, 800) });
+    throw new ClaudeRequestError(cutOff
+      ? 'The agent reply was cut off before the JSON completed (output limit reached). Try again.'
+      : 'The agent returned an invalid JSON response. Try again.', { code: 'invalid_json' });
+  }
+}
+
+/**
+ * Pull the JSON out of a model reply that may carry markdown fences, a prose
+ * preamble ("Here is the plan:") or trailing commentary. A COMPLETE fenced
+ * block wins; stray fence markers from a truncated reply are stripped (the
+ * old regex required the closing fence, so a cut-off ```json reply fell
+ * through to JSON.parse on raw markdown and always failed); then the FIRST
+ * balanced {...} or [...] is extracted with a string-aware scan. Returns null
+ * when the reply contains no JSON at all, and returns the unbalanced tail for
+ * a cut-off reply so the parse error names the real cause.
+ */
+export function extractJsonPayload(raw: string): string | null {
+  let text = String(raw || '').trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced && fenced[1].trim()) text = fenced[1].trim();
+  text = text.replace(/```(?:json)?/gi, '').trim();
+  const start = text.search(/[{[]/);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (inString) {
+      if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{' || ch === '[') depth += 1;
+    else if (ch === '}' || ch === ']') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return text.slice(start);
 }
 
 export async function claudeJson<T>(system: string, input: unknown, model = 'claude-opus-5', maxTokens = 8192, timeoutMs = CLAUDE_TIMEOUT_MS): Promise<T> {

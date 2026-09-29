@@ -15,9 +15,11 @@
  */
 
 import { uploadDataUrl, wsToken } from './api';
+import { generateWithRunway } from '../../lib/runwayAdapter';
+import { isRunwayModel } from '../../lib/videoEngines';
 
-/** The exact model id every Ads Studio clip renders on — exported so the
- * pipeline can RECORD the actual model used on each generated clip. */
+/** The default model an Ads Studio clip renders on — exported so the pipeline
+ * can RECORD the actual model used on each generated clip. */
 export const VEO_MODEL = 'gemini-omni-flash-preview';
 
 // The proxy rejects prompts over 1000 characters ("String must contain at
@@ -40,7 +42,8 @@ export async function submitVeo(params: {
   aspect: '9:16' | '16:9' | '1:1';
   durationS: number;
   referenceImageUrl?: string | null;
-  /** Exact platform model id — defaults to the proven Omni Flash. */
+  /** Group A model id. Runway ids never reach here — renderAdClip routes
+   * those to the Runway proxy instead. */
   model?: string;
 }): Promise<string> {
   // The video model renders 4–8s clips; a 10s script clip renders at the 8s cap.
@@ -103,6 +106,41 @@ export async function pollVeo(operationId: string, timeoutMs = 8 * 60 * 1000): P
     await new Promise((r) => setTimeout(r, 5000));
   }
   throw new Error('The render took too long (8 minutes). Regenerate the clip to retry.');
+}
+
+/**
+ * Render ONE ad clip on whichever engine the customer picked, and report the
+ * model it actually rendered on.
+ *
+ * Runway ids go to the platform's Runway proxy through the shared adapter:
+ * /api/veo/generate/video rejects them outright (invalid_enum_value), and the
+ * Runway proxy speaks a different body — promptText, pixel-pair ratio, and an
+ * Idempotency-Key per submit. Everything else keeps the proven Veo path.
+ */
+export async function renderAdClip(params: {
+  model: string;
+  prompt: string;
+  negative?: string;
+  aspect: '9:16' | '16:9' | '1:1';
+  durationS: number;
+  referenceImageUrl?: string | null;
+}): Promise<{ videoUrl: string; modelUsed: string }> {
+  if (isRunwayModel(params.model)) {
+    const seed = params.referenceImageUrl && /^https:\/\//.test(params.referenceImageUrl)
+      ? params.referenceImageUrl
+      : null;
+    const out = await generateWithRunway({
+      model: params.model,
+      prompt: capVeoText(params.prompt),
+      image: seed,
+      aspectRatio: params.aspect,
+      duration: params.durationS,
+    });
+    return { videoUrl: out.mediaUrls[0], modelUsed: params.model };
+  }
+  const model = params.model || VEO_MODEL;
+  const operationId = await submitVeo({ ...params, model });
+  return { videoUrl: await pollVeo(operationId), modelUsed: model };
 }
 
 // ---------------------------------------------------------------------------

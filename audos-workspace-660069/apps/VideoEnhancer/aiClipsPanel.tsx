@@ -9,11 +9,12 @@
  * Generated clips are durable URLs — download one and drop it into your edit.
  */
 import { useState } from 'react';
-import { Clapperboard, Download, Loader2, Upload, Wand2, X } from 'lucide-react';
+import { Clapperboard, Download, Upload, Wand2, X } from 'lucide-react';
 import { EnginePicker } from '../../components/EngineSelector';
 import { groupAModel, validateGroupAInputs } from '../../lib/videoEngines';
-import { pollGroupA, submitGroupA } from '../../lib/videoEngineClient';
+import { renderGroupAResilient } from '../../lib/videoEngineClient';
 import { uploadVideo } from './enhancerCore';
+import { LightBeamLoader } from '../../components/design-system/index';
 
 interface MadeClip { url: string; engine: string; prompt: string; at: number }
 
@@ -37,7 +38,7 @@ export default function AiClipsPanel() {
     if (!ready) return;
     setBusy(true); setErr(''); setNote('Submitting…');
     try {
-      const kick = await submitGroupA({
+      const rendered = await renderGroupAResilient({
         model: engine,
         prompt,
         aspectRatio: aspect,
@@ -45,11 +46,14 @@ export default function AiClipsPanel() {
         generateAudio: false,
         resolution: model?.supports4k ? '1080p' : undefined,
         imageData: seed || undefined,
+      }, {
+        fallbackModels: ['veo-3.1-fast-generate-preview', 'gemini-omni-flash-preview'],
+        onStatus: setNote,
+        onProgress: (progress) => setNote(`Rendering on ${model?.name || engine}… ${Math.round(progress)}%`),
       });
-      setNote(`Rendering on ${model?.name || engine}… polling every 5s${kick.cost ? ` · cost $${kick.cost}` : ''}`);
-      const url = await pollGroupA(kick.operationId);
-      setClips((all) => [{ url, engine: model?.name || engine, prompt: prompt.slice(0, 160), at: Date.now() }, ...all].slice(0, 8));
-      setNote('Clip ready — download it below and drop it into your edit.');
+      const actual = groupAModel(rendered.modelUsed)?.name || rendered.modelUsed;
+      setClips((all) => [{ url: rendered.videoUrl, engine: actual, prompt: prompt.slice(0, 160), at: Date.now() }, ...all].slice(0, 8));
+      setNote(rendered.fallbackFrom ? `Clip ready — Seedance was busy, so this one finished on ${actual}.` : 'Clip ready — download it below and drop it into your edit.');
     } catch (e: any) {
       setErr(String(e?.message || e));
       setNote('');
@@ -85,7 +89,7 @@ export default function AiClipsPanel() {
             <input type="range" min={4} max={Math.max(8, model?.maxDurationS || 8)} value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={{ width: 110, accentColor: 'var(--space-brand-primary-500)', cursor: 'pointer' }} />
           </label>
           <label className="ve-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600, color: 'var(--space-text-brand)', background: 'transparent', border: '1px dashed var(--space-border-strong)', borderRadius: 8, padding: '5px 10px', cursor: 'pointer' }}>
-            {seedBusy ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />} {seed ? 'Replace seed image' : 'Seed image (optional)'}
+            {seedBusy ? <LightBeamLoader height={2} style={{ width: 28 }} /> : <Upload size={12} />} {seed ? 'Replace seed image' : 'Seed image (optional)'}
             <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={async (e) => {
               const f = e.target.files?.[0];
               if (!f) return;
@@ -104,12 +108,12 @@ export default function AiClipsPanel() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
           <button onClick={() => void generate()} disabled={!ready} className="ve-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700, padding: '8px 16px', borderRadius: 9, border: 'none', cursor: ready ? 'pointer' : 'not-allowed', background: ready ? 'var(--space-brand-primary-600)' : 'var(--space-surface-panel-strong)', color: ready ? '#fff' : 'var(--space-text-muted)' }}>
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />} Generate clip
+            {busy ? <LightBeamLoader height={2} style={{ width: 30 }} /> : <Wand2 size={13} />} Generate clip
           </button>
           {violation && prompt.trim() ? <span style={{ fontSize: 11.5, color: '#d97706' }}>{violation}</span> : null}
           {model?.costHint ? <span style={{ fontSize: 11, color: 'var(--space-text-muted)' }}>Estimated: {model.costHint}</span> : null}
         </div>
-        {note ? <div style={{ fontSize: 12, color: 'var(--space-text-brand)', marginTop: 9 }}>{busy ? <Loader2 size={12} className="animate-spin" style={{ verticalAlign: -2, marginRight: 5 }} /> : null}{note}</div> : null}
+        {busy && note ? <LightBeamLoader label={note} style={{ marginTop: 10 }} /> : note ? <div style={{ fontSize: 12, color: 'var(--space-text-brand)', marginTop: 9 }}>{note}</div> : null}
         {err ? <div style={{ fontSize: 12, color: 'var(--space-semantic-danger)', marginTop: 9, lineHeight: 1.5 }}>{err}</div> : null}
       </div>
 

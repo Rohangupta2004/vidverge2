@@ -4,7 +4,7 @@ export const mapAnimation: ForgeStyle = {
   id: 'map-animation',
   name: 'Map animation',
   description: 'Illustrated topography, route zooms and precise marker drops.',
-  preview: 'linear-gradient(135deg,#E8DFC8,#7FA38A 55%,#D56D4C)',
+  preview: '#0b0d12 url("https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1790666772255-qam2gt.png") center/cover no-repeat',
   palette: ['#E8DFC8', '#7FA38A', '#305B50', '#D56D4C', '#24323A'],
   fonts: ['Inter', 'IBM Plex Mono'],
   imagePromptPrefix: 'Editorial illustrated map element, topographic contour lines, cartographic ink texture, warm parchment and forest palette, transparent background, no labels or text,',

@@ -34,10 +34,27 @@ import remarkGfm from 'remark-gfm';
 import { getFriendlyTerm, getToolColor } from '../lib/friendly-terms';
 import { tw } from '../lib/colors';
 import type { AgentChatRuntime } from './useAgentChatRuntime';
+import AgentStreak from './AgentStreak';
 
 interface AgentChatViewProps {
   runtime: AgentChatRuntime;
 }
+
+/**
+ * First-run copy. The space config can supply its own welcome message and
+ * conversation starters; these are what a visitor sees when it does not, and
+ * they describe what VidVerge actually does rather than asking an empty
+ * "how can I help".
+ */
+const VIDVERGE_HOME_WELCOME =
+  'Paste your product URL and I will read your brand, write you six different ad scripts, storyboard the one you pick and render it in your own colours — or bring footage you already have and I will cut, caption and score it.';
+
+const VIDVERGE_STARTERS = [
+  'Turn my product URL into an ad',
+  'Write me a script for a 30-second launch video',
+  'Add captions and music to a video I already have',
+  'Design a reusable character for my videos',
+];
 
 function WorkingIndicator({
   lastAction,
@@ -65,7 +82,7 @@ function WorkingIndicator({
   return (
     <div className="flex items-center justify-center py-2 mr-8">
       <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--space-surface-muted)] rounded-full">
-        <Icon className={`h-4 w-4 ${color} animate-spin`} />
+        <Icon className={`h-4 w-4 ${color} animate-spin motion-reduce:animate-none`} />
         <span className={`text-xs font-medium ${color}`}>
           {thinkingText || `${agentLabel} is ${friendlyText}...`}
         </span>
@@ -298,9 +315,17 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
     thinkingText,
     beaconIntake,
     beaconStarterPrompts,
-    starterPrompts,
     shortcutPrefix,
   } = runtime;
+
+  // The platform-managed runtime hook does not return `starterPrompts` (it only
+  // ships beaconStarterPrompts), so reading it off the typed runtime crashes the
+  // view the moment it mounts. Guard it: use the field when a future runtime
+  // supplies it, otherwise an empty list — the VidVerge fallback starters below
+  // keep the first screen from ever being a bare input box.
+  const starterPrompts: string[] = Array.isArray((runtime as any).starterPrompts)
+    ? ((runtime as any).starterPrompts as string[])
+    : [];
 
   const hasUserMessages = messages.some((message) => message.role === 'user');
   const shouldShowBeaconIntake = isBeaconSpace && !!beaconIntake && !hasUserMessages;
@@ -312,7 +337,7 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
       ? shouldShowBeaconIntake
         ? 'We can keep building from your starter plan, or you can tell me what changed...'
         : "Tell me what happened, or what you're worried about..."
-      : 'Ask me anything... (paste or drop images here)';
+      : 'Describe the video you want, paste a product URL, or drop in footage…';
 
   const visibleMessages = messages.filter(
     (m) => !(m.role === 'user' && typeof m.content === 'string' && m.content.startsWith('[SYSTEM:')),
@@ -367,6 +392,10 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
     !streamingContent &&
     !shouldShowBeaconIntake &&
     !isPending;
+
+  // Starters the space configured win; VidVerge's own are the fallback so the
+  // first screen is never a bare input box.
+  const homeStarters = starterPrompts.length > 0 ? starterPrompts : VIDVERGE_STARTERS;
 
   const firstAssistantMessage = visibleMessages.find((m) => m.role === 'assistant');
   const homeWelcomeText =
@@ -454,7 +483,7 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
               title="Attach files (images, PDFs)"
             >
               {isUploadingAttachment ? (
-                <Loader2 className="w-4 h-4 animate-spin text-[var(--space-text-muted)]" />
+                <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none text-[var(--space-text-muted)]" />
               ) : (
                 <Paperclip className="w-4 h-4 text-[var(--space-text-muted)]" />
               )}
@@ -493,15 +522,15 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--space-surface-accent-soft)] shadow-sm">
                 <Bot className="h-6 w-6 text-[var(--space-text-brand)]" />
               </div>
-              <h1 className="text-2xl font-semibold text-[var(--space-text-primary)]">How can I help?</h1>
-              {homeWelcomeText && (
-                <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--space-text-secondary)]">{homeWelcomeText}</p>
-              )}
+              <h1 className="text-2xl font-semibold text-[var(--space-text-primary)]">What are we making today?</h1>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--space-text-secondary)]">
+                {homeWelcomeText || VIDVERGE_HOME_WELCOME}
+              </p>
             </div>
             {composerElement}
-            {starterPrompts.length > 0 && (
+            {homeStarters.length > 0 && (
               <div className="mt-6 flex flex-wrap justify-center gap-2">
-                {starterPrompts.map((prompt) => (
+                {homeStarters.map((prompt) => (
                   <button
                     key={prompt}
                     type="button"
@@ -523,7 +552,7 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
         {showPendingPlaceholder && (
           <div className="flex justify-start mr-8">
             <div className="bg-[var(--space-surface-muted)] rounded-lg px-4 py-2 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-[var(--space-text-muted)]" />
+              <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none text-[var(--space-text-muted)]" />
               <span className="text-xs text-[var(--space-text-muted)]">Getting ready…</span>
             </div>
           </div>
@@ -616,8 +645,9 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
               </div>
             ) : (
               <div className="text-center text-[var(--space-text-secondary)]">
-                <Bot className="w-12 h-12 mx-auto mb-3 text-[var(--space-text-muted)]" />
-                <p className="text-sm">Ask me anything to get started</p>
+                <div className="mb-3 flex justify-center"><AgentStreak size={38} /></div>
+                <h2 className="text-lg font-semibold text-[var(--space-text-primary)]">What should we make?</h2>
+                <p className="mx-auto mt-2 max-w-md text-sm leading-6">Bring me a product URL, a script, or a rough idea. I’ll help shape it into a finished VidVerge video.</p>
                 {starterPrompts.length > 0 && (
                   <div className="mt-5 flex flex-wrap justify-center gap-2">
                     {starterPrompts.map((prompt) => (

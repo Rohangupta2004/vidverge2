@@ -176,7 +176,7 @@ function VoiceNarrationPanel(props: {
     <Section icon={<Mic size={15} />} title="Narration voice" hint="one consistent ElevenLabs voice for the whole film">
       {vp ? (
         <div style={{ color: T.muted, fontSize: 11.5, lineHeight: 1.6 }}>
-          Voice plan: <span style={{ color: T.bone }}>{vp.voiceName}</span> · tone {vp.tone} · energy {vp.energy} · pace {vp.pace} · emotion {vp.emotion} · {vp.language}{vp.accent ? ` (${vp.accent} accent)` : ''}
+          Voice plan: <span style={{ color: T.bone }}>{vp.voiceName || 'the selected voice'}</span> · tone {vp.tone || 'neutral'} · energy {vp.energy || 'steady'} · pace {vp.pace || 'natural'} · emotion {vp.emotion || 'grounded'} · {vp.language || 'English'}{vp.accent ? ` (${vp.accent} accent)` : ''}
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
@@ -190,7 +190,7 @@ function VoiceNarrationPanel(props: {
           style={{ ...fieldStyle, width: 260 }}
           aria-label="Narration voice"
         >
-          {vp?.voiceId && !props.voices.some((v) => v.id === vp.voiceId) ? <option value={vp.voiceId}>{vp.voiceName}</option> : null}
+          {vp?.voiceId && !props.voices.some((v) => v.id === vp.voiceId) ? <option value={vp.voiceId}>{vp.voiceName || 'Current voice'}</option> : null}
           {!vp?.voiceId ? <option value="">Choose a voice…</option> : null}
           {props.voices.map((v) => <option key={v.id} value={v.id}>{v.name}{v.labels?.accent ? ` · ${v.labels.accent}` : ''}</option>)}
         </select>
@@ -238,7 +238,7 @@ function MusicPanel(props: { film: Film; busy: boolean; onChangeMusic: (preset: 
           {!music ? 'Planned with the audio stage.'
             : music.status === 'skipped' ? 'Skipped — the film ships without music.'
             : music.status === 'failed' ? 'Music preparation failed.'
-            : music.status === 'ready' ? `${music.preset} bed ready${music.mood ? ` · ${music.mood}` : ''}` : `Composing ${music.preset}…`}
+            : music.status === 'ready' ? `${music.preset || 'Music'} bed ready${music.mood ? ` · ${music.mood}` : ''}` : `Composing the ${music.preset || 'music'} bed…`}
         </span>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 9, flexWrap: 'wrap' }}>
@@ -271,7 +271,7 @@ function SfxPanel(props: { film: Film; busy: boolean; onRetry: () => void; onSki
           {items.map((f, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <StateDot state={status === 'skipped' ? 'todo' : f.status === 'ready' ? 'done' : f.status === 'failed' ? 'failed' : 'active'} />
-              <span style={{ color: status === 'skipped' ? T.dim : T.muted, fontSize: 11.5 }}>{f.description} · @{Number(f.at_s || 0).toFixed(1)}s{f.error ? ` — ${f.error}` : ''}</span>
+              <span style={{ color: status === 'skipped' ? T.dim : T.muted, fontSize: 11.5 }}>{f.description || 'Sound effect'} · @{Number(f.at_s || 0).toFixed(1)}s{f.error ? ` — ${f.error}` : ''}</span>
             </div>
           ))}
         </div>

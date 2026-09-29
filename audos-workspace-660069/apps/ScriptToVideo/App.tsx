@@ -3,7 +3,8 @@
  *
  *   Script → Opus 5 reads the WHOLE story → sequential clip plan (4/6/8/10s)
  *          → one prompt at a time (global + scene + continuity context)
- *          → user-triggered generation on the Google video model (Omni Flash)
+ *          → generation on the Google video model (Omni Flash), fired by
+ *            auto-generate the moment a prompt is ready — or by a click
  *          → FFmpeg extracts + validates each clip's real final frame
  *          → Opus decides continuation vs. independent scene for the next clip
  *          → FFmpeg assembles the final film
@@ -15,30 +16,67 @@
  */
 import { Component, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertCircle, ArrowLeft, Clapperboard, Download } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Download, Sparkles } from 'lucide-react';
 import { Film, FilmScene, T, db } from './api';
 import {
-  AssemblyProgress, allScenesDone, assembleReadyFilm, autoPostProduce,
-  autoProduce, changeMusicDirection, changeNarrationVoice,
-  createAndSegmentFilm, generateScene, prepareFilmAudioStage, prepareScene,
-  regenerateNarration, regenerateScenePrompt, regenerateSfx, resumeFilm,
-  retryAudioLayer, retryScene, runAudioLayerStep, runFinalAssembly,
-  skipAudioLayer, skipScene, useCharacterReferenceFallback,
+  AssemblyProgress, activeScene, allScenesDone, assembleReadyFilm,
+  autoPostProduce, autoProduce, changeMusicDirection, changeNarrationVoice,
+  createAndSegmentFilm, generateScene, isFrameExtractionStalled,
+  msSinceFilmUpdate, prepareFilmAudioStage, prepareScene,
+  recoverStalledFrameExtraction, regenerateNarration, regenerateScenePrompt,
+  regenerateSfx, resumeFilm, retryAudioLayer, retryScene, runAudioLayerStep,
+  runFinalAssembly, skipAudioLayer, skipScene, useCharacterReferenceFallback,
 } from './pipeline/orchestrator';
 import { audioReady } from './pipeline/audio';
+import { LB_SHIMMER_CSS } from '../../components/LightBeam';
+import ProductSuiteHeader from '../../components/ProductSuiteHeader';
 import Library, { LegacyFilm } from './Library';
 import { CreateScreen } from './CreateFlow';
 import RenderRoom from './RenderRoom';
 import { FinalScreen } from './ReviewFinish';
 import AgentPanel from './AgentPanel';
 import AssemblyBar from './AssemblyBar';
+import AgentStudio from './ModelTester';
+import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
+import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
+import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
+import { videoEngine } from '../../lib/videoEngines';
 
-type Screen = 'library' | 'create' | 'board' | 'final' | 'legacy';
+type Screen = 'library' | 'create' | 'board' | 'final' | 'legacy' | 'tester';
+
+function friendlyAppError(value: unknown): string {
+  const raw = String(value || 'This step could not be completed.');
+  const named = raw.replace(/(?:openrouter\/[^\s,;]+|gemini-omni-flash-preview|veo-[\w.-]+)/g, (id) => videoEngine(id)?.label || 'the selected video engine');
+  if (/no_credentials|\b401\b/i.test(named)) return 'Your workspace session is not ready yet. Try again in a moment.';
+  if (/insufficient|payment|required|\b402\b/i.test(named)) return 'This generation needs more workspace credits before it can start.';
+  if (/rate.?limit|\b429\b/i.test(named)) return 'The video service is busy right now. Wait a moment, then try again.';
+  if (/provider[_ -]?error|\b50[0234]\b|service unavailable/i.test(named)) return 'The video service is temporarily unavailable. Your film is saved; retry this step shortly.';
+  return named;
+}
+
+/** Auto-generate is remembered per film. The pipeline prepares one prompt at a
+ * time, so a film reopened halfway through has to resume on its own instead of
+ * waiting at PROMPT_READY for a click the toggle says is not needed. Films
+ * that predate the preference default to on — that is what the board already
+ * did for every freshly planned film. */
+const autoPrefKey = (filmId: number) => `s2v:auto-generate:${filmId}`;
+
+function readAutoPref(filmId: number): boolean {
+  try {
+    const stored = window.localStorage.getItem(autoPrefKey(filmId));
+    return stored === null ? true : stored === '1';
+  } catch { return true; }
+}
+
+function writeAutoPref(filmId: number, on: boolean) {
+  try { window.localStorage.setItem(autoPrefKey(filmId), on ? '1' : '0'); } catch { /* preference only */ }
+}
 
 const APP_CSS = `
   .s2v-app button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease; }
   .s2v-app button:focus-visible, .s2v-app a:focus-visible { outline: 2px solid ${T.live}; outline-offset: 2px; }
-  .s2v-app input:focus-visible, .s2v-app textarea:focus-visible, .s2v-app select:focus-visible { outline: none; border-color: ${T.live} !important; box-shadow: 0 0 0 3px rgba(232,163,60,0.18); }
+  .s2v-app input:focus-visible, .s2v-app textarea:focus-visible, .s2v-app select:focus-visible { outline: none; border-color: ${T.live} !important; box-shadow: 0 0 0 3px rgba(245,158,11,0.18); }
+  ${LB_SHIMMER_CSS}
   .s2v-app input, .s2v-app textarea, .s2v-app select { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
   .s2v-row { transition: background-color 0.16s ease; border-radius: 10px; }
   .s2v-row:hover { background: rgba(255,255,255,0.035) !important; }
@@ -48,6 +86,10 @@ const APP_CSS = `
   .s2v-app ::-webkit-scrollbar { width: 8px; height: 8px; }
   .s2v-app ::-webkit-scrollbar-thumb { background: ${T.dim}; border-radius: 999px; }
   .s2v-app ::-webkit-scrollbar-track { background: transparent; }
+  @media (prefers-reduced-motion: reduce) {
+    .s2v-app *, .s2v-app *::before, .s2v-app *::after { transition-duration: 0.01ms !important; }
+    .s2v-app .animate-spin, .s2v-app .lb-shimmer { animation: none !important; }
+  }
 `;
 
 function ScriptToVideoApp() {
@@ -66,6 +108,9 @@ function ScriptToVideoApp() {
   const [captions, setCaptions] = useState(false);
   const [assembly, setAssembly] = useState<AssemblyProgress | null>(null);
   const [legacyOpen, setLegacyOpen] = useState<LegacyFilm | null>(null);
+  // The completed scene currently being redone (fresh prompt + re-render), so
+  // the board can show live progress from the first click.
+  const [redoingId, setRedoingId] = useState<number | null>(null);
 
   // The orchestrator works on MUTABLE engine objects (the state machine folds
   // continuity from clip to clip); React state mirrors them through the hooks.
@@ -78,6 +123,15 @@ function ScriptToVideoApp() {
   // audio auto-run each fire once per opened film — never in a loop.
   const advancedFor = useRef<number | null>(null);
   const postKickedFor = useRef<number | null>(null);
+  // Auto-generate fires once per PROMPT_READY scene: the key is film + scene,
+  // so every newly prepared clip re-arms the trigger while a scene already
+  // handed to the engine never fires twice.
+  const autoFiredFor = useRef('');
+  // One-shot guard for the stalled frame-extraction recovery, per film.
+  const frameRecoveryFor = useRef<number | null>(null);
+  // When the film entered its current machine_state, so a stall is measured
+  // from the transition rather than from when this tab happened to open it.
+  const stateSince = useRef<{ id: number; state: string; at: number }>({ id: 0, state: '', at: 0 });
 
   const hooks = useRef({
     onFilm: (patch: Partial<Film>) => setFilm((f) => (f ? { ...f, ...patch } : f)),
@@ -110,6 +164,89 @@ function ScriptToVideoApp() {
   }, []);
 
   useEffect(() => { loadLibrary(); }, [loadLibrary]);
+
+  /** Set auto-generate for a film and re-arm the PROMPT_READY trigger. */
+  function armAuto(filmId: number, on = readAutoPref(filmId)) {
+    setAuto(on);
+    autoRef.current = on;
+    autoFiredFor.current = '';
+  }
+
+  // AUTO-GENERATE — PROMPT_READY is the pipeline's "a prepared clip is waiting
+  // for a render trigger" state. Whenever the film sits there with
+  // auto-generate on, generation starts by itself: no click, and no
+  // requirement that the film have zero progress. The trigger re-arms for each
+  // newly prepared scene, so a loop that ended early — a reload, a reopened
+  // film, an auto-run interrupted by a failure the user then fixed — picks the
+  // pipeline back up instead of stalling at PROMPT_READY. It polls rather than
+  // keying off React state because the engine mutates its film/scene objects
+  // in refs: a run ending is not itself a state change. The loop stays
+  // strictly sequential through autoProduce (one clip at a time).
+  useEffect(() => {
+    if (!film || (screen !== 'board' && screen !== 'final')) return;
+    const filmId = film.id;
+    const tick = () => {
+      if (!autoRef.current || running.current) return;
+      const f = engineFilm.current;
+      if (!f || f.id !== filmId || f.status === 'ready') return;
+      // The scene row is the authority for PROMPT_READY: a prepared prompt
+      // sitting on 'ready' is exactly what that state means.
+      const head = activeScene(engineScenes.current);
+      if (!head || head.status !== 'ready' || !head.prompt) return;
+      const key = `${f.id}:${head.id}`;
+      if (autoFiredFor.current === key) return;
+      autoFiredFor.current = key;
+      void run(async () => {
+        await autoProduce(f, engineScenes.current, hooks, () => autoRef.current);
+        await maybeAdvancePost();
+      });
+    };
+    tick();
+    const timer = window.setInterval(tick, 4000);
+    return () => window.clearInterval(timer);
+  }, [film?.id, screen]);
+
+  // Track when the film entered its current machine_state. A film OPENED in a
+  // state it was already sitting in keeps the row's own timestamp, so a render
+  // abandoned an hour ago reads as stalled immediately; transitions made in
+  // this session are timed from the transition.
+  useEffect(() => {
+    if (!film) return;
+    const state = String(film.machine_state || '');
+    const prev = stateSince.current;
+    if (prev.id === film.id && prev.state === state) return;
+    const rowAt = Date.parse(String(film.updated_at || ''));
+    const openedHere = prev.id !== film.id && Number.isFinite(rowAt);
+    stateSince.current = { id: film.id, state, at: openedHere ? rowAt : Date.now() };
+  }, [film?.id, film?.machine_state, film?.updated_at]);
+
+  // EXTRACTING_FINAL_FRAME WATCHDOG — the clip has already rendered and been
+  // stored by the time a film reaches this state, so sitting in it is never
+  // progress. Past the stall budget the frame stage is retried from the stored
+  // clip (never a re-render) and, failing that, the scene completes without a
+  // keyframe and the next one opens with no reference. One attempt per film.
+  useEffect(() => {
+    if (!film || film.machine_state !== 'EXTRACTING_FINAL_FRAME') return;
+    const filmId = film.id;
+    const tick = () => {
+      if (running.current || busy) return;
+      if (frameRecoveryFor.current === filmId) return;
+      const f = engineFilm.current;
+      if (!f || f.id !== filmId) return;
+      const since = stateSince.current.id === filmId && stateSince.current.state === 'EXTRACTING_FINAL_FRAME'
+        ? Math.max(0, Date.now() - stateSince.current.at)
+        : msSinceFilmUpdate(f);
+      if (!isFrameExtractionStalled(f, engineScenes.current, since)) return;
+      frameRecoveryFor.current = filmId;
+      void run(async () => {
+        await recoverStalledFrameExtraction(f, engineScenes.current, hooks);
+        await maybeAdvancePost();
+      });
+    };
+    tick();
+    const timer = window.setInterval(tick, 15000);
+    return () => window.clearInterval(timer);
+  }, [film?.id, film?.machine_state, busy]);
 
   function adopt(f: Film, list: FilmScene[]) {
     engineFilm.current = f;
@@ -161,6 +298,10 @@ function ScriptToVideoApp() {
       const res = await createAndSegmentFilm({ script: params.script, aspect: params.aspect, referenceImageUrl: params.screenshotUrl, note: params.note, videoModel: params.videoModel }, hooks);
       const freshScenes = await db.listScenes(res.film.id);
       adopt(res.film, freshScenes);
+      advancedFor.current = null; postKickedFor.current = null;
+      frameRecoveryFor.current = null;
+      stateSince.current = { id: 0, state: '', at: 0 };
+      armAuto(res.film.id);
       setScreen('board');
     } catch (e: any) { setError(String(e?.message || e)); }
     finally { running.current = false; setBusy(false); }
@@ -181,13 +322,41 @@ function ScriptToVideoApp() {
   const handlePrepare = withEngine((f, list, s) => prepareScene(f, list, s, hooks));
   const handleRetry = withEngine((f, list, s) => retryScene(f, list, s, hooks));
   const handleRegenPrompt = withEngine((f, list, s) => regenerateScenePrompt(f, list, s, hooks));
+
+  /** [Redo this scene] — a TRUE redo for a completed scene: Opus writes a
+   * fresh prompt AND the clip re-renders immediately, with no dependency on
+   * the auto-generate toggle and no second click. The old wiring only rewrote
+   * the prompt (silently doing nothing at all while the pipeline was busy),
+   * which read as a broken button. Other scenes are never touched. */
+  function handleRedo(scene: FilmScene) {
+    const f = engineFilm.current;
+    const engineScene = engineScenes.current.find((s) => s.id === scene.id);
+    if (!f || !engineScene) return;
+    if (running.current) {
+      setError('The pipeline is busy with another step — wait for it to finish, then redo the scene.');
+      return;
+    }
+    setRedoingId(scene.id);
+    void run(async () => {
+      try {
+        await regenerateScenePrompt(f, engineScenes.current, engineScene, hooks);
+        await generateScene(f, engineScenes.current, engineScene, hooks);
+      } finally {
+        setRedoingId(null);
+      }
+      if (autoRef.current) await autoProduce(f, engineScenes.current, hooks, () => autoRef.current);
+      await maybeAdvancePost();
+    });
+  }
   const handleUseCharRef = withEngine((f, list, s) => useCharacterReferenceFallback(f, list, s, hooks));
   const handleSkip = withEngine((f, list, s) => skipScene(f, list, s, hooks));
 
   function handleToggleAuto(on: boolean) {
     setAuto(on);
     autoRef.current = on;
+    autoFiredFor.current = '';
     const f = engineFilm.current;
+    if (f) writeAutoPref(f.id, on);
     if (on && f && !running.current) {
       void run(async () => {
         await autoProduce(f, engineScenes.current, hooks, () => autoRef.current);
@@ -282,7 +451,9 @@ function ScriptToVideoApp() {
     running.current = true;
     try {
       await regenerateScenePrompt(f, engineScenes.current, engineScene, hooks, instruction);
-      return `Scene ${engineScene.idx + 1} has a new prompt — review it and generate when ready.`;
+      return autoRef.current
+        ? `Scene ${engineScene.idx + 1} has a new prompt — auto-generate picks it up and starts the render.`
+        : `Scene ${engineScene.idx + 1} has a new prompt — review it and generate when ready.`;
     } finally {
       running.current = false;
     }
@@ -290,8 +461,13 @@ function ScriptToVideoApp() {
 
   async function openFilm(f: Film) {
     setError(''); setNote(''); setAssembly(null);
-    setAuto(false); autoRef.current = false;
     advancedFor.current = null; postKickedFor.current = null;
+    frameRecoveryFor.current = null;
+    stateSince.current = { id: 0, state: '', at: 0 };
+    // Auto-generate is the film's own remembered setting, never a fresh false:
+    // a half-produced film reopened with it on resumes at PROMPT_READY instead
+    // of waiting for a click.
+    armAuto(f.id);
     try {
       const list = await db.listScenes(f.id);
       adopt(f, list);
@@ -307,8 +483,8 @@ function ScriptToVideoApp() {
           void run(() => autoPostProduce(engineFilm.current!, engineScenes.current, hooks));
         }
       } else setScreen('board');
-      // Adopt in-flight renders and re-arm the pipeline head (prompt prep only —
-      // generation always waits for a click).
+      // Adopt in-flight renders and re-arm the pipeline head (prompt prep only
+      // — generation itself starts from the auto-generate trigger or a click).
       if (list.length && !running.current) {
         const needsResume = list.some((s) => s.status === 'generating') || list.some((s) => s.status === 'waiting');
         if (needsResume && f.status !== 'ready') {
@@ -326,31 +502,75 @@ function ScriptToVideoApp() {
   const showBack = screen !== 'library';
   const showDirector = ['board', 'final'].includes(screen) && scenes.length > 0;
 
+  // Vidverge Agent — the floating orb assistant. It can write or improve the
+  // script, open the create screen prefilled, and start the film pipeline.
+  const agentContext = {
+    appId: 'script-to-video',
+    appName: 'Script-to-Video',
+    currentInputs: {
+      screen,
+      scriptDraft: quickText.slice(0, 2000),
+      openFilm: film ? `film #${film.id} (status: ${film.status})` : 'none',
+    },
+    onFillField: (field: string, value: string) => {
+      if (field === 'script') { setQuickText(value); setScreen('create'); }
+    },
+    onTriggerAction: (action: string, params?: Record<string, unknown>) => {
+      const p = params || {};
+      if (action === 'generate' || action === 'create') {
+        const script = (typeof p.script === 'string' && p.script.trim()) ? p.script.trim() : quickText.trim();
+        if (!script) { setError('Write or fill a script first — then I can start the film.'); return; }
+        const aspect = p.aspect === '9:16' ? '9:16' : '16:9';
+        void handleCreate({ script, aspect, screenshotUrl: null, note: '' });
+      } else if (action === 'assemble') void handleFinalAssembly({ captions });
+      else if (action === 'nativeCut') void handleNativeCut();
+      else if (action === 'studio') { setScreen('tester'); setAuto(false); autoRef.current = false; }
+    },
+    promptHint: [
+      'The user writes a script and this app turns it into a film, one verified AI clip at a time.',
+      'This app also has an AGENT STUDIO: one prompt, one clip, on any Runway model (Gen 4.5 by default), with a download button. It creates no film project. Send the user there when they want a single shot rather than a whole film, or want to compare models.',
+      'Fields you can fill: script (the full video script — filling it opens the create screen prefilled with your text).',
+      'Actions you can trigger: generate with {"script":"...","aspect":"16:9"|"9:16"} (starts scene planning and production — include the script in the params), studio (opens the Agent Studio so the user can generate one clip from one prompt), assemble (final assembly with audio layers, only when scenes are done), nativeCut (plain assembly without narration/music).',
+      'When the user asks you to write or improve a script, write it yourself, then fill it with FILL_FIELD:script:… and ask if they want you to start generation.',
+    ].join('\n'),
+  };
+
   return (
     <div className="s2v-app" style={{ position: 'relative', width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: T.canvas, fontFamily: T.sans, overflow: 'hidden' }}>
       <style>{APP_CSS}</style>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 20px', borderBottom: `1px solid ${T.raised}`, flexShrink: 0 }}>
-        {showBack ? (
-          <button className="s2v-ghost" onClick={() => { setScreen('library'); setLegacyOpen(null); setAuto(false); autoRef.current = false; loadLibrary(); }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: T.muted, fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: '6px 10px', margin: '-6px -10px', borderRadius: 8 }}>
-            <ArrowLeft size={15} /> Library
-          </button>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(232,163,60,0.12)', border: '1px solid rgba(232,163,60,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Clapperboard size={14} color={T.live} />
-            </div>
-            <div style={{ color: T.bone, fontSize: 14.5, fontWeight: 700, letterSpacing: -0.2 }}>Script to Video</div>
-          </div>
-        )}
-        <div style={{ marginLeft: 'auto', color: T.dim, fontSize: 11.5 }}>
-          Opus 5 directs · one clip at a time · FFmpeg reads every final frame and cuts the film.
-        </div>
+      <div style={{ padding: '12px 20px', borderBottom: `1px solid ${T.raised}`, flexShrink: 0 }}>
+        <ProductSuiteHeader
+          name="Script-to-Video"
+          voice={screen === 'tester'
+            ? 'Agent Studio \u2014 one prompt, one clip. Pick any Runway model and I direct the render end to end.'
+            : 'I read your whole script, protect continuity, and direct the film one verified clip at a time.'}
+          working={busy || Boolean(note)}
+          showIcon={false}
+          actions={(
+            <>
+              <button
+                className="s2v-lift"
+                disabled={screen === 'tester'}
+                title="Generate a single clip from one prompt on any Runway model — it never touches your film projects."
+                onClick={() => { setScreen('tester'); setAuto(false); autoRef.current = false; }}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, background: screen === 'tester' ? T.live : 'rgba(245,158,11,0.12)', border: `1px solid ${T.live}`, color: screen === 'tester' ? '#1A1205' : T.live, fontSize: 12.5, fontWeight: 750, cursor: screen === 'tester' ? 'default' : 'pointer', padding: '7px 13px', borderRadius: 999 }}
+              >
+                <Sparkles size={14} /> Agent Studio
+              </button>
+              {showBack ? (
+                <button className="s2v-ghost" onClick={() => { setScreen('library'); setLegacyOpen(null); setAuto(false); autoRef.current = false; loadLibrary(); }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: `1px solid ${T.dim}`, color: T.muted, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', padding: '7px 11px', borderRadius: 9 }}>
+                  <ArrowLeft size={14} /> Library
+                </button>
+              ) : null}
+            </>
+          )}
+        />
       </div>
 
       {error ? (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'rgba(226,114,111,0.1)', borderBottom: '1px solid rgba(226,114,111,0.4)', color: T.fault, fontSize: 12.5, lineHeight: 1.5, padding: '9px 20px' }}>
           <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>{error}</span>
+          <span>{friendlyAppError(error)}</span>
         </div>
       ) : null}
 
@@ -363,10 +583,13 @@ function ScriptToVideoApp() {
           onOpen={openFilm}
           onOpenLegacy={(l) => { setLegacyOpen(l); setScreen('legacy'); }}
           onQuickCreate={(t) => { setQuickText(t); setScreen('create'); }}
+          onOpenStudio={() => { setScreen('tester'); setAuto(false); autoRef.current = false; }}
         />
       ) : null}
 
       {screen === 'create' ? <CreateScreen initialText={quickText} busy={busy} onSubmit={handleCreate} /> : null}
+
+      {screen === 'tester' ? <AgentStudio /> : null}
 
       {screen === 'board' && film ? (
         <RenderRoom
@@ -382,6 +605,8 @@ function ScriptToVideoApp() {
           onPrepare={handlePrepare}
           onRetry={handleRetry}
           onRegenPrompt={handleRegenPrompt}
+          onRedo={handleRedo}
+          redoingId={redoingId}
           onUseCharRef={handleUseCharRef}
           onSkip={handleSkip}
         />
@@ -428,6 +653,10 @@ function ScriptToVideoApp() {
           onOpenBoard={() => setScreen('board')}
         />
       ) : null}
+      <AgentChatProvider appContext={agentContext}>
+        <AgentChatButton />
+        <AgentChatPanel />
+      </AgentChatProvider>
     </div>
   );
 }
@@ -447,7 +676,7 @@ function LegacyViewer({ legacy: item }: { legacy: LegacyFilm }) {
           <div style={{ marginTop: 16 }}>
             <video src={finalUrl} controls style={{ maxWidth: '100%', maxHeight: 440, borderRadius: 12, background: '#000' }} />
             <div style={{ marginTop: 12 }}>
-              <a className="s2v-lift" href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.live, color: '#1A1205', borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 2px 10px rgba(232,163,60,0.25)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
+              <a className="s2v-lift" href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.live, color: '#1A1205', borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 2px 10px rgba(245,158,11,0.25)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
                 <Download size={14} /> Download MP4
               </a>
             </div>

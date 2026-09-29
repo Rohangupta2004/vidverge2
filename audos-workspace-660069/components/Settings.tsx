@@ -493,7 +493,7 @@ export default function Settings({ spaceId }: SettingsProps) {
               </div>
               <button
                 onClick={() => openPricing('nav')}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#93c5fd] bg-[#2563eb]/10 hover:bg-[#2563eb]/20 border border-[#2563eb]/40 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#93c5fd] bg-[#f59e0b]/10 hover:bg-[#f59e0b]/20 border border-[#f59e0b]/40 rounded-lg transition-colors"
                 data-testid="button-settings-plans"
               >
                 <Crown className="w-3.5 h-3.5" />
@@ -529,7 +529,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                   style={{
                     color: subscriber ? '#fff' : 'var(--space-text-secondary)',
                     background: subscriber
-                      ? 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)'
+                      ? 'linear-gradient(90deg, #f59e0b 0%, #d97706 100%)'
                       : 'var(--space-surface-panel-strong)',
                   }}
                   data-testid="badge-settings-tier"
@@ -555,7 +555,7 @@ export default function Settings({ spaceId }: SettingsProps) {
               // An account that DOES hold a live Stripe subscription keeps the
               // normal panel, so it never loses its manage-billing link.
               <div
-                className="p-4 rounded-xl border border-[#2563eb]/30 bg-gradient-to-r from-[#2563eb]/15 to-[#1d4ed8]/5"
+                className="p-4 rounded-xl border border-[#f59e0b]/30 bg-gradient-to-r from-[#f59e0b]/15 to-[#d97706]/5"
                 data-testid="settings-granted-access"
               >
                 <div className="flex items-center gap-2">
@@ -579,7 +579,7 @@ export default function Settings({ spaceId }: SettingsProps) {
 
                 {/* Trial Progress */}
                 {(subscriptionStatus?.status === 'trial' || subscriptionStatus?.status === 'trialing') && (
-                  <div className="p-4 bg-gradient-to-r from-[#2563eb]/15 to-[#1d4ed8]/10 rounded-xl border border-[#2563eb]/30">
+                  <div className="p-4 bg-gradient-to-r from-[#f59e0b]/15 to-[#d97706]/10 rounded-xl border border-[#f59e0b]/30">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-sm font-medium text-[var(--space-text-primary)]">
                         Free Trial
@@ -590,7 +590,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                     </div>
                     <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-gradient-to-r from-[#2563eb] to-[#1d4ed8] rounded-full transition-all"
+                        className="h-full bg-gradient-to-r from-[#f59e0b] to-[#d97706] rounded-full transition-all"
                         style={{ 
                           width: `${((subscriptionStatus.trialDays - subscriptionStatus.trialDaysRemaining) / subscriptionStatus.trialDays) * 100}%` 
                         }}
@@ -713,7 +713,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                     <button
                       onClick={handleSubscribe}
                       disabled={subscribing}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#2563eb] to-[#1d4ed8] hover:brightness-110 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#fbbf24] to-[#d97706] hover:brightness-110 text-[#180f02] font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       data-testid="button-subscribe"
                     >
                       {subscribing ? (

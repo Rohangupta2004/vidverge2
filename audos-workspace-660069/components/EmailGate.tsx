@@ -851,34 +851,34 @@ export default function EmailGate({
   // than the per-space light tokens) so it reads like a high-end video tool.
   const brandName = branding?.name || 'VidVerge';
   const tagline = branding?.tagline || 'Turn any idea into a publish-ready video — brief to video in one shot';
-  const logoUrl = branding?.logoUrl;
+  const logoUrl = branding?.logoUrl || 'https://storage.googleapis.com/audos-images/attachments/general/c0902809-6dc4-4e0c-b04e-1f60e01b31e6.png';
 
   const FONT = "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
   const bodyFontStack = FONT;
   const headingFontStack = FONT;
 
-  const BLUE = '#2563eb';
-  const INDIGO = '#1d4ed8';
-  const CYAN = '#0891b2';
+  const BLUE = '#f59e0b';
+  const INDIGO = '#d97706';
+  const CYAN = '#fbbf24';
 
-  const primaryColor = '#062842';
+  const primaryColor = '#f59e0b';
   const highlightColor = BLUE;
-  const contrastColor = BLUE;
-  const pageBackground = '#041d32';
-  const sectionBackground = '#062842';
-  const panelColor = '#0a3050';
-  const panelStrongColor = '#082742';
+  const contrastColor = '#080c14';
+  const pageBackground = '#080c14';
+  const sectionBackground = '#0a0f1a';
+  const panelColor = '#0e131f';
+  const panelStrongColor = '#161d2c';
   const borderColor = 'rgba(255,255,255,0.10)';
   const bgLight = colorWithAlpha(BLUE, 0.06);
   const bgMedium = colorWithAlpha(BLUE, 0.12);
   const textPrimary = '#ffffff';
   const textMuted = '#9ca3af';
   const textSubtle = '#6b7280';
-  const onPrimary = '#ffffff';
+  const onPrimary = '#180f02';
   const heroTextPrimary = '#ffffff';
   const heroTextMuted = '#9ca3af';
   const gateGradient =
-    'radial-gradient(1200px 620px at 50% -12%, rgba(37,99,235,0.18), transparent 62%), #041d32';
+    'radial-gradient(1200px 620px at 50% -12%, rgba(245,158,11,0.18), transparent 62%), #080c14';
 
   // Injected CSS for things inline styles can’t express: keyframes, hover
   // glow, focus rings, and scrollbar styling for the showcase carousel.
@@ -886,6 +886,8 @@ export default function EmailGate({
 @keyframes rloMeshA { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(-6%,4%) scale(1.15);} 100%{transform:translate(0,0) scale(1);} }
 @keyframes rloMeshB { 0%{transform:translate(0,0) scale(1);} 50%{transform:translate(6%,-5%) scale(1.12);} 100%{transform:translate(0,0) scale(1);} }
 @keyframes rloFadeUp { from{opacity:0;transform:translateY(18px);} to{opacity:1;transform:translateY(0);} }
+@keyframes rloBrandDrift { 0%,100%{transform:translate(-50%,-52%) scale(1) rotate(0deg);opacity:.10;} 50%{transform:translate(-46%,-48%) scale(1.05) rotate(2deg);opacity:.16;} }
+@media (prefers-reduced-motion: reduce) { .rlo-brand-motion { animation: none !important; } }
 .rlo-fade { animation: rloFadeUp .8s cubic-bezier(.16,1,.3,1) both; }
 .rlo-cta { transition: transform .2s ease, box-shadow .3s ease, filter .2s ease; }
 .rlo-cta:hover { transform: translateY(-1px); box-shadow: 0 0 34px rgba(37,99,235,.6), 0 10px 28px rgba(29,78,216,.35); filter: brightness(1.06); }
@@ -910,7 +912,7 @@ export default function EmailGate({
         <img
           src={logoUrl}
           alt={brandName}
-          style={{ width: size, height: size, objectFit: 'contain', borderRadius: 8 }}
+          style={{ width: size * 1.4, height: size, objectFit: 'cover', objectPosition: 'center', mixBlendMode: 'screen', filter: 'drop-shadow(0 0 14px rgba(245,158,11,0.55))' }}
         />
       );
     }
@@ -920,16 +922,16 @@ export default function EmailGate({
           width: size,
           height: size,
           borderRadius: size * 0.28,
-          background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+          background: 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#ffffff',
+          color: '#180f02',
           fontWeight: 700,
           fontSize: size * 0.42,
           fontFamily: FONT,
           flexShrink: 0,
-          boxShadow: '0 6px 18px rgba(37,99,235,0.45)',
+          boxShadow: '0 6px 24px rgba(245,158,11,0.5)',
         }}
       >
         {brandName.charAt(0).toUpperCase()}
@@ -946,10 +948,20 @@ export default function EmailGate({
     return (
       <div
         className="min-h-screen flex flex-col overflow-y-auto"
-        style={{ fontFamily: bodyFontStack, background: 'radial-gradient(900px 500px at 50% -10%, rgba(37,99,235,0.16), transparent 60%), #041d32' }}
+        style={{ fontFamily: bodyFontStack, background: 'radial-gradient(900px 500px at 50% -10%, rgba(245,158,11,0.18), transparent 60%), #080c14' }}
       >
         <style>{RLO_STYLES}</style>
-        <div className="flex-1 flex items-center justify-center px-6 py-12">
+        {/* Animated brand-icon motion background — fixed, behind all content,
+            pointer-events off so it can never trap a tap or cause scroll. */}
+        <div aria-hidden style={{ position: 'fixed', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}>
+          <img
+            className="rlo-brand-motion"
+            src={logoUrl}
+            alt=""
+            style={{ position: 'absolute', left: '50%', top: '50%', width: 'min(56vmax, 900px)', height: 'min(56vmax, 900px)', objectFit: 'contain', transform: 'translate(-50%,-52%)', mixBlendMode: 'screen', opacity: 0.12, animation: 'rloBrandDrift 24s ease-in-out infinite', willChange: 'transform, opacity' }}
+          />
+        </div>
+        <div className="flex-1 flex items-center justify-center px-6 py-12" style={{ position: 'relative', zIndex: 1 }}>
           <div className="w-full max-w-sm">
             <div className="text-center mb-10">
               <div className="flex justify-center mb-4">
@@ -1003,11 +1015,11 @@ export default function EmailGate({
                 disabled={loading || code.length !== 4}
                 className="w-full py-3.5 rounded-xl font-semibold text-base transition-all rlo-cta"
                 style={{
-                  background: loading || code.length !== 4 ? 'rgba(37,99,235,0.4)' : 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
-                  color: '#ffffff',
+                  background: loading || code.length !== 4 ? 'rgba(245,158,11,0.35)' : 'linear-gradient(90deg, #fbbf24 0%, #d97706 100%)',
+                  color: '#180f02',
                   border: 'none',
                   cursor: loading || code.length !== 4 ? 'not-allowed' : 'pointer',
-                  boxShadow: loading || code.length !== 4 ? 'none' : '0 8px 24px rgba(37,99,235,0.45)',
+                  boxShadow: loading || code.length !== 4 ? 'none' : '0 8px 28px rgba(245,158,11,0.45)',
                 }}
                 data-testid="button-verify"
               >

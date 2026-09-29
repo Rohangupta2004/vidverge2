@@ -4,17 +4,24 @@
  *
  * Every approved engine on the platform, with per-model settings and a smart
  * recommendation engine:
- *   · GROUP A  — 12 models on POST /api/veo/generate/video (Omni Flash,
- *     Veo 3.1/3.1 Fast/3.0/3.0 Fast/2.0, Sora 2/2 Pro, Seedance 2.0 Fast and
- *     the three OpenRouter Veo 3.1 paths), polled at /api/veo/status/:id.
- *   · RUNWAY   — Gen 4.5 + Gen 4 Turbo base video and the 7 Recipes; a 503
- *     shows the friendly enabling note.
+ *   · GROUP A  — 12 models on POST /api/veo/generate/video, polled at
+ *     /api/veo/status/:id. The Google routes (Omni Flash and the Veo family)
+ *     are the ones confirmed up; Sora and the OpenRouter paths (Seedance 2.0
+ *     Fast, OpenRouter Veo) are grouped separately because a refusal there is
+ *     re-routed to a Google engine automatically rather than lost.
+ *   · RUNWAY   — Gen 4.5 + Gen 4 Turbo base video and the 7 Recipes. Paid
+ *     Runway generation is deployment-gated, so availability is probed on
+ *     mount and the engine is shown as unavailable BEFORE a wasted click
+ *     rather than only after a 503 comes back.
+ *   · KLING    — NOT PRESENT on this platform and therefore not listed at all.
+ *   · IMAGE LAB — gemini-3.1-flash-image / dall-e-3 / gpt-image-2 companions.
  *
  * Generate submits immediately — there is no quote step, no credit check and
  * no cooldown between pressing the button and the provider call.
- *   · KLING    — 4 models listed as [Coming Soon], disabled until the platform
- *     key lands.
- *   · IMAGE LAB — gemini-3.1-flash-image / dall-e-3 / gpt-image-2 companions.
+ *
+ * Every reference-image input carries an AI WRITE button: the picture goes to
+ * the OpenAI proxy and comes back as the written brief in the prompt field.
+ * VIDEO EXTENSION is a Veo-only switch and is absent for every other engine.
  *
  * The engine catalog, combining rules and recommendation logic live in
  * lib/videoEngines; all network calls live in lib/videoEngineClient.
@@ -26,16 +33,22 @@ import {
 } from 'lucide-react';
 import {
   FOUR_K_MODELS, GROUP_A_MODELS, GroupAModel, KLING_COMING_SOON_MESSAGE, KLING_MODELS,
-  IMAGE_MODELS, RUNWAY_DISABLED_MESSAGE, RUNWAY_RATIOS, RUNWAY_RECIPES, RUNWAY_VIDEO_MODELS,
-  RunwayVideoModel, groupAModel, isKlingModel, recommendEngine, runwayRecipe, runwayVideoModel,
-  tierColor, validateGroupAInputs,
+  IMAGE_MODELS, PROMPT_BUDGET, RUNWAY_DISABLED_MESSAGE, RUNWAY_RATIOS, RUNWAY_RECIPES,
+  RUNWAY_VIDEO_MODELS, RunwayVideoModel, capPromptText, groupAModel, isKlingModel,
+  recommendEngine, routeShotIntent, runwayRecipe, runwayVideoModel, tierColor, validateGroupAInputs,
 } from '../../lib/videoEngines';
 import {
-  EngineError, isRunwayDisabledError, pollGroupA, pollRunway,
-  runwaySubmitVideo, submitGroupA,
+  EngineError, checkRunwayAvailability, isRunwayDisabledError, pollGroupA,
+  pollRunway, pollVeoLongVideo, runwaySubmitVideo, submitGroupA,
+  submitVeoLongVideo,
 } from '../../lib/videoEngineClient';
-import { EngineBadge } from '../../components/EngineSelector';
+import { EngineBadge, engineDisplayName } from '../../components/EngineSelector';
 import RunwayRecipesPanel from '../../components/RunwayRecipesPanel';
+// VidVerge LightBeam UI system — one shared implementation for all six apps.
+import {
+  Input as BeamInput, LightBeamButton, LightBeamCard, LightBeamError,
+  LightBeamProcessing, LightBeamProgress, LightBeamTransition, colors,
+} from '../../components/design-system/index';
 
 // ---------------------------------------------------------------------------
 // Plumbing
@@ -78,6 +91,57 @@ async function uploadFile(file: File): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// AI Write — a reference image read back as the written brief
+// ---------------------------------------------------------------------------
+
+const AI_WRITE_SYSTEM = [
+  'You write prompts for AI video and image generators.',
+  'Answer with ONE prompt and nothing else — no preamble, no bullet points, no quotes, no title.',
+  'Stay between 50 and 110 words and cover the subject, the setting, the composition and camera',
+  'framing, the lighting, the colour palette, the mood and the overall style, as if directing the',
+  'shot that recreates the picture.',
+].join(' ');
+
+/**
+ * Describe a reference image as a generation prompt through the OpenAI proxy.
+ * An uploaded file has already become an https URL by the time it reaches
+ * here, but a base64 data URL travels in exactly the same `image_url` part.
+ */
+async function describeImageAsPrompt(imageUrl: string): Promise<string> {
+  const token = wsToken();
+  if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
+  const res = await fetch('/proxy/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
+    body: JSON.stringify({
+      model: 'gpt-5.6-terra',
+      reasoning_effort: 'none',
+      max_completion_tokens: 600,
+      stream: false,
+      messages: [
+        { role: 'system', content: AI_WRITE_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Describe this reference image as a single generation prompt.' },
+            { type: 'image_url', image_url: { url: imageUrl } },
+          ],
+        },
+      ],
+    }),
+  });
+  const data: any = await res.json().catch(() => null);
+  if (!res.ok) {
+    const code = data?.code ? ` [${data.code}]` : '';
+    const reported = String(data?.error?.message || (typeof data?.error === 'string' ? data.error : '') || '');
+    throw new Error(`${reported || `AI Write could not read this image (HTTP ${res.status}).`}${code}`);
+  }
+  const text = String(data?.choices?.[0]?.message?.content || '').trim();
+  if (!text) throw new Error('AI Write came back empty — try it again.');
+  return capPromptText(text, 1000);
+}
+
+// ---------------------------------------------------------------------------
 // History (last 10 generations, localStorage)
 // ---------------------------------------------------------------------------
 
@@ -110,32 +174,158 @@ function pushHistory(item: HistoryItem): HistoryItem[] {
 }
 
 // ---------------------------------------------------------------------------
+// Server-adopted job rows (creatables_jobs). The DB row is the durable record
+// of a run: the browser submits the render, INSERTS a row with the operation
+// id, hands polling to the creatables-worker server function, and then only
+// READS the row on a simple 5-second interval — no long-lived connection, no
+// client-side provider polling, and the tab can close while the render
+// finishes. Staggered cron sweeps adopt any run whose poll chain died.
+// ---------------------------------------------------------------------------
+
+interface JobRow {
+  id: number;
+  engine: string | null;
+  engine_name: string | null;
+  prompt: string | null;
+  status: 'pending' | 'running' | 'done' | 'error' | null;
+  operation_id: string | null;
+  result_url: string | null;
+  error_msg: string | null;
+  cost: string | null;
+  eta: string | null;
+  fallback_note: string | null;
+  started_at: string | null;
+  created_at: string;
+}
+
+function wdb(): any | null {
+  return typeof window !== 'undefined' ? (window as any).__workspaceDb : null;
+}
+
+function wsToken(): string {
+  return String(wdb()?.token || '');
+}
+
+function formatCost(value: string | undefined): string {
+  const raw = String(value || '').trim();
+  return !raw || raw.startsWith('$') ? raw : `$${raw}`;
+}
+
+async function insertJobRow(row: Partial<JobRow>): Promise<JobRow | null> {
+  try {
+    const res = await wdb()?.from('creatables_jobs').insert(row);
+    return (res?.data?.[0] || res?.data || null) as JobRow | null;
+  } catch { return null; }
+}
+
+async function readJobRow(id: number): Promise<JobRow | null> {
+  try {
+    const res = await wdb()?.from('creatables_jobs').getById(id);
+    return (res?.data as JobRow) || null;
+  } catch { return null; }
+}
+
+async function listMyJobs(limit = 12): Promise<JobRow[]> {
+  try {
+    const res = await wdb()?.from('creatables_jobs').orderBy('created_at', 'desc').limit(limit).get();
+    return Array.isArray(res?.data) ? res.data : [];
+  } catch { return []; }
+}
+
+/** Hand a submitted render's polling to the creatables-worker server function
+ * (fire-and-forget — the cron sweeps cover a dropped dispatch). */
+function handPollingToServer(jobId: number) {
+  fetch(`/api/hooks/execute/${appId()}/creatables-worker`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(wsToken() ? { 'X-Workspace-DB-Token': wsToken() } : {}) },
+    body: JSON.stringify({ op: 'watch', job_id: jobId, source: 'app' }),
+  }).catch(() => undefined);
+}
+
+/** Simple-interval DB read until the job settles. The server enforces its own
+ * 15-minute no-progress cap, so a row always reaches done/error; the 25-minute
+ * client ceiling only guards against reading a row nothing is advancing. */
+async function watchJobRow(jobId: number, opts: { onTick?: (row: JobRow) => void; isCancelled?: () => boolean } = {}): Promise<JobRow> {
+  const deadline = Date.now() + 25 * 60 * 1000;
+  while (Date.now() < deadline) {
+    if (opts.isCancelled?.()) throw new EngineError('This generation was cancelled.', { code: 'cancelled' });
+    const row = await readJobRow(jobId);
+    if (row) {
+      opts.onTick?.(row);
+      if (row.status === 'done' && row.result_url) return row;
+      if (row.status === 'error') throw new EngineError(row.error_msg || 'The render failed.', { code: 'render_failed' });
+    }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  throw new EngineError('The render took too long. Start it again to retry.', { code: 'timeout' });
+}
+
+// ---------------------------------------------------------------------------
 // Small UI atoms (space theme tokens with dark fallbacks)
 // ---------------------------------------------------------------------------
 
 const T = {
-  ink: 'var(--space-text-primary, #F8FAFC)',
-  soft: 'var(--space-text-secondary, #CBD5E1)',
-  muted: 'var(--space-text-muted, #94A3B8)',
-  card: 'var(--space-surface-card, #10182A)',
-  panel: 'var(--space-surface-panel, #121C30)',
-  raised: 'var(--space-surface-panel-strong, #18243A)',
-  line: 'var(--space-border-default, rgba(148,163,184,0.16))',
-  accent: 'var(--space-brand-primary-500, #3B82F6)',
-  accentDeep: 'var(--space-brand-primary-600, #2563EB)',
+  ink: 'var(--space-text-primary, #F0F0F0)',
+  soft: 'var(--space-text-secondary, rgba(240,240,240,0.62))',
+  muted: 'var(--space-text-muted, rgba(240,240,240,0.38))',
+  card: 'var(--space-surface-card, #0F0F0F)',
+  panel: 'var(--space-surface-panel, #101010)',
+  raised: 'var(--space-surface-panel-strong, #141414)',
+  line: 'var(--space-border-default, rgba(255,255,255,0.06))',
+  accent: 'var(--space-brand-primary-500, #F5B936)',
+  accentDeep: 'var(--space-brand-primary-600, #E0A527)',
   good: 'var(--space-semantic-success-600, #4ADE80)',
   bad: 'var(--space-semantic-danger, #F87171)',
-  warn: '#E8A33C',
+  warn: '#F5B936',
 } as const;
 
 const label: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: T.muted, display: 'block', marginBottom: 6 };
 const inputStyle: React.CSSProperties = { width: '100%', boxSizing: 'border-box', background: T.panel, border: `1px solid ${T.line}`, borderRadius: 9, color: T.ink, fontSize: 13, padding: '9px 11px', outline: 'none' };
 const chip = (active: boolean): React.CSSProperties => ({ background: active ? T.accentDeep : T.raised, color: active ? '#fff' : T.soft, border: `1px solid ${active ? 'transparent' : T.line}`, borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' });
 
-function UploadZone({ title, hint, urls, max, onChange, extra }: {
+/** The AI Write action for one reference image — fills the brief from the
+ * picture. Renders nothing until an image exists to read. */
+function AiWriteButton({ imageUrl, onWrite, target = 'prompt' }: {
+  imageUrl: string;
+  onWrite: (prompt: string) => void;
+  target?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  if (!imageUrl) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <LightBeamButton
+        small
+        kind="ghost"
+        busy={busy}
+        title={`Describe this image into the ${target} field`}
+        onClick={() => {
+          if (busy) return;
+          setBusy(true); setErr('');
+          describeImageAsPrompt(imageUrl)
+            .then(onWrite)
+            .catch((e: any) => setErr(String(e?.message || e)))
+            .finally(() => setBusy(false));
+        }}
+      >
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} color={T.warn} />}
+        {busy ? 'Reading the image…' : 'AI Write'}
+      </LightBeamButton>
+      <div style={{ fontSize: 10.5, color: T.muted, marginTop: 5, lineHeight: 1.4 }}>
+        Writes the {target} from this image.
+      </div>
+      {err ? <div style={{ fontSize: 11, color: T.bad, marginTop: 5 }}>{err}</div> : null}
+    </div>
+  );
+}
+
+function UploadZone({ title, hint, urls, max, onChange, extra, aiWrite }: {
   title: string; hint?: string; urls: string[]; max: number;
   onChange: (urls: string[]) => void;
   extra?: (url: string, idx: number) => React.ReactNode;
+  /** Turns the first image in this zone into the written brief. */
+  aiWrite?: { onWrite: (prompt: string) => void; target?: string };
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -158,6 +348,7 @@ function UploadZone({ title, hint, urls, max, onChange, extra }: {
         ) : null}
       </div>
       {hint ? <div style={{ fontSize: 10.5, color: T.muted, marginTop: 5, lineHeight: 1.4 }}>{hint}</div> : null}
+      {aiWrite ? <AiWriteButton imageUrl={urls[0] || ''} onWrite={aiWrite.onWrite} target={aiWrite.target} /> : null}
       {err ? <div style={{ fontSize: 11, color: T.bad, marginTop: 5 }}>{err}</div> : null}
       <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={async (e) => {
         const f = e.target.files?.[0];
@@ -185,6 +376,7 @@ export default function App() {
   const [prompt, setPrompt] = useState('');
   const [negative, setNegative] = useState('');
   const [engineId, setEngineId] = useState('veo-3.1-fast-generate-preview');
+  const [engineMode, setEngineMode] = useState<'auto' | 'manual'>('auto');
   const [recommended, setRecommended] = useState<{ engineId: string; reason: string; caveat?: string } | null>(null);
 
   // ---- Group A settings ----
@@ -192,6 +384,7 @@ export default function App() {
   const [duration, setDuration] = useState(8);
   const [resolution, setResolution] = useState<'720p' | '1080p' | '4k'>('1080p');
   const [audio, setAudio] = useState(false);
+  const [videoExtension, setVideoExtension] = useState(false);
   const [seedUrl, setSeedUrl] = useState<string[]>([]);
   const [lastFrameUrl, setLastFrameUrl] = useState<string[]>([]);
   const [refs, setRefs] = useState<{ url: string; type: 'asset' | 'style' }[]>([]);
@@ -201,6 +394,10 @@ export default function App() {
   const [rwDuration, setRwDuration] = useState(5);
   const [rwImage, setRwImage] = useState<string[]>([]);
   const [runwayDown, setRunwayDown] = useState(false);
+  // Runway's paid generation is deployment-gated, so it is probed once on
+  // mount. Knowing up front beats letting the user fill in a brief, press
+  // Generate and only then be told the provider is switched off.
+  const [runwayGate, setRunwayGate] = useState<'checking' | 'ready' | 'unavailable'>('checking');
 
   // ---- run state ----
   const [phase, setPhase] = useState<RunPhase>('idle');
@@ -219,42 +416,111 @@ export default function App() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   useEffect(() => { setHistory(loadHistory()); }, []);
   useEffect(() => {
+    let live = true;
+    void checkRunwayAvailability()
+      .then((gate) => { if (live) { setRunwayGate(gate.available ? 'ready' : 'unavailable'); setRunwayDown(!gate.available); } })
+      .catch(() => { if (live) { setRunwayGate('unavailable'); setRunwayDown(true); } });
+    return () => { live = false; };
+  }, []);
+  // RESUME: the creatables_jobs row is the durable record of a run. On mount,
+  // merge finished server-adopted jobs the local history missed, and re-attach
+  // the run panel to a render that is still running server-side (submitted
+  // before a reload or in a tab that closed mid-render).
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current) return;
+    resumedRef.current = true;
+    (async () => {
+      const rows = await listMyJobs(12);
+      if (!rows.length) return;
+      const seen = loadHistory();
+      const known = new Set(seen.map((h) => h.id));
+      const knownUrls = new Set(seen.map((h) => h.url));
+      for (const r of [...rows].reverse()) {
+        if (r.status === 'done' && r.result_url && !known.has(`job_${r.id}`) && !knownUrls.has(r.result_url)) {
+          setHistory(pushHistory({ id: `job_${r.id}`, at: new Date(r.created_at).getTime(), engine: String(r.engine || ''), engineName: String(r.engine_name || r.engine || ''), prompt: String(r.prompt || ''), url: String(r.result_url), kind: 'video', cost: r.cost || undefined }));
+        }
+      }
+      const running = rows.find((r) => r.status === 'running');
+      if (!running?.id) return;
+      cancelled.current = false;
+      setPhase('running'); setError(''); setOutputUrl('');
+      setOpId(String(running.operation_id || ''));
+      if (running.cost) setCost(String(running.cost));
+      if (running.fallback_note) setFallbackNote(String(running.fallback_note));
+      const startedMs = new Date(running.started_at || running.created_at).getTime();
+      setStartedAt(startedMs); setElapsedS(Math.round((Date.now() - startedMs) / 1000));
+      setNote(`Rendering on ${running.engine_name || running.engine}… resumed — the server kept watching while this tab was away`);
+      setProgress(24);
+      handPollingToServer(running.id);
+      try {
+        const done = await watchJobRow(running.id, { onTick: () => setProgress((p) => Math.min(96, Math.max(24, p + 1.5))), isCancelled: () => cancelled.current });
+        setOutputUrl(String(done.result_url || '')); setProgress(100); setPhase('done'); setNote('Done.');
+        if (done.result_url && !knownUrls.has(done.result_url)) {
+          setHistory(pushHistory({ id: `job_${done.id}`, at: Date.now(), engine: String(done.engine || ''), engineName: String(done.engine_name || done.engine || ''), prompt: String(done.prompt || ''), url: String(done.result_url), kind: 'video', cost: done.cost || undefined }));
+        }
+      } catch (e: any) {
+        if (e instanceof EngineError && e.code === 'cancelled') { setPhase('idle'); return; }
+        setPhase('error'); setError(String(e?.message || e));
+      }
+    })();
+  }, []);
+  useEffect(() => {
     if (phase !== 'running') return;
     const t = setInterval(() => setElapsedS(Math.round((Date.now() - startedAt) / 1000)), 1000);
     return () => clearInterval(t);
   }, [phase, startedAt]);
 
-  const gA = groupAModel(engineId);
-  const rw = runwayVideoModel(engineId);
-  const kling = isKlingModel(engineId);
-  const recipeSel = runwayRecipe(engineId);
+  const motionImage = seedUrl[0] || rwImage[0] || '';
+  const autoIntent = motionImage ? 'stills_to_motion' : 'cinematic_hero';
+  const autoRoute = routeShotIntent(autoIntent, { runwayEnabled: runwayGate === 'ready' });
+  const activeEngineId = engineMode === 'auto'
+    ? (autoRoute.engineId || 'veo-3.1-fast-generate-preview')
+    : engineId;
+  const gA = groupAModel(activeEngineId);
+  const rw = runwayVideoModel(activeEngineId);
+  const kling = isKlingModel(activeEngineId);
+  const recipeSel = runwayRecipe(activeEngineId);
   const promptOk = prompt.trim().length >= 10;
+  // Video Extension is a Veo control: every Veo path — Google-native and the
+  // OpenRouter ones — carries "veo" in its model id, and nothing else does.
+  const isVeoEngine = /veo/i.test(activeEngineId);
+  const videoExtensionOn = Boolean(gA && isVeoEngine && videoExtension);
 
   // Runway settings depend on mode: image-to-video unlocks the extra ratios.
   const rwRatios = useMemo(() => {
     if (!rw) return RUNWAY_RATIOS;
-    const allowed = rwImage.length > 0 || !rw.textToVideo ? rw.i2vRatios : rw.t2vRatios;
+    const allowed = motionImage || !rw.textToVideo ? rw.i2vRatios : rw.t2vRatios;
     return RUNWAY_RATIOS.filter((r) => allowed.includes(r.value));
-  }, [rw, rwImage.length]);
+  }, [rw, motionImage]);
   useEffect(() => {
     if (rw && !rwRatios.some((r) => r.value === rwRatio) && rwRatios[0]) setRwRatio(rwRatios[0].value);
   }, [rw, rwRatios, rwRatio]);
 
-  const combineViolation = gA ? validateGroupAInputs(engineId, {
+  const baseCombineViolation = gA ? validateGroupAInputs(activeEngineId, {
     prompt,
     imageData: seedUrl[0] || null,
     referenceImages: refs.length ? refs : null,
     lastFrameImage: lastFrameUrl[0] ? { imageData: lastFrameUrl[0] } : null,
   }) : null;
+  const extensionViolation = videoExtensionOn
+    ? refs.length > 0
+      ? 'Video Extension uses Veo’s long-video continuity route, which supports a seed image but not reference images.'
+      : aspect === '1:1'
+        ? 'Video Extension supports 16:9 or 9:16 output.'
+        : null
+    : null;
+  const combineViolation = baseCombineViolation || extensionViolation;
 
   const canGenerate = promptOk && !kling && phase !== 'running' && (
     gA ? !combineViolation
-      : rw ? (rw.textToVideo || rwImage.length > 0)
+      : rw ? runwayGate === 'ready' && (rw.textToVideo || Boolean(motionImage))
         : false
   );
 
   function pickEngine(id: string) {
     setEngineId(id);
+    setEngineMode('manual');
     if (runwayRecipe(id)) setTab('recipes');
   }
 
@@ -271,17 +537,50 @@ export default function App() {
     pickEngine(rec.engineId);
   }
 
+  /** Runway uses pixel-pair ratios; the Group A engines use plain labels. */
+  function rwRatioToAspect(ratio: string): '16:9' | '9:16' | '1:1' {
+    const [w, h] = ratio.split(':').map(Number);
+    if (!w || !h || w === h) return '1:1';
+    return w > h ? '16:9' : '9:16';
+  }
+
   function buildRunwayBody(): Record<string, unknown> {
     const body: Record<string, unknown> = { model: rw!.id, ratio: rwRatio, duration: rwDuration };
     if (rw!.id === 'gen4.5') {
       body.promptText = prompt.trim();
-      if (rwImage[0]) { body.mode = 'image-to-video'; body.promptImage = rwImage[0]; }
+      if (motionImage) { body.mode = 'image-to-video'; body.promptImage = motionImage; }
     } else {
       // gen4_turbo — image-to-video only; promptImage as positioned frame array.
-      body.promptImage = [{ uri: rwImage[0], position: 'first' }];
+      body.promptImage = [{ uri: motionImage, position: 'first' }];
       if (prompt.trim()) body.promptText = prompt.trim();
     }
     return body;
+  }
+
+  /** Persist a submitted render as a creatables_jobs row, hand polling to the
+   * creatables-worker server function, then just READ the row every 5s. Falls
+   * back to the legacy in-browser provider poll only when the workspace data
+   * runtime is unavailable, so a run always lands one way or the other. */
+  async function settleThroughJobRow(args: { engine: string; engineName: string; operationId: string; cost?: string; eta?: string; fallbackNote?: string; longVideo?: boolean }): Promise<string> {
+    const row = await insertJobRow({
+      engine: args.longVideo ? `long-video:${args.engine}` : args.engine,
+      engine_name: args.engineName, prompt: prompt.slice(0, 500), kind: 'video',
+      status: 'running', operation_id: args.operationId, cost: args.cost || null, eta: args.eta || null,
+      fallback_note: args.fallbackNote || null, started_at: new Date().toISOString(),
+    });
+    if (!row?.id) {
+      const poll = args.longVideo ? pollVeoLongVideo : pollGroupA;
+      return poll(args.operationId, {
+        onProgress: (p) => setProgress(Math.max(12, Math.min(96, p))),
+        isCancelled: () => cancelled.current,
+      });
+    }
+    handPollingToServer(row.id);
+    const done = await watchJobRow(row.id, {
+      onTick: () => setProgress((p) => Math.min(96, Math.max(12, p + 1.5))),
+      isCancelled: () => cancelled.current,
+    });
+    return String(done.result_url || '');
   }
 
   async function generate() {
@@ -289,55 +588,103 @@ export default function App() {
     cancelled.current = false;
     setPhase('running'); setError(''); setFallbackNote(''); setOutputUrl(''); setNote('Submitting…'); setProgress(4);
     setOpId(''); setEta(''); setCost(''); setStartedAt(Date.now()); setElapsedS(0);
-    let ranOn = gA?.name || rw?.name || engineId;
+    let ranOn = gA?.name || rw?.name || activeEngineId;
     try {
       let url = '';
       if (gA) {
-        const kick = await submitGroupA({
-          model: engineId,
+        const sharedVeoParams = {
+          model: activeEngineId,
           prompt,
           negativePrompt: negative || undefined,
-          aspectRatio: aspect,
           duration,
           generateAudio: gA.supportsAudio ? audio : false,
-          resolution: gA.supports4k ? resolution : (resolution === '4k' ? '1080p' : resolution),
+          resolution: gA.supports4k ? resolution : (resolution === '4k' ? '1080p' as const : resolution),
           imageData: seedUrl[0] || undefined,
-          referenceImages: refs.length ? refs.map((r) => ({ imageData: r.url, referenceType: r.type })) : undefined,
           lastFrameImage: lastFrameUrl[0] ? { imageData: lastFrameUrl[0] } : undefined,
-        });
+        };
+        const kick = videoExtensionOn
+          ? await submitVeoLongVideo({
+              ...sharedVeoParams,
+              aspectRatio: aspect === '1:1' ? '16:9' : aspect,
+            })
+          : await submitGroupA({
+              ...sharedVeoParams,
+              aspectRatio: aspect,
+              referenceImages: refs.length ? refs.map((r) => ({ imageData: r.url, referenceType: r.type })) : undefined,
+            });
         setOpId(kick.operationId);
-        if (kick.cost) setCost(`$${kick.cost}`);
+        if (kick.cost) setCost(formatCost(kick.cost));
         if (kick.estimatedDuration) setEta(kick.estimatedDuration);
-        ranOn = groupAModel(kick.modelUsed)?.name || kick.modelUsed;
+        ranOn = `${groupAModel(kick.modelUsed)?.name || kick.modelUsed}${videoExtensionOn ? ' · Video Extension' : ''}`;
         if (kick.fallbackFrom) {
           setFallbackNote(`${gA.name} refused this job, so it is rendering on ${ranOn} instead. ${kick.fallbackReason || ''}`.trim());
         }
-        setNote(`Rendering on ${ranOn}… polling every 5s`);
+        setNote(`Rendering on ${ranOn}… the server is watching this render — you can close this tab`);
         setProgress(12);
-        url = await pollGroupA(kick.operationId, {
-          onProgress: (p) => setProgress(Math.max(12, Math.min(96, p))),
-          isCancelled: () => cancelled.current,
+        url = await settleThroughJobRow({
+          engine: kick.modelUsed || activeEngineId,
+          engineName: ranOn,
+          operationId: kick.operationId,
+          cost: kick.cost ? formatCost(kick.cost) : '',
+          eta: kick.estimatedDuration || '',
+          fallbackNote: kick.fallbackFrom ? `${gA.name} refused this job — re-routed to ${ranOn}.` : '',
+          longVideo: videoExtensionOn,
         });
       } else if (rw) {
-        const kick = await runwaySubmitVideo(buildRunwayBody());
-        if (kick.uncertain) throw new EngineError('Runway accepted the request but the outcome is uncertain — do NOT resubmit; check back shortly.', { code: 'runway_uncertain' });
-        setOpId(kick.taskId);
-        setNote(`Runway task ${kick.status}… polling every 5s`);
-        setProgress(12);
-        const result = await pollRunway(kick.taskId, {
-          onStatus: (s) => { setNote(`Runway — ${s}…`); setProgress((p) => Math.min(94, p + 4)); },
-          isCancelled: () => cancelled.current,
-        });
-        url = result.mediaUrls[0] || '';
-        setCost(`$${(rw.pricePerSecondUsd * rwDuration).toFixed(2)}`);
-        if (!url) throw new EngineError('Runway succeeded but returned no media URL.', { code: 'no_media' });
+        let taskId = '';
+        try {
+          const kick = await runwaySubmitVideo(buildRunwayBody());
+          if (kick.uncertain) throw new EngineError('Runway accepted the request but the outcome is uncertain — do NOT resubmit; check back shortly.', { code: 'runway_uncertain' });
+          taskId = kick.taskId;
+          setOpId(kick.taskId);
+          setNote(`Runway task ${kick.status}… polling every 5s`);
+        } catch (e: any) {
+          // 503 "being enabled" and an uncertain outcome both have their own
+          // handling; anything else means Runway would not take the job, so
+          // re-route it rather than leave the user with nothing.
+          if (isRunwayDisabledError(e) || (e instanceof EngineError && e.code === 'runway_uncertain')) throw e;
+          const alt = 'gemini-omni-flash-preview';
+          setFallbackNote(`${rw.name} could not take this job, so it is rendering on ${groupAModel(alt)?.name || alt} instead. ${String(e?.message || e)}`);
+          setNote('Re-routing to an engine that is accepting jobs…');
+          const kick = await submitGroupA({
+            model: alt,
+            prompt,
+            negativePrompt: negative || undefined,
+            aspectRatio: rwRatioToAspect(rwRatio),
+            duration: Math.max(4, Math.min(8, rwDuration)),
+            generateAudio: false,
+            imageData: rwImage[0] || undefined,
+          });
+          ranOn = groupAModel(kick.modelUsed)?.name || kick.modelUsed;
+          setOpId(kick.operationId);
+          if (kick.cost) setCost(formatCost(kick.cost));
+          setNote(`Rendering on ${ranOn}… the server is watching this render — you can close this tab`);
+          setProgress(12);
+          url = await settleThroughJobRow({
+            engine: 'gemini-omni-flash-preview',
+            engineName: ranOn,
+            operationId: kick.operationId,
+            cost: kick.cost ? formatCost(kick.cost) : '',
+            fallbackNote: `${rw.name} could not take this job — re-routed to ${ranOn}.`,
+          });
+        }
+        if (taskId) {
+          setProgress(12);
+          const result = await pollRunway(taskId, {
+            onStatus: (s) => { setNote(`Runway — ${s}…`); setProgress((p) => Math.min(94, p + 4)); },
+            isCancelled: () => cancelled.current,
+          });
+          url = result.mediaUrls[0] || '';
+          setCost(`$${(rw.pricePerSecondUsd * rwDuration).toFixed(2)}`);
+          if (!url) throw new EngineError('Runway succeeded but returned no media URL.', { code: 'no_media' });
+        }
       }
       setOutputUrl(url);
       setProgress(100);
       setPhase('done');
       setNote('Done.');
       setHistory(pushHistory({
-        id: `h_${Date.now()}`, at: Date.now(), engine: engineId,
+        id: `h_${Date.now()}`, at: Date.now(), engine: activeEngineId,
         engineName: ranOn, prompt: prompt.slice(0, 220),
         url, kind: 'video', cost: cost || undefined, seconds: Math.round((Date.now() - startedAt) / 1000),
       }));
@@ -367,11 +714,12 @@ export default function App() {
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             {([['video', 'Video Studio', Clapperboard], ['recipes', 'Runway Recipes', LayersIcon], ['image', 'Image Lab', ImageIcon]] as const).map(([id, name, Icon]) => (
-              <button key={id} type="button" onClick={() => setTab(id as Tab)} style={{ ...chip(tab === id), display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={13} /> {name}</button>
+              <LightBeamButton key={id} small kind={tab === id ? 'primary' : 'ghost'} onClick={() => setTab(id as Tab)}><Icon size={13} /> {name}</LightBeamButton>
             ))}
           </div>
         </div>
 
+        <LightBeamTransition routeKey={tab}>
         {tab === 'recipes' ? (
           <div style={{ marginTop: 18 }}>
             <div style={{ fontSize: 12.5, color: T.soft, marginBottom: 10 }}>Seven Runway production recipes — a 503 simply means Runway is still being enabled on the platform.</div>
@@ -383,15 +731,15 @@ export default function App() {
           <>
             {/* Prompt */}
             <div style={{ marginTop: 18 }}>
-              <textarea
+              <BeamInput
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={setPrompt}
                 rows={Math.min(8, Math.max(3, prompt.split('\n').length + 1))}
-                placeholder="Describe your video — subject, action, setting, camera, mood. The more specific, the better the result."
-                style={{ ...inputStyle, fontSize: 14.5, lineHeight: 1.55, padding: '14px 16px', resize: 'vertical' }}
+                placeholder='Describe your video — subject, action, setting, camera, mood. The more specific, the better the result.'
+                inputStyle={{ fontSize: 14.5, lineHeight: 1.55 }}
               />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5 }}>
-                <span style={{ fontSize: 11, color: promptOk ? T.muted : T.warn }}>{prompt.trim().length} / 1000 characters{promptOk ? '' : ' — at least 10 needed'}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7 }}>
+                <span style={{ fontSize: 11, color: promptOk ? T.muted : T.warn }}>{prompt.trim().length} / {PROMPT_BUDGET} characters{promptOk ? '' : ' — at least 10 needed'}</span>
                 <button type="button" onClick={runRecommend} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'transparent', border: `1px solid ${T.line}`, borderRadius: 9, color: T.ink, fontSize: 12, fontWeight: 700, padding: '6px 12px', cursor: 'pointer' }}>
                   <Sparkles size={13} color={T.warn} /> Recommend for me
                 </button>
@@ -403,10 +751,21 @@ export default function App() {
               ) : null}
             </div>
 
-            {/* Engine grid */}
+            {/* Auto Director + existing manual engine grid */}
             <div style={{ marginTop: 22 }}>
               <span style={label}>Engine</span>
-              <EngineGrid selected={engineId} recommendedId={recommended?.engineId || null} onPick={pickEngine} />
+              <button type="button" onClick={() => setEngineMode('auto')} style={{ ...chip(engineMode === 'auto'), marginBottom: 9 }}>
+                Auto — Director picks
+              </button>
+              {engineMode === 'auto' ? (
+                <div style={{ marginBottom: 10, fontSize: 12, color: T.soft, background: T.card, border: `1px solid ${T.line}`, borderRadius: 10, padding: '10px 13px', lineHeight: 1.55 }}>
+                  <b style={{ color: T.ink }}>Director's pick: {engineDisplayName(activeEngineId)}</b>
+                  <div style={{ color: T.muted, marginTop: 3 }}>{autoRoute.reason}</div>
+                </div>
+              ) : (
+                <div style={{ marginBottom: 9, fontSize: 11.5, color: T.muted }}>Manual override — the selected concrete model is submitted.</div>
+              )}
+              <EngineGrid selected={activeEngineId} recommendedId={recommended?.engineId || null} onPick={pickEngine} runwayGate={runwayGate} />
             </div>
 
             {/* Per-model settings */}
@@ -436,7 +795,7 @@ export default function App() {
                         {(['720p', '1080p'] as const).map((r) => (
                           <button key={r} type="button" onClick={() => setResolution(r)} style={chip(resolution === r)}>{r}</button>
                         ))}
-                        {FOUR_K_MODELS.includes(engineId) ? (
+                        {FOUR_K_MODELS.includes(activeEngineId) ? (
                           <button type="button" onClick={() => setResolution('4k')} style={chip(resolution === '4k')}>4K</button>
                         ) : null}
                       </div>
@@ -446,16 +805,25 @@ export default function App() {
                         <input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} /> Generate audio
                       </label>
                     ) : null}
+                    {isVeoEngine ? (
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: 3, cursor: 'pointer', paddingBottom: 6 }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 700, color: T.soft }}>
+                          <input type="checkbox" checked={videoExtension} onChange={(e) => setVideoExtension(e.target.checked)} /> Video Extension
+                        </span>
+                        <span style={{ fontSize: 11, color: T.muted, paddingLeft: 24 }}>Extends clip duration using Veo</span>
+                      </label>
+                    ) : null}
                   </div>
 
                   <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-                    <UploadZone title="Seed image (image-to-video)" hint="The opening frame. Optional." urls={seedUrl} max={1} onChange={setSeedUrl} />
+                    <UploadZone title="Seed image (image-to-video)" hint="The opening frame. Optional." urls={seedUrl} max={1} onChange={setSeedUrl} aiWrite={{ onWrite: setPrompt }} />
                     {gA.supportsReferenceImages ? (
                       <UploadZone
                         title="Reference images"
                         hint={gA.refsExclusiveWithSeed ? 'Up to 3. On this model refs are EXCLUSIVE with seed/last frame.' : 'Up to 3 — keeps the same character/product across scenes. May combine with a seed image.'}
                         urls={refs.map((r) => r.url)} max={3}
                         onChange={(urls) => setRefs(urls.map((u) => refs.find((r) => r.url === u) || { url: u, type: 'asset' }))}
+                        aiWrite={{ onWrite: setPrompt }}
                         extra={(u) => {
                           const r = refs.find((x) => x.url === u);
                           if (!r) return null;
@@ -469,7 +837,7 @@ export default function App() {
                       />
                     ) : null}
                     {gA.supportsLastFrame && seedUrl.length > 0 ? (
-                      <UploadZone title="Last frame (locks the ending)" hint="First/last-frame flow: seed opens the clip, this frame closes it." urls={lastFrameUrl} max={1} onChange={setLastFrameUrl} />
+                      <UploadZone title="Last frame (locks the ending)" hint="First/last-frame flow: seed opens the clip, this frame closes it." urls={lastFrameUrl} max={1} onChange={setLastFrameUrl} aiWrite={{ onWrite: setPrompt }} />
                     ) : null}
                   </div>
 
@@ -478,15 +846,16 @@ export default function App() {
                     <input value={negative} onChange={(e) => setNegative(e.target.value)} placeholder="Things that must NOT appear — e.g. on-screen text, watermarks, logos" style={inputStyle} />
                   </div>
 
-                  {combineViolation && (seedUrl.length || refs.length || lastFrameUrl.length) ? (
+                  {combineViolation && (videoExtensionOn || seedUrl.length || refs.length || lastFrameUrl.length) ? (
                     <div style={{ fontSize: 12, color: T.warn, background: 'rgba(232,163,60,0.08)', border: '1px solid rgba(232,163,60,0.25)', borderRadius: 9, padding: '8px 12px' }}>{combineViolation}</div>
                   ) : null}
 
-                  <div style={{ fontSize: 12, color: T.muted }}>Estimated cost: <b style={{ color: T.soft }}>{gA.costHint}</b> — the exact charge is reported when the render starts.</div>
+                  <div style={{ fontSize: 12, color: T.muted }}>Estimated cost: <b style={{ color: T.soft }}>{gA.costHint}{videoExtensionOn ? ' × 2 clips' : ''}</b> — the exact charge is reported when the render starts.</div>
                 </div>
               ) : rw ? (
                 <div style={{ display: 'grid', gap: 16 }}>
-                  {runwayDown ? <div style={{ fontSize: 12.5, color: T.warn, background: 'rgba(232,163,60,0.08)', border: '1px solid rgba(232,163,60,0.25)', borderRadius: 9, padding: '8px 12px' }}>{RUNWAY_DISABLED_MESSAGE}</div> : null}
+                  {runwayGate === 'checking' ? <div style={{ fontSize: 12.5, color: T.soft, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 9, padding: '8px 12px' }}>Checking whether Runway is enabled…</div> : null}
+                  {runwayGate === 'unavailable' ? <div style={{ fontSize: 12.5, color: T.warn, background: 'rgba(232,163,60,0.08)', border: '1px solid rgba(232,163,60,0.25)', borderRadius: 9, padding: '8px 12px' }}>{RUNWAY_DISABLED_MESSAGE} Pick Omni Flash or a Veo engine to generate now.</div> : null}
                   <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                     <div>
                       <span style={label}>Ratio (Runway pixel-pair)</span>
@@ -502,7 +871,8 @@ export default function App() {
                   <UploadZone
                     title={rw.textToVideo ? 'Prompt image (optional — switches to image-to-video)' : 'Prompt image (REQUIRED — Gen 4 Turbo is image-to-video only)'}
                     hint="Must resolve to a public HTTPS URL — uploads here are stored durably and qualify."
-                    urls={rwImage} max={1} onChange={setRwImage}
+                    urls={motionImage ? [motionImage] : []} max={1} onChange={(urls) => { setRwImage(urls); setSeedUrl(urls); }}
+                    aiWrite={{ onWrite: setPrompt }}
                   />
                 </div>
               ) : recipeSel ? (
@@ -512,34 +882,35 @@ export default function App() {
 
             {/* Generate */}
             <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <button
-                type="button"
+              <LightBeamButton
                 disabled={!canGenerate}
+                busy={phase === 'running'}
                 onClick={() => void generate()}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: canGenerate ? T.accentDeep : T.raised, color: canGenerate ? '#fff' : T.muted, border: 'none', borderRadius: 11, padding: '13px 26px', fontSize: 14, fontWeight: 800, cursor: canGenerate ? 'pointer' : 'default', boxShadow: canGenerate ? '0 2px 14px rgba(37,99,235,0.35)' : 'none' }}
               >
-                {phase === 'running' ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+                <Wand2 size={16} />
                 {phase === 'running' ? 'Generating…' : 'Generate video'}
-              </button>
+              </LightBeamButton>
               {phase === 'running' ? (
                 <button type="button" onClick={() => { cancelled.current = true; }} style={{ ...chip(false) }}>Stop watching</button>
               ) : null}
               {!promptOk ? <span style={{ fontSize: 12, color: T.muted }}>Write at least 10 characters to unlock Generate.</span>
                 : kling ? <span style={{ fontSize: 12, color: T.muted }}>{KLING_COMING_SOON_MESSAGE}</span>
-                : gA && combineViolation && (seedUrl.length || refs.length || lastFrameUrl.length) ? <span style={{ fontSize: 12, color: T.warn }}>{combineViolation}</span>
+                : rw && runwayGate === 'unavailable' ? <span style={{ fontSize: 12, color: T.warn }}>{RUNWAY_DISABLED_MESSAGE}</span>
+                : rw && runwayGate === 'checking' ? <span style={{ fontSize: 12, color: T.muted }}>Checking whether Runway is enabled…</span>
+                : rw && !rw.textToVideo && !motionImage ? <span style={{ fontSize: 12, color: T.warn }}>{rw.name} is image-to-video only — upload a prompt image.</span>
+                : gA && combineViolation && (videoExtensionOn || seedUrl.length || refs.length || lastFrameUrl.length) ? <span style={{ fontSize: 12, color: T.warn }}>{combineViolation}</span>
                 : null}
             </div>
 
             {/* Progress */}
             {phase === 'running' ? (
               <div style={{ marginTop: 16, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: 15 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: T.soft, marginBottom: 8 }}>
-                  <span><Loader2 size={13} className="animate-spin" style={{ verticalAlign: -2, marginRight: 6 }} />{note}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: T.soft, marginBottom: 12 }}>
+                  <span>{note}</span>
                   <span style={{ color: T.muted }}>{elapsedS}s elapsed{eta ? ` · est. ${eta}` : ''}</span>
                 </div>
-                <div style={{ height: 7, background: T.raised, borderRadius: 99, overflow: 'hidden' }}>
-                  <div style={{ width: `${progress}%`, height: '100%', background: T.accent, transition: 'width 600ms ease' }} />
-                </div>
+                <LightBeamProcessing progress={progress} rows={4} />
+                <LightBeamProgress progress={progress} showValue={false} style={{ marginTop: 12 }} />
                 {opId ? <div style={{ fontSize: 10.5, color: T.muted, marginTop: 7, fontFamily: 'monospace' }}>operation: {opId}{cost ? ` · cost: ${cost}` : ''}</div> : null}
               </div>
             ) : null}
@@ -551,12 +922,18 @@ export default function App() {
             ) : null}
 
             {error ? (
-              <div style={{ marginTop: 14, fontSize: 12.5, lineHeight: 1.55, color: error === RUNWAY_DISABLED_MESSAGE ? T.warn : T.bad, background: error === RUNWAY_DISABLED_MESSAGE ? 'rgba(232,163,60,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${error === RUNWAY_DISABLED_MESSAGE ? 'rgba(232,163,60,0.25)' : 'rgba(239,68,68,0.25)'}`, borderRadius: 10, padding: '10px 14px' }}>
-                {error}
-                {phase === 'error' && (error.includes('502') || /safe to retry/i.test(error)) ? (
-                  <button type="button" onClick={() => void generate()} style={{ ...chip(false), marginLeft: 10, padding: '4px 10px', fontSize: 11.5 }}><RefreshCw size={11} style={{ verticalAlign: -1, marginRight: 4 }} />Retry</button>
-                ) : null}
-              </div>
+              <LightBeamError
+                runKey={error}
+                style={{ marginTop: 14 }}
+                message={(
+                  <>
+                    {error}
+                    {phase === 'error' && (error.includes('502') || /safe to retry/i.test(error)) ? (
+                      <button type='button' onClick={() => void generate()} style={{ ...chip(false), marginLeft: 10, padding: '4px 10px', fontSize: 11.5 }}><RefreshCw size={11} style={{ verticalAlign: -1, marginRight: 4 }} />Retry</button>
+                    ) : null}
+                  </>
+                )}
+              />
             ) : null}
 
             {/* Output */}
@@ -568,7 +945,7 @@ export default function App() {
                     <Download size={14} /> Download
                   </a>
                   <span style={{ fontSize: 12, color: T.muted }}>
-                    {(gA?.name || rw?.name || engineId)} · {elapsedS}s generation time{cost ? ` · ${cost}` : ''}
+                    {(gA?.name || rw?.name || activeEngineId)} · {elapsedS}s generation time{cost ? ` · ${cost}` : ''}
                   </span>
                 </div>
               </div>
@@ -596,6 +973,7 @@ export default function App() {
             ) : null}
           </>
         )}
+        </LightBeamTransition>
       </div>
     </div>
   );
@@ -605,52 +983,78 @@ export default function App() {
 // Engine card grid — grouped by provider
 // ---------------------------------------------------------------------------
 
-function EngineGrid({ selected, recommendedId, onPick }: {
+/** Google routes confirmed up on this platform — the engines to reach for. */
+const GOOGLE_UP_IDS = [
+  'gemini-omni-flash-preview',
+  'veo-3.1-generate-preview',
+  'veo-3.1-fast-generate-preview',
+  'veo-3.0-generate-001',
+  'veo-3.0-fast-generate-001',
+  'veo-2.0-generate-001',
+];
+
+function EngineGrid({ selected, recommendedId, onPick, runwayGate }: {
   selected: string;
   recommendedId: string | null;
   onPick: (id: string) => void;
+  runwayGate: 'checking' | 'ready' | 'unavailable';
 }) {
   const card = (id: string, name: string, tier: any, blurb: string, opts: { disabled?: boolean; gated?: boolean; comingSoon?: boolean } = {}) => {
     const active = selected === id;
     const isRec = recommendedId === id;
+    // The engine cards are the app-selection surface: dormant they are
+    // completely still, and a single beam traces the border on hover.
     return (
-      <button
+      <LightBeamCard
         key={id}
-        type="button"
-        onClick={() => { if (!opts.disabled) onPick(id); }}
-        aria-pressed={active}
+        selected={active}
+        hoverable={!opts.disabled}
+        onClick={opts.disabled ? undefined : () => onPick(id)}
+        padding='11px 13px'
+        radius={12}
         style={{
-          textAlign: 'left', borderRadius: 12, padding: '11px 13px', cursor: opts.disabled ? 'default' : 'pointer',
-          background: active ? 'color-mix(in srgb, var(--space-brand-primary-500, #3B82F6) 12%, transparent)' : T.card,
-          border: `1.5px solid ${active ? T.accent : isRec ? T.warn : T.line}`,
+          textAlign: 'left',
           opacity: opts.disabled ? 0.55 : 1,
-          boxShadow: isRec ? '0 0 0 3px rgba(232,163,60,0.12)' : 'none',
+          boxShadow: isRec ? '0 0 0 3px ' + colors.beamGlow : 'none',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12.5, fontWeight: 800, color: T.ink }}>{name}</span>
-          {opts.comingSoon ? <EngineBadge tier="Coming Soon" /> : <EngineBadge tier={tier} />}
-          {opts.gated ? <EngineBadge tier="Gated" /> : null}
+          {opts.comingSoon ? <EngineBadge tier='Coming Soon' /> : <EngineBadge tier={tier} />}
+          {opts.gated ? <EngineBadge tier='Gated' /> : null}
           {isRec ? <span style={{ marginLeft: 'auto', fontSize: 9.5, fontWeight: 800, color: T.warn }}>✨ PICK</span> : null}
         </div>
         <div style={{ fontSize: 10.5, color: T.muted, lineHeight: 1.45, marginTop: 4 }}>{blurb}</div>
-      </button>
+      </LightBeamCard>
     );
   };
 
-  const group = (title: string, children: React.ReactNode) => (
+  const group = (title: string, children: React.ReactNode, note?: string) => (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', color: T.muted, marginBottom: 7 }}>{title}</div>
+      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.2, textTransform: 'uppercase', color: T.muted, marginBottom: note ? 3 : 7 }}>{title}</div>
+      {note ? <div style={{ fontSize: 10.5, color: T.muted, lineHeight: 1.45, marginBottom: 7 }}>{note}</div> : null}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(225px, 1fr))', gap: 8 }}>{children}</div>
     </div>
   );
 
+  const googleUp = GROUP_A_MODELS.filter((m: GroupAModel) => GOOGLE_UP_IDS.includes(m.id));
+  const otherRoutes = GROUP_A_MODELS.filter((m: GroupAModel) => !GOOGLE_UP_IDS.includes(m.id));
+  const runwayNote = runwayGate === 'ready'
+    ? 'Runway is enabled on this platform.'
+    : runwayGate === 'checking'
+      ? 'Checking whether Runway is enabled…'
+      : `${RUNWAY_DISABLED_MESSAGE} These engines cannot take a job right now.`;
+  const runwayDisabled = runwayGate !== 'ready';
+
   return (
     <div>
-      {group('Google · OpenAI · OpenRouter (12 models)', GROUP_A_MODELS.map((m: GroupAModel) => card(m.id, m.name, m.tier, `${m.blurb} · ${m.costHint}`)))}
-      {group('Runway — base video (gated)', RUNWAY_VIDEO_MODELS.map((m: RunwayVideoModel) => card(m.id, m.name, m.tier, `${m.blurb} · $${m.pricePerSecondUsd.toFixed(2)}/s`, { gated: true })))}
-      {group('Runway Recipes (7)', RUNWAY_RECIPES.map((r) => card(r.id, r.name, 'Recipe', `${r.purpose} · ${r.priceNote}`, { gated: true })))}
-      {group('Kling — Coming Soon', KLING_MODELS.map((k) => card(k.id, k.name, k.tier, k.blurb, { comingSoon: true })))}
+      {group('Google — up and usable', googleUp.map((m: GroupAModel) => card(m.id, m.name, m.tier, `${m.blurb} · ${m.costHint}`)),
+        'Omni Flash and the Veo family are the routes confirmed working. Start here.')}
+      {group('Other routes — auto re-route on refusal', otherRoutes.map((m: GroupAModel) => card(m.id, m.name, m.tier, `${m.blurb} · ${m.costHint}`)),
+        'Sora and the OpenRouter paths (Seedance 2.0 Fast on openrouter/bytedance/seedance-2.0-fast, OpenRouter Veo). If one of these refuses the job, the same brief is resubmitted on a Google engine and the swap is reported — you never lose the generation.')}
+      {group('Runway — base video (gated)', RUNWAY_VIDEO_MODELS.map((m: RunwayVideoModel) => card(m.id, m.name, m.tier, `${m.blurb} · $${m.pricePerSecondUsd.toFixed(2)}/s`, { gated: true, disabled: runwayDisabled })), runwayNote)}
+      {group('Runway Recipes (7)', RUNWAY_RECIPES.map((r) => card(r.id, r.name, 'Recipe', `${r.purpose} · ${r.priceNote}`, { gated: true, disabled: runwayDisabled })), runwayNote)}
+      {KLING_MODELS.length ? group('Kling', KLING_MODELS.map((k) => card(k.id, k.name, k.tier, k.blurb, { comingSoon: true }))) : null}
     </div>
   );
 }
@@ -743,7 +1147,7 @@ function ImageLab() {
         ) : null}
       </div>
       {def.supportsEdit ? (
-        <UploadZone title="Edit image (optional — image-to-image)" hint='"Keep this thing, change that thing" edits: the model transforms this image per your prompt.' urls={editUrl} max={1} onChange={setEditUrl} />
+        <UploadZone title="Edit image (optional — image-to-image)" hint='"Keep this thing, change that thing" edits: the model transforms this image per your prompt.' urls={editUrl} max={1} onChange={setEditUrl} aiWrite={{ onWrite: setPrompt, target: 'description' }} />
       ) : null}
       <div>
         <button type="button" disabled={busy || prompt.trim().length < 3} onClick={() => void run()} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: busy || prompt.trim().length < 3 ? T.raised : T.accentDeep, color: busy || prompt.trim().length < 3 ? T.muted : '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 13, fontWeight: 800, cursor: busy ? 'default' : 'pointer' }}>

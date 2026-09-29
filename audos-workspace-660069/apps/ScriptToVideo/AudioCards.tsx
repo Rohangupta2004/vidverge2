@@ -210,7 +210,7 @@ export default function AudioCards(props: {
           <div style={{ minWidth: 0 }}>
             <div style={{ color: music?.audioUrl ? T.bone : T.dim, fontSize: 12, fontWeight: 600 }}>Music preview</div>
             <div style={{ color: T.muted, fontSize: 11 }}>
-              {music?.status === 'ready' && music.audioUrl ? `Selected track · ${music.preset}` : music?.status === 'skipped' ? 'skipped' : music?.status === 'failed' ? 'failed' : mState === 'active' ? 'selecting…' : 'not selected yet'}
+              {music?.status === 'ready' && music.audioUrl ? `Selected track · ${music.preset || 'custom bed'}` : music?.status === 'skipped' ? 'Skipped — no music bed' : music?.status === 'failed' ? 'Music preparation failed' : mState === 'active' ? 'Selecting a bed…' : 'Not selected yet'}
             </div>
           </div>
         </div>
