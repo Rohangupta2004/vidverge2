@@ -197,7 +197,7 @@ export function specFromOverlay(overlay: { text?: string; subtext?: string } | n
  * re-captured — never silently reused for different content.
  */
 export function motionFingerprint(spec: MotionSpec): string {
-  const ordered = JSON.stringify(spec, Object.keys(spec as Record<string, unknown>).sort());
+  const ordered = JSON.stringify(spec, Object.keys(spec as unknown as Record<string, unknown>).sort());
   let hash = 5381;
   for (let i = 0; i < ordered.length; i += 1) hash = ((hash << 5) + hash + ordered.charCodeAt(i)) >>> 0;
   return `mg:${hash.toString(36)}:${ordered.length.toString(36)}`;

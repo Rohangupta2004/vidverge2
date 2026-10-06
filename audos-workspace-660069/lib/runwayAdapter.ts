@@ -42,6 +42,9 @@
  */
 
 import {
+  engineLabelOf, generateWithOmniFlash, isModelRejection,
+} from './omniFallback';
+import {
   EngineError, isPublicHttpsUrl, pollRunway,
   runwayQuote as postRunwayQuote, runwaySubmitRecipe, runwaySubmitVideo,
 } from './videoEngineClient';
@@ -68,6 +71,8 @@ export interface RunwayGenerateParams {
   onStatus?: (status: string) => void;
   isCancelled?: () => boolean;
   timeoutMs?: number;
+  /** Reuse for retries of one logical video clip so it is billed once. */
+  creditKey?: string;
 }
 
 export interface RunwayGenerateResult {
@@ -76,6 +81,9 @@ export interface RunwayGenerateResult {
   kind: 'video' | 'image';
   model: string;
   raw: any;
+  /** The engine the caller ASKED for, when the proxy refused it and Omni
+   * Flash filmed the shot instead. Absent on a normal Runway render. */
+  fallbackFrom?: string;
 }
 
 /**
@@ -193,16 +201,57 @@ export async function quoteRunway(params: RunwayGenerateParams): Promise<{ ok: b
  */
 export async function generateWithRunway(params: RunwayGenerateParams): Promise<RunwayGenerateResult> {
   await syncRunwayCatalog(); // availability is live — never throws, cached 5 min
+
+  const catalogued = runwayModel(params.model);
+  const wantsVideo = !catalogued || catalogued.type === 'video';
+
+  /**
+   * The stand-in. Every picker now offers the FULL Runway roster, because a
+   * greyed-out entry tells a customer nothing they can act on — so a video
+   * model the proxy will not accept is re-filmed on Omni Flash here, once,
+   * for every app at the same time. Image recipes have no stand-in and are
+   * never routed through it.
+   */
+  const viaOmniFlash = async (): Promise<RunwayGenerateResult> => {
+    const out = await generateWithOmniFlash({
+      // Runway's image-to-video models accept a bare image; Omni Flash needs
+      // words, so an imageless brief gets a plain motion instruction rather
+      // than a refusal the customer cannot act on.
+      prompt: String(params.prompt || '').trim()
+        || 'Slow cinematic camera move across the subject in the source image, natural light, shallow depth of field.',
+      aspect: params.aspectRatio,
+      durationSeconds: params.duration,
+      seedImageUrl: params.image,
+      onStatus: params.onStatus,
+      isCancelled: params.isCancelled,
+    });
+    return {
+      taskId: '',
+      mediaUrls: [out.videoUrl],
+      kind: 'video',
+      model: out.model,
+      raw: null,
+      fallbackFrom: engineLabelOf(params.model),
+    };
+  };
+
   const violation = validateRunwayRequest(params);
-  if (violation) throw new RunwayUnavailable(violation, { code: 'unsupported_model', status: 400, switchModels: true });
+  if (violation) {
+    const refusedModel = Boolean(catalogued && !catalogued.available);
+    if (refusedModel && wantsVideo) return viaOmniFlash();
+    throw new RunwayUnavailable(violation, { code: 'unsupported_model', status: 400, switchModels: true });
+  }
 
   const route = runwayRoute(params.model);
   const body = buildRunwayBody(params);
 
   try {
+    const credit = route.outputKind === 'video'
+      ? { seconds: Number(body.duration) || Number(params.duration) || 5, creditKey: params.creditKey }
+      : undefined;
     const kickoff = route.kind === 'recipe' && route.recipeId
-      ? await runwaySubmitRecipe(route.recipeId, body)
-      : await runwaySubmitVideo(body);
+      ? await runwaySubmitRecipe(route.recipeId, body, credit)
+      : await runwaySubmitVideo(body, credit);
 
     if (kickoff.uncertain && !kickoff.taskId) {
       throw new RunwayUnavailable(
@@ -215,6 +264,7 @@ export async function generateWithRunway(params: RunwayGenerateParams): Promise<
       onStatus: params.onStatus,
       isCancelled: params.isCancelled,
       timeoutMs: params.timeoutMs,
+      creditKey: kickoff.creditKey,
     });
 
     if (!result.mediaUrls.length) {
@@ -228,7 +278,14 @@ export async function generateWithRunway(params: RunwayGenerateParams): Promise<
       raw: result.raw,
     };
   } catch (e) {
-    throw asRunwayFailure(e, params.model);
+    const failure = asRunwayFailure(e, params.model);
+    // A refusal the proxy only raises at submit time gets the same stand-in.
+    // If Omni Flash cannot film it either, the ORIGINAL refusal is what the
+    // customer reads — not a second one about a model they never chose.
+    if (wantsVideo && !params.isCancelled?.() && isModelRejection(failure)) {
+      try { return await viaOmniFlash(); } catch { /* the original failure stands */ }
+    }
+    throw failure;
   }
 }
 

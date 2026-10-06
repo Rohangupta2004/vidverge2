@@ -47,13 +47,18 @@ interface AgentChatViewProps {
  * "how can I help".
  */
 const VIDVERGE_HOME_WELCOME =
-  'Paste your product URL and I will read your brand, write you six different ad scripts, storyboard the one you pick and render it in your own colours — or bring footage you already have and I will cut, caption and score it.';
+  'Paste your product URL and I will read your brand, write you six different ad scripts, storyboard the one you pick and render it in your own colours. Describe what you are launching and I will write the script and build the launch video — teaser, reveal, demo, explainer, founder-led or social clip — in 16:9, 9:16 or square. Bring footage you already have and I will transcribe it, hand you a cut plan you can accept edit by edit, then reframe, caption and export it for every platform — or just give me a topic and I will research, script and film a faceless explainer, documentary or true-crime video end to end. Need the voice rather than the whole film? Voice Studio clones your voice, reads a Hinglish script in it, dubs a finished video into Tamil or Telugu, scores a music bed and lip-syncs an avatar presenter to any of it. Or drop a clip into VFX Drop, describe anything you want to add — rain, neon, fire, particles or something entirely new — and review the AI-expanded cinematic prompt before it is composited into your footage.';
 
 const VIDVERGE_STARTERS = [
   'Turn my product URL into an ad',
-  'Write me a script for a 30-second launch video',
-  'Add captions and music to a video I already have',
-  'Design a reusable character for my videos',
+  'Write and build my product launch video',
+  'Compare my brand with my competitors',
+  'Make me a faceless documentary video',
+  'Cut, caption and reframe footage I already have',
+  'Design my clip into a vertical short',
+  'Add anything with AI to a clip of me',
+  'Clone my voice and make an avatar video',
+  'Dub my video into Hindi or Tamil',
 ];
 
 function WorkingIndicator({

@@ -199,8 +199,8 @@ export default function CompositionPreview({ project, scenes }: { project: Proje
     return <div className="rounded-2xl border border-dashed border-[var(--space-border-default)] p-6 text-sm text-[var(--space-text-muted)]">The preview needs the avatar master — render the HeyGen presenter first.</div>;
   }
 
-  return <div>
-    <div className="relative w-full overflow-hidden rounded-2xl bg-black" style={{ aspectRatio: '16 / 9', containerType: 'inline-size', fontSize: 'clamp(6px, 1.6cqw, 22px)' }}>
+  return <div className={project.aspect_ratio === '9:16' ? 'mx-auto w-full max-w-sm' : 'w-full'}>
+    <div className="relative w-full overflow-hidden rounded-2xl bg-black shadow-2xl" style={{ aspectRatio: project.aspect_ratio === '9:16' ? '9 / 16' : '16 / 9', containerType: 'inline-size', fontSize: 'clamp(6px, 1.6cqw, 22px)' }}>
       {/* No crossOrigin here on purpose: the preview never reads pixels, and
           an anonymous CORS request would refuse to play a non-CORS master. */}
       <video ref={baseVideo} key={project.heygen_video_url} src={project.heygen_video_url} playsInline onEnded={() => { setPlaying(false); musicAudio.current?.pause(); }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />

@@ -1,8 +1,9 @@
 /**
  * Video Enhancer — platform API core.
  *
- * Fully self-contained (imports NOTHING from Track A or Track B code). Covers
- * the whole enhancement pipeline against documented platform integrations:
+ * Self-contained apart from the shared app-id registry and generation client
+ * (imports NOTHING from Track A or Track B code). Covers the whole enhancement
+ * pipeline against documented platform integrations:
  *   1. Upload           → POST /api/upload/file            (file-storage)
  *   2. Transcription    → POST /api/workspaces/:id/audio/transcribe-timestamped
  *                         (deepgram-transcription; WAV extraction fallback)
@@ -10,6 +11,9 @@
  *   4. B-roll           → POST /api/veo/generate/video + /api/veo/status/:op
  *   5. Export           → POST /api/render/remotion + GET /api/render/remotion/:op
  */
+
+import { APP_IDS, VEO_31_FAST_MODEL } from '../../lib/appIds';
+import { generationHeaders, postGeneration } from '../../lib/videoEngineClient';
 
 export const WORKSPACE_UUID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
 export const ACCENT = '#3B82F6';
@@ -533,19 +537,14 @@ export function applyEmphasis(segments: CaptionSegment[], emphasis: string[]): C
 // ---------------------------------------------------------------------------
 
 export async function submitBroll(prompt: string, aspectRatio: '16:9' | '9:16', durationSec: number): Promise<string> {
-  const res = await fetch('/api/veo/generate/video', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
-    body: JSON.stringify({
-      model: 'veo-3.1-fast-generate-preview',
-      prompt,
-      aspectRatio,
-      duration: Math.min(8, Math.max(4, Math.round(durationSec))),
-      generateAudio: false,
-      resolution: '1080p',
-    }),
-  });
-  const data = await res.json().catch(() => null);
+  const { res, data } = await postGeneration('/api/veo/generate/video', {
+    model: VEO_31_FAST_MODEL,
+    prompt,
+    aspectRatio,
+    duration: Math.min(8, Math.max(4, Math.round(durationSec))),
+    generateAudio: false,
+    resolution: '1080p',
+  }, APP_IDS.videoEnhancer);
   if (!res.ok || !data?.operationId) {
     const detail = Array.isArray(data?.details) ? data.details.map((d: any) => d?.message).filter(Boolean).join('; ') : '';
     throw new Error((detail || (data?.error as string)) || ('B-roll generation failed to start (HTTP ' + res.status + ').'));
@@ -555,7 +554,7 @@ export async function submitBroll(prompt: string, aspectRatio: '16:9' | '9:16', 
 
 export async function checkBroll(operationId: string): Promise<{ status: 'processing' | 'completed' | 'failed'; progress?: number; videoUrl?: string; errorMessage?: string }> {
   const enc = encodeURIComponent(operationId);
-  const headers = { 'X-Workspace-DB-Token': workspaceToken() };
+  const headers = generationHeaders(APP_IDS.videoEnhancer);
   let res = await fetch('/api/veo/status/' + enc, { headers });
   if (res.status === 404) {
     res = await fetch('/api/generate/video/status/' + enc, { headers });

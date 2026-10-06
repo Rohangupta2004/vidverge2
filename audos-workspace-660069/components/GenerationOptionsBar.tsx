@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 import {
   Check,
   ChevronDown,
+  Coins,
   Film,
   Globe,
   Loader2,
@@ -24,6 +25,8 @@ import {
   Settings2,
   Sparkles,
 } from 'lucide-react';
+import { openPricing } from '../lib/plans';
+import { creditsForSeconds, formatCredits, useCredits } from '../lib/credits';
 import {
   getGenerationOptions,
   setGenerationOptions,
@@ -160,6 +163,15 @@ export default function GenerationOptionsBar({
   const currentModelId = modelKnown ? options.model : DEFAULT_VIDEO_MODEL;
   const model = getVideoModel(currentModelId);
 
+  // What this configuration costs. 1 credit = 1 second of finished video, the
+  // same on every model — so the chip answers "what will this cost me?" before
+  // anybody presses Generate.
+  const { credits } = useCredits();
+  const totalSeconds = manual.sceneCount * manual.sceneDuration;
+  const cost = creditsForSeconds(totalSeconds);
+  const balance = credits ? credits.balance : null;
+  const short = balance !== null && balance < cost;
+
   return (
     <div className="mb-2 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-2.5 py-2">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -196,6 +208,26 @@ export default function GenerationOptionsBar({
           <ChevronDown className={`h-3 w-3 transition-transform ${detail === 'longform' ? 'rotate-180' : ''}`} />
         </button>
 
+        <span
+          className={`${CHIP_BASE} ${
+            short
+              ? 'border-[color-mix(in_srgb,var(--space-brand-primary-500)_60%,transparent)] bg-[color-mix(in_srgb,var(--space-brand-primary-500)_18%,transparent)] text-[var(--space-text-brand)]'
+              : 'border-[var(--space-border-default)] bg-[var(--space-surface-muted)] text-[var(--space-text-muted)]'
+          }`}
+          title={
+            balance !== null
+              ? `${totalSeconds}s of video costs ${formatCredits(cost)} credits, and you have ${formatCredits(balance)}.`
+              : `${totalSeconds}s of video costs ${formatCredits(cost)} credits — 1 credit = 1 second, on every model.`
+          }
+          data-testid="chip-option-credits"
+        >
+          <Coins className="h-3 w-3" />
+          {formatCredits(cost)} credits
+          {balance !== null ? (
+            <span className="font-medium text-[var(--space-text-muted)]">of {formatCredits(balance)}</span>
+          ) : null}
+        </span>
+
         <button
           type="button"
           onClick={() => {
@@ -223,16 +255,30 @@ export default function GenerationOptionsBar({
         {onGenerate ? (
           <button
             type="button"
-            onClick={() => onGenerate(buildManualVideoRequest(prompt))}
+            onClick={() => {
+              // A render nobody can pay for never starts: the plans screen
+              // opens on the credit wall with the exact shortfall instead.
+              if (short) {
+                openPricing('credits', { required: cost, balance: balance ?? 0, seconds: totalSeconds });
+                return;
+              }
+              onGenerate(buildManualVideoRequest(prompt));
+            }}
             disabled={disabled || busy}
             className={`${chipClass(true)} ml-auto disabled:cursor-not-allowed disabled:opacity-50`}
             data-testid="button-generate-video-pass"
-            title="Generate every configured scene automatically"
+            title={
+              short
+                ? `This ${totalSeconds}s video costs ${formatCredits(cost)} credits and you have ${formatCredits(balance ?? 0)}.`
+                : 'Generate every configured scene automatically'
+            }
           >
-            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : short ? <Coins className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
             {busy
               ? `Generating ${manual.sceneCount} scene${manual.sceneCount === 1 ? '' : 's'}…`
-              : 'Generate'}
+              : short
+                ? `Need ${formatCredits(cost - (balance ?? 0))} more credits`
+                : 'Generate'}
           </button>
         ) : null}
 
@@ -327,7 +373,11 @@ export default function GenerationOptionsBar({
             </div>
           </div>
           <p className="text-[11px] text-[var(--space-text-muted)] sm:col-span-2">
-            Total target: {manual.sceneCount * manual.sceneDuration}s ({Math.floor((manual.sceneCount * manual.sceneDuration) / 60)}m {(manual.sceneCount * manual.sceneDuration) % 60}s). One Generate click runs every scene in order, keeps the same character anchor, and returns a stitched video plus the clip playlist.
+            Total target: {totalSeconds}s ({Math.floor(totalSeconds / 60)}m {totalSeconds % 60}s) —{' '}
+            <span className="font-semibold text-[var(--space-text-brand)]">{formatCredits(cost)} credits</span>, because one
+            credit buys one second on every model.{' '}
+            {balance !== null ? `You have ${formatCredits(balance)}. ` : ''}
+            One Generate click runs every scene in order, keeps the same character anchor, and returns a stitched video plus the clip playlist.
           </p>
         </div>
       )}

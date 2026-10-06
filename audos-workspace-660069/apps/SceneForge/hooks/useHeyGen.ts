@@ -5,6 +5,50 @@ import { approximateWordTimestamps } from '../agents/orchestrator';
 import { sortAvatars } from '../lib/heygenCatalog';
 
 const base = `/api/workspaces/${WORKSPACE_ID}/provider-credentials/heygen/proxy`;
+const refreshHook = '/api/hooks/execute/workspace-660069/sceneforge-refresh-heygen-url-secure';
+
+/** CloudFront signs HeyGen media with an epoch-seconds `Expires` query param. */
+export function heyGenSignedUrlExpiresAt(url: string): number | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url, typeof window === 'undefined' ? 'https://audos.com' : window.location.origin);
+    const raw = parsed.searchParams.get('Expires') || parsed.searchParams.get('expires');
+    if (!raw || !/^\d+$/.test(raw)) return null;
+    const seconds = Number(raw);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+  } catch { return null; }
+}
+
+export function isExpiredHeyGenSignedUrl(url: string, now = Date.now()): boolean {
+  const expiresAt = heyGenSignedUrlExpiresAt(url);
+  return expiresAt !== null && expiresAt <= now;
+}
+
+export interface RefreshedHeyGenVideo {
+  videoUrl: string;
+  heygenChunks: any[];
+}
+
+function unwrapHook(payload: any): any {
+  return payload && typeof payload === 'object' && payload.response !== undefined && payload._meta !== undefined ? payload.response : payload;
+}
+
+async function requestFreshHeyGenUrl(projectId: string): Promise<RefreshedHeyGenVideo> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = typeof window === 'undefined' ? '' : String((window as any).__workspaceDb?.token || '');
+  const sessionId = typeof window === 'undefined' ? '' : String((window as any).__spaceSessionId || '');
+  if (token) headers['X-Workspace-DB-Token'] = token;
+  if (sessionId) headers['X-Session-Id'] = sessionId;
+  const response = await fetch(refreshHook, { method: 'POST', headers, body: JSON.stringify({ project_id: projectId }) });
+  const data = unwrapHook(await response.json().catch(() => null));
+  if (!response.ok || !data || data.success === false || data.error) {
+    throw new Error(String(data?.error || `The video link could not be refreshed (HTTP ${response.status}).`));
+  }
+  const videoUrl = String(data.video_url || '');
+  if (!videoUrl) throw new Error('HeyGen did not return a fresh video link.');
+  return { videoUrl, heygenChunks: Array.isArray(data.heygen_chunks) ? data.heygen_chunks : [] };
+}
+
 // Content-Type is only sent when there IS a body: a bare GET carrying
 // `Content-Type: application/json` makes some transports forward an empty {}
 // body, which HeyGen v3 rejects with "Extra inputs are not permitted".
@@ -292,5 +336,16 @@ export function useHeyGen() {
     setProgress('Reconnecting to the avatar render already in flight');
     return pollUntilReady(videoId, project);
   }, [pollUntilReady]);
-  return { avatars, voices, catalogLoading, catalogError, progress, generate, resume };
+  const refreshVideoUrl = useCallback(async (projectId: string) => {
+    setProgress('Refreshing video link…');
+    try {
+      const refreshed = await requestFreshHeyGenUrl(projectId);
+      setProgress('Avatar video ready');
+      return refreshed;
+    } catch (error) {
+      setProgress('');
+      throw error;
+    }
+  }, []);
+  return { avatars, voices, catalogLoading, catalogError, progress, generate, resume, refreshVideoUrl };
 }

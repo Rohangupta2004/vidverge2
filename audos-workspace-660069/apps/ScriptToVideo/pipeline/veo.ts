@@ -19,9 +19,11 @@
  * as imageData — the opening frame of the new shot.
  */
 
-import { Aspect, wsToken } from '../api';
+import { Aspect } from '../api';
+import { APP_IDS, OMNI_FLASH_MODEL } from '../../../lib/appIds';
+import { generationHeaders, postGeneration } from '../../../lib/videoEngineClient';
 
-const VEO_MODEL = 'gemini-omni-flash-preview';
+const VEO_MODEL = OMNI_FLASH_MODEL;
 
 // The platform Veo proxy rejects prompts longer than 1000 characters with
 // 400 "Invalid request parameters — String must contain at most 1000
@@ -61,16 +63,12 @@ export async function submitVeo(params: {
   if (params.negative) body.negativePrompt = capVeoText(params.negative, 500);
   if (params.seedImageUrl && /^https:\/\//.test(params.seedImageUrl)) body.imageData = params.seedImageUrl;
   let res: Response;
+  let data: any;
   try {
-    res = await fetch('/api/veo/generate/video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': wsToken() },
-      body: JSON.stringify(body),
-    });
+    ({ res, data } = await postGeneration('/api/veo/generate/video', body, APP_IDS.scriptToVideo));
   } catch (e: any) {
     throw new Error(`Could not reach the video service: ${String(e?.message || e)}`);
   }
-  const data = await res.json().catch(() => null);
   const operationId = data && (data.operationId || data.operation_id);
   // The proxy can answer 200 OK with a placeholder id prefixed veo_video_error_
   // (or status: "failed") when the provider submission itself failed — treating
@@ -85,7 +83,7 @@ export async function submitVeo(params: {
 export interface VeoStatus { status: 'processing' | 'completed' | 'failed'; videoUrl?: string; progress?: number; error?: string }
 
 export async function checkVeo(operationId: string): Promise<VeoStatus> {
-  const res = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`);
+  const res = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, { headers: generationHeaders(APP_IDS.scriptToVideo) });
   const data = await res.json().catch(() => null);
   if (res.status === 404) return { status: 'failed', error: 'The video service has no record of this render (404). Regenerate the scene.' };
   if (!res.ok) return { status: 'processing', error: String(data?.error || `status HTTP ${res.status}`) };

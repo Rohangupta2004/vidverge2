@@ -114,14 +114,23 @@ export interface VoicePlan {
   voiceName: string;
 }
 
+/** Which engine speaks the film's narration, chosen on the voiceover step.
+ * 'none' is always available and needs nothing generated, which is what keeps
+ * the step optional instead of a gate the pipeline waits behind. */
+export type VoiceSourceId = 'none' | 'elevenlabs' | 'openai';
+
 export interface AudioNarrationEntry {
   scene_key: string;
   /** Natural spoken wording for this scene — faithful to the original script. */
   text: string;
-  /** 'elevenlabs' = ElevenLabs narration is this scene's authoritative voice;
-   * 'video_native' = the clip's own generated dialogue is (narration skipped);
-   * 'none' = the scene carries no words. */
-  voice_source: 'elevenlabs' | 'video_native' | 'none';
+  /** 'elevenlabs' / 'openai' = that TTS engine is this scene's authoritative
+   * voice; 'video_native' = the clip's own generated dialogue is (narration
+   * skipped); 'none' = the scene is silent (no words, or no voiceover). */
+  voice_source: 'elevenlabs' | 'openai' | 'video_native' | 'none';
+  /** What the SOUND DIRECTOR decided for this line, independent of the voice
+   * source the customer picked. Kept so switching the source off and back on
+   * restores the right lines instead of losing which scenes had words. */
+  planned_source?: 'elevenlabs' | 'video_native' | 'none';
   voiceId?: string;
   audioUrl?: string;
   duration_s?: number;
@@ -132,6 +141,10 @@ export interface AudioNarrationEntry {
 export interface AudioMusicPlan {
   required: boolean;
   preset: string;
+  /** The provider that rendered the current bed. Older plans omit this. */
+  provider?: 'elevenlabs' | 'gemini';
+  /** Why an optional bed was skipped automatically rather than by the user. */
+  skip_reason?: 'providers_unavailable';
   /** Optional richer brief for the custom music endpoint (style, energy,
    * tempo, mood, arc). Preset is the fallback. */
   customPrompt?: string;
@@ -169,6 +182,11 @@ export interface FilmAudio {
   music: AudioMusicPlan | null;
   sfx: AudioSfxItem[];
   sfx_status: 'pending' | 'ready' | 'failed' | 'skipped' | 'none';
+  /** The engine speaking this film's narration. Absent on films planned before
+   * the voiceover step became optional — those were all ElevenLabs. */
+  voice_source?: VoiceSourceId;
+  /** The built-in voice used while voice_source is 'openai' (alloy, nova, …). */
+  openai_voice?: string;
   /** Fingerprint of scene keys + segments + durations the plan was made for —
    * a mismatch means scenes changed and narration must be re-planned. */
   planned_fingerprint: string;
@@ -234,6 +252,25 @@ export interface OverlaySpec {
   duration_s?: number;
 }
 
+/** MANUAL SCRIPT MODE — one scene exactly as parsed from a pre-formatted
+ * script the customer pasted. No model reads the brief in this mode: the
+ * parser in ./manualScript.ts produces these objects and the generation
+ * prompt is assembled from them deterministically. */
+export interface ManualDialogueLine { speaker: string; line: string }
+
+export interface ParsedScene {
+  /** 1-based position in the pasted script. */
+  index: number;
+  title: string;
+  durationSec: number;
+  visual: string;
+  dialogue: ManualDialogueLine[];
+  camera: string;
+}
+
+/** A whole pasted script: its scenes plus the trailing overall-style block. */
+export interface ParsedScript { scenes: ParsedScene[]; globalStyle: string }
+
 /** Sequential-pipeline scene spec: prep context stored beside the prompt.
  * The prompt itself lives in the scene row's `prompt` column. */
 export interface VideoClipSpec {
@@ -243,6 +280,8 @@ export interface VideoClipSpec {
   reasoning?: string;            // Opus's continuation/reference reasoning
   characters?: string[];         // character ids appearing in this clip
   duration_s?: number;
+  /** Manual Script Mode: this scene exactly as parsed from the pasted script. */
+  manual?: ParsedScene;
 }
 
 export type SceneSpec = VideoClipSpec | VeoSpec | GraphicSpec | MockupSpec | OverlaySpec;
@@ -296,6 +335,14 @@ export interface FilmPlan {
   visual_style?: string;
   /** Characters with locked appearances (reference image URLs live on film.character_refs). */
   characters?: { id: string; name: string; appearance: string }[];
+  /** How these scenes were produced: 'ai' = the director model read the brief
+   * and segmented it; 'manual' = they were parsed from a pre-formatted pasted
+   * script and no director model runs at any step. Absent on films planned
+   * before Manual Script Mode existed (they are all 'ai'). */
+  input_mode?: 'ai' | 'manual';
+  /** Manual Script Mode: the overall-style block at the end of the pasted
+   * script. Appended to the end of every scene's generation prompt. */
+  global_style?: string;
 }
 
 export interface FilmFinishState {
@@ -333,11 +380,19 @@ export interface Film {
   machine_state: MachineState | null;
   /** Locked character reference images: [{ id, name, appearance, url }]. */
   character_refs: FilmCharacter[] | null;
+  /** The character reference image the CUSTOMER uploaded on the create screen
+   * (durable public URL). It drives the dual-reference (n+1) method in every
+   * generation mode: it travels alongside the previous scene's extracted
+   * final frame so one character stays consistent across clips. */
+  character_ref_url?: string | null;
   /** Audio production state: voice plan, per-scene narration, music, SFX. */
   audio: FilmAudio | null;
   /** Video model id this film's clips render on ('omni-flash' | 'seedance-2.0'
    * | 'kling-v2-master'). Null = omni-flash (pre-picker films). */
   video_model: string | null;
+  /** True when the user has archived this film from the Library — hidden from
+   * the default list but never deleted. Null/false = active. */
+  is_archived?: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -433,9 +488,37 @@ export const db = {
   async updateFilm(id: number, patch: Partial<Film>): Promise<void> {
     await wdb().from('s2v_films').update(id, patch);
   },
+  /** Archive / unarchive a film — a soft hide that keeps the row and its clips. */
+  async setFilmArchived(id: number, archived: boolean): Promise<void> {
+    await wdb().from('s2v_films').update(id, { is_archived: archived });
+  },
+  /** Permanently delete a film and its scene rows (scenes best-effort so a
+   * partial cleanup never blocks removing the film itself). */
+  async deleteFilm(id: number): Promise<void> {
+    try {
+      const scenes = await this.listScenes(id);
+      for (const s of scenes) {
+        try { await this.deleteScene(s.id); } catch { /* best-effort per scene */ }
+      }
+    } catch { /* best-effort — still remove the film row below */ }
+    await wdb().from('s2v_films').delete(id);
+  },
   async listScenes(filmId: number): Promise<FilmScene[]> {
-    const { data } = await wdb().from('s2v_film_scenes').eq('film_id', filmId).orderBy('idx', 'asc').limit(200).get();
-    return (Array.isArray(data) ? data : []).map(normalizeScene);
+    // Every scene row a film has, however many. The data API serves at most
+    // 10,000 rows per request, so the list is read in idx order one page at a
+    // time until a short page ends it — there is no fixed scene ceiling here.
+    const PAGE = 10000;
+    const rows: FilmScene[] = [];
+    let previousFirstId: number | null = null;
+    for (let offset = 0; ; offset += PAGE) {
+      const { data } = await wdb().from('s2v_film_scenes').eq('film_id', filmId).orderBy('idx', 'asc').limit(PAGE).offset(offset).get();
+      const page: FilmScene[] = Array.isArray(data) ? data : [];
+      if (page.length && page[0].id === previousFirstId) throw new Error('The scene list could not be paged — the data API returned the same page twice.');
+      previousFirstId = page.length ? page[0].id : null;
+      rows.push(...page);
+      if (page.length < PAGE) break;
+    }
+    return rows.map(normalizeScene);
   },
   async insertScene(row: Partial<FilmScene>): Promise<void> {
     await wdb().from('s2v_film_scenes').insert(row);

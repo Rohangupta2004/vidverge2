@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Save, CreditCard, Crown, LogOut, Clock, CheckCircle2, AlertCircle, Loader2, ExternalLink, CalendarX } from 'lucide-react';
+import { Save, CreditCard, Coins, Crown, LogOut, Clock, CheckCircle2, AlertCircle, Loader2, ExternalLink, CalendarX } from 'lucide-react';
 import { useSpaceRuntime } from '../SpaceRuntimeContext';
 import { settingsStyles } from '../lib/colors';
 import { isPaidTier, isProTier, openPricing, useUserTier } from '../lib/plans';
+import { formatCredits, useCredits } from '../lib/credits';
 import { scopedSpaceSessionStorageKey } from '../lib/tenant-delegation-scope';
 
 interface SettingsProps {
@@ -63,9 +64,10 @@ export default function Settings({ spaceId }: SettingsProps) {
   const {
     tier: userTier,
     loading: tierLoading,
-    videoLimit,
-    unlimited,
   } = useUserTier(spaceId, contextSessionId);
+  // Credits are the product's only meter (1 credit = 1 second of finished
+  // video), so the account panel shows a balance rather than a video count.
+  const { credits } = useCredits();
   const subscriber = isPaidTier(userTier);
   const tierLabel = isProTier(userTier)
     ? 'Pro'
@@ -249,11 +251,18 @@ export default function Settings({ spaceId }: SettingsProps) {
           'X-App-Id': appId
         },
         body: JSON.stringify({
+          // The entry-level locked plan. Pro and pay-as-you-go are chosen on
+          // the Plans screen; this button is the one-tap Creator path.
+          billingPlanId: 'creator-monthly',
           customerEmail: synced.email,
-          successUrl: window.location.origin + window.location.pathname + '?subscription_success=true&session_id={CHECKOUT_SESSION_ID}',
+          successUrl: window.location.origin + window.location.pathname + '?subscription_success=true&vv_checkout=subscription&session_id={CHECKOUT_SESSION_ID}',
           cancelUrl: window.location.href,
+          // Stamped onto the subscription so `subscription-events` can find
+          // this credit wallet again on a renewal or a cancellation.
           metadata: {
             spaceId,
+            vvEmail: synced.email,
+            vvPlan: 'creator',
           },
         })
       });
@@ -501,6 +510,30 @@ export default function Settings({ spaceId }: SettingsProps) {
               </button>
             </div>
 
+            {credits && (
+              <div
+                className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-muted)] px-4 py-3"
+                data-testid="settings-credit-row"
+              >
+                <span className="flex flex-col gap-0.5">
+                  <span className="flex items-center gap-1.5 text-sm font-semibold text-[var(--space-text-primary)]">
+                    <Coins className="w-4 h-4 text-[var(--space-text-brand)]" />
+                    {formatCredits(credits.balance)} credits
+                  </span>
+                  <span className="text-xs text-[var(--space-text-muted)]">
+                    {formatCredits(credits.balance)} seconds of video · 1 credit = 1 second, every engine
+                  </span>
+                </span>
+                <button
+                  onClick={() => openPricing('nav')}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all hover:brightness-110 text-[#180f02] bg-[var(--space-brand-primary)]"
+                  data-testid="button-settings-topup"
+                >
+                  Top up
+                </button>
+              </div>
+            )}
+
             {!tierLoading && (
               <div
                 className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3"
@@ -514,15 +547,11 @@ export default function Settings({ spaceId }: SettingsProps) {
               >
                 <span className="flex flex-col gap-0.5">
                   <span className="text-sm text-[var(--space-text-secondary)]">VidVerge access</span>
-                  {subscriber && (
-                    <span className="text-xs text-[var(--space-text-muted)]">
-                      {unlimited
-                        ? 'Unlimited videos — no monthly cap'
-                        : typeof videoLimit === 'number'
-                          ? `${videoLimit} videos a month`
-                          : 'No trial limit on this account'}
-                    </span>
-                  )}
+                  <span className="text-xs text-[var(--space-text-muted)]">
+                    {credits && credits.rollover && credits.monthlyCredits > 0
+                      ? `${formatCredits(credits.monthlyCredits)} credits a month, rolling over`
+                      : 'Credits never expire — top up in $9 blocks any time'}
+                  </span>
                 </span>
                 <span
                   className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold"
@@ -565,11 +594,11 @@ export default function Settings({ spaceId }: SettingsProps) {
                   </span>
                 </div>
                 <p className="mt-2 text-xs text-[var(--space-text-secondary)]">
-                  {unlimited
-                    ? 'This account makes unlimited videos — no monthly cap, no trial limit, and nothing to buy.'
-                    : `This account is on VidVerge ${tierLabel}${
-                        typeof videoLimit === 'number' ? ` (${videoLimit} videos a month)` : ''
-                      } — no trial limit, and nothing to buy.`}
+                  {`This account is on VidVerge ${tierLabel}${
+                    credits && credits.monthlyCredits > 0
+                      ? ` — ${formatCredits(credits.monthlyCredits)} credits a month, rolling over`
+                      : ''
+                  }. The access was granted directly, so there is no subscription to buy.`}
                 </p>
               </div>
             ) : (

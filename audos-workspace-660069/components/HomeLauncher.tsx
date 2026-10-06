@@ -107,6 +107,36 @@ function LaunchArt() {
   );
 }
 
+// Faceless Content — a narration waveform reading inside a video frame, swept
+// by a soft light bar. No face, on purpose.
+function FacelessArt() {
+  return (
+    <div className="vv-art vv-art-faceless" aria-hidden="true">
+      <div className="vv-faceless-frame">
+        <div className="vv-faceless-scan" />
+        <div className="vv-faceless-wave">
+          {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+            <span key={i} className="vv-faceless-bar" style={{ animationDelay: `${i * 0.13}s` }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Vergeye — a radar sweep over concentric rings with a lock-on blip. It researches
+// the competition before it films anything, so it gets no lens and no clapper.
+function RadarArt() {
+  return (
+    <div className="vv-art vv-art-phantom" aria-hidden="true">
+      <div className="vv-radar-ring vv-radar-ring-outer" />
+      <div className="vv-radar-ring vv-radar-ring-inner" />
+      <div className="vv-radar-sweep" />
+      <span className="vv-radar-blip" />
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Tool identity registry                                              */
 /* ------------------------------------------------------------------ */
@@ -125,7 +155,7 @@ const TOOL_IDENTITIES: Record<string, ToolIdentity> = {
   },
   'video-enhancer': {
     accent: '#2dd4bf',
-    tagline: 'Polish footage you already have: captions, overlays, music, and pro-grade export.',
+    tagline: 'Drop in footage and get a cut plan in minutes — transcript editing, reframing, captions, overlays and export, all in one editor.',
     Art: EnhanceArt,
   },
   'script-to-video': {
@@ -147,6 +177,16 @@ const TOOL_IDENTITIES: Record<string, ToolIdentity> = {
     accent: '#22c55e',
     tagline: 'Your SaaS launch video — URL in, a 40-second kinetic launch film out, in your brand.',
     Art: LaunchArt,
+  },
+  'faceless-content': {
+    accent: '#3b82f6',
+    tagline: 'A topic in, a finished faceless video out — researched, scripted, filmed and cut.',
+    Art: FacelessArt,
+  },
+  phantom: {
+    accent: '#e879f9',
+    tagline: 'Paste your own URL — it finds your real competitors, compares you side by side, and makes the positioning video.',
+    Art: RadarArt,
   },
 };
 
@@ -402,6 +442,36 @@ const LAUNCHER_CSS = `
 .vv-icon-tile-sm .vv-art { transform: scale(0.78); }
 .vv-art { position: relative; width: 48px; height: 48px; }
 
+/* ===== Phantom: radar sweep ===== */
+.vv-art-phantom { border-radius: 9999px; }
+.vv-radar-ring {
+  position: absolute; border-radius: 9999px;
+  border: 1.5px solid color-mix(in srgb, var(--vv-accent) 48%, transparent);
+}
+.vv-radar-ring-outer {
+  inset: 0;
+  box-shadow: inset 0 0 14px color-mix(in srgb, var(--vv-accent) 30%, transparent);
+}
+.vv-radar-ring-inner { inset: 12px; opacity: 0.55; }
+.vv-radar-sweep {
+  position: absolute; inset: 0; border-radius: 9999px;
+  background: conic-gradient(from 0deg, color-mix(in srgb, var(--vv-accent) 55%, transparent), transparent 55%);
+  -webkit-mask: radial-gradient(farthest-side, #000 98%, transparent);
+  mask: radial-gradient(farthest-side, #000 98%, transparent);
+  animation: vv-spin 3.4s linear infinite;
+}
+.vv-radar-blip {
+  position: absolute; top: 13px; right: 12px; width: 7px; height: 7px; border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 0 10px 3px color-mix(in srgb, var(--vv-accent) 70%, transparent);
+  animation: vv-radar-blip 3.4s ease-in-out infinite;
+}
+@keyframes vv-radar-blip {
+  0%, 24% { opacity: 0; transform: scale(0.4); }
+  30% { opacity: 1; transform: scale(1.25); }
+  70%, 100% { opacity: 0; transform: scale(0.6); }
+}
+
 /* ===== Product Video: camera lens ===== */
 .vv-lens-ring {
   position: absolute; inset: -4px; border-radius: 9999px;
@@ -587,6 +657,31 @@ const LAUNCHER_CSS = `
   15% { opacity: 0.9; }
   100% { top: -8px; opacity: 0; }
 }
+
+/* ===== Faceless Content: narration waveform inside a frame ===== */
+.vv-art-faceless { display: flex; align-items: center; justify-content: center; }
+.vv-faceless-frame {
+  position: absolute; inset: 6px 2px; border-radius: 8px; overflow: hidden;
+  border: 1.5px solid rgba(147,197,253,0.55);
+  background: linear-gradient(160deg, rgba(59,130,246,0.30), rgba(5,10,24,0.95) 70%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 4px 12px rgba(59,130,246,0.30);
+}
+.vv-faceless-wave {
+  position: absolute; left: 7px; right: 7px; bottom: 9px; height: 20px;
+  display: flex; align-items: flex-end; justify-content: space-between;
+}
+.vv-faceless-bar {
+  width: 3px; border-radius: 2px; height: 30%;
+  background: linear-gradient(180deg, #bfdbfe, #3b82f6);
+  animation: vv-faceless-bar 1.6s ease-in-out infinite;
+}
+@keyframes vv-faceless-bar { 0%, 100% { height: 22%; } 50% { height: 100%; } }
+.vv-faceless-scan {
+  position: absolute; left: 0; right: 0; top: -32%; height: 32%;
+  background: linear-gradient(180deg, transparent, rgba(147,197,253,0.32), transparent);
+  animation: vv-faceless-scan 3.6s ease-in-out infinite;
+}
+@keyframes vv-faceless-scan { 0%, 12% { top: -32%; } 62%, 100% { top: 108%; } }
 
 /* ===== Reduced motion: everything settles into its static state ===== */
 @media (prefers-reduced-motion: reduce) {

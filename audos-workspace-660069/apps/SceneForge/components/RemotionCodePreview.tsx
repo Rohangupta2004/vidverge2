@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
-import { Player } from 'https://esm.sh/@remotion/player@4.0.525?external=react,react-dom';
+// Remotion is pinned to 4.0.220 to match apps/ProductLaunch/compositions/remotionShim.ts
+// and the platform's render service. The space compiler collapses every esm.sh pin into a
+// SINGLE importmap entry per specifier, so two versions anywhere in the tree leave the page
+// with mismatched `remotion` / `@remotion/player` copies; Remotion then throws "Multiple
+// versions of Remotion detected" while the module graph is still evaluating, which blanks
+// the whole space. Keep this version identical to the shim's.
+import { Player } from 'https://esm.sh/@remotion/player@4.0.220?external=react,react-dom';
 import { transform } from 'https://esm.sh/sucrase@3.35.1?bundle';
-import * as Remotion from 'https://esm.sh/remotion@4.0.525?external=react,react-dom';
+import * as Remotion from 'https://esm.sh/remotion@4.0.220?external=react,react-dom';
 import { listAssets, type Asset, type Project, type Scene } from '../lib/supabase';
 
 const FPS = 30;

@@ -1,7 +1,10 @@
 import { updateScene, type Project, type Scene } from './supabase';
-import { sleep, workspaceToken } from './proxy';
-import { generateWithRunway } from '../../../lib/runwayAdapter';
-import { isRunwayModel } from '../../../lib/videoEngines';
+import { ProviderError } from './providers';
+import { groupAModel } from '../../../lib/videoEngines';
+import { generateVideoClip, integrationForEngineId, type VideoIntegrationId } from '../../../lib/videoIntegrations';
+import { studioConfigOf } from './studioConfig';
+import { EngineError } from '../../../lib/videoEngineClient';
+import { APP_IDS } from '../../../lib/appIds';
 
 // VIDEO TOOL — not an agent. This module contains no LLM: the single
 // orchestrator LLM (agents/orchestrator.ts) writes every video prompt
@@ -62,7 +65,7 @@ export interface SceneVideoResult { videoUrl: string; reused: boolean }
  * twice. The durable URL is persisted onto the scene through the server
  * function (render_url is a server-only column).
  */
-export async function generateSceneVideo(project: Project, scene: Scene, options: { force?: boolean; model?: string } = {}): Promise<SceneVideoResult> {
+export async function generateSceneVideo(project: Project, scene: Scene, options: { force?: boolean; model?: string; characterRefUrl?: string } = {}): Promise<SceneVideoResult> {
   const prompt = sceneVideoPrompt(scene);
   if (!prompt || prompt.length < 5) throw new Error(`Scene ${scene.scene_index} has no description to generate video from.`);
   if (!options.force && hasFreshSceneVideo(scene, prompt)) return { videoUrl: String(scene.render_url), reused: true };
@@ -70,52 +73,42 @@ export async function generateSceneVideo(project: Project, scene: Scene, options
   const span = Number(scene.script_end_sec) - Number(scene.script_start_sec);
   const duration = Math.max(2, Math.min(MAX_CLIP_SECONDS, Math.round(Number.isFinite(span) && span > 0 ? span : MAX_CLIP_SECONDS)));
   const engine = options.model || sceneVideoEngine();
+  const studio = studioConfigOf(project);
+  const integration = (String(studio.video_integration || '') || integrationForEngineId(engine)) as VideoIntegrationId;
 
-  if (isRunwayModel(engine)) {
-    // The Runway proxy is a different contract from /api/veo (promptText, a
-    // pixel-pair ratio, an Idempotency-Key per submit), so it goes through the
-    // shared adapter instead of the fetch below. A still already attached to
-    // the scene becomes the image-to-video seed.
-    const seed = /^https:\/\//.test(String(scene.render_url || '')) && !looksLikeVideo(scene.render_url)
-      ? String(scene.render_url)
-      : null;
-    const out = await generateWithRunway({
+  const fail = (message: string, opts: { status?: number; code?: string; retryAfterSeconds?: number } = {}) =>
+    new ProviderError(message, { provider: engine, sceneIndex: scene.scene_index, ...opts });
+
+  const seedStill = /^https:\/\//.test(String(scene.render_url || '')) && !looksLikeVideo(scene.render_url)
+    ? String(scene.render_url)
+    : null;
+  const characterRef = /^https:\/\//.test(String(options.characterRefUrl || '')) && groupAModel(engine)?.supportsReferenceImages
+    ? [{ imageData: String(options.characterRefUrl), referenceType: 'asset' as const }]
+    : null;
+
+  const fullPrompt = `${prompt}. Cinematic, high quality, no on-screen text or lettering, no watermark.`;
+
+  try {
+    const videoUrl = await generateVideoClip({
+      integration,
       model: engine,
-      prompt: `${prompt}. Cinematic, high quality, no on-screen text or lettering, no watermark.`,
-      image: seed,
-      aspectRatio: project.aspect_ratio,
+      prompt: fullPrompt,
+      aspectRatio: project.aspect_ratio as '16:9' | '9:16' | '1:1',
       duration,
+      imageData: seedStill,
+      referenceImages: characterRef,
+      appId: APP_IDS.sceneForge,
     });
-    const videoUrl = out.mediaUrls[0];
     await updateScene(scene.id, { render_url: videoUrl, video_prompt: prompt, status: 'ready' }, scene.project_id);
     return { videoUrl, reused: false };
+  } catch (error: any) {
+    const message = error instanceof EngineError
+      ? error.message
+      : String(error?.message || error || 'the generation request failed');
+    throw fail(message, {
+      status: error instanceof EngineError ? error.status : Number(error?.status) || undefined,
+      code: error instanceof EngineError ? error.code : error?.code,
+      retryAfterSeconds: error instanceof EngineError ? error.retryAfterSeconds : undefined,
+    });
   }
-
-  const response = await fetch('/api/veo/generate/video', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
-    body: JSON.stringify({
-      model: engine,
-      prompt: `${prompt}. Cinematic, high quality, no on-screen text or lettering, no watermark.`,
-      aspectRatio: project.aspect_ratio,
-      duration,
-      generateAudio: false,
-    }),
-  });
-  const start = await response.json().catch(() => ({}));
-  if (!response.ok || !start.operationId) throw new Error(start.error || `Scene ${scene.scene_index} video generation could not start`);
-
-  for (let i = 0; i < 120; i += 1) {
-    await sleep(5000);
-    // A dropped poll is not a failed render — the next tick asks again.
-    const status = await fetch(`/api/veo/status/${encodeURIComponent(start.operationId)}`).then((r) => r.json()).catch(() => null);
-    if (!status) continue;
-    if (status.status === 'completed' && status.videoUrl) {
-      const videoUrl = String(status.videoUrl);
-      await updateScene(scene.id, { render_url: videoUrl, video_prompt: prompt, status: 'ready' }, scene.project_id);
-      return { videoUrl, reused: false };
-    }
-    if (status.status === 'failed') throw new Error(status.errorMessage || `Scene ${scene.scene_index} video generation failed`);
-  }
-  throw new Error(`Scene ${scene.scene_index} video generation timed out. Retry it, or switch the scene to Text/Graphics.`);
 }

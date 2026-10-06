@@ -7,7 +7,29 @@
   "currency": "USD",
   "businessName": "Vidverge",
   "supportEmail": "grohan24102004@gmail.com",
-  "defaultTrialDays": 7,
-  "defaultPriceCents": 500,
-  "defaultPriceId": null
+  "defaultTrialDays": 0,
+  "defaultPriceCents": 3500,
+  "defaultPriceId": null,
+  "plans": [
+    {
+      "id": "creator-monthly",
+      "name": "Creator",
+      "priceCents": 3500,
+      "currency": "usd",
+      "interval": "month",
+      "intervalCount": 1,
+      "trialDays": 0,
+      "planTier": "creator"
+    },
+    {
+      "id": "pro-monthly",
+      "name": "Pro",
+      "priceCents": 7000,
+      "currency": "usd",
+      "interval": "month",
+      "intervalCount": 1,
+      "trialDays": 0,
+      "planTier": "pro"
+    }
+  ]
 }

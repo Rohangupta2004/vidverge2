@@ -29,7 +29,21 @@ interface OpusCall {
   effort?: 'low' | 'medium' | 'high';
 }
 
-export async function askOpus({ system, user, images = [], maxTokens = 4096, effort = 'medium' }: OpusCall): Promise<string> {
+export interface OpusReply {
+  text: string;
+  /** Anthropic `stop_reason`; 'max_tokens' means the platform's 8,192-token
+   * ceiling cut the reply off and its tail is missing. */
+  stopReason: string;
+}
+
+/** The director's text reply (every director surface uses this). */
+export async function askOpus(call: OpusCall): Promise<string> {
+  return (await askOpusRaw(call)).text;
+}
+
+/** askOpus plus the stop reason, for callers that must know whether the
+ * reply was cut off by the token ceiling. */
+export async function askOpusRaw({ system, user, images = [], maxTokens = 4096, effort = 'medium' }: OpusCall): Promise<OpusReply> {
   const token = wsToken();
   if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
   const content: any[] = images
@@ -61,10 +75,11 @@ export async function askOpus({ system, user, images = [], maxTokens = 4096, eff
     const code = data?.code ? ` [${data.code}]` : '';
     throw new Error(`${detail}${code}`);
   }
-  return (Array.isArray(data?.content) ? data.content : [])
+  const text = (Array.isArray(data?.content) ? data.content : [])
     .filter((b: any) => b?.type === 'text')
     .map((b: any) => String(b.text || ''))
     .join('');
+  return { text, stopReason: String(data?.stop_reason || '') };
 }
 
 /**
@@ -140,16 +155,30 @@ export function extractJson<T = any>(text: string): T {
  * with AI).
  */
 export async function askOpusJson<T = any>(call: OpusCall): Promise<T> {
-  const text = await askOpus(call);
+  return (await askOpusJsonDetailed<T>(call)).value;
+}
+
+export interface OpusJsonReply<T> {
+  value: T;
+  /** True when the reply hit the token ceiling: `value` was repaired from a
+   * cut-off reply and may be missing its tail (last array items, later keys). */
+  truncated: boolean;
+}
+
+/** askOpusJson plus the truncation signal — for callers whose output grows
+ * with the input (clip plans, narration plans) and who continue in a
+ * follow-up call instead of silently keeping a shortened result. */
+export async function askOpusJsonDetailed<T = any>(call: OpusCall): Promise<OpusJsonReply<T>> {
+  const reply = await askOpusRaw(call);
   try {
-    return extractJson<T>(text);
+    return { value: extractJson<T>(reply.text), truncated: reply.stopReason === 'max_tokens' };
   } catch (first: any) {
-    const strict = await askOpus({
+    const strict = await askOpusRaw({
       ...call,
       system: call.system + '\n\nCRITICAL OUTPUT RULE: reply with ONE complete, syntactically valid JSON value and NOTHING else — no markdown fences, no commentary, no trailing commas. If space is tight, shorten string values rather than cutting the JSON off.',
     });
     try {
-      return extractJson<T>(strict);
+      return { value: extractJson<T>(strict.text), truncated: strict.stopReason === 'max_tokens' };
     } catch {
       throw new Error(String(first?.message || first) + ' A stricter retry also returned unparseable JSON — try again.');
     }
@@ -355,6 +384,43 @@ export async function reviseScene(scene: FilmScene, film: Film, instruction: str
 // films made before the rebuild and for the other director surfaces.
 // ===========================================================================
 
+/** The proxy's REAL per-request ceilings (platform contract): at most 200,000
+ * characters of conversation input and a 256 KB body. They are the only size
+ * limits this pipeline honours — never an app-side cap. A prompt that would
+ * exceed them is split across requests (segmentation passes, narration
+ * chunks, a scene's script neighbourhood) so nothing about the film is cut. */
+const PROXY_INPUT_CHARS = 200000;
+const PROXY_BODY_BYTES = 256 * 1024;
+/** Room kept for JSON encoding, the reply envelope and small prompt parts. */
+const PROXY_HEADROOM_CHARS = 12000;
+
+const utf8Length = (s: string) => new TextEncoder().encode(s).length;
+
+/** How many characters of `text` still fit in one request next to `fixed`
+ * (the system prompt plus the rest of the user message), honouring both the
+ * character and the byte ceiling. */
+function scriptBudgetChars(text: string, fixed: string): number {
+  const chars = PROXY_INPUT_CHARS - PROXY_HEADROOM_CHARS - fixed.length;
+  const bytes = PROXY_BODY_BYTES - PROXY_HEADROOM_CHARS - utf8Length(fixed);
+  const textBytes = utf8Length(text) || 1;
+  // Bytes → characters at this text's own average width.
+  const charsByBytes = Math.floor(bytes * (text.length / textBytes));
+  return Math.max(0, Math.min(chars, charsByBytes));
+}
+
+/** Whether `text` fits whole in one request next to `fixed`. */
+const fitsRequest = (text: string, fixed: string) => text.length <= scriptBudgetChars(text, fixed);
+
+/** The longest prefix of `text` within `max` characters that ends at a
+ * paragraph, sentence or line boundary — used to split a script ACROSS
+ * requests, never to shorten the film. */
+function excerptAt(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, Math.max(0, max));
+  const cut = Math.max(head.lastIndexOf('\n\n'), head.lastIndexOf('. '), head.lastIndexOf('\n'));
+  return cut > max * 0.5 ? head.slice(0, cut + 1) : head;
+}
+
 export interface SegmentedPlan {
   title: string;
   story_summary: string;
@@ -364,20 +430,112 @@ export interface SegmentedPlan {
   scenes: { script_segment: string; summary: string; visual_goal: string; duration_s: number; characters: string[]; dialogue: SceneDialogue | null }[];
 }
 
-const SEGMENT_SYSTEM = `You are the director of a sequential script-to-video pipeline. You read the ENTIRE script first and understand the complete story — characters, world, arc, tone — BEFORE splitting anything. Then you break the script into video clips by STORY LOGIC, never mechanical time slices. Reply with ONE JSON object and nothing else.
-
-RULES:
+const SEGMENT_RULES = `RULES:
 - Every clip is AI-generated video footage. There are no graphics, text cards or overlays — pure visual storytelling.
 - Clip durations are EXACTLY 4, 6, 8 or 10 seconds (the video model's supported lengths). Pick the duration that fits the beat.
 - A long continuous action becomes MULTIPLE consecutive clips (e.g. a player dribbling up the court and scoring = dribble start → drive → jump → ball through hoop — each its own clip that will later continue from the previous clip's extracted final frame).
 - The script is the source of truth. Never rewrite it. Split it into contiguous script_segment slices that together cover the whole script in order.
-- 2–12 clips. Do not pad; do not compress several distinct beats into one clip.
+- VERBATIM AND CONTIGUOUS (the pipeline verifies this against the script text): every script_segment is copied character-for-character from the script — never paraphrased, cleaned up, summarized or reordered. The first clip starts at the script's very first words and each next clip starts exactly where the previous one ended, so no word of the script is skipped; the last clip ends at the script's very last words. Title lines, headings, speaker labels and stage directions are part of the script and belong inside the clips' segments (they inform the visuals; they are never shown as text). A segment that cannot be found verbatim in the script is rejected and re-planned.
+- There is NO cap on the number of clips — the script decides. A 30-second script may need 3 clips; an 8-minute story typically needs 50–100. Every distinct beat gets its own clip. Do not pad; do not compress several distinct beats into one clip; never stop early — the clip list must run all the way to the script's final words. Keep "summary" and "visual_goal" to ONE tight line each so a long script still fits in your reply.
 - CHARACTERS: identify every recurring character and write a LOCKED, exhaustively specific appearance (age, build, face, hair, skin tone, exact clothing with colors, shoes, distinguishing details). Every clip that shows the character reuses this exact description verbatim — it is the continuity contract. Never use a real person's name or likeness; invent a generic character that fits the story.
 - DIALOGUE (do not skip): read the script for SPOKEN LINES. A line a character speaks ON CAMERA in the scene (quoted dialogue attributed to a character who is visibly present) becomes that scene's "dialogue" object with the EXACT words from the script — never paraphrased, never invented, in the script's own language. Voice-over / narrator (VO) lines are NOT dialogue — they are narration, delivered later by the narration layer, so leave dialogue null for them. A scene with no one speaking on camera gets dialogue null.
-- No readable on-screen text, UI, logos or captions in any clip — the video model cannot render text reliably. (Spoken dialogue is allowed and encouraged where the script has it — text on screen is not.)
+- No readable on-screen text, UI, logos or captions in any clip — the video model cannot render text reliably. (Spoken dialogue is allowed and encouraged where the script has it — text on screen is not.)`;
+
+const SEGMENT_SYSTEM = `You are the director of a sequential script-to-video pipeline. You read the ENTIRE script first and understand the complete story — characters, world, arc, tone — BEFORE splitting anything. Then you break the script into video clips by STORY LOGIC, never mechanical time slices. Reply with ONE JSON object and nothing else.
+
+${SEGMENT_RULES}
 
 OUTPUT SHAPE:
 { "title": str, "story_summary": str (the complete story in 3-6 sentences), "world": str (the shared setting/world), "visual_style": str (film-wide look: palette, lens language, lighting, mood), "characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "duration_s": 4|6|8|10, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
+
+const SEGMENT_CONTINUE_SYSTEM = `You are the director of a sequential script-to-video pipeline, CONTINUING a clip plan that is already underway. The story, world, visual style and characters are decided and given to you, and the earlier clips are already planned. Segment ONLY the REMAINING SCRIPT into further clips, continuing the sequence exactly where it left off. Reply with ONE JSON object and nothing else.
+
+${SEGMENT_RULES}
+- Start with the first words of the REMAINING SCRIPT and run to its last words — never re-segment text the earlier clips already cover, never skip ahead. Reuse the given character ids verbatim; put a character in "new_characters" ONLY when a genuinely new recurring character first appears in the remaining script.
+- Never stop early and never answer with an empty "scenes" list: every word of the REMAINING SCRIPT lands in a clip — a one-word line, a closing sentence, credits or an end marker included (film those as a brief closing shot). The pipeline checks the clips against the script text and rejects a plan that leaves any of it uncovered.
+
+OUTPUT SHAPE:
+{ "new_characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "duration_s": 4|6|8|10, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
+
+/** Consecutive clips may overlap by a few words (the model repeats a phrase
+ * at a boundary): a clip may begin up to this many source words BEFORE the
+ * coverage cursor. It may never begin after it — that would skip words — and
+ * its whole text is verified from wherever it begins, so overlap can neither
+ * hide an omission nor move the cursor backwards. */
+const OVERLAP_TOKENS = 12;
+/** Word characters: ASCII letters/digits plus every non-ASCII letter block,
+ * with the Unicode punctuation blocks (general/supplemental punctuation, CJK
+ * symbols, fullwidth forms) treated as separators like ASCII punctuation. */
+const WORD_CLASS = 'A-Za-z0-9\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u1FFF\\u2070-\\u2DFF\\u2E80-\\u2FFF\\u3040-\\uFEFF\\uFF10-\\uFF19\\uFF21-\\uFF3A\\uFF41-\\uFF5A\\uFF66-\\uFFDC';
+const WORD_RE = new RegExp(`[${WORD_CLASS}]+`, 'g');
+
+/** Typographic variants the model tends to straighten, mapped 1:1 so offsets
+ * into the normalised text are valid in the original script. */
+function normalizeForMatch(s: string): string {
+  return String(s || '')
+    .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '-')
+    .replace(/\u00A0/g, ' ');
+}
+
+/** One word of the script, lower-cased, with its offsets in the normalised
+ * text (identical to offsets in the original — the normalisation is 1:1). */
+interface SourceToken { text: string; start: number; end: number }
+
+/** The script's COMPLETE word sequence, in order. */
+function tokenizeSource(norm: string): SourceToken[] {
+  const out: SourceToken[] = [];
+  const re = new RegExp(`[${WORD_CLASS}]+`, 'g');
+  for (let m = re.exec(norm); m; m = re.exec(norm)) out.push({ text: m[0].toLowerCase(), start: m.index, end: m.index + m[0].length });
+  return out;
+}
+
+/** A segment's complete word sequence, normalised and lower-cased the same way. */
+const segmentWords = (s: string) => (normalizeForMatch(s).match(WORD_RE) || []).map((t) => t.toLowerCase());
+
+/** Whether `words` equal the source words from index `at` on, one for one. */
+function matchesAt(source: SourceToken[], at: number, words: string[]): boolean {
+  if (at < 0 || at + words.length > source.length) return false;
+  for (let j = 0; j < words.length; j += 1) if (source[at + j].text !== words[j]) return false;
+  return true;
+}
+
+/** EXACT COVERAGE CHECK — the invariant behind every returned plan.
+ *
+ * Walks the clips in order against the script's COMPLETE word sequence,
+ * keeping a cursor k = the index of the first source word not yet covered.
+ * A clip is accepted only when its segment's ENTIRE word sequence equals the
+ * source words one for one, contiguously, starting at k or at most
+ * OVERLAP_TOKENS words before k (repeating a few already-covered words). It
+ * may not start after k — that would skip source words — and no word inside
+ * it may be missing, added, changed or reordered. On acceptance k moves to
+ * the word after the segment, so the cursor only ever advances. A clip whose
+ * words all lie before k, or that has no words, covers nothing new: it is
+ * dropped and is not progress. The first clip that fails verification ends
+ * the chain — it and everything after it are unproven and are re-planned
+ * from the source.
+ *
+ * Words are compared, not characters: case, whitespace and punctuation
+ * differences are ignored and typographic quotes/dashes are normalised 1:1.
+ * Nothing else is forgiven. */
+function locateCoverage<S extends { script_segment: string }>(source: SourceToken[], scenes: S[]): { kept: S[]; nextToken: number; cursor: number } {
+  const kept: S[] = [];
+  let k = 0;
+  for (const scene of scenes) {
+    const words = segmentWords(scene.script_segment);
+    if (!words.length) continue; // no words → covers nothing; not a clip of this film
+    let at = -1;
+    for (let cand = k; cand >= Math.max(0, k - OVERLAP_TOKENS); cand -= 1) {
+      if (matchesAt(source, cand, words)) { at = cand; break; }
+    }
+    if (at < 0) break; // paraphrased, altered, reordered, or skipping source words
+    if (at + words.length <= k) continue; // only repeats covered words → dropped, no progress
+    k = at + words.length;
+    kept.push(scene);
+  }
+  return { kept, nextToken: k, cursor: k > 0 ? source[k - 1].end : 0 };
+}
 
 /** Stage 1 — Opus reads the WHOLE script, understands the full story, then
  * segments it into sequential clips at supported durations. */
@@ -387,22 +545,120 @@ export async function segmentScript(params: {
   note?: string | null;
   referenceImageUrl?: string | null;
 }): Promise<SegmentedPlan> {
-  const user = [
+  const script = String(params.script || '');
+  const header = [
     `ASPECT RATIO: ${params.aspect}`,
     params.referenceImageUrl ? `A USER-PROVIDED REFERENCE IMAGE exists (a character/product/scene visual the clips can reference): ${params.referenceImageUrl}` : 'REFERENCE IMAGE: none provided.',
     params.note ? `DIRECTOR NOTE FROM THE USER: ${params.note}` : '',
-    `SCRIPT (source of truth — read it COMPLETELY before segmenting; never rewrite it):\n"""\n${params.script}\n"""`,
   ].filter(Boolean).join('\n\n');
-  const raw = await askOpusJson<any>({ system: SEGMENT_SYSTEM, user, maxTokens: 8192, effort: 'high' });
-  const characters = (Array.isArray(raw?.characters) ? raw.characters : [])
+  // The whole script goes in one request whenever the proxy allows it. A
+  // script longer than one request may carry is not cut: the first pass reads
+  // as much as fits and the coverage loop below brings the rest, so the plan
+  // still ends at the script's final words.
+  const firstExcerpt = excerptAt(script, scriptBudgetChars(script, SEGMENT_SYSTEM + header));
+  const user = [
+    header,
+    firstExcerpt.length < script.length
+      ? `SCRIPT (source of truth — never rewrite it). It is longer than one request may carry, so this is its FIRST PART (${firstExcerpt.length} of ${script.length} characters); the remainder is segmented in follow-up passes. Understand the story from what you see and segment this part completely, to its last words:\n"""\n${firstExcerpt}\n"""`
+      : `SCRIPT (source of truth — read it COMPLETELY before segmenting; never rewrite it):\n"""\n${script}\n"""`,
+  ].join('\n\n');
+  const first = await askOpusJsonDetailed<any>({ system: SEGMENT_SYSTEM, user, maxTokens: 8192, effort: 'high' });
+  const raw = first.value;
+  const title = String(raw?.title || 'Untitled film').slice(0, 120);
+  const story_summary = String(raw?.story_summary || '').slice(0, 1500);
+  const world = String(raw?.world || '').slice(0, 800);
+  const visual_style = String(raw?.visual_style || '').slice(0, 800);
+  const characters = normalizeSegmentCharacters(raw?.characters);
+  const scenes = normalizeSegmentScenes(raw?.scenes);
+  // A cut-off reply's last clip may be half-written — re-plan it from the script.
+  if (first.truncated && scenes.length > 1) scenes.pop();
+
+  // COVERAGE-DRIVEN, UNCAPPED AND EXACT: the clip count is decided by the
+  // script alone. Every pass verifies the planned clips word for word against
+  // the script's complete word sequence (locateCoverage), keeps only the
+  // verified contiguous chain, and asks for the words that follow it. The
+  // plan is returned ONLY when every word of the script is covered — what
+  // remains after the last clip may be whitespace and punctuation, nothing
+  // else; no marker, credit or closing word is exempt. Unverifiable clips are
+  // never kept as coverage: they are re-planned with verbatim instructions,
+  // and a director that covers no new word twice in a row is a loud error,
+  // not a shorter film.
+  const source = tokenizeSource(normalizeForMatch(script));
+  let lastToken = 0;
+  let stalls = 0;
+  for (;;) {
+    const cov = locateCoverage(source, scenes);
+    scenes.splice(0, scenes.length, ...cov.kept);
+    if (cov.nextToken >= source.length) break; // every source word is covered
+    const remaining = script.slice(cov.cursor);
+    const remainingWords = source.length - cov.nextToken;
+    if (cov.nextToken <= lastToken) {
+      stalls += 1;
+      if (stalls > 1) {
+        const reached = cov.nextToken > 0
+          ? `${scenes.length} clip${scenes.length === 1 ? '' : 's'} are verified word for word up to “…${script.slice(Math.max(0, cov.cursor - 60), cov.cursor).trim()}”, and the ${remainingWords} words that follow`
+          : `none of its ${remainingWords} words`;
+        throw new Error(`The director could not plan the script as verbatim clips: ${reached} stayed unplanned after repeated attempts (the clips returned were paraphrased, skipped words, or only repeated text already covered) — try again.`);
+      }
+    } else {
+      stalls = 0;
+    }
+    lastToken = cov.nextToken;
+    const recent = scenes.slice(-4);
+    const context = [
+      header,
+      '=== THE FILM SO FAR (decided — do not change) ===',
+      `TITLE: ${title}`,
+      `STORY: ${story_summary}`,
+      `WORLD: ${world}`,
+      `VISUAL STYLE: ${visual_style}`,
+      characters.length
+        ? `CHARACTERS (reuse these ids verbatim):\n${characters.map((c) => `- [${c.id}] ${c.name}: ${c.appearance}`).join('\n')}`
+        : 'CHARACTERS: none recurring so far.',
+      `CLIPS ALREADY PLANNED: ${scenes.length}.${recent.length ? ` The most recent ones:\n${recent.map((s, i) => `- clip ${scenes.length - recent.length + i + 1} (${s.duration_s}s): ${s.summary || s.visual_goal}`).join('\n')}` : ''}`,
+      cov.cursor > 0 ? `SCRIPT ALREADY COVERED — its tail, for orientation only (do NOT segment it again):\n"""\n…${script.slice(Math.max(0, cov.cursor - 500), cov.cursor)}\n"""` : '',
+      stalls ? 'NOTE: the previous attempt was REJECTED — its clips could not be verified word for word as contiguous slices of the text below (words were paraphrased, changed or dropped inside a clip, text was skipped before the first clip or between clips, or the clips only repeated text already covered). Plan it again: copy every script_segment CHARACTER-FOR-CHARACTER from the text below, start the first clip at its very first words, start each next clip exactly where the previous one ended, and end the last clip at its very last words.' : '',
+    ].filter(Boolean).join('\n\n');
+    // The remainder goes whole whenever the proxy allows it; otherwise this
+    // pass takes as much as one request may carry and the next pass continues
+    // from wherever coverage reaches.
+    const part = excerptAt(remaining, scriptBudgetChars(remaining, SEGMENT_CONTINUE_SYSTEM + context));
+    const label = part.length < remaining.length
+      ? `REMAINING SCRIPT — NEXT PART (${part.length} of ${remaining.length} remaining characters; the rest follows in a later pass). Segment ALL of this part, in order, from its first words to its last:`
+      : 'REMAINING SCRIPT (segment ALL of it, in order, from its first words to its last):';
+    const more = await askOpusJsonDetailed<any>({
+      system: SEGMENT_CONTINUE_SYSTEM,
+      user: `${context}\n\n${label}\n"""\n${part}\n"""`,
+      maxTokens: 8192,
+      effort: 'medium',
+    });
+    const added = normalizeSegmentScenes(more.value?.scenes);
+    if (more.truncated && added.length > 1) added.pop(); // half-written last clip — re-planned next pass
+    // Nothing the director SAYS ends the plan — only the coverage check at the
+    // top of the loop does, against the script text. An empty or unverifiable
+    // reply is simply no progress: one more attempt with the NOTE, then an error.
+    scenes.push(...added);
+    for (const c of normalizeSegmentCharacters(more.value?.new_characters)) {
+      if (!characters.some((k) => k.id === c.id)) characters.push(c);
+    }
+  }
+  if (!scenes.length) throw new Error('The director produced an empty clip plan — try again.');
+  return { title, story_summary, world, visual_style, characters, scenes };
+}
+
+function normalizeSegmentCharacters(list: unknown): SegmentedPlan['characters'] {
+  return (Array.isArray(list) ? list : [])
     .filter((c: any) => c && (c.id || c.name))
     .map((c: any, i: number) => ({
       id: String(c.id || `char_${i + 1}`).toLowerCase().replace(/[^a-z0-9_]+/g, '_'),
       name: String(c.name || `Character ${i + 1}`).slice(0, 80),
       appearance: String(c.appearance || '').slice(0, 800),
     }));
+}
+
+function normalizeSegmentScenes(list: unknown): SegmentedPlan['scenes'] {
   const snap = (n: unknown) => [4, 6, 8, 10].sort((a, b) => Math.abs(a - (Number(n) || 6)) - Math.abs(b - (Number(n) || 6)))[0];
-  const scenes = (Array.isArray(raw?.scenes) ? raw.scenes : [])
+  return (Array.isArray(list) ? list : [])
     .filter((s: any) => s && String(s.script_segment || '').trim())
     .map((s: any) => ({
       script_segment: String(s.script_segment),
@@ -420,15 +676,6 @@ export async function segmentScript(params: {
           } as SceneDialogue
         : null,
     }));
-  if (!scenes.length) throw new Error('The director produced an empty clip plan — try again.');
-  return {
-    title: String(raw?.title || 'Untitled film').slice(0, 120),
-    story_summary: String(raw?.story_summary || '').slice(0, 1500),
-    world: String(raw?.world || '').slice(0, 800),
-    visual_style: String(raw?.visual_style || '').slice(0, 800),
-    characters,
-    scenes,
-  };
 }
 
 export interface PreparedScene {
@@ -505,7 +752,7 @@ export async function prepareScenePrompt(params: {
     ? scene.dialogue
     : (planScene?.dialogue && String((planScene.dialogue as any).line || '').trim()) ? planScene.dialogue! : null;
 
-  const user = [
+  const globalLines = [
     `=== GLOBAL CONTEXT (the whole story) ===`,
     `TITLE: ${film.title || plan.title || ''}`,
     `STORY: ${plan.story_summary || ''}`,
@@ -513,7 +760,8 @@ export async function prepareScenePrompt(params: {
     `VISUAL STYLE (applies to every clip): ${plan.visual_style || plan.style_direction || ''}`,
     charLines ? `CHARACTERS (locked appearances — reuse verbatim):\n${charLines}` : 'CHARACTERS: none recurring.',
     film.product_screenshot_url ? `SCENE/PRODUCT REFERENCE IMAGE available: ${film.product_screenshot_url}` : '',
-    `FULL SCRIPT:\n"""\n${String(film.script || '').slice(0, 6000)}\n"""`,
+  ];
+  const sceneLines = [
     `\n=== SCENE CONTEXT (this clip) ===`,
     `CLIP ${scene.idx + 1}, duration ${scene.duration_s || planScene?.duration_s || 6}s, aspect ${film.aspect_ratio || '16:9'}.`,
     `SCRIPT SEGMENT: "${scene.script_segment}"`,
@@ -525,7 +773,22 @@ export async function prepareScenePrompt(params: {
     `\n=== CONTINUITY CONTEXT ===`,
     continuity,
     params.revisionNote ? `\nREVISION NOTE (the previous attempt failed or must improve — address this directly): ${params.revisionNote}` : '',
-  ].filter(Boolean).join('\n');
+  ];
+  // The whole script rides along whenever the proxy allows it. A script too
+  // long for one request is not cut: the clip gets the passage around it (its
+  // neighbouring clips' segments) instead — relevant source context for every
+  // scene, however deep into the script it sits.
+  const fullScript = String(film.script || '');
+  const fixed = PREPARE_SYSTEM + globalLines.join('\n') + sceneLines.join('\n');
+  const neighbourhood = (Array.isArray(plan.scenes) ? plan.scenes : [])
+    .filter((p) => Math.abs(p.idx - scene.idx) <= 3)
+    .sort((a, b) => a.idx - b.idx)
+    .map((p) => p.script_segment)
+    .join('\n');
+  const scriptContext = fitsRequest(fullScript, fixed)
+    ? `FULL SCRIPT:\n"""\n${fullScript}\n"""`
+    : `SCRIPT PASSAGE AROUND THIS CLIP (the full script is ${fullScript.length} characters — more than one request may carry — so here are the neighbouring clips' segments, in order):\n"""\n${neighbourhood || scene.script_segment}\n"""`;
+  const user = [...globalLines, scriptContext, ...sceneLines].filter(Boolean).join('\n');
 
   const images = !params.forceIndependent && prevScene?.keyframe_url ? [prevScene.keyframe_url] : [];
   const out = await askOpusJson<any>({ system: PREPARE_SYSTEM, user, images, maxTokens: 4096, effort: 'high' });
@@ -600,23 +863,27 @@ export interface PlannedFilmAudio {
   sfx: Pick<AudioSfxItem, 'scene_key' | 'description' | 'prompt' | 'at_s' | 'volume'>[];
 }
 
-const AUDIO_PLAN_SYSTEM = `You are the sound director of a script-to-video pipeline. The video clips are ALREADY generated — you plan the complete audio experience for them: one narration voice, per-scene narration lines, a music bed, and sparse sound effects. Reply with ONE JSON object and nothing else.
-
-THE ORIGINAL SCRIPT IS THE SOURCE OF TRUTH (hard rules):
+const SCRIPT_TRUTH_RULES = `THE ORIGINAL SCRIPT IS THE SOURCE OF TRUTH (hard rules):
 - The narration preserves the meaning of the original script. NEVER invent product claims, statistics, features, numbers or promises that are not in the script. Names, numbers and technical terms are preserved EXACTLY.
 - You MAY rewrite wording so it sounds natural SPOKEN aloud (drop markdown/stage directions/"Scene 3" labels, smooth written-language phrasing into speech), but the story and facts stay the script's.
-- Keep the script's own language: a Hindi/Hinglish script is narrated in Hindi/Hinglish, not translated.
+- Keep the script's own language: a Hindi/Hinglish script is narrated in Hindi/Hinglish, not translated.`;
+
+const NARRATION_RULES = `NARRATION (one entry PER SCENE, in order — every scene_key exactly once):
+- voice_source "elevenlabs": the scene gets a narration line — write "text" as the natural spoken wording of THAT scene's script segment (its VO/narration content).
+- voice_source "video_native": the scene has ON-CAMERA DIALOGUE (marked in the scene list) — the clip's own generated voice carries it. text = "". Never narrate over on-camera dialogue.
+- voice_source "none": the scene genuinely has no words (pure visual beat). text = "".
+- TIMING (hard rule): a comfortable narrator speaks ~2.3 words per second. Each scene's text must fit INSIDE its real duration (listed): duration 6s → at most ~13 words. Better slightly short than long. Never pad to fill.
+- Split the script's narration across scenes so that, read in order, it covers the whole script's meaning without repeating lines.`;
+
+const AUDIO_PLAN_SYSTEM = `You are the sound director of a script-to-video pipeline. The video clips are ALREADY generated — you plan the complete audio experience for them: one narration voice, per-scene narration lines, a music bed, and sparse sound effects. Reply with ONE JSON object and nothing else.
+
+${SCRIPT_TRUTH_RULES}
 
 VOICE PLAN (one consistent voice for the whole film):
 - Decide tone, energy, pace, emotion, language and accent from the script's content and mood.
 - Choose ONE voice from the AVAILABLE VOICES list whose name/labels best match. Use its exact id. The same voice is reused for every line and every regeneration.
 
-NARRATION (one entry PER SCENE, in order — every scene_key exactly once):
-- voice_source "elevenlabs": the scene gets a narration line — write "text" as the natural spoken wording of THAT scene's script segment (its VO/narration content).
-- voice_source "video_native": the scene has ON-CAMERA DIALOGUE (marked in the scene list) — the clip's own generated voice carries it. text = "". Never narrate over on-camera dialogue.
-- voice_source "none": the scene genuinely has no words (pure visual beat). text = "".
-- TIMING (hard rule): a comfortable narrator speaks ~2.3 words per second. Each scene's text must fit INSIDE its real duration (listed): duration 6s → at most ~13 words. Better slightly short than long. Never pad to fill.
-- Split the script's narration across scenes so that, read in order, it covers the whole script's meaning without repeating lines.
+${NARRATION_RULES}
 
 MUSIC (respond to the script, not a constant loop):
 - Decide whether music serves this film (required true/false — most films: true).
@@ -628,11 +895,26 @@ SFX (subtle, sparse — quality over quantity):
 - 0–6 total for the whole film, ONLY where a sound genuinely lands a visual event (whoosh on a fast reveal, soft impact on a landing, UI tick on an interface moment, rising swell into the climax). Most scenes get NONE. Never place SFX over an on-camera dialogue line.
 - Each: scene_key, description (what visual event it marks), prompt (a short sound-design brief: "short airy whoosh, fast transient, no music, no melody"), at_s (seconds from that scene's start, before the scene ends), volume 0.15–0.4.
 
-OUTPUT SHAPE:
+OUTPUT SHAPE (keys in exactly this order — narration LAST, because it is the longest part: if the reply runs out of room only narration entries go missing, and those are completed in a follow-up pass):
 { "voice_plan": { "tone": str, "energy": str, "pace": str, "emotion": str, "language": str, "accent": str, "voice_id": str (exact id from the list), "voice_name": str },
-  "narration": [{ "scene_key": str, "voice_source": "elevenlabs"|"video_native"|"none", "text": str }],
   "music": { "required": bool, "preset": str, "custom_prompt": str, "mood": str, "volume": num },
-  "sfx": [{ "scene_key": str, "description": str, "prompt": str, "at_s": num, "volume": num }] }`;
+  "sfx": [{ "scene_key": str, "description": str, "prompt": str, "at_s": num, "volume": num }],
+  "narration": [{ "scene_key": str, "voice_source": "elevenlabs"|"video_native"|"none", "text": str }] }`;
+
+const NARRATION_FILL_SYSTEM = `You are the sound director of a script-to-video pipeline, COMPLETING a narration plan that is already underway: the voice plan is decided and the earlier scenes already have their lines (the most recent ones are shown for continuity). Write the narration entry for EVERY scene listed under SCENES TO NARRATE — each scene_key exactly once, in order, and nothing else. Reply with ONE JSON object and nothing else.
+
+${SCRIPT_TRUTH_RULES}
+
+${NARRATION_RULES}
+- Continue where the earlier lines left off: never repeat what they already said; narrate the script content that belongs to the listed scenes only.
+
+OUTPUT SHAPE:
+{ "narration": [{ "scene_key": str, "voice_source": "elevenlabs"|"video_native"|"none", "text": str }] }`;
+
+/** Request granularity for the narration fill passes — small enough that a
+ * chunk's entries always fit inside one 8,192-token reply. It is a batch
+ * size, not a limit: passes continue until every scene has its entry. */
+const NARRATION_FILL_CHUNK = 30;
 
 /** Opus plans the film's complete audio: voice plan, scene-level narration
  * script, music brief and sparse SFX — all from the ORIGINAL script and the
@@ -644,26 +926,51 @@ export async function planFilmAudio(params: {
 }): Promise<PlannedFilmAudio> {
   const { film } = params;
   const scenes = [...params.scenes].sort((a, b) => a.idx - b.idx);
-  const sceneLines = scenes.map((s) => {
+  const sceneLine = (s: FilmScene) => {
     const d = s.dialogue && String((s.dialogue as any).line || '').trim() ? s.dialogue : null;
     return [
       `- scene_key=${s.scene_key} · scene ${s.idx + 1} · real duration ${Number(s.duration_s) || 6}s`,
-      `  segment: "${String(s.script_segment || '').replace(/\s+/g, ' ').slice(0, 500)}"`,
+      `  segment: "${String(s.script_segment || '').replace(/\s+/g, ' ')}"`,
       d ? `  ON-CAMERA DIALOGUE (voice_source must be video_native): ${d.speaker || 'character'} says "${d.line}"` : '',
     ].filter(Boolean).join('\n');
-  }).join('\n');
+  };
   const voiceLines = params.voices.slice(0, 40)
     .map((v) => `- id=${v.id} · ${v.name}${v.labels ? ` · ${Object.entries(v.labels).map(([k, val]) => `${k}:${val}`).join(' ')}` : ''}`)
     .join('\n');
+  const filmLine = `FILM: ${film.title || 'Untitled'} · ${scenes.length} scenes · total ~${Math.round(scenes.reduce((n, s) => n + (Number(s.duration_s) || 6), 0))}s`;
+  const storyLine = `STORY: ${film.plan?.story_summary || ''}`;
+  const styleLine = `VISUAL STYLE / MOOD: ${film.plan?.visual_style || film.plan?.style_direction || ''}`;
+  const voicesBlock = voiceLines ? `AVAILABLE VOICES (choose one id):\n${voiceLines}` : 'AVAILABLE VOICES: none listed — set voice_id to "" and voice_name to "default".';
+  const fullScript = String(film.script || '');
+  // The original script rides along whole whenever the proxy allows it. The
+  // scene list already carries every segment (the segments ARE the script, in
+  // order), so a script too long for one request is referenced through them
+  // instead of being cut.
+  const scriptBlockFor = (fixed: string) => (fitsRequest(fullScript, fixed)
+    ? `ORIGINAL SCRIPT (source of truth — preserve its meaning, names and numbers exactly):\n"""\n${fullScript}\n"""`
+    : `ORIGINAL SCRIPT: ${fullScript.length} characters — longer than one request may carry. The scene segments listed above ARE that script, verbatim and in order; treat them as the source of truth.`);
+
+  // One request must stay inside the proxy's ceilings, so the main plan lists
+  // as many scenes as fit; every scene it could not list is narrated by the
+  // fill passes below — all scenes, never a shortened list.
+  const fixedHead = [AUDIO_PLAN_SYSTEM, filmLine, storyLine, styleLine, voicesBlock].join('\n\n');
+  const allLines = scenes.map(sceneLine);
+  let listed = allLines.length;
+  let sceneList = allLines.join('\n');
+  while (listed > 1 && !fitsRequest(sceneList, fixedHead)) {
+    listed = Math.max(1, Math.floor(listed * 0.8));
+    sceneList = allLines.slice(0, listed).join('\n');
+  }
   const user = [
-    `FILM: ${film.title || 'Untitled'} · ${scenes.length} scenes · total ~${Math.round(scenes.reduce((n, s) => n + (Number(s.duration_s) || 6), 0))}s`,
-    `STORY: ${film.plan?.story_summary || ''}`,
-    `VISUAL STYLE / MOOD: ${film.plan?.visual_style || film.plan?.style_direction || ''}`,
-    `SCENES (in order, with REAL durations):\n${sceneLines}`,
-    voiceLines ? `AVAILABLE VOICES (choose one id):\n${voiceLines}` : 'AVAILABLE VOICES: none listed — set voice_id to "" and voice_name to "default".',
-    `ORIGINAL SCRIPT (source of truth — preserve its meaning, names and numbers exactly):\n"""\n${String(film.script || '').slice(0, 9000)}\n"""`,
+    filmLine,
+    storyLine,
+    styleLine,
+    `SCENES (in order, with REAL durations)${listed < scenes.length ? ` — the first ${listed} of ${scenes.length}; the rest are narrated in follow-up passes` : ''}:\n${sceneList}`,
+    voicesBlock,
+    scriptBlockFor(fixedHead + sceneList),
   ].join('\n\n');
-  const raw = await askOpusJson<any>({ system: AUDIO_PLAN_SYSTEM, user, maxTokens: 8192, effort: 'high' });
+  const first = await askOpusJsonDetailed<any>({ system: AUDIO_PLAN_SYSTEM, user, maxTokens: 8192, effort: 'high' });
+  const raw = first.value;
 
   const vp = raw?.voice_plan || {};
   const voiceId = String(vp.voice_id || vp.voiceId || '').trim();
@@ -682,15 +989,65 @@ export async function planFilmAudio(params: {
   const byKey = new Map(scenes.map((s) => [s.scene_key, s]));
   const seen = new Set<string>();
   const narration: PlannedFilmAudio['narration'] = [];
-  for (const n of (Array.isArray(raw?.narration) ? raw.narration : [])) {
-    const key = String(n?.scene_key || '');
-    if (!byKey.has(key) || seen.has(key)) continue;
-    seen.add(key);
-    const source = ['elevenlabs', 'video_native', 'none'].includes(n?.voice_source) ? n.voice_source : 'elevenlabs';
-    narration.push({ scene_key: key, voice_source: source, text: String(n?.text || '').replace(/\s+/g, ' ').trim().slice(0, 900) });
+  const accept = (entries: unknown, truncated: boolean) => {
+    const list: any[] = Array.isArray(entries) ? [...entries] : [];
+    // A cut-off reply's last entry may be a half-written line — re-request it.
+    if (truncated && list.length > 1) list.pop();
+    for (const n of list) {
+      const key = String(n?.scene_key || '');
+      if (!byKey.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      const source = ['elevenlabs', 'video_native', 'none'].includes(n?.voice_source) ? n.voice_source : 'elevenlabs';
+      narration.push({ scene_key: key, voice_source: source, text: String(n?.text || '').replace(/\s+/g, ' ').trim().slice(0, 900) });
+    }
+  };
+  accept(raw?.narration, first.truncated);
+
+  // Every scene the main plan did not reach is narrated in follow-up chunks
+  // until none is missing. There is no pass limit — the loop is driven by the
+  // missing scenes alone — and a sound director that stops making progress is
+  // a loud error, never a film whose tail goes quiet.
+  let stalls = 0;
+  for (;;) {
+    const missing = scenes.filter((s) => !seen.has(s.scene_key));
+    if (!missing.length) break;
+    const chunk = missing.slice(0, NARRATION_FILL_CHUNK);
+    const firstIdx = chunk[0]?.idx ?? 0;
+    const lastIdx = chunk[chunk.length - 1]?.idx ?? firstIdx;
+    const earlier = narration
+      .filter((n) => n.text && (byKey.get(n.scene_key)?.idx ?? 0) < firstIdx)
+      .sort((a, b) => (byKey.get(a.scene_key)?.idx ?? 0) - (byKey.get(b.scene_key)?.idx ?? 0))
+      .slice(-3)
+      .map((n) => `- scene ${(byKey.get(n.scene_key)?.idx ?? 0) + 1}: "${n.text}"`)
+      .join('\n');
+    const parts = [
+      filmLine,
+      storyLine,
+      `VOICE PLAN (decided): ${voice_plan.tone} · ${voice_plan.energy} energy · ${voice_plan.pace} pace · ${voice_plan.emotion} · language ${voice_plan.language} · accent ${voice_plan.accent}`,
+      earlier ? `EARLIER LINES (already narrated — continue after them, never repeat them):\n${earlier}` : '',
+      `SCENES TO NARRATE (in order, with REAL durations — one entry each):\n${chunk.map(sceneLine).join('\n')}`,
+      stalls ? 'NOTE: the previous attempt returned no entry for these scene_keys. Answer with one entry per listed scene_key, copied exactly.' : '',
+    ].filter(Boolean);
+    const fill = await askOpusJsonDetailed<any>({
+      system: NARRATION_FILL_SYSTEM,
+      user: [...parts, scriptBlockFor(NARRATION_FILL_SYSTEM + parts.join('\n\n'))].join('\n\n'),
+      maxTokens: 8192,
+      effort: 'medium',
+    });
+    const covered = seen.size;
+    accept(fill.value?.narration, fill.truncated);
+    if (seen.size === covered) {
+      stalls += 1;
+      if (stalls > 1) {
+        throw new Error(`The sound director returned no narration for scenes ${firstIdx + 1}–${lastIdx + 1} after repeated attempts (${missing.length} of ${scenes.length} scenes still have no entry) — plan the audio again.`);
+      }
+    } else {
+      stalls = 0;
+    }
   }
-  // Every scene gets exactly one entry — a scene Opus forgot becomes an
-  // explicit gap the caller can see, never a silent omission.
+  // Every scene has exactly one entry: the loop above only ends when none is
+  // missing. This fallback merely keeps the shape honest if a scene key ever
+  // slipped through; it is not a place where scenes go quiet.
   for (const s of scenes) {
     if (seen.has(s.scene_key)) continue;
     const hasDialogue = !!(s.dialogue && String((s.dialogue as any).line || '').trim());

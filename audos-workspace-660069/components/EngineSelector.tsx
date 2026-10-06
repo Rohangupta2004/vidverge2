@@ -4,23 +4,32 @@
  *  <EnginePicker>  compact grouped dropdown + tier badge + capability note.
  *                  Used by Product Video, SceneForge, Script-to-Video,
  *                  Video Enhancer and Ads Studio next to their generate
- *                  buttons. Kling entries render disabled with [Coming Soon].
- *                  Runway entries (optional) come from RUNWAY_MODELS: the ids
- *                  the platform proxy actually accepts are selectable and
- *                  carry a ⚡ on the fast ones; the ids it rejects with 400
- *                  (act_two, gen4_image, gen4_image_turbo) render disabled
- *                  with the reason, so the gap is visible instead of being a
- *                  dropdown entry that fails at submit.
+ *                  buttons.
+ *
+ * EVERY RUNWAY ENTRY IS SELECTABLE. The roster beyond gen4.5 / gen4_turbo used
+ * to render disabled, which left the customer staring at a greyed-out button
+ * with nothing to do about it. Those entries are now choosable and labelled
+ * with where they actually run: lib/runwayAdapter re-films the shot on
+ * Omni Flash 1.1 when the proxy refuses the model, and the host app says so in
+ * a toast (see lib/omniFallback.ts).
+ *
+ * Kling and Higgsfield route through /api/generate/kling/* and
+ * /api/generate/higgsfield/* with X-Workspace-DB-Token on every call.
  *
  * The full card grid lives in the Creatables app; this component stays small
  * so existing apps embed it without layout surgery.
  */
 import { CSSProperties, useCallback, useEffect, useState } from 'react';
 import {
-  GROUP_A_MODELS, IMAGE_MODELS, KLING_MODELS, KLING_COMING_SOON_MESSAGE, RUNWAY_MODELS,
+  GROUP_A_MODELS, HIGGSFIELD_VIDEO_MODELS, IMAGE_MODELS, KLING_MODELS, KLING_COMING_SOON_MESSAGE, RUNWAY_MODELS,
   groupAModel, isKlingModel, runwayInputLabel, runwayModel, runwayVideoModel,
   subscribeRunwayCatalog, syncRunwayCatalog, tierColor, EngineTier,
 } from '../lib/videoEngines';
+import { OMNI_FALLBACK_LABEL } from '../lib/omniFallback';
+
+/** What a Runway entry the proxy does not accept today is labelled with,
+ * instead of being greyed out: it still generates, just on the stand-in. */
+const VIA_FALLBACK = ` — via ${OMNI_FALLBACK_LABEL}`;
 
 /** Keep the Runway roster live: kick one capabilities sync on mount and
  * re-render whenever the catalog moves (a model was enabled or disabled
@@ -75,8 +84,10 @@ export interface EnginePickerProps {
   /** Which Runway entries to list: video models (default), the image entries
    * that resolve to Runway's image recipes, or both. */
   runwayKinds?: 'video' | 'image' | 'all';
-  /** List Kling models as disabled [Coming Soon] entries (default true). */
+  /** List Kling models (default true). */
   includeKling?: boolean;
+  /** List Higgsfield video models (default true). */
+  includeHiggsfield?: boolean;
   disabled?: boolean;
   label?: string;
   /** Extra note under the picker (e.g. the app's default-model reminder). */
@@ -86,7 +97,9 @@ export interface EnginePickerProps {
 
 export function engineDisplayName(id: string): string {
   return groupAModel(id)?.name || runwayModel(id)?.label || runwayVideoModel(id)?.name
-    || KLING_MODELS.find((k) => k.id === id)?.name || id;
+    || KLING_MODELS.find((k) => k.id === id)?.name
+    || HIGGSFIELD_VIDEO_MODELS.find((h) => h.id === id)?.name
+    || id;
 }
 
 export function EnginePicker(props: EnginePickerProps) {
@@ -95,6 +108,7 @@ export function EnginePicker(props: EnginePickerProps) {
     ? GROUP_A_MODELS
     : GROUP_A_MODELS.filter((m) => (props.groupAIds as string[]).includes(m.id));
   const includeKling = props.includeKling !== false;
+  const includeHiggsfield = props.includeHiggsfield !== false;
   const runwayKinds = props.runwayKinds || 'video';
   const runway = RUNWAY_MODELS.filter((m) => runwayKinds === 'all' || m.type === runwayKinds);
   const selectedA = groupAModel(props.value);
@@ -104,6 +118,7 @@ export function EnginePicker(props: EnginePickerProps) {
     || (selectedRunway && selectedRunway.available
       ? (selectedRunway.speed === 'fast' ? 'Fast' : selectedRunway.type === 'image' ? 'Recipe' : 'Cinematic')
       : undefined);
+  const viaFallback = Boolean(selectedRunway && !selectedRunway.available);
 
   // Capability + comparison line (folded in from the retired Model Lab):
   // alongside the input rules, each model shows its clip ceiling and cost
@@ -120,7 +135,7 @@ export function EnginePicker(props: EnginePickerProps) {
     : selectedRunway
       ? (selectedRunway.available
         ? `${runwayInputLabel(selectedRunway)} · ${selectedRunway.blurb} · ${selectedRunway.priceNote}`
-        : `${runwayInputLabel(selectedRunway)} · ${selectedRunway.unavailableReason || ''}`)
+        : `${runwayInputLabel(selectedRunway)} · The platform does not accept this model today, so it renders on ${OMNI_FALLBACK_LABEL}. ${selectedRunway.unavailableReason || ''}`)
       : selectedKling ? KLING_COMING_SOON_MESSAGE : '';
 
   return (
@@ -134,14 +149,7 @@ export function EnginePicker(props: EnginePickerProps) {
         <select
           value={props.value}
           disabled={props.disabled}
-          onChange={(e) => {
-            const id = e.target.value;
-            // Disabled-option guard — some browsers still fire change for them.
-            if (isKlingModel(id)) return;
-            const rw = runwayModel(id);
-            if (rw && !rw.available) return;
-            props.onChange(id);
-          }}
+          onChange={(e) => props.onChange(e.target.value)}
           style={{
             background: 'var(--space-surface-card, #10182A)', color: 'var(--space-text-primary, #F8FAFC)',
             border: '1px solid var(--space-border-default, rgba(148,163,184,0.16))', borderRadius: 9,
@@ -157,22 +165,29 @@ export function EnginePicker(props: EnginePickerProps) {
           {props.includeRunway ? (
             <optgroup label="Runway">
               {runway.map((m) => (
-                <option key={m.id} value={m.id} disabled={!m.available}>
-                  {m.speed === 'fast' ? '⚡ ' : ''}{m.label} · {runwayInputLabel(m).toLowerCase()}{m.available ? '' : ' — unavailable on this platform'}
+                <option key={m.id} value={m.id}>
+                  {m.speed === 'fast' ? '⚡ ' : ''}{m.label} · {runwayInputLabel(m).toLowerCase()}{m.available ? '' : VIA_FALLBACK}
                 </option>
               ))}
             </optgroup>
           ) : null}
           {includeKling ? (
-            <optgroup label="Kling — Coming Soon">
+            <optgroup label="Kling">
               {KLING_MODELS.map((m) => (
-                <option key={m.id} value={m.id} disabled>{m.name} — Coming Soon</option>
+                <option key={m.id} value={m.id}>{m.name} — {m.tier}</option>
+              ))}
+            </optgroup>
+          ) : null}
+          {includeHiggsfield ? (
+            <optgroup label="Higgsfield">
+              {HIGGSFIELD_VIDEO_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </optgroup>
           ) : null}
         </select>
         {tier ? <EngineBadge tier={tier} label={selectedRunway?.speed === 'fast' ? '⚡ Fast' : undefined} /> : null}
-        {selectedRunway && !selectedRunway.available ? <EngineBadge tier="Unavailable" /> : null}
+        {viaFallback ? <EngineBadge tier="Gated" label={OMNI_FALLBACK_LABEL} /> : null}
         {selectedKling ? <EngineBadge tier="Coming Soon" /> : null}
       </div>
       {capabilityNote ? (
@@ -191,6 +206,10 @@ export function EnginePicker(props: EnginePickerProps) {
 // image models alongside Runway's image entries, which resolve to the
 // marketing_stock_image / product_campaign_image recipes — the platform's only
 // Runway image path, since the proxy exposes no image MODEL route.
+//
+// The unavailable entries here stay DISABLED, unlike the video picker above:
+// Omni Flash is a video stand-in, so there is nothing for an image entry to
+// fall back to and a selectable one would only buy the customer a 400.
 // ---------------------------------------------------------------------------
 
 /** What every image surface falls back to when nothing is chosen. */

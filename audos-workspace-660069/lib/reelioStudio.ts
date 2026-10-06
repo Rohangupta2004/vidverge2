@@ -19,6 +19,8 @@
  * up in videos nobody asked for (see SELECTED_MOCKUP_KEY below).
  */
 import { DEFAULT_VIDEO_MODEL, getVideoModel } from '../apps/Create/videoTypes';
+import { postGeneration } from './videoEngineClient';
+import type { AppId } from './appIds';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -896,6 +898,16 @@ export async function generateImage(opts: {
    * screens by design.
    */
   negativePrompt?: string;
+  /**
+   * Opt into a higher image tier. `/api/generate/image` picks the model
+   * server-side by default (gpt-image-1.5 with a Gemini fallback) and accepts
+   * exactly one override: 'gpt-image-2', which itself falls back to
+   * gpt-image-1.5. Only 1:1 / 16:9 / 9:16 may use it — the override answers
+   * 400 unsupported_aspect_ratio on 4:3 and 3:4 — so it is ignored there.
+   */
+  model?: 'gpt-image-2';
+  /** The calling app's registered id (lib/appIds) — the job is recorded against it. */
+  appId?: AppId;
 }): Promise<string> {
   // Every image prompt carries the negative steer once — the image endpoint
   // has no separate negative-prompt parameter, so it rides in the prompt. The
@@ -906,16 +918,14 @@ export async function generateImage(opts: {
   const prompt = opts.prompt.includes(' Avoid: ')
     ? opts.prompt
     : `${opts.prompt}${avoid ? ` Avoid: ${avoid}.` : ''}${SAFETY_AVOID_CLAUSE}`;
-  const res = await fetch('/api/generate/image', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt,
-      aspectRatio: opts.aspectRatio || '9:16',
-      quality: opts.quality || 'high',
-    }),
-  });
-  const data = await res.json().catch(() => null);
+  const aspectRatio = opts.aspectRatio || '9:16';
+  const overrideAllowed = aspectRatio === '1:1' || aspectRatio === '16:9' || aspectRatio === '9:16';
+  const { res, data } = await postGeneration('/api/generate/image', {
+    prompt,
+    aspectRatio,
+    quality: opts.quality || 'high',
+    ...(opts.model && overrideAllowed ? { model: opts.model } : {}),
+  }, opts.appId);
   if (!res.ok || !data?.success || typeof data.imageUrl !== 'string') {
     throw new Error(data?.error || `Image generation failed (HTTP ${res.status}).`);
   }

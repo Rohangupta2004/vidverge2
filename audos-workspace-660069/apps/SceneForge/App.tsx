@@ -1,25 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Circle, Film, FolderOpen, ImagePlus, Loader2, MessageSquareText, Plus, Send, Settings, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Circle, Clapperboard, Film, FolderOpen, ImagePlus, Loader2, MessageSquareText, Plus, RefreshCw, Send, Settings, X } from 'lucide-react';
 import TopicInput from './components/TopicInput';
 import ScriptReview from './components/ScriptReview';
 import HeyGenModule from './components/HeyGenModule';
 import StylePicker from './components/StylePicker';
-import ScenePlanner from './components/ScenePlanner';
-import AssetProgress from './components/AssetProgress';
-import AssemblyProgress from './components/AssemblyProgress';
 import EditorHandoff from './components/EditorHandoff';
 import SettingsPanel from './components/SettingsPanel';
 import AssetStudio from './components/AssetStudio';
 import { useProject } from './hooks/useProject';
 import { useScenes } from './hooks/useScenes';
-import { isTerminalRenderFailure, useHeyGen } from './hooks/useHeyGen';
+import { isExpiredHeyGenSignedUrl, isTerminalRenderFailure, useHeyGen } from './hooks/useHeyGen';
 // ONE LLM. Every language-model call in this pipeline goes through the single
 // orchestrator (script, scene manifest, image/video prompts, overlay specs,
 // change-request routing); imageTool and videoTool are LLM-free executors of
 // the prompts that orchestrator wrote.
 import { planScenes, routeChangeRequest, writeScript } from './agents/orchestrator';
 import { ensureMotionBackground, ensureSceneImage, generateSceneImage } from './lib/imageTool';
-import { generateSceneVideo, sceneVideoPrompt } from './lib/videoTool';
+import { generateSceneVideo, sceneVideoPrompt, setSceneVideoEngine } from './lib/videoTool';
 import { generatePortraitCalloutImage, generatePortraitImageCardPng, generatePortraitMotionOverlayFrames, generateSceneMotionClip, sceneMotionSpec } from './lib/motionCapture';
 // Directed production: Opus Motion Director → GSAP capture → visual QA with
 // auto-fix (see lib/motionPipeline). One call per motion scene.
@@ -28,7 +25,7 @@ import { findReusableAsset } from './lib/assetReuse';
 import { isMotionFingerprint, specFromOverlay } from './lib/motionSpec';
 import { getStyle } from './styles/registry';
 import { buildTimeline, createAssemblySource, timelineDurationInFrames } from './remotion/AssemblyComp';
-import { captionChunks } from './remotion/compositionRuntime';
+import { captionChunks, musicBedProps } from './remotion/compositionRuntime';
 import { runChecks } from './lib/checks';
 import { filmQaChecks, runFilmQa, verifyRenderOutput } from './lib/filmQa';
 import { validateTimeline } from './lib/timelineValidation';
@@ -38,13 +35,43 @@ import { DEFAULT_SETTINGS, WORKSPACE_ID, assemblyJobRunning, getProject, listAss
 import { defaultOverlay, visualKindOf, type VisualKind } from './lib/effects';
 import { isVideoUrl, sceneKind, sceneNeedsGeneration, sceneSettled } from './lib/sceneState';
 import { forgeApi } from './lib/forge';
-import { sleep, workspaceToken } from './lib/proxy';
+import { sleep, uploadFile, workspaceToken } from './lib/proxy';
 import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
 import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
 import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
 import { videoEngine } from '../../lib/videoEngines';
+import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
+import { integrationForEngineId, type VideoIntegrationId } from '../../lib/videoIntegrations';
+import type { VidvergeAttachment } from '../../lib/vidvergeHandoff';
+import { VIDVERGE_HANDOFF_KEY } from '../../lib/vidvergeHandoff';
+import AvatarStudio from './components/AvatarStudio';
+import HeyGenConsole from './components/heygen/HeyGenConsole';
+import MotionEditor, { type MotionEditorSource } from './components/MotionEditor';
+import { fetchVideoStatus } from './lib/heygenStudio';
+// THE STUDIO WORKBENCH is SceneForge's working surface once a project has
+// scenes: one screen with the provider selector, the preview, the scene
+// timeline and a single collapsible panel. The step wizard below it is kept
+// only for first-run (topic -> script -> presenter -> style).
+import StudioWorkbench, { type SceneProgress } from './components/StudioWorkbench';
+import { DEFAULT_SCENE_PROVIDER, describeProviderFailure, estimateGeneration, estimateSecondsPerClip, probeProviders, type ProviderStatus } from './lib/providers';
+import { DEFAULT_STUDIO_CONFIG, applyAutoGraphics, postProductionProps, saveStudioConfig, studioConfigOf, type StudioConfig } from './lib/studioConfig';
+import { runSceneVision } from './lib/sceneVision';
+import { setSceneBroll, type BrollClip } from './lib/broll';
+import { fetchElevenVoices, type ElevenVoice } from './lib/elevenLabs';
+import { lipsyncScenes, narrateScenes, sceneSpeechWindows, scenesNeedingLipsync, scenesNeedingVoice, stampTimelineAudio } from './lib/sceneAudio';
 
 type View = 'library' | 'project' | 'settings';
+
+// SceneForge has two faces. 'studio' is the HeyGen Avatar Studio — pick an
+// avatar, pick a voice, write a script, render and download one MP4 — and it
+// is what the app opens on. 'pipeline' is the full directed explainer
+// production (research script → avatar master → scene blueprint → assembly),
+// one click away and otherwise untouched.
+// 'suite' is the full HeyGen suite (components/heygen): one locked character
+// and brand carried across brief, storyboard, motion graphics and every
+// post-production pass. 'studio' stays the fast single-script render.
+type Surface = 'studio' | 'pipeline' | 'suite';
+const SURFACE_KEY = 'sceneforge_surface_v1';
 
 function friendlyErrorText(value: unknown): string {
   const raw = String(value || 'This step could not be completed.');
@@ -93,7 +120,13 @@ const ASSEMBLY_CANCELLED = 'assembly-cancelled';
 // closed or refreshed tab — no browser session is driving it any more.
 const ASSEMBLY_HEARTBEAT_STALE_MS = 45_000;
 
-export default function App() {
+// Once a project has a scene plan, the Studio workbench IS the surface: one
+// screen with the provider selector, the preview, the scene timeline and a
+// single collapsible panel. The step wizard that precedes it only covers
+// first-run (topic -> script -> presenter -> style).
+const WORKBENCH_STATUSES = ['scene_review', 'asset_gen', 'coding', 'assembling', 'checks', 'done'];
+
+function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
   const projectState = useProject();
   const { project, setProject, projects, loading, error, setError, start, patch, open, refreshLibrary } = projectState;
   const sceneState = useScenes(project?.id);
@@ -114,6 +147,32 @@ export default function App() {
   const [projectAssets, setProjectAssets] = useState<Asset[]>([]);
   const [musicBusy, setMusicBusy] = useState(false);
   const [musicNote, setMusicNote] = useState('');
+  const [initialTopic, setInitialTopic] = useState('');
+  const [initialAttachment, setInitialAttachment] = useState<VidvergeAttachment | null>(null);
+  // ---- Studio workbench state ----------------------------------------
+  // The workbench's own settings live on the project row (studio_config) so
+  // the script draft, brand accent, cards and provider choice survive a
+  // reload; `studio` is the live copy and is auto-saved behind a debounce.
+  const [studio, setStudio] = useState<StudioConfig>(DEFAULT_STUDIO_CONFIG);
+  const [providers, setProviders] = useState<ProviderStatus[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(true);
+  const [sceneProgress, setSceneProgress] = useState<SceneProgress>({ active: false, done: 0, total: 0, currentIndex: null, etaSec: 0, message: '' });
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  const [analyzingSceneId, setAnalyzingSceneId] = useState<string | null>(null);
+  const [autoGraphicsBusy, setAutoGraphicsBusy] = useState(false);
+  const [autoGraphicsNote, setAutoGraphicsNote] = useState('');
+  const [characterNote, setCharacterNote] = useState('');
+  // ---- Per-scene speech (the Audio tab) --------------------------------
+  // The mode, voice and every clip live in studio_config.audio and ride the
+  // same debounced save as the rest of the workbench; this is only the live
+  // catalog and the run state.
+  const [elevenVoices, setElevenVoices] = useState<ElevenVoice[]>([]);
+  const [elevenVoicesLoading, setElevenVoicesLoading] = useState(true);
+  const [elevenVoicesError, setElevenVoicesError] = useState('');
+  const [audioBusy, setAudioBusy] = useState(false);
+  const [audioNote, setAudioNote] = useState('');
+  const studioSaveTimer = useRef(0);
+  const studioLoadedFor = useRef('');
   // Guards assembly specifically. `busy` is shared with every other stage —
   // the Verger panel raises it before routing a request into assembly — so it
   // cannot tell a second Assemble click from a legitimate hand-off.
@@ -145,6 +204,54 @@ export default function App() {
   // planning LLM call lives only in the browser session that started it — so
   // it is handed back to style_choice at most once per project.
   const resumedPlanning = useRef('');
+  // HeyGen's CloudFront URLs expire in hours. One in-flight refresh is shared
+  // by project loading, player recovery and assembly preflight so simultaneous
+  // failures never stampede the provider or race different URLs into state.
+  const [refreshingVideoLink, setRefreshingVideoLink] = useState(false);
+  const videoUrlRefresh = useRef<Promise<string> | null>(null);
+  const expiredUrlRefreshAttempted = useRef('');
+  const refreshAvatarVideoUrl = useCallback(async (target: Project): Promise<string> => {
+    if (!target.id || !target.heygen_video_id) throw new Error('This project has no HeyGen render id to refresh.');
+    if (videoUrlRefresh.current) return videoUrlRefresh.current;
+    setRefreshingVideoLink(true);
+    const pending = heygen.refreshVideoUrl(target.id).then((refreshed) => {
+      setProject((live) => live && live.id === target.id ? {
+        ...live,
+        heygen_video_url: refreshed.videoUrl,
+        heygen_chunks: refreshed.heygenChunks.length ? refreshed.heygenChunks : live.heygen_chunks,
+      } : live);
+      return refreshed.videoUrl;
+    });
+    videoUrlRefresh.current = pending;
+    try { return await pending; }
+    finally {
+      if (videoUrlRefresh.current === pending) videoUrlRefresh.current = null;
+      setRefreshingVideoLink(false);
+    }
+  }, [heygen.refreshVideoUrl, setProject]);
+
+  useEffect(() => {
+    const handoff = consumeVidvergeHandoff('sceneforge');
+    if (!handoff) return;
+    if (handoff.projectId != null) {
+      setView('project');
+      void open(String(handoff.projectId));
+      return;
+    }
+    setInitialTopic(String(handoff.prompt || ''));
+    setInitialAttachment(handoff.attachment || null);
+    if (handoff.videoModel) {
+      setSceneVideoEngine(handoff.videoModel);
+      const integration = (handoff.videoIntegration || integrationForEngineId(handoff.videoModel)) as VideoIntegrationId;
+      setStudio((prev) => ({
+        ...prev,
+        video_integration: integration,
+        provider: handoff.videoModel || prev.provider,
+      }));
+    }
+    setProject(null);
+    setView('project');
+  }, []);
 
   useEffect(() => { loadSettings().then((value) => { setSettings(value); setSceneShare(value.default_scene_share); }).catch(() => undefined); }, []);
   // The motion engine's theme source for preview surfaces that don't carry
@@ -218,6 +325,17 @@ export default function App() {
     })();
   }, [project?.id, project?.status, scenes, busy, setScenes]);
 
+  // Refresh a persisted signed URL as soon as an expired project is opened.
+  // The old URL never reaches an assembly or sits behind a MissingKey player.
+  useEffect(() => {
+    const current = project;
+    if (!current?.id || !current.heygen_video_id || !current.heygen_video_url || !isExpiredHeyGenSignedUrl(current.heygen_video_url)) return;
+    const key = `${current.id}:${current.heygen_video_url}`;
+    if (expiredUrlRefreshAttempted.current === key) return;
+    expiredUrlRefreshAttempted.current = key;
+    void refreshAvatarVideoUrl(current).catch((e: any) => setError(String(e?.message || e)));
+  }, [project?.id, project?.heygen_video_id, project?.heygen_video_url, refreshAvatarVideoUrl, setError]);
+
   // Reload-recovery for the avatar stage: a HeyGen render whose id was
   // persisted at submit is picked back up here, so closing the tab no longer
   // loses a paid render.
@@ -288,12 +406,12 @@ export default function App() {
       try {
         for (let i = 0; i < 1350; i += 1) {
           if (assemblyCancelled.current) { await cancelAssemblyRun(current.id); return; }
-          const status = await fetch(`/api/render/remotion/${encodeURIComponent(operationId)}`).then((r) => r.json()).catch(() => null);
-          if (status?.status === 'complete' && status.videoUrl) { await completeAssembly(current, String(status.videoUrl)); return; }
-          if (status?.status === 'failed') throw new Error(status.error || 'Assembly failed');
           // The bar keeps moving while the render runs — eased toward 94%.
           const eased = Math.min(94, Math.round(baseProgress + (94 - baseProgress) * (1 - Math.exp(-(i + 1) / 90))));
-          await pushAssemblyJob(current.id, { status: 'assembling', progress: eased, message: 'Rendering the final MP4…', started_at: startedAt }, true);
+          const status = await forgeApi.assemblyStatus(current.id, String(operationId), eased);
+          if (status.status === 'complete' && status.videoUrl) { await completeAssembly(current, String(status.videoUrl)); return; }
+          if (status.status === 'failed') throw new Error(status.error || 'Assembly failed');
+          await pushAssemblyJob(current.id, { status: 'assembling', progress: eased, message: 'Rendering the final MP4 on Cloud Run…', started_at: startedAt, operation_id: String(operationId) }, true);
           await sleep(4000);
         }
         throw new Error('Assembly is still rendering after 90 minutes. Retry assembly to submit a fresh render.');
@@ -382,6 +500,236 @@ export default function App() {
       ? { ...plan, draft_version: plan.draft_version + 1 }
       : { version: 1, generation_id: String(current.generation_id || newGenerationId()), draft_version: 2, created_at: new Date().toISOString(), music: { required: false }, captions: false, treatments: [] };
     await patch({ director_plan: next as any, ...(current.generation_id ? {} : { generation_id: next.generation_id }) });
+  }
+
+  // PROVIDER HEALTH. The top-bar picker shows what this workspace can really
+  // use: Runway and HeyGen are probed live, Group A is the platform baseline.
+  // An unconfigured provider is greyed out WITH its setup note — never a
+  // crash, and never a silent switch to a different engine.
+  useEffect(() => {
+    let cancelled = false;
+    probeProviders()
+      .then((statuses) => { if (!cancelled) setProviders(statuses); })
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) setProvidersLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // The ElevenLabs catalog is a free read, loaded once so the Audio tab
+  // opens on the whole list rather than a spinner.
+  useEffect(() => {
+    let cancelled = false;
+    fetchElevenVoices()
+      .then((catalog) => { if (!cancelled) setElevenVoices(catalog.voices); })
+      .catch((e: any) => { if (!cancelled) setElevenVoicesError(String(e?.message || 'The ElevenLabs voice catalog could not be loaded.')); })
+      .finally(() => { if (!cancelled) setElevenVoicesLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  function refreshProviders() {
+    setProvidersLoading(true);
+    probeProviders({ force: true })
+      .then(setProviders)
+      .catch(() => undefined)
+      .finally(() => setProvidersLoading(false));
+  }
+
+  // Restore the workbench exactly as the customer left it the moment their
+  // project opens — script draft, brand accent, cards, provider.
+  useEffect(() => {
+    const id = project?.id;
+    if (!id || studioLoadedFor.current === id) return;
+    studioLoadedFor.current = id;
+    const loaded = studioConfigOf(project);
+    const provider = loaded.provider || DEFAULT_SCENE_PROVIDER;
+    setSceneVideoEngine(provider);
+    setStudio({ ...loaded, provider, script_draft: loaded.script_draft || String(project?.script || '') });
+    setSelectedSceneId(null);
+  }, [project?.id]);
+
+  // AUTO-SAVE. Every workbench edit is written back a beat later, so closing
+  // the tab mid-sentence never loses a script or a card.
+  useEffect(() => {
+    const id = project?.id;
+    if (!id || studioLoadedFor.current !== id) return;
+    window.clearTimeout(studioSaveTimer.current);
+    studioSaveTimer.current = window.setTimeout(() => { void saveStudioConfig(id, studio).catch(() => undefined); }, 1200);
+    return () => window.clearTimeout(studioSaveTimer.current);
+  }, [studio, project?.id]);
+
+  function patchStudio(patch: Partial<StudioConfig>) {
+    // The scene generator keeps its own engine preference, so the two can
+    // never disagree about which provider a Generate All run will use.
+    if (patch.provider) setSceneVideoEngine(patch.provider);
+    setStudio((current) => ({ ...current, ...patch }));
+  }
+
+  // DOWNLOAD. The finished MP4 is fetched and handed to the browser as a real
+  // file; when the cross-origin read is refused the URL is opened instead, so
+  // the customer always ends up with the video rather than a dead button.
+  async function downloadFilm() {
+    const url = String(project?.final_video_url || project?.assembled_video_url || '');
+    if (!url) return;
+    const name = `${String(project?.topic || 'sceneforge').replace(/[^\w.-]+/g, '-').slice(0, 60) || 'sceneforge'}.mp4`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 15000);
+    } catch {
+      window.open(url, '_blank', 'noopener');
+    }
+  }
+
+  // Gemini Vision over the scene's first frame: detected objects, mood,
+  // setting, palette and the B-roll terms the picker offers.
+  async function analyzeScene(scene: Scene) {
+    if (analyzingSceneId) return;
+    setAnalyzingSceneId(scene.id);
+    try {
+      const context = await runSceneVision(scene, { force: true });
+      if (context) setScenes((all) => all.map((item) => item.id === scene.id ? ({ ...item, vision_context: context } as Scene) : item));
+      else setSceneImageError(`Scene ${scene.scene_index}: Gemini Vision could not read a frame from this clip in this browser, so there is no scene context for it. The film itself is unaffected.`);
+    } finally { setAnalyzingSceneId(null); }
+  }
+
+  // 'Auto-apply graphics': a vision-grounded lower third and subject callout
+  // on every analyzed scene. Hand-made overlays are kept.
+  async function autoApplyGraphics() {
+    if (!project || autoGraphicsBusy) return;
+    setAutoGraphicsBusy(true); setAutoGraphicsNote('');
+    try {
+      const changed = await applyAutoGraphics(scenes, studio, { withCallouts: true });
+      setScenes(await listScenes(project.id));
+      if (changed) await bumpDraftVersion();
+      setAutoGraphicsNote(changed
+        ? `Graphics written on ${changed} scene${changed === 1 ? '' : 's'} — press Export to render them into the film.`
+        : 'No scene has a readable visual yet. Generate the clips first, or press Analyze on a scene in Context.');
+    } catch (e: any) {
+      setAutoGraphicsNote(`The graphics pass failed: ${String(e?.message || e).slice(0, 200)}`);
+    } finally { setAutoGraphicsBusy(false); }
+  }
+
+  async function applyBroll(scene: Scene, clip: BrollClip | null) {
+    try {
+      await setSceneBroll(scene, clip);
+      setScenes((all) => all.map((item) => item.id === scene.id ? ({ ...item, broll: clip } as Scene) : item));
+      await bumpDraftVersion();
+    } catch (e: any) {
+      setSceneImageError(`The B-roll could not be saved: ${String(e?.message || e).slice(0, 200)}`);
+    }
+  }
+
+  async function uploadAudioTrack(file: File) {
+    setMusicNote('Uploading your audio track…');
+    try {
+      const uploaded = await uploadFile(file, 'sceneforge-audio');
+      patchStudio({ audio_track_url: uploaded.url });
+      setMusicNote('Audio track saved — the next export mounts it under the narration, ducked so the voice stays clear.');
+    } catch (e: any) {
+      setMusicNote(`That audio file could not be uploaded: ${String(e?.message || e).slice(0, 200)}`);
+    }
+  }
+
+  // A clip that just landed is merged UNDER whatever line the customer has
+  // typed since: the text column is theirs, the rest is the generator's.
+  function mergeSceneAudio(sceneId: string, entry: StudioConfig['audio']['scenes'][string]) {
+    setStudio((current) => ({
+      ...current,
+      audio: { ...current.audio, scenes: { ...current.audio.scenes, [sceneId]: { ...entry, text: current.audio.scenes[sceneId]?.text || entry.text } } },
+    }));
+  }
+
+  // PER-SCENE VOICEOVER: ONE ElevenLabs request narrates every scene whose
+  // line has no current clip in the chosen voice. Each clip comes back with
+  // its measured duration and is kept on the project, so re-running after
+  // editing one line bills one line.
+  async function narrateSceneLines() {
+    if (!project || audioBusy) return;
+    const pending = scenesNeedingVoice(scenes, project, studio.audio);
+    if (!pending.length) { setAudioNote('Every scene already has a current clip in this voice.'); return; }
+    setAudioBusy(true);
+    setAudioNote(`Narrating ${pending.length} scene${pending.length === 1 ? '' : 's'} with ElevenLabs — one request for the whole batch…`);
+    try {
+      const next = await narrateScenes(scenes, project, studio.audio);
+      pending.forEach((scene) => { if (next[scene.id]) mergeSceneAudio(scene.id, next[scene.id]); });
+      const spokenMs = pending.reduce((sum, scene) => sum + (next[scene.id]?.duration_ms || 0), 0);
+      await bumpDraftVersion();
+      setAudioNote(`${pending.length} scene${pending.length === 1 ? '' : 's'} narrated · ${(spokenMs / 1000).toFixed(1)}s of speech. ${studio.audio.mode === 'lipsync' ? 'Press Lip-sync to render the presenter to these clips, or ' : ''}Press Export to hear them in the film.`);
+      pipelineLog('assets', 'scene-voiceover-ready', { projectId: project.id, sceneCount: pending.length, voiceId: studio.audio.voice_id, spokenMs });
+    } catch (e: any) {
+      setAudioNote(String(e?.message || e));
+      pipelineLog('assets', 'scene-voiceover-error', { projectId: project.id, message: String(e?.message || e) });
+    } finally { setAudioBusy(false); }
+  }
+
+  // LIP-SYNC: HeyGen renders the chosen look speaking each scene's
+  // ElevenLabs clip — caller audio, so HeyGen's own text-to-speech is never
+  // used. Scenes are persisted as they settle, so a closed tab keeps every
+  // clip already paid for; a missing HeyGen key is reported in the
+  // platform's own words and leaves every scene on voiceover.
+  async function lipsyncSceneLines() {
+    if (!project || audioBusy) return;
+    const heygenStatus = providers.find((entry) => entry.id === 'heygen');
+    if (heygenStatus?.state === 'unconfigured') { setAudioNote(`${heygenStatus.note} Every scene plays as voiceover until then.`); return; }
+    if (!studio.audio.lipsync_avatar_id) { setAudioNote('Pick a lip-sync presenter first.'); return; }
+    const pending = scenesNeedingLipsync(scenes, project, studio.audio);
+    if (!pending.length) {
+      setAudioNote(scenesNeedingVoice(scenes, project, studio.audio).length
+        ? 'Narrate the lines first — lip-sync renders the presenter to the ElevenLabs clips.'
+        : 'Every narrated scene already has a lip-sync clip of this presenter.');
+      return;
+    }
+    setAudioBusy(true);
+    setAudioNote(`Rendering ${pending.length} lip-synced scene${pending.length === 1 ? '' : 's'} in HeyGen, two at a time — each takes a minute or two…`);
+    try {
+      const outcome = await lipsyncScenes(scenes, project, studio.audio, {
+        aspectRatio: project.aspect_ratio,
+        unconfiguredNote: heygenStatus?.note || undefined,
+        onScene: mergeSceneAudio,
+      });
+      if (outcome.rendered) await bumpDraftVersion();
+      setAudioNote(outcome.unavailable
+        ? `${outcome.unavailable} Every scene stays on voiceover until then.`
+        : `${outcome.rendered} lip-synced scene${outcome.rendered === 1 ? '' : 's'} ready${outcome.failed ? `; ${outcome.failed} fell back to voiceover — each row says why` : ''}. Press Export to render them into the film.`);
+      pipelineLog('assets', 'scene-lipsync-complete', { projectId: project.id, rendered: outcome.rendered, failed: outcome.failed, unavailable: Boolean(outcome.unavailable) });
+    } catch (e: any) {
+      setAudioNote(String(e?.message || e));
+      pipelineLog('assets', 'scene-lipsync-error', { projectId: project.id, message: String(e?.message || e) });
+    } finally { setAudioBusy(false); }
+  }
+
+  async function uploadCharacterPhoto(file: File) {
+    setCharacterNote('Uploading the character reference…');
+    try {
+      const uploaded = await uploadFile(file, 'sceneforge-characters');
+      patchStudio({ character_photo_url: uploaded.url });
+      setCharacterNote('Character reference saved. Scenes generated from now on send it with every request on engines that carry references.');
+    } catch (e: any) {
+      setCharacterNote(`That photo could not be uploaded: ${String(e?.message || e).slice(0, 200)}`);
+    }
+  }
+
+  // Editing a scene's script invalidates its clip: the stored prompt is
+  // cleared so the next generate actually re-films it instead of reusing the
+  // old take.
+  async function editSceneScript(scene: Scene, description: string) {
+    if (!description) return;
+    await patchScene(scene.id, { description, video_prompt: '', status: 'pending' });
+    await bumpDraftVersion();
+  }
+
+  async function applyScript(script: string) {
+    if (!project || !script.trim()) return;
+    await patch({ script: script.trim() });
+    patchStudio({ script_draft: script.trim() });
   }
 
   async function begin(input: Parameters<typeof start>[0]) {
@@ -518,18 +866,6 @@ export default function App() {
     catch (e: any) { setError(e.message); } finally { setBusy(false); }
   }
 
-  async function generateScenePreview(scene: Scene) {
-    if (!project || generatingSceneId) return;
-    setGeneratingSceneId(scene.id); setSceneImageError('');
-    try {
-      const made = await generateSceneImage(project, scene, settings.image_model, getStyle(project.style));
-      setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.url, status: 'ready' as const } : item));
-      if (made.fallbackFrom) setSceneImageError(`${made.fallbackFrom} is unavailable right now, so this scene was drawn with ${made.model} instead.`);
-    } catch (e: any) {
-      setSceneImageError(e.message || 'The selected image model could not generate this scene. Your existing image was kept.');
-    } finally { setGeneratingSceneId(null); }
-  }
-
   // Produce every supporting scene, in parallel, by its own kind. AI-video
   // scenes generate a real clip on the existing Omni pipeline and land
   // DIRECTLY on the timeline; text/graphics scenes at most draw one cached
@@ -568,6 +904,25 @@ export default function App() {
       const queue = persisted.filter((scene) => sceneNeedsGeneration(scene)).sort((a, b) => a.scene_index - b.scene_index);
       const failures: string[] = [];
       const markScene = (id: string, changes: Partial<Scene>) => setScenes((all) => all.map((item) => item.id === id ? { ...item, ...changes } : item));
+      // PER-SCENE PROGRESS. Three lanes pull from one queue, so the readout
+      // reports the lowest scene still in flight plus how many have settled,
+      // and estimates the remaining wait from the chosen engine's typical
+      // clip time — "Generating scene 2 of 4 · about 3m left" rather than a
+      // spinner with nothing behind it.
+      const engineId = studio.provider || DEFAULT_SCENE_PROVIDER;
+      const totalToMake = queue.length;
+      const inFlight = new Set<number>();
+      let completed = 0;
+      const perClipSec = estimateSecondsPerClip(engineId);
+      const reportProgress = (message: string) => setSceneProgress({
+        active: true,
+        done: completed,
+        total: totalToMake,
+        currentIndex: inFlight.size ? Math.min(...Array.from(inFlight)) : null,
+        etaSec: Math.max(0, Math.ceil(((totalToMake - completed) / 3) * perClipSec)),
+        message,
+      });
+      reportProgress(totalToMake ? `Producing ${totalToMake} scene${totalToMake === 1 ? '' : 's'} on ${engineId}` : 'Every scene already has its clip');
       const lane = async () => {
         for (;;) {
           // A cancelled batch stops pulling new work; the scene this lane is
@@ -575,12 +930,21 @@ export default function App() {
           if (cancelBatch.current) return;
           const scene = queue.shift();
           if (!scene) return;
+          inFlight.add(scene.scene_index);
           markScene(scene.id, { status: 'generating' });
+          reportProgress(`Filming scene ${scene.scene_index}`);
           try {
             const kind = sceneKind(scene);
             if (kind === 'ai_video') {
-              const made = await generateSceneVideo(project, scene);
+              const made = await generateSceneVideo(project, scene, { model: engineId, characterRefUrl: studio.character_photo_url });
               markScene(scene.id, { render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' });
+              // SCENE CONTEXT. The new clip's first frame goes straight to
+              // Gemini Vision, so the sidebar can describe the shot and the
+              // B-roll picker can suggest footage that matches it. A failed
+              // read is silent by design — vision never gates the film.
+              void runSceneVision({ ...scene, render_url: made.videoUrl } as Scene)
+                .then((context) => { if (context) markScene(scene.id, { vision_context: context } as Partial<Scene>); })
+                .catch(() => undefined);
               pipelineLog('scene-media', 'scene-video-ready', { projectId: project.id, sceneIndex: scene.scene_index, reused: made.reused });
             } else if (kind === 'motion_graphic' || kind === 'text_overlay') {
               // The GSAP+SVG engine records this scene right here in the
@@ -648,15 +1012,24 @@ export default function App() {
           } catch (e: any) {
             // One scene's failure is that scene's failure: it is marked so the
             // board can offer Retry / Text-Graphics / Skip, and the lanes keep
-            // going instead of throwing away the scenes that worked.
-            failures.push(`Scene ${scene.scene_index}: ${e?.message || e}`);
+            // going instead of throwing away the scenes that worked. The
+            // message names WHICH provider refused and WHY — status, reason
+            // and the concrete next step — never a bare "Error generating".
+            failures.push(sceneKind(scene) === 'ai_video'
+              ? describeProviderFailure(String(e?.provider || engineId), e, { sceneIndex: scene.scene_index })
+              : `Scene ${scene.scene_index}: ${String(e?.message || e)}`);
             await updateScene(scene.id, { status: 'error' }, project.id).catch(() => undefined);
             markScene(scene.id, { status: 'error' });
-            pipelineLog('scene-media', 'scene-error', { projectId: project.id, sceneIndex: scene.scene_index, message: String(e?.message || e) });
+            pipelineLog('scene-media', 'scene-error', { projectId: project.id, sceneIndex: scene.scene_index, provider: String(e?.provider || engineId), status: e?.status, message: String(e?.message || e) });
+          } finally {
+            inFlight.delete(scene.scene_index);
+            completed += 1;
+            reportProgress(`${completed} of ${totalToMake} scenes settled`);
           }
         }
       };
       await Promise.all([lane(), lane(), lane()]);
+      setSceneProgress({ active: false, done: completed, total: totalToMake, currentIndex: null, etaSec: 0, message: '' });
       const motionBg = await motionPromise;
       if (motionBg) await patch({ motion_bg_url: motionBg });
       const settledScenes = await listScenes(project.id);
@@ -680,7 +1053,8 @@ export default function App() {
       const readyNote = 'Every supporting scene is settled — ready to assemble';
       setNote(readyNote);
       await noteStage(project.id, readyNote);
-    } catch (e: any) { pipelineLog('assets', 'error', { projectId: project.id, message: e.message }); setError(e.message); } finally { setBusy(false); }
+    } catch (e: any) { pipelineLog('assets', 'error', { projectId: project.id, message: e.message }); setError(e.message); }
+    finally { setBusy(false); setSceneProgress((live) => ({ ...live, active: false, currentIndex: null, etaSec: 0 })); }
   }
 
   // Cancel the batch without losing anything: in-flight clips finish and are
@@ -700,8 +1074,11 @@ export default function App() {
     try {
       const kind = sceneKind(scene);
       if (kind === 'ai_video') {
-        const made = await generateSceneVideo(project, scene, { force: true });
+        const made = await generateSceneVideo(project, scene, { force: true, model: studio.provider || DEFAULT_SCENE_PROVIDER, characterRefUrl: studio.character_photo_url });
         setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' as const } : item));
+        void runSceneVision({ ...scene, render_url: made.videoUrl } as Scene)
+          .then((context) => { if (context) setScenes((all) => all.map((item) => item.id === scene.id ? ({ ...item, vision_context: context } as Scene) : item)); })
+          .catch(() => undefined);
       } else if (kind === 'motion_graphic' || kind === 'text_overlay') {
         const made = await produceMotionScene(project, scene, { force: true, onNote: setNote });
         setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: made.fingerprint, status: 'ready' as const, qa_report: made.qa as unknown as Record<string, unknown>, director_timeline: made.scene.director_timeline } : item));
@@ -710,7 +1087,9 @@ export default function App() {
         setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.url, status: 'ready' as const } : item));
       }
     } catch (e: any) {
-      setSceneImageError(e.message || String(e));
+      setSceneImageError(sceneKind(scene) === 'ai_video'
+        ? describeProviderFailure(String(e?.provider || studio.provider || DEFAULT_SCENE_PROVIDER), e, { sceneIndex: scene.scene_index })
+        : `Scene ${scene.scene_index}: ${String(e?.message || e)}`);
       await updateScene(scene.id, { status: 'error' }, project.id).catch(() => undefined);
       setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, status: 'error' as const } : item));
     } finally { setGeneratingSceneId(null); }
@@ -750,49 +1129,51 @@ export default function App() {
     await patchScene(scene.id, changes);
   }
 
-  // Capture one motion-graphic / text-overlay scene from the editor — the
-  // browser records the GSAP animation and ships it as a real clip.
-  async function generateSceneMotionPreview(scene: Scene) {
-    if (!project || generatingSceneId) return;
-    setGeneratingSceneId(scene.id); setSceneImageError('');
-    setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, status: 'generating' as const } : item));
-    try {
-      const made = await produceMotionScene(project, scene, { force: true, onNote: setNote });
-      setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: made.fingerprint, status: 'ready' as const, qa_report: made.qa as unknown as Record<string, unknown>, director_timeline: made.scene.director_timeline } : item));
-    } catch (e: any) {
-      setSceneImageError(e.message || String(e));
-      setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, status: 'error' as const } : item));
-    } finally { setGeneratingSceneId(null); }
-  }
+  // Single-scene regeneration is retryScene() for every kind — the workbench
+  // context menu routes Regenerate straight to it, so there are no
+  // per-kind duplicates of the same action to drift apart.
 
-  // Generate one scene's AI clip from the editor; a clip already made from the
-  // same prompt is reused instead of regenerated.
-  async function generateSceneVideoPreview(scene: Scene) {
-    if (!project || generatingSceneId) return;
-    setGeneratingSceneId(scene.id); setSceneImageError('');
-    setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, status: 'generating' as const } : item));
-    try {
-      const made = await generateSceneVideo(project, scene);
-      setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' as const } : item));
-    } catch (e: any) {
-      setSceneImageError(e.message || String(e));
-      setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, status: 'error' as const } : item));
-    } finally { setGeneratingSceneId(null); }
-  }
-
-  // ElevenLabs music bed, then the mix that lays it under the picture.
+  // ElevenLabs music bed. The bed is laid under the picture by the assembly
+  // render itself (see mixMusic and remotion/AssemblyComp), so generating one
+  // only produces the track.
   async function makeMusic(prompt: string) {
     if (!project) return; setMusicBusy(true); setMusicNote('');
     try {
       const seconds = Number(project.avatar_duration_sec || project.estimated_duration_sec || project.target_length_sec) || 30;
       const result = await forgeApi.music(project.id, prompt || undefined, seconds);
       setProject((current) => current ? { ...current, music_url: result.musicUrl, music_prompt: result.prompt } : current);
-      setMusicNote('Music bed ready — preview it below, then mix it into the film.');
+      setMusicNote(project.aspect_ratio === '9:16'
+        ? 'Music bed ready - preview and download it below. A 9:16 master keeps the presenter audio, so this bed stays a separate track.'
+        : 'Music bed ready - preview it below, then add it to the film.');
     } catch (e: any) { setMusicNote(e.message || String(e)); } finally { setMusicBusy(false); }
   }
 
+  // ADDING MUSIC = RENDERING THE FILM WITH IT. A 16:9 master is produced by
+  // the ONE Remotion assembly, and that composition now mounts the bed itself
+  // (same ducking the draft preview plays), so the bed is laid down by a
+  // render of the timeline rather than by a second pass that re-encodes the
+  // finished master - the pass that was handing back a film with no music.
+  // Portrait keeps its own answer below: its FFmpeg compositor can only carry
+  // the presenter's own audio.
   async function mixMusic() {
-    if (!project) return; setMusicBusy(true); setMusicNote('Mixing the music bed under the film…');
+    if (!project) return;
+    if (project.aspect_ratio !== '9:16') {
+      const projectId = project.id;
+      const bed = String(project.music_url || '');
+      setMusicBusy(true); setMusicNote('Rendering the film with the music bed under the narration...');
+      try {
+        await assemble();
+        // The render stamps the bed it carried onto the finished job, so this
+        // reports what the film actually contains rather than that a render
+        // was attempted.
+        const settled = await getProject(projectId).catch(() => null);
+        setMusicNote(settled?.assembly_job?.status === 'completed' && String(settled.assembly_job.music_url || '') === bed
+          ? 'The film now carries the music bed, ducked under the narration. Play it above to hear the mix.'
+          : 'The film has not picked up the bed yet - the assembly panel above shows what happened. Start the render again when ready.');
+      } finally { setMusicBusy(false); }
+      return;
+    }
+    setMusicBusy(true); setMusicNote('Mixing the music bed under the film…');
     const projectId = project.id;
     const expectedSec = Number(project.avatar_duration_sec || project.estimated_duration_sec || project.target_length_sec) || 0;
     try {
@@ -854,7 +1235,8 @@ export default function App() {
     // A fresh assembled cut supersedes any earlier music mix — that mix was
     // rendered from the PREVIOUS cut, and the player prefers final_video_url,
     // so keeping it would show a stale (or broken) master over the new film.
-    // The music bed itself is kept; one click re-mixes it into the new cut.
+    // The bed itself is kept, and a 16:9 re-render carries it inside the new
+    // cut, so nothing has to be mixed on top afterwards.
     const next = { ...current, assembled_video_url: videoUrl, final_video_url: null, build_hash: hash, editor_manifest: editorManifest, status: 'checks' as const, assembly_job: checkingJob };
     await updateProject(projectId, { assembled_video_url: videoUrl, final_video_url: null, build_hash: hash, editor_manifest: editorManifest, status: 'checks', render_operation_id: null, stage_note: 'Running the delivery checks', assembly_job: checkingJob });
     mergeProject(next);
@@ -873,7 +1255,10 @@ export default function App() {
       ? 'Film assembled from an older draft — the plan changed during the render; re-render to include the newest edits'
       : finalStatus === 'done' ? 'Film assembled, output verified, and all delivery checks passed' : 'Film assembled — some checks still need attention';
     const doneStamp = new Date().toISOString();
-    const completedJob: AssemblyJob = { status: 'completed', progress: 100, message: 'Film assembled — the final MP4 is loaded in the player.', started_at: startedAt, finished_at: doneStamp, updated_at: doneStamp, output_url: videoUrl, ...(submittedDraft ? { draft_version: submittedDraft } : {}) };
+    // A cut rendered WITH the bed records it, so Step 7 can tell a scored
+    // film from one assembled before the music existed.
+    const scored = current.aspect_ratio !== '9:16' && Boolean(current.music_url);
+    const completedJob: AssemblyJob = { ...(scored ? { music_url: current.music_url } : {}), status: 'completed', progress: 100, message: scored ? 'Film assembled with its music bed - the final MP4 is loaded in the player.' : 'Film assembled — the final MP4 is loaded in the player.', started_at: startedAt, finished_at: doneStamp, updated_at: doneStamp, output_url: videoUrl, ...(submittedDraft ? { draft_version: submittedDraft } : {}) };
     // ATOMIC PROMOTION: only a render that completed, verified its output and
     // passed every check — for the CURRENT draft — becomes last_good_version.
     const promote = finalStatus === 'done' && !staleDraft;
@@ -908,7 +1293,17 @@ export default function App() {
     const liveBeat = project.assembly_job?.updated_at ? Date.parse(String(project.assembly_job.updated_at)) : 0;
     if (assemblyJobRunning(project.assembly_job) && liveBeat && Date.now() - liveBeat < ASSEMBLY_HEARTBEAT_STALE_MS) { setNote('Assembly is already running — its live progress is shown below.'); return; }
     if (!project.heygen_video_url) { setError('This project has no avatar master yet, so there is nothing to assemble against.'); return; }
-    const current = project; const projectId = current.id;
+    let current = project;
+    if (isExpiredHeyGenSignedUrl(String(current.heygen_video_url || ''))) {
+      try {
+        const freshUrl = await refreshAvatarVideoUrl(current);
+        current = { ...current, heygen_video_url: freshUrl };
+      } catch (e: any) {
+        setError(String(e?.message || 'The avatar video link could not be refreshed.'));
+        return;
+      }
+    }
+    const projectId = current.id;
     const mergeProject = (changes: Partial<Project>) => setProject((live) => live && live.id === projectId ? { ...live, ...changes } : live);
     assembling.current = true;
     assemblyCancelled.current = false;
@@ -954,12 +1349,16 @@ export default function App() {
       // past the recorded avatar duration is not cut off and a project with no
       // duration at all still renders instead of being rejected.
       const durationInFrames = timelineDurationInFrames(timeline, Number(current.avatar_duration_sec || current.estimated_duration_sec || current.target_length_sec) || 0);
-      pipelineLog('joiner', 'timeline-ready', { projectId, segmentCount: timeline.length, codedSceneRenders: timeline.filter((segment) => segment.sceneRenderKind === 'video').length, assetCount: assets.length, durationInFrames });
+      pipelineLog('joiner', 'timeline-ready', { projectId, segmentCount: timeline.length, codedSceneRenders: timeline.filter((segment) => segment.sceneRenderKind === 'video').length, assetCount: assets.length, durationInFrames, musicBed: Boolean(current.music_url) });
       const clipCount = timeline.filter((segment) => segment.type === 'scene').length;
       const filmSec = Math.max(10, Math.round(durationInFrames / 30));
       await push({ progress: 10, message: `Preparing ${clipCount} video clip${clipCount === 1 ? '' : 's'}…` });
       if (current.aspect_ratio === '9:16') {
         setNote('FFmpeg is compositing the middle visuals around the talking head — narration audio runs uninterrupted underneath');
+        // The portrait compositor carries only the base video's audio and has
+        // no input for a per-scene track, so the Audio tab's clips cannot
+        // reach this export. The panel says so; this just leaves a trace.
+        if (studio.audio.mode !== 'off') pipelineLog('joiner', 'scene-audio-unsupported-portrait', { projectId, mode: studio.audio.mode });
         await push({ progress: 14, message: 'Compositing scene overlays and presenter callouts…' });
         // The endpoint accepts only full-frame assets, but its FFmpeg pipeline
         // preserves PNG alpha. That alpha channel is what powers the
@@ -1045,30 +1444,69 @@ export default function App() {
           // Captions are a Director decision: word-timed chunks derived from
           // the avatar master's timestamps, rendered TOPMOST by the composition.
           const captions = planOf(current)?.captions ? captionChunks(current.word_timestamps) : [];
-          const response = await fetch('/api/render/remotion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId: WORKSPACE_ID, compositionTsx: createAssemblySource(durationInFrames), props: { timeline, avatarVideoUrl: current.heygen_video_url, motionBgUrl: current.motion_bg_url, captions }, durationInFrames }) });
-          const started = await response.json().catch(() => ({})); if (!response.ok || !started.operationId) throw new Error(started.error || 'Assembly render could not start');
-          const rendering: Partial<Project> = { render_operation_id: String(started.operationId), stage_note: 'Rendering the Remotion assembly' };
-          await updateProject(projectId, rendering).catch(() => undefined); mergeProject(rendering);
-          // The renderer has started: the job flips to 'assembling' NOW, not
-          // when the render finishes.
-          await push({ status: 'assembling', progress: Math.max(job.progress, 18), message: 'Rendering the final MP4…' });
-          // Long films render long: the ceiling scales with the film instead
-          // of giving up at ten minutes flat — the old fixed cap orphaned
-          // every long-video assembly, and the resume effect above now covers
-          // a reload on top of that.
+          // THE MUSIC BED TRAVELS WITH THE RENDER. The project's bed, its
+          // level and the narration windows it ducks under are part of the
+          // props, so the film comes out of this one render already scored -
+          // the bed is no longer dropped and then chased with a second mix
+          // pass that re-encodes the finished master.
+          const music = musicBedProps(current);
+          // THE POST-PROCESSING LAYER rides with this same render. Once every
+          // scene clip exists, the finished film is NOT the raw generated
+          // footage: this one server-side pass draws the branded title card,
+          // the per-scene lower thirds, the chosen transition language, the
+          // muted B-roll picture-in-picture and the closing CTA over the
+          // clips. Because Remotion composites at the render's own frame
+          // rate, those graphics come out frame-accurate and crisp instead of
+          // re-encoded from a browser capture — and the narration, the music
+          // bed and any uploaded audio track all survive untouched, because
+          // nothing is re-encoded after this.
+          const finishing = postProductionProps(studio, current, durationInFrames);
+          const trimmedTimeline = studio.lower_thirds
+            ? timeline
+            : timeline.map((segment) => segment.overlayElements
+              ? { ...segment, overlayElements: segment.overlayElements.filter((element) => element.type !== 'lower_third') }
+              : segment);
+          // PER-SCENE SPEECH rides this same render. Each scene's ElevenLabs
+          // clip (or the HeyGen clip lip-synced to it) is stamped on its
+          // segment; the composition mounts it inside the scene's Sequence,
+          // mutes the presenter master for that window, and the music bed
+          // ducks under those lines exactly as it ducks under the presenter.
+          // This is the only native path that puts a per-scene voice inside
+          // the MP4 — the overlay and stitch routes keep base audio only.
+          const finishedTimeline = stampTimelineAudio(trimmedTimeline, studio.audio);
+          const speech = [...(Array.isArray((music as any).speech) ? (music as any).speech as [number, number][] : []), ...sceneSpeechWindows(finishedTimeline)];
+          const started = await forgeApi.assemblySubmit(projectId, {
+            compositionTsx: createAssemblySource(durationInFrames),
+            props: {
+              timeline: finishedTimeline,
+              avatarVideoUrl: current.heygen_video_url,
+              motionBgUrl: current.motion_bg_url,
+              captions,
+              ...music,
+              ...(speech.length ? { speech } : {}),
+              ...finishing,
+            },
+            durationInFrames,
+            job: { ...job, status: 'assembling', progress: Math.max(job.progress, 18), message: 'Rendering the final MP4 on Cloud Run…' },
+          });
+          if (!started.operationId) throw new Error(started.error || 'Assembly render could not start');
+          const operationId = String(started.operationId);
+          job.operation_id = operationId;
+          // The server persisted the operation id before responding. This local
+          // merge only repaints immediately; closing the tab cannot orphan it.
+          mergeProject({ render_operation_id: operationId, stage_note: 'Rendering the Remotion assembly on Cloud Run' });
+          await push({ status: 'assembling', progress: Math.max(job.progress, 18), message: 'Rendering the final MP4 on Cloud Run…', operation_id: operationId });
+          // Long films render long: polling may stop with the tab, but Cloud Run
+          // does not. Reopening reads the same operation id and continues here.
           const pollCap = Math.max(450, Math.ceil(durationInFrames / 30) * 6);
           for (let i = 0; i < pollCap; i += 1) {
             if (assemblyCancelled.current) throw new Error(ASSEMBLY_CANCELLED);
             await sleep(3000);
-            // A dropped poll is not a failed render — the next tick asks again.
-            const status = await fetch(`/api/render/remotion/${encodeURIComponent(started.operationId)}`).then((r) => r.json()).catch(() => null);
-            if (!status) continue;
+            const eased = Math.min(92, Math.round(18 + 74 * (1 - Math.exp(-((i + 1) * 2) / Math.max(90, filmSec * 2)))));
+            const status = await forgeApi.assemblyStatus(projectId, operationId, eased);
             if (status.status === 'complete' && status.videoUrl) return String(status.videoUrl);
             if (status.status === 'failed') throw new Error(status.error || 'Assembly failed');
-            // Progress DURING the render: eased toward 92% against the film's
-            // expected render time, so the bar never sits still then jumps.
-            const eased = Math.min(92, Math.round(18 + 74 * (1 - Math.exp(-((i + 1) * 2) / Math.max(90, filmSec * 2)))));
-            if (eased > job.progress) await push({ progress: eased }, true);
+            if (eased > job.progress) await push({ progress: eased, operation_id: operationId }, true);
           }
           throw new Error('Assembly timed out. Resume this project to check again.');
         };
@@ -1213,42 +1651,141 @@ export default function App() {
     ].join('\n'),
   };
 
+  // Everything the workbench needs, assembled once per render.
+  const exportJob = project?.assembly_job || null;
+  const exporting = Boolean(project && (project.status === 'assembling' || assemblyJobRunning(exportJob)));
+  const stageNote = String(project?.stage_note || '');
+  const assemblyFailure = !busy && project && !project.assembled_video_url && stageNote.startsWith(ASSEMBLY_FAILED_PREFIX)
+    ? friendlyErrorText(stageNote.slice(ASSEMBLY_FAILED_PREFIX.length).trim())
+    : '';
+  const failedChecks = (project?.checks || []).filter((check) => !check.pass);
+  const workbenchNote = [
+    note,
+    failedChecks.length ? `Delivery checks need attention — ${failedChecks.map((check) => `${check.label}: ${check.detail}`).join(' · ')}` : '',
+  ].filter(Boolean).join(' · ');
+  const pendingWindows = scenes.filter((scene) => sceneNeedsGeneration(scene)).map((scene) => Number(scene.script_end_sec) - Number(scene.script_start_sec));
+  const workbenchMode = Boolean(project && view === 'project' && WORKBENCH_STATUSES.includes(project.status));
+
+  const workbench = project ? <StudioWorkbench
+    project={project}
+    scenes={scenes}
+    config={studio}
+    onConfig={patchStudio}
+    providers={providers}
+    providersLoading={providersLoading}
+    onRefreshProviders={refreshProviders}
+    estimate={estimateGeneration(pendingWindows, studio.provider || DEFAULT_SCENE_PROVIDER)}
+    progress={sceneProgress}
+    busy={busy}
+    note={workbenchNote}
+    error={error ? friendlyErrorText(error) : assemblyFailure}
+    onDismissError={() => setError('')}
+    selectedSceneId={selectedSceneId}
+    onSelectScene={setSelectedSceneId}
+    onGenerateAll={() => void generateSupportingScenes()}
+    onCancelGenerate={() => { if (exporting) cancelAssembly(); else cancelGeneration(); }}
+    onExport={() => void assemble()}
+    onDownload={() => void downloadFilm()}
+    exportBusy={exporting}
+    exportProgress={Number(exportJob?.progress) || 0}
+    exportMessage={String(exportJob?.message || '')}
+    finalVideoUrl={String(project.final_video_url || project.assembled_video_url || '')}
+    onRegenerateScene={(scene) => void retryScene(scene)}
+    onDeleteScene={(scene) => void remove(scene.id)}
+    onAddScene={() => void addSceneRange()}
+    onConvertScene={(scene) => void convertSceneToText(scene)}
+    onFilmAsVideo={(scene) => void switchSceneKind(scene, 'ai_video')}
+    onSkipScene={(scene) => void skipScene(scene)}
+    onUnskipScene={(scene) => void unskipScene(scene)}
+    onEditSceneScript={(scene, description) => void editSceneScript(scene, description)}
+    onUploadSceneMedia={(scene, file) => void uploadScene(scene, file)}
+    generatingSceneId={generatingSceneId}
+    onSaveScript={(script) => void applyScript(script)}
+    onRewriteScript={(direction) => void rewrite(direction)}
+    onPlanScenes={() => void confirmStyle()}
+    onAnalyzeScene={(scene) => void analyzeScene(scene)}
+    analyzingSceneId={analyzingSceneId}
+    onAutoGraphics={() => void autoApplyGraphics()}
+    autoGraphicsBusy={autoGraphicsBusy}
+    autoGraphicsNote={autoGraphicsNote}
+    onSetBroll={(scene, clip) => void applyBroll(scene, clip)}
+    onGenerateMusic={(prompt) => void makeMusic(prompt)}
+    onMixMusic={() => void mixMusic()}
+    musicBusy={musicBusy}
+    musicNote={musicNote}
+    onUploadAudioTrack={(file) => void uploadAudioTrack(file)}
+    elevenVoices={elevenVoices}
+    elevenVoicesLoading={elevenVoicesLoading}
+    elevenVoicesError={elevenVoicesError}
+    onNarrateScenes={() => void narrateSceneLines()}
+    onLipsyncScenes={() => void lipsyncSceneLines()}
+    audioBusy={audioBusy}
+    audioNote={audioNote}
+    avatars={heygen.avatars}
+    voices={heygen.voices}
+    charactersLoading={heygen.catalogLoading}
+    charactersError={heygen.catalogError}
+    characterNote={characterNote || heygen.progress}
+    onGenerateAvatar={(options) => void generateAvatar({ ...options, resolution: '1080p', aspect_ratio: project.aspect_ratio, fit: 'cover', background: { type: 'color', value: '#0f172a' }, voice_settings: { speed: 1 }, captions: false, gestures: false, output_format: 'mp4' })}
+    onUploadCharacterPhoto={(file) => void uploadCharacterPhoto(file)}
+    onOpenLibrary={() => { setView('library'); setProject(null); void refreshLibrary(); }}
+    onOpenSettings={() => setView('settings')}
+    onOpenAssistant={() => setVergerOpen(true)}
+  /> : null;
+
   const content = () => {
     if (view === 'settings') return <SettingsPanel />;
     if (view === 'library') return <Library projects={projects} loading={loading} onOpen={(id) => { void open(id); setView('project'); }} onNew={() => { setProject(null); setView('project'); }} />;
-    if (!project) return <TopicInput busy={busy} onStart={(input) => void begin(input)} />;
+    if (!project) return <TopicInput busy={busy} initialTopic={initialTopic} initialAttachment={initialAttachment} onStart={(input) => void begin(input)} />;
     if (project.status === 'scripting') return <Working text="Researching and writing your script" />;
     if (project.status === 'script_review') return <ScriptReview key={project.script} initialScript={project.script || ''} sources={project.sources || []} busy={busy} onApprove={(script) => void approveScript(script)} onRewrite={(direction) => void rewrite(direction)} />;
-    if (project.status === 'avatar_render') return <HeyGenModule avatars={heygen.avatars} voices={heygen.voices} catalogLoading={heygen.catalogLoading} catalogError={heygen.catalogError} aspectRatio={project.aspect_ratio} progress={heygen.progress} busy={busy} videoUrl={project.heygen_video_url} onGenerate={(options) => void generateAvatar(options)} />;
+    if (project.status === 'avatar_render') return <HeyGenModule avatars={heygen.avatars} voices={heygen.voices} catalogLoading={heygen.catalogLoading} catalogError={heygen.catalogError} aspectRatio={project.aspect_ratio} progress={heygen.progress} busy={busy} videoUrl={project.heygen_video_url} refreshingVideoLink={refreshingVideoLink} onVideoError={() => void refreshAvatarVideoUrl(project).catch((e: any) => setError(String(e?.message || e)))} onGenerate={(options) => void generateAvatar(options)} />;
     if (project.status === 'style_choice') return <StylePicker value={project.style} onChange={(style) => void patch({ style })} onConfirm={() => void confirmStyle()} />;
     if (project.status === 'scene_planning') return <Working text={note || 'Verger is timing supporting scenes against the avatar'} />;
-    if (project.status === 'scene_review') return <ScenePlanner scenes={scenes} assets={projectAssets} duration={Number(project.avatar_duration_sec || project.target_length_sec)} aspect={project.aspect_ratio} share={sceneShare} onShare={setSceneShare} imageModel={settings.image_model} onImageModel={(image_model) => setSettings((old) => ({ ...old, image_model }))} onPatch={(id, value) => void patchScene(id, value)} onKind={(scene, kind) => void switchSceneKind(scene, kind)} onRemove={(id) => void remove(id)} onAdd={() => void addSceneRange()} onUpload={(scene, file) => void uploadScene(scene, file)} onGenerateImage={(scene) => void generateScenePreview(scene)} onGenerateVideo={(scene) => void generateSceneVideoPreview(scene)} onGenerateMotion={(scene) => void generateSceneMotionPreview(scene)} generatingSceneId={generatingSceneId} onGenerate={() => void generateSupportingScenes()} />;
-    const board = <AssetProgress scenes={scenes} busy={busy} note={note} project={project} onAssemble={() => void assemble()} onRetryScene={(scene) => void retryScene(scene)} onConvertScene={(scene) => void convertSceneToText(scene)} onSkipScene={(scene) => void skipScene(scene)} onUnskipScene={(scene) => void unskipScene(scene)} onCancel={cancelGeneration} onResume={() => void generateSupportingScenes()} />;
-    if (project.status === 'asset_gen' || project.status === 'coding') return board;
-    if (project.status === 'assembling' || project.status === 'checks' || project.status === 'done') {
-      // A run that was interrupted before it produced a film lands back on the
-      // board it stopped on, with what it already made, instead of on an empty
-      // player it can never fill.
-      const stalled = !busy && !project.assembled_video_url && scenes.some((scene) => !sceneSettled(scene));
-      if (stalled) return board;
-      // The persisted note survives a reload, so it is the primary source for
-      // "this render failed, and here is why"; the live error covers the
-      // attempt that just happened in front of the customer.
-      const noted = String(project.stage_note || '');
-      const failure = busy || project.assembled_video_url ? '' : friendlyErrorText(noted.startsWith(ASSEMBLY_FAILED_PREFIX) ? noted.slice(ASSEMBLY_FAILED_PREFIX.length).trim() : error);
-      return <AssemblyProgress busy={busy} note={note} failure={failure} project={project} scenes={scenes} checks={project.checks || []} musicBusy={musicBusy} musicNote={musicNote} onRetry={() => void assemble()} onCancel={cancelAssembly} onContinue={openEditor} onGenerateMusic={(value) => void makeMusic(value)} onMixMusic={() => void mixMusic()} onDraftEdited={() => void bumpDraftVersion()} />;
-    }
     if (project.status === 'editing') return <EditorHandoff project={project} scenes={scenes} onOpen={openEditor} />;
+    // From the scene plan onward there is ONE surface, not a stack of step
+    // screens: the workbench owns planning review, generation, the preview
+    // and the export.
+    if (WORKBENCH_STATUSES.includes(project.status)) return workbench;
     return <Working text="Restoring this project" />;
   };
 
-  return <div className="sceneforge-app relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]">
-    <style>{`@media (prefers-reduced-motion: reduce) { .sceneforge-app *, .sceneforge-app *::before, .sceneforge-app *::after { animation: none !important; transition-duration: 0.01ms !important; } }`}</style>
-    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-5"><button onClick={() => { setView('library'); setProject(null); void refreshLibrary(); }} className="flex items-center gap-2.5 rounded-xl px-1.5 py-1 font-bold tracking-tight transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]">SceneForge</button><span className="hidden text-sm text-[var(--space-text-muted)] sm:block">Avatar-first explainers, directed scene by scene</span><div className="ml-auto flex gap-2">{project ? <button onClick={() => setAssetStudioOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><ImagePlus className="h-4 w-4" />Asset Studio</button> : null}<button onClick={() => setVergerOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><MessageSquareText className="h-4 w-4" />Verger</button><button aria-label="Settings" onClick={() => setView('settings')} className="rounded-xl border border-[var(--space-border-default)] p-2 transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Settings className="h-4 w-4" /></button></div></header>
-    {error ? <div className="flex items-center justify-between gap-3 border-b border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_14%,transparent)] px-5 py-2.5 text-sm leading-relaxed text-[var(--space-semantic-danger)]"><span>{friendlyErrorText(error)}</span><button aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded-lg p-1 transition-colors hover:bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_18%,transparent)]"><X className="h-4 w-4" /></button></div> : null}
-    {project && vergerSteps.length ? <details className="shrink-0 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2.5"><summary className="cursor-pointer text-xs font-semibold text-[var(--space-text-secondary)]">Production status — <span className="font-normal text-[var(--space-text-muted)]">{project.stage_note || note || (busy ? 'Working on the current stage' : 'Waiting for you')}</span></summary><div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">{vergerSteps.map((step) => <span key={step.label} className="flex items-center gap-2 text-xs">{step.state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--space-semantic-success)]" /> : step.state === 'active' ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--space-text-brand)]" /> : <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)]" />}<span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span></span>)}</div></details> : null}
-    <main className="flex-1 overflow-y-auto">{content()}</main>
-    {sceneImageError ? <div role="alert" className="absolute bottom-5 right-5 z-30 flex max-w-sm items-start gap-3 rounded-xl border border-[var(--space-semantic-danger)] bg-[var(--space-surface-card)] p-4 text-sm text-[var(--space-text-primary)] shadow-2xl"><span>{friendlyErrorText(sceneImageError)}</span><button aria-label="Dismiss image generation error" onClick={() => setSceneImageError('')}><X className="h-4 w-4" /></button></div> : null}
+  // The space surface token stays the base colour; the gradient rides on top of
+  // it as a background IMAGE, so the shell theme still drives the palette.
+  return <div className="sceneforge-app relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]" style={{ backgroundImage: 'linear-gradient(160deg, #0d0d1a, #1a1033)' }}>
+    <style>{`
+      @keyframes sf-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+      @keyframes sf-pulse { 0%, 100% { opacity: .42; } 50% { opacity: .82; } }
+      .sceneforge-app .sf-fade-up { animation: sf-fade-up .34s cubic-bezier(.22,.9,.3,1) both; }
+      .sceneforge-app .sf-skeleton { animation: sf-pulse 1.5s ease-in-out infinite; }
+      .sceneforge-app button, .sceneforge-app a { transition: transform .16s cubic-bezier(.22,.9,.3,1), background-color .16s ease, border-color .16s ease, box-shadow .2s ease, color .16s ease, opacity .16s ease; }
+      .sceneforge-app button:active:not(:disabled), .sceneforge-app a:active { transform: scale(.97); }
+      .sceneforge-app input:not([type='checkbox']):not([type='radio']), .sceneforge-app textarea, .sceneforge-app select, .sceneforge-app .input {
+        border-color: var(--space-border-default); outline: none; box-shadow: 0 0 0 1px var(--space-border-strong);
+        transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+      }
+      .sceneforge-app input:not([type='checkbox']):not([type='radio']):focus, .sceneforge-app textarea:focus, .sceneforge-app select:focus, .sceneforge-app .input:focus {
+        border-color: var(--space-brand-primary-500); box-shadow: 0 0 0 1px var(--space-brand-primary-500), 0 0 0 4px color-mix(in srgb, var(--space-brand-primary-500) 18%, transparent);
+      }
+      .sceneforge-app .sf-card { animation: sf-fade-up .34s cubic-bezier(.22,.9,.3,1) both; }
+      @supports (interpolate-size: allow-keywords) {
+        .sceneforge-app { interpolate-size: allow-keywords; }
+        .sceneforge-app details::details-content { block-size: 0; opacity: 0; overflow: clip; transition: block-size .32s cubic-bezier(.22,.9,.3,1), opacity .22s ease; }
+        .sceneforge-app details[open]::details-content { block-size: auto; opacity: 1; }
+      }
+      @media (max-width: 639px) {
+        .sceneforge-app header { padding-inline: 12px; gap: 6px; }
+        .sceneforge-app header > div:last-child button { font-size: 0; padding: 9px; }
+        .sceneforge-app header > div:last-child button svg { width: 17px; height: 17px; }
+      }
+      @media (prefers-reduced-motion: reduce) { .sceneforge-app *, .sceneforge-app *::before, .sceneforge-app *::after { animation: none !important; transition-duration: 0.01ms !important; } }
+    `}</style>
+    {workbenchMode ? null : <header className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-5"><button onClick={() => { setView('library'); setProject(null); void refreshLibrary(); }} className="flex items-center gap-2.5 rounded-xl px-1.5 py-1 font-bold tracking-tight transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]">SceneForge</button><span className="hidden text-sm text-[var(--space-text-muted)] sm:block">Avatar-first explainers, directed scene by scene</span><div className="ml-auto flex gap-2"><button onClick={onExitToStudio} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Clapperboard className="h-4 w-4" />Avatar Studio</button>{project ? <button onClick={() => setAssetStudioOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><ImagePlus className="h-4 w-4" />Asset Studio</button> : null}<button onClick={() => setVergerOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><MessageSquareText className="h-4 w-4" />Verger</button><button aria-label="Settings" onClick={() => setView('settings')} className="rounded-xl border border-[var(--space-border-default)] p-2 transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Settings className="h-4 w-4" /></button></div></header>}
+    {!workbenchMode && error ? <div role="alert" className="sf-fade-up flex flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_14%,transparent)] px-4 py-3 text-sm leading-relaxed sm:px-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_14%,transparent)]"><AlertTriangle className="h-4 w-4 text-[var(--space-semantic-danger)]" /></span><span className="min-w-[min(100%,240px)] flex-1 text-[var(--space-text-secondary)]"><strong className="block text-[var(--space-text-primary)]">This step needs attention</strong>{friendlyErrorText(error)}</span><button onClick={() => window.location.reload()} className="flex items-center gap-1.5 rounded-xl bg-[var(--space-brand-primary-600)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3.5 w-3.5" />Retry</button><button aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded-lg p-1.5 text-[var(--space-semantic-danger)] hover:bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_18%,transparent)]"><X className="h-4 w-4" /></button></div> : null}
+    {!workbenchMode && project && vergerSteps.length ? <details className="shrink-0 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2.5"><summary className="cursor-pointer text-xs font-semibold text-[var(--space-text-secondary)]">Production status — <span className="font-normal text-[var(--space-text-muted)]">{project.stage_note || note || (busy ? 'Working on the current stage' : 'Waiting for you')}</span></summary><div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">{vergerSteps.map((step) => <span key={step.label} className="flex items-center gap-2 text-xs">{step.state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--space-semantic-success)]" /> : step.state === 'active' ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--space-text-brand)]" /> : <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)]" />}<span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span></span>)}</div></details> : null}
+    {refreshingVideoLink ? <div className="flex shrink-0 items-center gap-2 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2 text-xs text-[var(--space-text-muted)]"><Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--space-text-brand)]" />Refreshing video link…</div> : null}
+    <main className={workbenchMode ? 'min-h-0 flex-1 overflow-hidden' : 'flex-1 overflow-y-auto'}>{content()}</main>
+    {sceneImageError ? <div role="alert" className="sf-fade-up absolute bottom-4 left-4 right-4 z-30 flex max-w-sm flex-wrap items-start gap-3 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_40%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,var(--space-surface-card))] p-4 text-sm text-[var(--space-text-primary)] shadow-2xl sm:left-auto sm:right-5"><AlertTriangle className="h-4 w-4 shrink-0 text-[var(--space-semantic-danger)]" /><span className="min-w-0 flex-1">{friendlyErrorText(sceneImageError)}</span><button onClick={() => window.location.reload()} className="flex items-center gap-1 rounded-lg bg-[var(--space-brand-primary-600)] px-2.5 py-1.5 text-xs font-semibold text-white"><RefreshCw className="h-3 w-3" />Retry</button><button aria-label="Dismiss image generation error" onClick={() => setSceneImageError('')} className="rounded-lg p-1"><X className="h-4 w-4" /></button></div> : null}
     {vergerOpen ? <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-xl flex-col border-l border-[var(--space-border-default)] bg-[var(--space-surface-card)] shadow-2xl">
       <div className="flex items-center justify-between border-b border-[var(--space-border-default)] px-6 py-4"><div><h2 className="text-lg font-bold tracking-tight">Verger</h2><p className="mt-0.5 text-xs text-[var(--space-text-muted)]">Your project director — it knows this project, its scenes and its timeline</p></div><button aria-label="Close Verger" onClick={() => setVergerOpen(false)} className="rounded-lg p-1.5 transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_7%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><X className="h-5 w-5" /></button></div>
       {project && vergerSteps.length ? <div className="border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-6 py-3">
@@ -1275,5 +1812,55 @@ export default function App() {
   </div>;
 }
 
-function Working({ text }: { text: string }) { return <div className="flex h-full min-h-[420px] items-center justify-center"><div className="text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--space-text-brand)]" /><p className="mt-4 text-[var(--space-text-secondary)]">{text}…</p></div></div>; }
+function Working({ text }: { text: string }) { return <div className="flex h-full min-h-[420px] items-center justify-center px-4"><div className="sf-fade-up w-full max-w-sm rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-6 text-center shadow-xl"><Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--space-text-brand)]" /><p className="mt-4 font-semibold text-[var(--space-text-primary)]">{text}…</p><p className="mt-1 text-sm text-[var(--space-text-muted)]">Your progress is saved as each stage lands.</p><div className="mt-5 grid gap-2"><span className="sf-skeleton h-2.5 rounded-full bg-[var(--space-surface-muted)]" /><span className="sf-skeleton mx-auto h-2.5 w-3/4 rounded-full bg-[var(--space-surface-muted)]" /></div></div></div>; }
 function Library({ projects, loading, onOpen, onNew }: { projects: Project[]; loading: boolean; onOpen: (id: string) => void; onNew: () => void }) { return <div className="mx-auto max-w-6xl px-6 py-10"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Your studio</p><h1 className="mt-2 text-3xl font-bold tracking-tight">SceneForge projects</h1></div><button onClick={onNew} className="flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_6px_18px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Plus className="h-4 w-4" />New project</button></div>{loading ? <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-36 animate-pulse rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)]" />)}</div> : <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project.id)} className="group rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 text-left transition-all hover:-translate-y-0.5 hover:border-[var(--space-border-strong)] hover:shadow-[0_10px_30px_rgba(0,0,0,0.3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><FolderOpen className="h-5 w-5 text-[var(--space-text-brand)] transition-transform group-hover:scale-110" /><div className="mt-4 line-clamp-2 font-semibold leading-snug">{project.topic}</div><div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--space-text-muted)]">{project.status.replace(/_/g, ' ')} · {project.aspect_ratio}</div></button>)}{!projects.length ? <div className="col-span-full flex flex-col items-center rounded-2xl border border-dashed border-[var(--space-border-default)] px-8 py-14 text-center"><span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--space-brand-primary-500)_12%,transparent)]"><Film className="h-6 w-6 text-[var(--space-text-brand)]" /></span><p className="mt-4 text-lg font-semibold text-[var(--space-text-primary)]">Direct your first explainer</p><p className="mt-1.5 max-w-sm text-sm leading-relaxed text-[var(--space-text-muted)]">Give SceneForge a topic — it researches the script, renders your avatar, and builds every supporting scene.</p><button onClick={onNew} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-2.5 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)]"><Plus className="h-4 w-4" />Start a project</button></div> : null}</div>}</div>; }
+
+// A brief routed here from the Vidverge Agent targets the full pipeline, so
+// the handoff is PEEKED at (never consumed) before the opening surface is
+// chosen — ForgePipeline is the only thing that may consume it.
+function pipelineHandoffWaiting(): boolean {
+  try {
+    const raw = window.localStorage.getItem(VIDVERGE_HANDOFF_KEY);
+    if (!raw) return false;
+    const handoff = JSON.parse(raw);
+    return Boolean(handoff && handoff.appId === 'sceneforge' && Date.now() - Number(handoff.ts || 0) < 30 * 60 * 1000);
+  } catch { return false; }
+}
+
+function initialSurface(): Surface {
+  if (pipelineHandoffWaiting()) return 'pipeline';
+  try {
+    const stored = window.localStorage.getItem(SURFACE_KEY);
+    return stored === 'pipeline' || stored === 'suite' ? stored : 'studio';
+  } catch { return 'studio'; }
+}
+
+export default function App() {
+  const [surface, setSurface] = useState<Surface>(initialSurface);
+  // The post-production editor is a THIRD face of SceneForge, opened on a
+  // finished avatar master. It is held as state rather than a route so the
+  // studio behind it keeps its own render state while the editor is open.
+  const [editorSource, setEditorSource] = useState<MotionEditorSource | null>(null);
+  const show = (next: Surface) => {
+    setSurface(next);
+    try { window.localStorage.setItem(SURFACE_KEY, next); } catch { /* private mode — the choice just does not persist */ }
+  };
+
+  // HeyGen serves signed URLs that expire while a long edit is in progress;
+  // the editor asks for a fresh one by video id instead of failing.
+  const refreshEditorLink = async (videoId: string, staleUrl: string): Promise<string> => {
+    const status = await fetchVideoStatus(videoId);
+    if (status.status !== 'completed' || !status.videoUrl || status.videoUrl === staleUrl) {
+      throw new Error(status.error || 'HeyGen has not made a fresh link for this video yet.');
+    }
+    return status.videoUrl;
+  };
+
+  if (editorSource) {
+    return <MotionEditor source={editorSource} onClose={() => setEditorSource(null)} onRefreshLink={refreshEditorLink} />;
+  }
+  if (surface === 'suite') return <HeyGenConsole onBackToQuickRender={() => show('studio')} />;
+  return surface === 'studio'
+    ? <AvatarStudio onOpenPipeline={() => show('pipeline')} onOpenSuite={() => show('suite')} onOpenEditor={setEditorSource} />
+    : <ForgePipeline onExitToStudio={() => show('studio')} />;
+}

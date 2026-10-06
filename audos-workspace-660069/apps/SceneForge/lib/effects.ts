@@ -121,6 +121,8 @@ export function effectiveComposition(kind: VisualKind, overlay?: { composition?:
  * caption/title can sit on top of the generated clip.
  */
 export interface OverlayConfig {
+  /** Legacy home of an Omni Flash scene's spoken line — newer rows keep it in spec.dialogue. */
+  dialogue?: string;
   text?: string;
   subtext?: string;
   font?: string;

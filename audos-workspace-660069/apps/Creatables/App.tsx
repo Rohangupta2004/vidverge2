@@ -561,16 +561,17 @@ export default function App() {
    * creatables-worker server function, then just READ the row every 5s. Falls
    * back to the legacy in-browser provider poll only when the workspace data
    * runtime is unavailable, so a run always lands one way or the other. */
-  async function settleThroughJobRow(args: { engine: string; engineName: string; operationId: string; cost?: string; eta?: string; fallbackNote?: string; longVideo?: boolean }): Promise<string> {
+  async function settleThroughJobRow(args: { engine: string; engineName: string; operationId: string; creditKey?: string; cost?: string; eta?: string; fallbackNote?: string; longVideo?: boolean }): Promise<string> {
     const row = await insertJobRow({
       engine: args.longVideo ? `long-video:${args.engine}` : args.engine,
       engine_name: args.engineName, prompt: prompt.slice(0, 500), kind: 'video',
-      status: 'running', operation_id: args.operationId, cost: args.cost || null, eta: args.eta || null,
+      status: 'running', operation_id: args.operationId, credit_entry_key: args.creditKey || null, cost: args.cost || null, eta: args.eta || null,
       fallback_note: args.fallbackNote || null, started_at: new Date().toISOString(),
     });
     if (!row?.id) {
       const poll = args.longVideo ? pollVeoLongVideo : pollGroupA;
       return poll(args.operationId, {
+        creditKey: args.creditKey,
         onProgress: (p) => setProgress(Math.max(12, Math.min(96, p))),
         isCancelled: () => cancelled.current,
       });
@@ -625,6 +626,7 @@ export default function App() {
           engine: kick.modelUsed || activeEngineId,
           engineName: ranOn,
           operationId: kick.operationId,
+          creditKey: (kick as any).creditKey,
           cost: kick.cost ? formatCost(kick.cost) : '',
           eta: kick.estimatedDuration || '',
           fallbackNote: kick.fallbackFrom ? `${gA.name} refused this job — re-routed to ${ranOn}.` : '',
@@ -664,6 +666,7 @@ export default function App() {
             engine: 'gemini-omni-flash-preview',
             engineName: ranOn,
             operationId: kick.operationId,
+            creditKey: (kick as any).creditKey,
             cost: kick.cost ? formatCost(kick.cost) : '',
             fallbackNote: `${rw.name} could not take this job — re-routed to ${ranOn}.`,
           });

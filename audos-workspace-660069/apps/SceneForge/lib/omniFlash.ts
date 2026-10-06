@@ -1,5 +1,7 @@
 import { WORKSPACE_ID, updateScene, type Project, type Scene } from './supabase';
 import { sleep, workspaceToken } from './proxy';
+import { generationHeaders, postGeneration } from '../../../lib/videoEngineClient';
+import { APP_IDS } from '../../../lib/appIds';
 
 /**
  * OMNI FLASH — DIALOGUE + LIPSYNC (the HeyGen-style middle-scene mode).
@@ -176,12 +178,10 @@ async function submitSegment(project: Project, line: string, characterImageUrl: 
   // every segment is what keeps one presenter across the whole take.
   if (characterImageUrl) payload.referenceImages = [{ imageData: characterImageUrl, referenceType: 'asset' }];
 
-  const response = await fetch('/api/veo/generate/video', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
-    body: JSON.stringify(payload),
-  });
-  const start = await response.json().catch(() => ({} as any));
+  // Posted through the shared engine client so the segment is recorded
+  // against SceneForge like every other clip this app films.
+  const { res: response, data } = await postGeneration('/api/veo/generate/video', payload, APP_IDS.sceneForge);
+  const start: any = data || {};
   const operationId = String(start.operationId || start.operation_id || '');
   // The proxy answers 200 with a placeholder id when the provider route itself
   // refused the job — polling that id would 404 forever.
@@ -193,7 +193,7 @@ async function submitSegment(project: Project, line: string, characterImageUrl: 
   for (let i = 0; i < 120; i += 1) {
     await sleep(5000);
     // A dropped poll is not a failed render — the next tick asks again.
-    const status = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`).then((r) => r.json()).catch(() => null);
+    const status = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, { headers: generationHeaders(APP_IDS.sceneForge) }).then((r) => r.json()).catch(() => null);
     if (!status) continue;
     if (status.status === 'completed' && status.videoUrl) return String(status.videoUrl);
     if (status.status === 'failed' || status.status === 'error') throw new Error(String(status.errorMessage || status.error || 'The dialogue segment failed at the provider.'));

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, Loader2, Play, Search, Upload } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Check, ChevronDown, Loader2, Play, RefreshCw, Search, Upload } from 'lucide-react';
 import { uploadFile } from '../lib/proxy';
-import { sortAvatars, sortVoices, suggestedVoices } from '../lib/heygenCatalog';
+import { sortAvatars, sortVoices, suggestedVoices, withIndiaSeedVoices } from '../lib/heygenCatalog';
 import type { HeyGenOptions } from '../hooks/useHeyGen';
 
 const DEFAULTS: HeyGenOptions = {
@@ -16,7 +16,7 @@ function Field(props: { label: string; children: any }) {
   return <label className="text-xs font-medium text-[var(--space-text-secondary)]">{props.label}<div className="mt-1">{props.children}</div></label>;
 }
 function Section(props: { title: string; children: any }) {
-  return <section className="my-6 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5"><h2 className="mb-4 font-semibold text-[var(--space-text-primary)]">{props.title}</h2>{props.children}</section>;
+  return <section className="sf-card my-6 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 transition-all hover:border-[var(--space-border-strong)] hover:shadow-xl"><h2 className="mb-4 font-semibold text-[var(--space-text-primary)]">{props.title}</h2>{props.children}</section>;
 }
 function Badge(props: { children: any }) {
   return <span className="rounded-full bg-[color-mix(in_srgb,var(--space-text-primary)_7%,transparent)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--space-text-muted)]">{props.children}</span>;
@@ -44,9 +44,11 @@ function LibraryTools(props: { query: string; onQuery: (value: string) => void; 
   </div>;
 }
 function CatalogNotice(props: { tone: 'error' | 'empty'; text: string }) {
-  return props.tone === 'error'
-    ? <div className="flex items-start gap-2 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] p-4 text-sm text-[var(--space-semantic-danger)]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{props.text}</span></div>
-    : <div className="rounded-xl border border-dashed border-[var(--space-border-default)] p-4 text-sm text-[var(--space-text-secondary)]">{props.text}</div>;
+  return <div className={props.tone === 'error' ? 'sf-fade-up flex flex-wrap items-center gap-3 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] p-4 text-sm' : 'sf-fade-up flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-4 text-sm'}>
+    {props.tone === 'error' ? <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--space-semantic-danger)]" /> : <Search className="h-4 w-4 shrink-0 text-[var(--space-text-brand)]" />}
+    <span className="min-w-[min(100%,220px)] flex-1 text-[var(--space-text-secondary)]">{props.text}</span>
+    <button type="button" onClick={() => window.location.reload()} className="flex items-center gap-1.5 rounded-lg bg-[var(--space-brand-primary-600)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3.5 w-3.5" />Refresh catalog</button>
+  </div>;
 }
 function LoadingGrid(props: { text: string; shape: 'portrait' | 'row' }) {
   return <div>
@@ -59,11 +61,12 @@ function LoadingGrid(props: { text: string; shape: 'portrait' | 'row' }) {
   </div>;
 }
 
-export default function HeyGenModule(props: { avatars: any[]; voices: any[]; catalogLoading: boolean; catalogError: string; aspectRatio: '16:9' | '9:16'; progress: string; busy: boolean; videoUrl?: string; onGenerate: (options: HeyGenOptions) => void }) {
-  const { avatars, voices, catalogLoading, catalogError, aspectRatio, progress, busy, videoUrl, onGenerate } = props;
+export default function HeyGenModule(props: { avatars: any[]; voices: any[]; catalogLoading: boolean; catalogError: string; aspectRatio: '16:9' | '9:16'; progress: string; busy: boolean; videoUrl?: string; refreshingVideoLink?: boolean; onVideoError?: () => void; onGenerate: (options: HeyGenOptions) => void }) {
+  const { avatars, voices, catalogLoading, catalogError, aspectRatio, progress, busy, videoUrl, refreshingVideoLink, onVideoError, onGenerate } = props;
   const [options, setOptions] = useState<HeyGenOptions>({ ...DEFAULTS, aspect_ratio: aspectRatio });
   const [advancedText, setAdvancedText] = useState('{}');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advancedError, setAdvancedError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [avatarQuery, setAvatarQuery] = useState('');
   const [avatarChip, setAvatarChip] = useState<CatalogChip>('all');
@@ -72,13 +75,16 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
   const [voiceChip, setVoiceChip] = useState<CatalogChip>('all');
   const [voiceLimit, setVoiceLimit] = useState(30);
   const [voiceScope, setVoiceScope] = useState<'suggested' | 'all'>('suggested');
+  const [voiceMode, setVoiceMode] = useState<'catalog' | 'custom'>('catalog');
+  const [customVoiceId, setCustomVoiceId] = useState('');
+  const [voiceError, setVoiceError] = useState('');
   useEffect(() => setOptions((old) => ({ ...old, aspect_ratio: aspectRatio })), [aspectRatio]);
   const patch = (value: Partial<HeyGenOptions>) => setOptions((old) => ({ ...old, ...value }));
 
   // Everything shown comes straight off the live catalog the hook fetched —
   // ordering puts Indian avatars and Indian-language/accent voices first.
   const avatarLibrary = useMemo(() => sortAvatars(avatars), [avatars]);
-  const voiceLibrary = useMemo(() => sortVoices(voices), [voices]);
+  const voiceLibrary = useMemo(() => sortVoices(withIndiaSeedVoices(voices)), [voices]);
   const selectedAvatar = useMemo(() => avatarLibrary.find((view) => view.id === options.avatar_id), [avatarLibrary, options.avatar_id]);
   const suggestion = useMemo(() => suggestedVoices(selectedAvatar?.raw, voiceLibrary), [selectedAvatar, voiceLibrary]);
   const suggestedList = useMemo(() => (suggestion ? voiceLibrary.filter((view) => suggestion.ids.has(view.id)) : []), [suggestion, voiceLibrary]);
@@ -100,9 +106,9 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
   // it never overrides a voice the user already picked.
   useEffect(() => {
     setVoiceScope('suggested');
-    if (!options.avatar_id || !suggestedList.length) return;
+    if (!options.avatar_id || !suggestedList.length || voiceMode === 'custom') return;
     setOptions((old) => (old.voice_id ? old : { ...old, voice_id: suggestedList[0].id }));
-  }, [options.avatar_id, suggestedList]);
+  }, [options.avatar_id, suggestedList, voiceMode]);
 
   async function uploadBackground(file?: File) {
     if (!file) return;
@@ -113,11 +119,15 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
     } finally { setUploading(false); }
   }
   function submit() {
-    try { onGenerate({ ...options, advanced: JSON.parse(advancedText || '{}') }); }
-    catch { window.alert('Advanced controls must be valid JSON.'); }
+    if (voiceMode === 'custom' && !options.voice_id.trim()) {
+      setVoiceError('Enter your HeyGen Voice ID (or Voice Clone ID) before generating, or pick a voice from the catalog.');
+      return;
+    }
+    try { setAdvancedError(''); onGenerate({ ...options, voice_id: options.voice_id.trim(), advanced: JSON.parse(advancedText || '{}') }); }
+    catch { setAdvancedError('Advanced controls must be valid JSON before generation can start.'); setShowAdvanced(true); }
   }
 
-  return <div className="mx-auto max-w-6xl px-6 py-9">
+  return <div className="sf-step-shell mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-9">
     <p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Step 3 · Avatar and voice</p>
     <h1 className="mt-2 text-3xl font-bold text-[var(--space-text-primary)]">Direct the presenter</h1>
     <p className="mt-2 text-[var(--space-text-secondary)]">Catalog choices come live from HeyGen v3. Additional future controls can be passed through in Advanced.</p>
@@ -163,33 +173,49 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
     </Section>
 
     <Section title="Voice">
-      {catalogLoading && !voiceLibrary.length ? <LoadingGrid text="Loading the live HeyGen voice catalog…" shape="row" />
-        : catalogError && !voiceLibrary.length ? <CatalogNotice tone="error" text={`The HeyGen voice list could not be loaded: ${catalogError} — reopen this step to retry.`} />
-          : !voiceLibrary.length ? <CatalogNotice tone="empty" text="HeyGen returned no voices for this account, so there is nothing to choose from yet." />
-            : <>
-              {suggestion && suggestedList.length ? <div className="mb-3 flex flex-wrap items-center gap-2">
-                <Chip active={voiceScope === 'suggested'} label={`Suggested for ${selectedAvatar?.name || 'this avatar'} (${suggestedList.length})`} onClick={() => setVoiceScope('suggested')} />
-                <Chip active={voiceScope === 'all'} label={`All voices (${voiceLibrary.length})`} onClick={() => setVoiceScope('all')} />
-                <span className="text-xs text-[var(--space-text-muted)]">{suggestion.reason} You can still pick any voice.</span>
-              </div> : null}
-              <LibraryTools query={voiceQuery} onQuery={setVoiceQuery} chip={voiceChip} onChip={setVoiceChip} placeholder="Search voices" hasIndian={voiceLibrary.some((view) => view.indian)} hasGender={voiceLibrary.some((view) => view.gender)} />
-              <p className="mb-2 text-xs text-[var(--space-text-muted)]">{filteredVoices.length} voices · live from HeyGen · Indian-accent and Indian-language voices are listed first{catalogLoading ? ' · loading the rest…' : ''}</p>
-              {filteredVoices.length
-                ? <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-                  {filteredVoices.slice(0, voiceLimit).map((view) => {
-                    const selected = options.voice_id === view.id;
-                    return <button key={view.id} type="button" onClick={() => patch({ voice_id: view.id })} className={selected ? 'rounded-xl border-2 border-[var(--space-brand-primary-500)] bg-[color-mix(in_srgb,var(--space-brand-primary-500)_8%,transparent)] p-3 text-left' : 'rounded-xl border border-[var(--space-border-default)] p-3 text-left transition-colors hover:border-[var(--space-border-strong)]'}>
+      {catalogError ? <div className="mb-3"><CatalogNotice tone="error" text={`The live HeyGen voice list could not be fully loaded: ${catalogError} — reopen this step to retry. The India voices below are always available.`} /></div> : null}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Chip active={voiceMode === 'catalog'} label="Catalog voices" onClick={() => { setVoiceMode('catalog'); setVoiceError(''); }} />
+        <Chip active={voiceMode === 'custom'} label="Custom Voice" onClick={() => { setVoiceMode('custom'); setVoiceError(''); patch({ voice_id: customVoiceId.trim() }); }} />
+      </div>
+      {voiceMode === 'custom'
+        ? <div className="sf-fade-up rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-4">
+          <Field label="Custom Voice ID"><input value={customVoiceId} onChange={(e) => { setCustomVoiceId(e.target.value); patch({ voice_id: e.target.value.trim() }); setVoiceError(''); }} placeholder="Paste a HeyGen Voice ID or Voice Clone ID" className="input" /></Field>
+          <p className="mt-2 text-xs text-[var(--space-text-muted)]">Enter your HeyGen Voice ID or Voice Clone ID.</p>
+          {voiceError ? <div role="alert" className="sf-fade-up mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] p-3 text-sm"><AlertTriangle className="h-4 w-4 shrink-0 text-[var(--space-semantic-danger)]" /><span className="min-w-[min(100%,220px)] flex-1 text-[var(--space-text-secondary)]">{voiceError}</span></div> : null}
+        </div>
+        : catalogLoading && !voiceLibrary.length ? <LoadingGrid text="Loading the live HeyGen voice catalog…" shape="row" />
+          : <>
+            {suggestion && suggestedList.length ? <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Chip active={voiceScope === 'suggested'} label={`Suggested for ${selectedAvatar?.name || 'this avatar'} (${suggestedList.length})`} onClick={() => setVoiceScope('suggested')} />
+              <Chip active={voiceScope === 'all'} label={`All voices (${voiceLibrary.length})`} onClick={() => setVoiceScope('all')} />
+              <span className="text-xs text-[var(--space-text-muted)]">{suggestion.reason} You can still pick any voice.</span>
+            </div> : null}
+            <LibraryTools query={voiceQuery} onQuery={setVoiceQuery} chip={voiceChip} onChip={setVoiceChip} placeholder="Search voices" hasIndian={voiceLibrary.some((view) => view.indian)} hasGender={voiceLibrary.some((view) => view.gender)} />
+            <p className="mb-2 text-xs text-[var(--space-text-muted)]">{filteredVoices.length} voices · live from HeyGen · India voices are grouped first{catalogLoading ? ' · loading the rest…' : ''}</p>
+            {filteredVoices.length
+              ? <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                {filteredVoices.slice(0, voiceLimit).map((view, index, list) => {
+                  const selected = voiceMode === 'catalog' && options.voice_id === view.id;
+                  const prev = list[index - 1];
+                  const indiaHeader = view.indian && (index === 0 || !prev.indian);
+                  const otherHeader = !view.indian && (index === 0 || prev.indian);
+                  return <Fragment key={view.id}>
+                    {indiaHeader ? <p className="col-span-full mt-1 text-xs font-semibold uppercase tracking-wide text-[var(--space-text-secondary)]">🇮🇳 India</p> : null}
+                    {otherHeader ? <p className="col-span-full mt-2 text-xs font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">All voices</p> : null}
+                    <button type="button" onClick={() => { patch({ voice_id: view.id }); setVoiceMode('catalog'); setVoiceError(''); }} className={selected ? 'rounded-xl border-2 border-[var(--space-brand-primary-500)] bg-[color-mix(in_srgb,var(--space-brand-primary-500)_8%,transparent)] p-3 text-left' : 'rounded-xl border border-[var(--space-border-default)] p-3 text-left transition-colors hover:border-[var(--space-border-strong)]'}>
                       <span className="flex items-center justify-between gap-2">
                         <span className="truncate text-sm font-medium text-[var(--space-text-primary)]">{view.name}</span>
                         {selected ? <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--space-brand-primary-600)]"><Check className="h-3 w-3 text-white" /></span> : null}
                       </span>
                       <span className="mt-1.5 flex flex-wrap gap-1"><Badge>{view.language}</Badge>{view.gender ? <Badge>{view.gender}</Badge> : null}</span>
-                    </button>;
-                  })}
-                  {filteredVoices.length > voiceLimit ? <button type="button" onClick={() => setVoiceLimit((old) => old + 60)} className="col-span-full rounded-xl border border-dashed border-[var(--space-border-default)] py-3 text-sm text-[var(--space-text-secondary)] transition-colors hover:border-[var(--space-border-strong)]">Show more ({filteredVoices.length - voiceLimit} remaining)</button> : null}
-                </div>
-                : <CatalogNotice tone="empty" text={voiceScope === 'suggested' ? 'No suggested voice matches this search — switch to All voices.' : 'No voices match this search or filter.'} />}
-            </>}
+                    </button>
+                  </Fragment>;
+                })}
+                {filteredVoices.length > voiceLimit ? <button type="button" onClick={() => setVoiceLimit((old) => old + 60)} className="col-span-full rounded-xl border border-dashed border-[var(--space-border-default)] py-3 text-sm text-[var(--space-text-secondary)] transition-colors hover:border-[var(--space-border-strong)]">Show more ({filteredVoices.length - voiceLimit} remaining)</button> : null}
+              </div>
+              : <CatalogNotice tone="empty" text={voiceScope === 'suggested' ? 'No suggested voice matches this search — switch to All voices.' : 'No voices match this search or filter.'} />}
+          </>}
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <Field label={'Speed ' + options.voice_settings.speed.toFixed(2) + 'x'}><input type="range" min={0.5} max={1.5} step={0.05} value={options.voice_settings.speed} onChange={(e) => patch({ voice_settings: { ...options.voice_settings, speed: Number(e.target.value) } })} /></Field>
         <Field label="Pitch pass-through"><input type="number" value={options.voice_settings.pitch || 0} onChange={(e) => patch({ voice_settings: { ...options.voice_settings, pitch: Number(e.target.value) } })} className="input" /></Field>
@@ -212,13 +238,15 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
       </div>
     </Section>
 
-    <button onClick={() => setShowAdvanced(!showAdvanced)} className="flex items-center gap-2 text-sm text-[var(--space-text-secondary)]"><ChevronDown className={showAdvanced ? 'h-4 w-4 rotate-180' : 'h-4 w-4'} /> Advanced pass-through JSON</button>
-    {showAdvanced ? <textarea value={advancedText} onChange={(e) => setAdvancedText(e.target.value)} rows={6} className="mt-2 w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-3 font-mono text-sm text-[var(--space-text-primary)]" /> : null}
-    <button disabled={busy || !options.avatar_id || !options.voice_id} onClick={submit} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-3 font-semibold text-white disabled:opacity-40">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{videoUrl ? 'Regenerate avatar video' : 'Generate Avatar Video'}</button>
+    <button aria-expanded={showAdvanced} onClick={() => setShowAdvanced(!showAdvanced)} className="flex items-center gap-2 text-sm text-[var(--space-text-secondary)]"><ChevronDown className={showAdvanced ? 'h-4 w-4 rotate-180' : 'h-4 w-4'} /> Advanced pass-through JSON</button>
+    {showAdvanced ? <textarea value={advancedText} onChange={(e) => { setAdvancedText(e.target.value); setAdvancedError(''); }} rows={6} className="mt-2 w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-3 font-mono text-sm text-[var(--space-text-primary)]" /> : null}
+    {advancedError ? <div role="alert" className="sf-fade-up mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] p-3 text-sm"><AlertTriangle className="h-4 w-4 text-[var(--space-semantic-danger)]" /><span className="min-w-[min(100%,220px)] flex-1 text-[var(--space-text-secondary)]">{advancedError}</span><button type="button" onClick={submit} className="flex items-center gap-1 rounded-lg bg-[var(--space-brand-primary-600)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3 w-3" />Try again</button></div> : null}
+    <button disabled={busy || !options.avatar_id || (voiceMode === 'catalog' && !options.voice_id)} onClick={submit} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-3 font-semibold text-white disabled:opacity-40">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{videoUrl ? 'Regenerate avatar video' : 'Generate Avatar Video'}</button>
     {progress ? <p className="mt-2 text-sm text-[var(--space-text-brand)]">{progress}</p> : null}
     {videoUrl
-      ? <video src={videoUrl} controls playsInline className={aspectRatio === '9:16' ? 'mt-5 max-h-[520px] max-w-xs rounded-2xl bg-black' : 'mt-5 w-full max-w-3xl rounded-2xl bg-black'} />
-      : busy ? <div className={aspectRatio === '9:16' ? 'mt-5 flex max-h-[520px] min-h-72 max-w-xs animate-pulse items-center justify-center rounded-2xl bg-[var(--space-surface-muted)]' : 'mt-5 flex min-h-64 w-full max-w-3xl animate-pulse items-center justify-center rounded-2xl bg-[var(--space-surface-muted)]'}><span className="text-sm text-[var(--space-text-secondary)]">Avatar video rendering…</span></div>
+      ? <video key={videoUrl} src={videoUrl} controls playsInline onError={onVideoError} className={aspectRatio === '9:16' ? 'mt-5 max-h-[520px] max-w-xs rounded-2xl bg-black' : 'mt-5 w-full max-w-3xl rounded-2xl bg-black'} />
+      : busy ? <div className={aspectRatio === '9:16' ? 'mt-5 flex max-h-[520px] min-h-72 max-w-xs animate-pulse items-center justify-center rounded-2xl bg-[var(--space-surface-muted)]' : 'mt-5 flex min-h-64 w-full max-w-3xl animate-pulse items-center justify-center rounded-2xl bg-[var(--space-surface-muted)]'}><span className="flex items-center gap-2 text-sm text-[var(--space-text-secondary)]"><Loader2 className="h-4 w-4 animate-spin text-[var(--space-text-brand)]" />Avatar video rendering…</span></div>
         : null}
+    {refreshingVideoLink ? <p className="mt-2 flex items-center gap-2 text-xs text-[var(--space-text-muted)]"><Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--space-text-brand)]" />Refreshing video link…</p> : null}
   </div>;
 }

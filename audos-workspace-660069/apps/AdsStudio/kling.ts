@@ -171,7 +171,7 @@ async function kickoff(path: string, body: Record<string, unknown>, context: str
   if (!res.ok) throw describeHttpError(res.status, data, context);
   const taskId = String(data?.taskId || data?.task_id || '');
   if (!taskId) {
-    throw new EngineError('Kling accepted the request without returning a task id.', { code: 'no_task_id', status: res.status, detail: data });
+    throw new EngineError('Kling accepted the request without returning a task id.', { code: 'no_task_id', status: res.status });
   }
   return taskId;
 }

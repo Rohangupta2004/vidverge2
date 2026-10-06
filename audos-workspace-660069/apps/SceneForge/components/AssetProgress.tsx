@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Circle, Clapperboard, Eye, GitBranch, Image as ImageIcon, Loader2, RefreshCw, ShieldAlert, ShieldCheck, SkipForward, Type, Undo2, X } from 'lucide-react';
 import type { Project, Scene } from '../lib/supabase';
 import { isVideoUrl, sceneKind, sceneSettled } from '../lib/sceneState';
@@ -17,6 +17,19 @@ function phaseOf(project: Project | null, settled: number, total: number) {
   if (project.status === 'assembling') return 'Assembling the final film';
   if (settled === total && total > 0) return 'Every scene is settled — ready to assemble';
   return 'Waiting to start';
+}
+
+function formatStepElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
+function displayStatus(scene: Scene): 'pending' | 'running' | 'done' | 'failed' {
+  if (scene.status === 'error') return 'failed';
+  if (scene.status === 'generating') return 'running';
+  if (sceneSettled(scene) || scene.status === 'skipped') return 'done';
+  return 'pending';
 }
 
 function sceneLabel(scene: Scene) {
@@ -87,8 +100,42 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
   const failed = scenes.filter((scene) => scene.status === 'error');
   const allReady = total > 0 && settled === total;
   const percent = total ? Math.round(settled / total * 100) : 0;
+  const timings = useRef<Record<string, { status: ReturnType<typeof displayStatus>; startedAt?: number; elapsedMs?: number }>>({});
+  const [nowMs, setNowMs] = useState(Date.now());
+  const timingSignature = scenes.map((scene) => `${scene.id}:${displayStatus(scene)}`).join('|');
+  useEffect(() => {
+    const now = Date.now();
+    const next = { ...timings.current };
+    scenes.forEach((scene) => {
+      const status = displayStatus(scene);
+      const previous = next[scene.id];
+      const rowAt = Date.parse(String((scene as Scene & { updated_at?: string }).updated_at || ''));
+      if (status === 'running' && previous?.status !== 'running') {
+        next[scene.id] = { status, startedAt: previous ? now : (Number.isFinite(rowAt) ? rowAt : now) };
+      } else if (status !== 'running' && previous?.status === 'running' && previous.startedAt) {
+        next[scene.id] = { status, elapsedMs: Math.max(0, now - previous.startedAt) };
+      } else {
+        next[scene.id] = { ...previous, status };
+      }
+    });
+    timings.current = next;
+    setNowMs(now);
+  }, [timingSignature]);
+  const hasRunning = scenes.some((scene) => displayStatus(scene) === 'running');
+  useEffect(() => {
+    if (!hasRunning) return;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasRunning, timingSignature]);
+  const elapsedFor = (scene: Scene) => {
+    const status = displayStatus(scene);
+    const timing = timings.current[scene.id];
+    if (status === 'running' && timing?.startedAt) return formatStepElapsed(nowMs - timing.startedAt);
+    if ((status === 'done' || status === 'failed') && timing?.elapsedMs !== undefined) return formatStepElapsed(timing.elapsedMs);
+    return '—';
+  };
 
-  return <div className="mx-auto max-w-4xl px-6 py-10">
+  return <div className="sf-step-shell mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-10">
     <p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Step 6 · Middle visuals</p>
     <h1 className="mt-2 text-3xl font-bold text-[var(--space-text-primary)]">Each scene is produced its own way</h1>
     <p className="mt-2 text-sm leading-relaxed text-[var(--space-text-secondary)]">AI Video scenes generate real clips in parallel; Motion Graphic and Text Overlay scenes are recorded right here in your browser by the GSAP engine (exact text, never hallucinated); Image scenes draw one still. Every clip is cached — re-assembly never regenerates a scene.</p>
@@ -112,7 +159,14 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
       <span className="text-sm text-[var(--space-text-secondary)]">Avatar video rendering…</span>
     </div>}
 
-    <div className="mt-5 space-y-3">{scenes.map((scene) => {
+    {!total ? <div className="mt-5 flex flex-col items-center rounded-2xl border border-dashed border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-6 py-10 text-center">
+      <ImageIcon className="h-7 w-7 text-[var(--space-text-brand)]" />
+      <p className="mt-3 font-semibold text-[var(--space-text-primary)]">No scenes are queued yet</p>
+      <p className="mt-1 max-w-md text-sm text-[var(--space-text-muted)]">Return to the scene plan, add the moments you want, then generate the supporting visuals.</p>
+      {onResume ? <button disabled={busy} onClick={onResume} className="mt-4 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">Generate scenes</button> : null}
+    </div> : null}
+
+    <div className="mt-5 space-y-3">{scenes.map((scene, sceneIndex) => {
       const done = sceneSettled(scene) && scene.status !== 'skipped';
       const working = scene.status === 'generating';
       const broken = scene.status === 'error';
@@ -122,7 +176,7 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
       const hasVideo = isVideoUrl(scene.render_url);
       const thumb = hasVideo ? '' : scene.render_url || scene.overlay_config?.assetUrl || '';
       const legacyPreviewable = kind === 'legacy' && Boolean(scene.remotion_code?.trim());
-      return <div key={scene.id} className={skipped ? 'flex items-center gap-4 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4 opacity-55' : 'flex items-center gap-4 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4 transition-colors hover:border-[var(--space-border-strong)]'}>
+      return <div key={scene.id} className={skipped ? 'sf-card flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4 opacity-55 sm:gap-4' : 'sf-card flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4 transition-all hover:-translate-y-0.5 hover:border-[var(--space-border-strong)] hover:shadow-xl sm:gap-4'} style={{ animationDelay: `${Math.min(sceneIndex, 10) * 45}ms` }}>
         {/* 80x60 inline preview, shown the instant THIS scene's media lands. */}
         <span className="flex h-[60px] w-[80px] shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--space-surface-muted)]">
           {hasVideo
@@ -134,10 +188,13 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
                   : kind === 'text_graphics' ? <Type className="h-5 w-5 text-[var(--space-text-muted)]" /> : <ImageIcon className="h-5 w-5 text-[var(--space-text-muted)]" />}
         </span>
         {done ? <CheckCircle2 className="h-5 w-5 shrink-0 text-[var(--space-semantic-success)]" /> : working ? <Loader2 className="h-5 w-5 shrink-0 animate-spin text-[var(--space-text-brand)]" /> : broken ? <AlertCircle className="h-5 w-5 shrink-0 text-[var(--space-semantic-danger)]" /> : <Circle className="h-5 w-5 shrink-0 text-[var(--space-text-muted)]" />}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[min(100%,240px)] flex-1">
           <div className="flex items-center gap-2 font-semibold text-[var(--space-text-primary)]">Scene {scene.scene_index}<span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: badge.color, background: `color-mix(in srgb, ${badge.color} 14%, transparent)` }}><badge.icon className="h-3 w-3" />{badge.label}</span></div>
           <p className="truncate text-sm text-[var(--space-text-secondary)]">{scene.description}</p>
-          <p className={broken ? 'mt-1 text-xs text-[var(--space-semantic-danger)]' : 'mt-1 text-xs text-[var(--space-text-muted)]'}>{sceneLabel(scene)}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+            <span className={broken ? 'text-[var(--space-semantic-danger)]' : 'text-[var(--space-text-muted)]'}>{sceneLabel(scene)}</span>
+            <span className={working ? 'rounded-full bg-[color-mix(in_srgb,var(--space-brand-primary-500)_12%,transparent)] px-2 py-0.5 font-mono font-semibold uppercase tracking-wide text-[var(--space-text-brand)]' : broken ? 'rounded-full bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] px-2 py-0.5 font-mono font-semibold uppercase tracking-wide text-[var(--space-semantic-danger)]' : 'rounded-full bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] px-2 py-0.5 font-mono font-semibold uppercase tracking-wide text-[var(--space-text-muted)]'}>{displayStatus(scene)} · {elapsedFor(scene)}</span>
+          </div>
           <QaBadge scene={scene} />
         </div>
         {hasVideo && !skipped ? <button onClick={() => setVideoSceneId(scene.id)} className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,var(--space-brand-primary-500)_45%,transparent)] bg-[color-mix(in_srgb,var(--space-brand-primary-500)_10%,transparent)] px-3 py-2 text-xs font-semibold text-[var(--space-text-brand)] transition hover:bg-[color-mix(in_srgb,var(--space-brand-primary-500)_18%,transparent)]"><Eye className="h-3.5 w-3.5" />Preview</button> : null}
@@ -157,7 +214,11 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
       </div>
     </div> : null}
 
-    {failed.length ? <p className="mt-4 text-sm text-[var(--space-semantic-danger)]">{failed.length} scene{failed.length === 1 ? '' : 's'} failed — each one can be retried, switched to Text/Graphics, or skipped. The rest of the film is unaffected.</p> : null}
+    {failed.length ? <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_40%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_10%,transparent)] p-4 text-sm">
+      <AlertCircle className="h-5 w-5 shrink-0 text-[var(--space-semantic-danger)]" />
+      <p className="min-w-[min(100%,220px)] flex-1 text-[var(--space-text-secondary)]"><strong className="text-[var(--space-text-primary)]">{failed.length} scene{failed.length === 1 ? '' : 's'} need attention.</strong> Retry, switch to Text Overlay, or skip each failed scene; the rest of the film is safe.</p>
+      {onRetryScene ? <button onClick={() => onRetryScene(failed[0])} className="rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-2 text-xs font-semibold text-white"><RefreshCw className="mr-1.5 inline h-3.5 w-3.5" />Retry first failed scene</button> : null}
+    </div> : null}
 
     {/* FULL-FILM DRAFT PREVIEW before the production render: the browser plays
         the complete composition from the same timeline and props the Remotion
@@ -165,7 +226,7 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
         captions and the ducked music bed. Strictly a preview: the final MP4 is
         always produced by the platform renderer. */}
     {project && allReady ? <div className="mt-6 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-5">
-      <button onClick={() => setFilmPreviewOpen((open) => !open)} className="flex w-full items-center gap-2 text-left">
+      <button aria-expanded={filmPreviewOpen} onClick={() => setFilmPreviewOpen((open) => !open)} className="flex w-full items-center gap-2 text-left">
         <Clapperboard className="h-4 w-4 text-[var(--space-text-brand)]" />
         <span className="font-semibold text-[var(--space-text-primary)]">Preview the full film before rendering</span>
         <span className="ml-auto text-xs font-semibold text-[var(--space-text-brand)]">{filmPreviewOpen ? 'Hide' : 'Show'}</span>

@@ -7,13 +7,13 @@
  * clip at a time). Failed scenes offer per-scene recovery that never touches
  * completed clips.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, ArrowRight, Check, Circle, CircleDot,
   Loader2, Play, RefreshCw, SkipForward, Sparkles, UserRound, Wand2, Zap,
 } from 'lucide-react';
 import { Film, FilmScene, T } from './api';
-import { audioReady, musicReady, narrationReady, sfxReady } from './pipeline/audio';
+import { audioReady, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
 import { videoEngine } from '../../lib/videoEngines';
 
 const DONE = new Set(['completed', 'skipped']);
@@ -41,12 +41,18 @@ function statusMeta(s: FilmScene): { word: string; color: string; icon: any } {
 
 function referenceLabel(s: FilmScene, scenes: FilmScene[]): string {
   const prev = [...scenes].filter((x) => x.idx < s.idx && x.status === 'completed').sort((a, b) => b.idx - a.idx)[0];
-  switch (String(s.reference_type || '')) {
-    case 'previous_final_frame': return prev ? `Scene ${prev.idx + 1} final frame` : 'Previous final frame';
-    case 'character_reference': return 'Locked character reference';
-    case 'scene_reference': return 'Scene reference image';
-    default: return 'None — prompt only';
-  }
+  const base = (() => {
+    switch (String(s.reference_type || '')) {
+      case 'previous_final_frame': return prev ? `Scene ${prev.idx + 1} final frame` : 'Previous final frame';
+      case 'character_reference': return 'Character reference';
+      case 'scene_reference': return 'Scene reference image';
+      default: return 'None — prompt only';
+    }
+  })();
+  // The dual reference: a seed frame AND a character image travelling together.
+  const assets = Array.isArray(s.reference_assets) ? s.reference_assets : [];
+  const dual = assets.some((a) => a.role === 'first_frame') && assets.some((a) => a.role === 'reference');
+  return dual ? `${base} + character reference` : base;
 }
 
 export default function RenderRoom(props: {
@@ -70,6 +76,7 @@ export default function RenderRoom(props: {
   const { film, note, busy, auto, autoPost } = props;
   const scenes = [...(Array.isArray(props.scenes) ? props.scenes : [])].sort((a, b) => a.idx - b.idx);
   const completed = scenes.filter((s) => s.status === 'completed');
+  const failedScenes = scenes.filter((s) => s.status === 'failed');
   const generating = scenes.find((s) => s.status === 'generating') || null;
   const active = scenes.find((s) => !DONE.has(String(s.status))) || null;
   const allDone = scenes.length > 0 && scenes.every((s) => DONE.has(String(s.status)));
@@ -87,6 +94,11 @@ export default function RenderRoom(props: {
         <div style={{ padding: '16px 16px 10px' }}>
           <div style={{ color: T.bone, fontSize: 14.5, fontWeight: 700, letterSpacing: -0.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{film.title || 'Your film'}</div>
           <div style={{ color: T.muted, fontSize: 11.5, marginTop: 4 }}>{completed.length} of {scenes.length} clips completed</div>
+          {generating ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: T.live, fontSize: 11.5, fontWeight: 700, marginTop: 4 }}>
+              <Loader2 size={11} className="animate-spin" /> Generating scene {generating.idx + 1}/{scenes.length}
+            </div>
+          ) : null}
           <div style={{ marginTop: 8, height: 4, background: T.raised, borderRadius: 2, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${scenes.length ? Math.round((completed.length / scenes.length) * 100) : 2}%`, background: T.live, transition: 'width 0.6s ease' }} />
           </div>
@@ -146,11 +158,42 @@ export default function RenderRoom(props: {
             </div>
           ) : null}
 
+          {/* Partial failures are never swallowed: the scenes that refused are
+              listed here with their real reason and a retry that touches only
+              them, while every other clip keeps its progress. */}
+          {failedScenes.length ? (
+            <div style={{ marginTop: 6, marginBottom: 10, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.3)', borderRadius: 12, padding: '13px 15px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <AlertTriangle size={14} color={T.fault} style={{ flexShrink: 0 }} />
+                <span style={{ color: T.fault, fontSize: 13, fontWeight: 700 }}>
+                  {completed.length} of {scenes.length} scenes succeeded, {failedScenes.length} failed
+                </span>
+                <button
+                  className="s2v-lift"
+                  disabled={busy || !!generating}
+                  onClick={() => { const first = failedScenes[0]; if (first) props.onRetry(first); }}
+                  style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, background: busy || generating ? T.raised : T.live, color: busy || generating ? T.dim : '#1A1205', border: 'none', borderRadius: 9, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: busy || generating ? 'default' : 'pointer' }}
+                >
+                  <RefreshCw size={12} /> Retry failed only
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                {failedScenes.map((s) => (
+                  <div key={s.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <span style={{ color: T.muted, fontFamily: T.mono, fontSize: 11, flexShrink: 0, paddingTop: 1 }}>Scene {String(s.idx + 1).padStart(2, '0')}</span>
+                    <span style={{ color: T.fault, fontSize: 11.5, lineHeight: 1.5, minWidth: 0, flex: 1 }}>{customerError(s.error)}</span>
+                    <button className="s2v-ghost" disabled={busy || !!generating} onClick={() => props.onRetry(s)} style={{ flexShrink: 0, background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 8, padding: '4px 10px', fontSize: 11, cursor: busy || generating ? 'default' : 'pointer' }}>Retry</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {allDone && !selected ? (
             <div style={{ color: T.done, fontSize: 14, marginTop: 30, textAlign: 'center' }}>All scenes are complete — assemble the final film.</div>
           ) : null}
 
-          {selected ? <ScenePanel scene={selected} scenes={scenes} film={film} isActive={selectedIsActive} busy={busy} auto={auto} {...props} /> : null}
+          {selected ? <ScenePanel {...props} scene={selected} scenes={scenes} film={film} isActive={selectedIsActive} busy={busy} auto={auto} /> : null}
         </div>
       </div>
     </div>
@@ -160,6 +203,12 @@ export default function RenderRoom(props: {
 /** The pipeline's post-scene steps — REAL backend states, never faked: a ✓
  * appears only when that layer's asset actually exists, a failure shows as a
  * failure, and “queued” vs “generating” reflect the machine state. */
+function formatStepElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
 function GenerationStates({ film, scenes }: { film: Film; scenes: FilmScene[] }) {
   const completed = scenes.filter((s) => s.status === 'completed').length;
   const allDone = scenes.length > 0 && scenes.every((s) => DONE.has(String(s.status)));
@@ -170,40 +219,80 @@ function GenerationStates({ film, scenes }: { film: Film; scenes: FilmScene[] })
   const continuity = scenes.some((s) => s.keyframe_url);
   const audioRunning = film.machine_state === 'AUDIO_PLANNING' || film.machine_state === 'AUDIO_GENERATING';
   const nReady = !!audio && narrationReady(audio);
-  const nFailed = !!audio && audio.narration.some((n) => n.status === 'failed');
+  const nFailed = !!audio && audio.narration.some((n) => isSpokenSource(n.voice_source) && n.status === 'failed');
+  const silentVoice = audio?.voice_source === 'none';
   const mReady = !!audio && musicReady(audio);
   const mFailed = audio?.music?.status === 'failed';
   const sReady = !!audio && sfxReady(audio);
   const sFailed = audio?.sfx_status === 'failed';
 
   type RowState = 'done' | 'active' | 'failed' | 'todo';
-  const layer = (ready: boolean, failed: boolean, active: boolean, labels: { done: string; failed: string; active: string; todo: string }): { label: string; state: RowState } =>
-    ready ? { label: labels.done, state: 'done' }
-      : failed ? { label: labels.failed, state: 'failed' }
-        : active ? { label: labels.active, state: 'active' }
-          : { label: labels.todo, state: 'todo' };
+  type Row = { key: string; label: string; state: RowState };
+  const layer = (key: string, ready: boolean, failed: boolean, active: boolean, labels: { done: string; failed: string; active: string; todo: string }): Row =>
+    ready ? { key, label: labels.done, state: 'done' }
+      : failed ? { key, label: labels.failed, state: 'failed' }
+        : active ? { key, label: labels.active, state: 'active' }
+          : { key, label: labels.todo, state: 'todo' };
 
-  const rows: { label: string; state: RowState }[] = [
-    { label: 'Script analyzed', state: film.plan ? 'done' : 'active' },
-    { label: `Video scenes (${completed}/${scenes.length})`, state: allDone ? 'done' : sceneFailed ? 'failed' : 'active' },
-    { label: 'Character continuity', state: continuity ? 'done' : 'todo' },
-    layer(nReady, nFailed, audioRunning && !nReady, { done: 'Narration ready', failed: 'Narration failed', active: 'Generating narration…', todo: audio ? 'Narration queued' : 'Narration' }),
-    layer(mReady, !!mFailed, audioRunning && nReady && !mReady, { done: audio?.music?.status === 'skipped' ? 'Music skipped' : 'Music selected', failed: 'Music failed', active: 'Selecting music…', todo: audio ? 'Music queued' : 'Music' }),
-    layer(sReady, !!sFailed, audioRunning && nReady && mReady && !sReady, { done: audio?.sfx_status === 'skipped' ? 'SFX skipped' : audio?.sfx_status === 'none' ? 'No SFX needed' : 'SFX prepared', failed: 'SFX failed', active: 'Preparing SFX…', todo: audio ? 'SFX queued' : 'SFX' }),
+  const rows: Row[] = [
+    { key: 'script', label: 'Script analyzed', state: film.plan ? 'done' : 'active' },
+    { key: 'scenes', label: `Video scenes (${completed}/${scenes.length})`, state: allDone ? 'done' : sceneFailed ? 'failed' : 'active' },
+    { key: 'continuity', label: 'Character continuity', state: continuity ? 'done' : 'todo' },
+    layer('narration', nReady, nFailed, audioRunning && !nReady, { done: silentVoice ? 'No voiceover' : 'Voiceover ready', failed: 'Voiceover failed', active: 'Recording the voiceover…', todo: audio ? 'Voiceover queued' : 'Voiceover (optional)' }),
+    layer('music', mReady, !!mFailed, audioRunning && nReady && !mReady, { done: audio?.music?.status === 'skipped' ? 'Music skipped' : 'Music selected', failed: 'Music failed', active: 'Selecting music…', todo: audio ? 'Music queued' : 'Music' }),
+    layer('sfx', sReady, !!sFailed, audioRunning && nReady && mReady && !sReady, { done: audio?.sfx_status === 'skipped' ? 'SFX skipped' : audio?.sfx_status === 'none' ? 'No SFX needed' : 'SFX prepared', failed: 'SFX failed', active: 'Preparing SFX…', todo: audio ? 'SFX queued' : 'SFX' }),
     finalReady
-      ? { label: 'Final video ready', state: 'done' as const }
+      ? { key: 'assembly', label: 'Final video ready', state: 'done' as const }
       : assembling
-        ? { label: 'Assembling final video…', state: 'active' as const }
-        : { label: 'Ready for Final Assembly', state: allDone && !!audio && audioReady(audio) ? 'done' as const : 'todo' as const },
+        ? { key: 'assembly', label: 'Assembling final video…', state: 'active' as const }
+        : { key: 'assembly', label: allDone && !!audio && audioReady(audio) ? 'Ready for Final Assembly' : 'Final assembly', state: 'todo' as const },
   ];
+
+  const timings = useRef<Record<string, { state: RowState; startedAt?: number; elapsedMs?: number }>>({});
+  const [nowMs, setNowMs] = useState(Date.now());
+  const signature = rows.map((row) => `${row.key}:${row.state}`).join('|');
+  useEffect(() => {
+    const now = Date.now();
+    const reopenedAt = Date.parse(String(film.updated_at || ''));
+    const next = { ...timings.current };
+    rows.forEach((row) => {
+      const previous = next[row.key];
+      if (row.state === 'active' && previous?.state !== 'active') {
+        next[row.key] = { state: row.state, startedAt: previous ? now : (Number.isFinite(reopenedAt) ? reopenedAt : now) };
+      } else if (row.state !== 'active' && previous?.state === 'active' && previous.startedAt) {
+        next[row.key] = { state: row.state, elapsedMs: Math.max(0, now - previous.startedAt) };
+      } else {
+        next[row.key] = { ...previous, state: row.state };
+      }
+    });
+    timings.current = next;
+    setNowMs(now);
+  }, [film.id, film.updated_at, signature]);
+  const hasRunning = rows.some((row) => row.state === 'active');
+  useEffect(() => {
+    if (!hasRunning) return;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasRunning, signature]);
+
+  const statusWord = (state: RowState) => state === 'active' ? 'running' : state === 'todo' ? 'pending' : state;
+  const elapsedFor = (row: Row) => {
+    const timing = timings.current[row.key];
+    if (row.state === 'active' && timing?.startedAt) return formatStepElapsed(nowMs - timing.startedAt);
+    if ((row.state === 'done' || row.state === 'failed') && timing?.elapsedMs !== undefined) return formatStepElapsed(timing.elapsedMs);
+    return '—';
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {rows.map((r, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {rows.map((r) => (
+        <div key={r.key} className="s2v-row" style={{ display: 'flex', alignItems: 'center', gap: 7, borderRadius: 7, padding: '3px 5px' }}>
           <span style={{ color: r.state === 'done' ? T.done : r.state === 'active' ? T.live : r.state === 'failed' ? T.fault : T.dim, display: 'flex', flexShrink: 0 }}>
-            {r.state === 'done' ? <Check size={11} /> : r.state === 'active' ? <CircleDot size={11} /> : r.state === 'failed' ? <AlertTriangle size={11} /> : <Circle size={10} />}
+            {r.state === 'done' ? <Check size={11} /> : r.state === 'active' ? <Loader2 size={11} className="animate-spin" /> : r.state === 'failed' ? <AlertTriangle size={11} /> : <Circle size={10} />}
           </span>
-          <span style={{ color: r.state === 'todo' ? T.dim : r.state === 'failed' ? T.fault : T.muted, fontSize: 11 }}>{r.label}</span>
+          <span style={{ color: r.state === 'todo' ? T.dim : r.state === 'failed' ? T.fault : T.muted, fontSize: 11, minWidth: 0, flex: 1 }}>{r.label}</span>
+          <span style={{ color: r.state === 'failed' ? T.fault : r.state === 'active' ? T.live : T.dim, fontSize: 9.5, fontFamily: T.mono, textTransform: 'uppercase' }}>{statusWord(r.state)}</span>
+          <span style={{ width: 46, textAlign: 'right', color: T.dim, fontSize: 9.5, fontFamily: T.mono, fontVariantNumeric: 'tabular-nums' }}>{elapsedFor(r)}</span>
         </div>
       ))}
     </div>
@@ -346,7 +435,7 @@ function ScenePanel(props: {
         ) : null}
         {s.status === 'generating' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: T.live, fontSize: 13, fontWeight: 600, padding: '11px 4px' }}>
-            <Loader2 size={15} className="animate-spin" /> Generating — the clip, its real duration and its final frame land automatically…
+            <Loader2 size={15} className="animate-spin" /> Generating scene {s.idx + 1}/{scenes.length} — the clip, its real duration and its final frame land automatically…
           </div>
         ) : null}
         {s.status === 'failed' ? (

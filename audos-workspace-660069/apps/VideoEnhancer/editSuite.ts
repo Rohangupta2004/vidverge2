@@ -459,13 +459,14 @@ export async function renderEditedVideo(
           if (wantsMusic && opts.music) {
             onNote?.('Decoding the music bed…');
             const buf = await acx.decodeAudioData(await opts.music.blob.arrayBuffer());
-            musicSrc = acx.createBufferSource();
-            musicSrc.buffer = buf;
-            musicSrc.loop = true;
+            const musicNode = acx.createBufferSource();
+            musicNode.buffer = buf;
+            musicNode.loop = true;
             const gMusic = acx.createGain();
             gMusic.gain.value = clamp(opts.music.volume, 0, 1);
-            musicSrc.connect(gMusic);
+            musicNode.connect(gMusic);
             gMusic.connect(dest);
+            musicSrc = musicNode;
           }
           if (wantsSfx) {
             onNote?.('Decoding sound effects…');

@@ -1,20 +1,25 @@
 /**
  * Final screen — the AUDIO & FINAL ASSEMBLY hub.
  *
- * Voice plan · per-scene ElevenLabs narration · music bed (auto-ducked under
- * speech) · subtle SFX · audio timeline (VIDEO / VOICE / MUSIC / SFX tracks)
- * · one-click Final Assembly with real progress. Audio work NEVER regenerates
- * the video clips: change the voice or the music and only that layer is
- * re-made before a fast re-assembly of the existing clips.
+ * Voice source · per-scene narration · music bed (auto-ducked under speech) ·
+ * subtle SFX · audio timeline (VIDEO / VOICE / MUSIC / SFX tracks) · one-click
+ * Final Assembly with real progress. Audio work NEVER regenerates the video
+ * clips: change the voice or the music and only that layer is re-made before a
+ * fast re-assembly of the existing clips.
+ *
+ * The voiceover is OPTIONAL and so is every other layer: the voiceover card
+ * leads with its source choice (No Voiceover / ElevenLabs / built-in AI voice)
+ * and nothing here can hold Final Assembly behind a voice provider.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, Captions, Check, Circle, CircleDot, Download, Layers,
+  AlertTriangle, Captions, Check, Circle, Download, Layers,
   Loader2, Mic, Music, RefreshCw, SkipForward, Sparkles, Volume2,
 } from 'lucide-react';
-import { Film, FilmScene, T } from './api';
+import { Film, FilmScene, T, VoiceSourceId } from './api';
 import { MUSIC_PRESETS, MusicPreset, VoiceOption, listVoices } from './pipeline/finish';
-import { audioReady, audioScenes, musicReady, narrationReady, sfxReady } from './pipeline/audio';
+import { audioReady, audioScenes, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
+import { openAiVoiceLabel } from './pipeline/voiceSource';
 import { AssemblyProgress, sceneTargetDuration } from './pipeline/orchestrator';
 import AudioCards from './AudioCards';
 
@@ -92,7 +97,7 @@ function AudioTimeline({ film, scenes }: { film: Film; scenes: FilmScene[] }) {
         <div style={trackStyle}>
           {blocks.map((b) => {
             const n = entries.get(b.s.scene_key);
-            if (!n || n.voice_source === 'none') return null;
+            if (!n || (!isSpokenSource(n.voice_source) && n.voice_source !== 'video_native')) return null;
             if (n.voice_source === 'video_native') {
               return <div key={b.s.id} title={`Scene ${b.s.idx + 1}: on-camera dialogue (native voice)`} style={{ position: 'absolute', left: `${b.leftPct}%`, width: `calc(${b.widthPct}% - 1px)`, top: 2, bottom: 2, border: `1px dashed ${T.done}`, borderRadius: 3 }} />;
             }
@@ -132,7 +137,47 @@ function AudioTimeline({ film, scenes }: { film: Film; scenes: FilmScene[] }) {
 // Final Assembly progress — real step states, never faked
 // ---------------------------------------------------------------------------
 
-function AssemblyProgressCard({ progress }: { progress: AssemblyProgress }) {
+function formatAssemblyElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
+function AssemblyProgressCard({ progress, filmUpdatedAt }: { progress: AssemblyProgress; filmUpdatedAt?: string }) {
+  const timings = useRef<Record<string, { status: string; startedAt?: number; elapsedMs?: number }>>({});
+  const [nowMs, setNowMs] = useState(Date.now());
+  const signature = progress.steps.map((step) => `${step.key}:${step.status}`).join('|');
+  useEffect(() => {
+    const now = Date.now();
+    const reopenedAt = Date.parse(String(filmUpdatedAt || ''));
+    const next = { ...timings.current };
+    progress.steps.forEach((step) => {
+      const previous = next[step.key];
+      if (step.status === 'active' && previous?.status !== 'active') {
+        next[step.key] = { status: step.status, startedAt: previous ? now : (Number.isFinite(reopenedAt) ? reopenedAt : now) };
+      } else if (step.status !== 'active' && previous?.status === 'active' && previous.startedAt) {
+        next[step.key] = { status: step.status, elapsedMs: Math.max(0, now - previous.startedAt) };
+      } else {
+        next[step.key] = { ...previous, status: step.status };
+      }
+    });
+    timings.current = next;
+    setNowMs(now);
+  }, [signature, filmUpdatedAt]);
+  const hasRunning = progress.steps.some((step) => step.status === 'active');
+  useEffect(() => {
+    if (!hasRunning) return;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasRunning, signature]);
+  const elapsedFor = (key: string, status: string) => {
+    const timing = timings.current[key];
+    if (status === 'active' && timing?.startedAt) return formatAssemblyElapsed(nowMs - timing.startedAt);
+    if ((status === 'done' || status === 'failed') && timing?.elapsedMs !== undefined) return formatAssemblyElapsed(timing.elapsedMs);
+    return '—';
+  };
+  const statusWord = (status: string) => status === 'active' ? 'running' : status;
+
   return (
     <div style={{ marginTop: 14, background: '#101014', border: `1px solid ${T.dim}`, borderRadius: 12, padding: '13px 15px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -144,9 +189,11 @@ function AssemblyProgressCard({ progress }: { progress: AssemblyProgress }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
         {progress.steps.map((s) => (
-          <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div key={s.key} className="s2v-row" style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 7, padding: '3px 5px' }}>
             <StateDot state={s.status === 'done' ? 'done' : s.status === 'active' ? 'active' : s.status === 'failed' ? 'failed' : 'todo'} />
-            <span style={{ color: s.status === 'pending' ? T.dim : s.status === 'failed' ? T.fault : T.muted, fontSize: 11.5 }}>{s.label}</span>
+            <span style={{ color: s.status === 'pending' ? T.dim : s.status === 'failed' ? T.fault : T.muted, fontSize: 11.5, minWidth: 0, flex: 1 }}>{s.label}</span>
+            <span style={{ color: s.status === 'failed' ? T.fault : s.status === 'active' ? T.live : T.dim, fontSize: 9.5, fontFamily: T.mono, textTransform: 'uppercase' }}>{statusWord(s.status)}</span>
+            <span style={{ width: 46, textAlign: 'right', color: T.dim, fontSize: 9.5, fontFamily: T.mono, fontVariantNumeric: 'tabular-nums' }}>{elapsedFor(s.key, s.status)}</span>
           </div>
         ))}
       </div>
@@ -163,62 +210,89 @@ function VoiceNarrationPanel(props: {
   scenes: FilmScene[];
   voices: VoiceOption[];
   busy: boolean;
+  voiceSource: VoiceSourceId;
+  openaiVoice: string;
   onChangeVoice: (voiceId: string, voiceName?: string) => void;
   onRetry: () => void;
+  onSkip: () => void;
 }) {
-  const { film, busy } = props;
+  const { film, busy, voiceSource } = props;
   const audio = film.audio!;
   const vp = audio.voice_plan;
   const done = audioScenes(props.scenes);
   const entries = new Map(audio.narration.map((n) => [n.scene_key, n]));
-  const failed = audio.narration.some((n) => n.status === 'failed');
+  const failed = audio.narration.some((n) => isSpokenSource(n.voice_source) && n.status === 'failed');
+  const silent = voiceSource === 'none';
   return (
-    <Section icon={<Mic size={15} />} title="Narration voice" hint="one consistent ElevenLabs voice for the whole film">
-      {vp ? (
+    <Section
+      icon={<Mic size={15} />}
+      title="Voiceover"
+      hint={silent
+        ? 'optional — off, so the film keeps the clips’ own sound'
+        : voiceSource === 'openai'
+          ? `optional — the built-in ${openAiVoiceLabel(props.openaiVoice)} voice for the whole film`
+          : 'optional — one consistent ElevenLabs voice for the whole film'}
+    >
+      {silent ? (
         <div style={{ color: T.muted, fontSize: 11.5, lineHeight: 1.6 }}>
-          Voice plan: <span style={{ color: T.bone }}>{vp.voiceName || 'the selected voice'}</span> · tone {vp.tone || 'neutral'} · energy {vp.energy || 'steady'} · pace {vp.pace || 'natural'} · emotion {vp.emotion || 'grounded'} · {vp.language || 'English'}{vp.accent ? ` (${vp.accent} accent)` : ''}
+          No voiceover is being added. Each scene keeps whatever sound its clip generated, and Final Assembly needs nothing else from this step. Change the voice source on the VOICEOVER card above to add narration.
         </div>
-      ) : null}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-        <select
-          value={vp?.voiceId || ''}
-          disabled={busy}
-          onChange={(e) => {
-            const v = props.voices.find((x) => x.id === e.target.value);
-            if (e.target.value) props.onChangeVoice(e.target.value, v?.name);
-          }}
-          style={{ ...fieldStyle, width: 260 }}
-          aria-label="Narration voice"
-        >
-          {vp?.voiceId && !props.voices.some((v) => v.id === vp.voiceId) ? <option value={vp.voiceId}>{vp.voiceName || 'Current voice'}</option> : null}
-          {!vp?.voiceId ? <option value="">Choose a voice…</option> : null}
-          {props.voices.map((v) => <option key={v.id} value={v.id}>{v.name}{v.labels?.accent ? ` · ${v.labels.accent}` : ''}</option>)}
-        </select>
-        {failed ? (
-          <button style={smallBtn(true)} disabled={busy} onClick={props.onRetry}><RefreshCw size={12} /> Retry Voice</button>
-        ) : null}
-      </div>
-      <div style={{ color: T.dim, fontSize: 10.5, marginTop: 6 }}>Changing the voice re-records the narration only — the video clips are never regenerated.</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
-        {done.map((s) => {
-          const n = entries.get(s.scene_key);
-          const clipS = Number(s.duration_s) || 6;
-          return (
-            <div key={s.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <StateDot state={!n || n.voice_source === 'none' ? 'todo' : n.voice_source === 'video_native' ? 'done' : n.status === 'ready' ? 'done' : n.status === 'failed' ? 'failed' : 'active'} />
-              <div style={{ minWidth: 0 }}>
-                <span style={{ color: T.muted, fontSize: 11, fontFamily: T.mono }}>Scene {String(s.idx + 1).padStart(2, '0')} — {clipS.toFixed(1)}s</span>
-                <span style={{ color: n?.voice_source === 'elevenlabs' ? T.bone : T.dim, fontSize: 11.5, marginLeft: 8 }}>
-                  {!n || n.voice_source === 'none' ? 'no words (visual beat)'
-                    : n.voice_source === 'video_native' ? `on-camera dialogue — the clip's own voice${s.dialogue?.line ? `: "${String(s.dialogue.line).slice(0, 70)}"` : ''}`
-                    : `"${(n.text || '').slice(0, 110)}"${n.duration_s ? ` · voice ${n.duration_s.toFixed(1)}s` : ''}`}
-                </span>
-                {n?.error ? <div style={{ color: T.fault, fontSize: 10.5 }}>{n.error}</div> : null}
-              </div>
+      ) : (
+        <>
+          {voiceSource === 'elevenlabs' && vp ? (
+            <div style={{ color: T.muted, fontSize: 11.5, lineHeight: 1.6 }}>
+              Voice plan: <span style={{ color: T.bone }}>{vp.voiceName || 'the selected voice'}</span> · tone {vp.tone || 'neutral'} · energy {vp.energy || 'steady'} · pace {vp.pace || 'natural'} · emotion {vp.emotion || 'grounded'} · {vp.language || 'English'}{vp.accent ? ` (${vp.accent} accent)` : ''}
             </div>
-          );
-        })}
-      </div>
+          ) : null}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+            {voiceSource === 'elevenlabs' ? (
+              <select
+                value={vp?.voiceId || ''}
+                disabled={busy}
+                onChange={(e) => {
+                  const v = props.voices.find((x) => x.id === e.target.value);
+                  if (e.target.value) props.onChangeVoice(e.target.value, v?.name);
+                }}
+                style={{ ...fieldStyle, width: 260 }}
+                aria-label="Narration voice"
+              >
+                {vp?.voiceId && !props.voices.some((v) => v.id === vp.voiceId) ? <option value={vp.voiceId}>{vp.voiceName || 'Current voice'}</option> : null}
+                {!vp?.voiceId ? <option value="">Choose a voice…</option> : null}
+                {props.voices.map((v) => <option key={v.id} value={v.id}>{v.name}{v.labels?.accent ? ` · ${v.labels.accent}` : ''}</option>)}
+              </select>
+            ) : (
+              <span style={{ color: T.muted, fontSize: 11.5 }}>
+                Built-in AI voice: <span style={{ color: T.bone }}>{openAiVoiceLabel(props.openaiVoice)}</span> — pick another on the VOICEOVER card above.
+              </span>
+            )}
+            {failed ? (<>
+              <button style={smallBtn(true)} disabled={busy} onClick={props.onRetry}><RefreshCw size={12} /> Retry Voice</button>
+              <button style={smallBtn()} disabled={busy} onClick={props.onSkip}><SkipForward size={12} /> Continue Without Voiceover</button>
+            </>) : null}
+          </div>
+          <div style={{ color: T.dim, fontSize: 10.5, marginTop: 6 }}>Changing the voice re-records the narration only — the video clips are never regenerated.</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+            {done.map((s) => {
+              const n = entries.get(s.scene_key);
+              const clipS = Number(s.duration_s) || 6;
+              return (
+                <div key={s.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <StateDot state={!n || n.voice_source === 'none' ? 'todo' : n.voice_source === 'video_native' ? 'done' : n.status === 'ready' ? 'done' : n.status === 'failed' ? 'failed' : 'active'} />
+                  <div style={{ minWidth: 0 }}>
+                    <span style={{ color: T.muted, fontSize: 11, fontFamily: T.mono }}>Scene {String(s.idx + 1).padStart(2, '0')} — {clipS.toFixed(1)}s</span>
+                    <span style={{ color: n && isSpokenSource(n.voice_source) ? T.bone : T.dim, fontSize: 11.5, marginLeft: 8 }}>
+                      {!n || n.voice_source === 'none' ? 'no words (visual beat)'
+                        : n.voice_source === 'video_native' ? `on-camera dialogue — the clip's own voice${s.dialogue?.line ? `: "${String(s.dialogue.line).slice(0, 70)}"` : ''}`
+                        : `"${(n.text || '').slice(0, 110)}"${n.duration_s ? ` · voice ${n.duration_s.toFixed(1)}s` : ''}`}
+                    </span>
+                    {n?.error ? <div style={{ color: T.fault, fontSize: 10.5 }}>{n.error}</div> : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </Section>
   );
 }
@@ -229,6 +303,9 @@ function VoiceNarrationPanel(props: {
 
 function MusicPanel(props: { film: Film; busy: boolean; onChangeMusic: (preset: string) => void; onRetry: () => void; onSkip: () => void }) {
   const music = props.film.audio?.music || null;
+  const provider = music?.provider === 'gemini'
+    ? 'Google Gemini (Lyria)'
+    : music?.provider === 'elevenlabs' ? 'ElevenLabs' : '';
   const state = !music ? 'todo' : music.status === 'ready' ? 'done' : music.status === 'failed' ? 'failed' : music.status === 'skipped' ? 'todo' : 'active';
   return (
     <Section icon={<Music size={15} />} title="Music bed" hint="responds to the script — ducks under narration automatically">
@@ -236,9 +313,14 @@ function MusicPanel(props: { film: Film; busy: boolean; onChangeMusic: (preset: 
         <StateDot state={state as any} />
         <span style={{ color: T.muted, fontSize: 11.5 }}>
           {!music ? 'Planned with the audio stage.'
-            : music.status === 'skipped' ? 'Skipped — the film ships without music.'
+            : music.status === 'skipped'
+              ? music.skip_reason === 'providers_unavailable'
+                ? 'ElevenLabs and Google Gemini music are unavailable — the film is continuing without music.'
+                : 'Skipped — the film ships without music.'
             : music.status === 'failed' ? 'Music preparation failed.'
-            : music.status === 'ready' ? `${music.preset || 'Music'} bed ready${music.mood ? ` · ${music.mood}` : ''}` : `Composing the ${music.preset || 'music'} bed…`}
+            : music.status === 'ready'
+              ? `${music.preset || 'Music'} bed ready${provider ? ` · ${provider}` : ''}${music.mood ? ` · ${music.mood}` : ''}`
+              : `Composing the ${music.preset || 'music'} bed…`}
         </span>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 9, flexWrap: 'wrap' }}>
@@ -300,13 +382,13 @@ function FinalHeader(props: {
   onBackToBoard: () => void;
   onFinalAssembly: (o: { captions: boolean }) => void;
   onRetryLayer: (layer: 'narration' | 'music' | 'sfx') => void;
-  onSkipLayer: (layer: 'music' | 'sfx') => void;
+  onSkipLayer: (layer: 'narration' | 'music' | 'sfx') => void;
 }) {
   const { film, busy, canAssemble, captions } = props;
   const assembling = film.status === 'assembling';
   const videoUrl = film.final_video_url;
   const audio = film.audio || null;
-  const narrFailed = !!audio && audio.narration.some((n) => n.status === 'failed');
+  const narrFailed = !!audio && audio.narration.some((n) => isSpokenSource(n.voice_source) && n.status === 'failed');
   const musicFailed = audio?.music?.status === 'failed';
   const sfxFailed = audio?.sfx_status === 'failed';
   return (
@@ -318,11 +400,13 @@ function FinalHeader(props: {
         </button>
       </div>
 
-      <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', background: '#0C0C0F', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 20px 50px rgba(0,0,0,0.4)' }}>
+      {/* The frame takes the FILM's own shape, so a 9:16 cut is reviewed
+          portrait instead of letterboxed inside a widescreen box. */}
+      <div style={{ margin: '16px auto 0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0C0C0F', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 20px 50px rgba(0,0,0,0.4)', width: '100%', maxWidth: film.aspect_ratio === '9:16' ? 272 : 820, aspectRatio: videoUrl ? (film.aspect_ratio === '9:16' ? '9 / 16' : '16 / 9') : undefined }}>
         {videoUrl ? (
-          <video key={videoUrl} src={videoUrl} controls poster={film.final_thumb_url || undefined} style={{ maxWidth: '100%', maxHeight: 460, background: '#000' }} />
+          <video key={videoUrl} src={videoUrl} controls poster={film.final_thumb_url || undefined} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} />
         ) : (
-          <div style={{ color: T.dim, fontSize: 13, padding: 56 }}>
+          <div style={{ color: T.dim, fontSize: 13, padding: 56, textAlign: 'center' }}>
             {assembling ? 'Final Assembly is running…' : 'Run Final Assembly — the finished film plays here when it lands.'}
           </div>
         )}
@@ -341,7 +425,8 @@ function FinalHeader(props: {
           <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
             {narrFailed ? (<>
               <button style={smallBtn(true)} disabled={busy} onClick={() => props.onRetryLayer('narration')}><RefreshCw size={12} /> Retry</button>
-              <button style={smallBtn()} disabled={busy} onClick={() => document.getElementById('s2v-voice-picker')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><Mic size={12} /> Choose Voice</button>
+              <button style={smallBtn()} disabled={busy} onClick={() => props.onSkipLayer('narration')}><SkipForward size={12} /> Continue Without Voiceover</button>
+              <button style={smallBtn()} disabled={busy} onClick={() => document.getElementById('s2v-voice-source')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><Mic size={12} /> Change voice source</button>
             </>) : null}
             {musicFailed ? (<>
               <button style={smallBtn(true)} disabled={busy} onClick={() => props.onRetryLayer('music')}><RefreshCw size={12} /> Retry</button>
@@ -377,10 +462,15 @@ export function FinalScreen(props: {
   onRegenNarration: () => void;
   onRegenSfx: () => void;
   onRetryLayer: (layer: 'narration' | 'music' | 'sfx') => void;
-  onSkipLayer: (layer: 'music' | 'sfx') => void;
+  onSkipLayer: (layer: 'narration' | 'music' | 'sfx') => void;
   onChangeVoice: (voiceId: string, voiceName?: string) => void;
   onChangeMusic: (preset: string) => void;
   onNativeCut: () => void;
+  /** Which engine speaks the narration — 'none' keeps the step out of the way. */
+  voiceSource: VoiceSourceId;
+  openaiVoice: string;
+  elevenLabsOffered: boolean;
+  onChangeVoiceSource: (source: VoiceSourceId, openaiVoice?: string) => void;
 }) {
   const { film, busy, assembly, captions } = props;
   const scenes = Array.isArray(props.scenes) ? props.scenes : [];
@@ -438,6 +528,10 @@ export function FinalScreen(props: {
           voices={voices}
           busy={busy || assembling}
           generating={audioGenerating}
+          voiceSource={props.voiceSource}
+          openaiVoice={props.openaiVoice}
+          elevenLabsOffered={props.elevenLabsOffered}
+          onChangeVoiceSource={props.onChangeVoiceSource}
           onRunLayer={props.onRunLayer}
           onRegenNarration={props.onRegenNarration}
           onRegenSfx={props.onRegenSfx}
@@ -447,7 +541,7 @@ export function FinalScreen(props: {
           onSkipLayer={props.onSkipLayer}
         />
 
-        {showProgress ? <AssemblyProgressCard progress={assembly!} /> : null}
+        {showProgress ? <AssemblyProgressCard progress={assembly!} filmUpdatedAt={film.updated_at} /> : null}
 
         {ready.length ? (
           <Section icon={<Layers size={15} />} title="Timeline" hint="video · voice · music · SFX">
@@ -457,14 +551,24 @@ export function FinalScreen(props: {
 
         {audio ? (
           <>
-            <VoiceNarrationPanel film={film} scenes={scenes} voices={voices} busy={busy || assembling} onChangeVoice={props.onChangeVoice} onRetry={() => props.onRetryLayer('narration')} />
+            <VoiceNarrationPanel
+              film={film}
+              scenes={scenes}
+              voices={voices}
+              busy={busy || assembling}
+              voiceSource={props.voiceSource}
+              openaiVoice={props.openaiVoice}
+              onChangeVoice={props.onChangeVoice}
+              onRetry={() => props.onRetryLayer('narration')}
+              onSkip={() => props.onSkipLayer('narration')}
+            />
             <MusicPanel film={film} busy={busy || assembling} onChangeMusic={props.onChangeMusic} onRetry={() => props.onRetryLayer('music')} onSkip={() => props.onSkipLayer('music')} />
             <SfxPanel film={film} busy={busy || assembling} onRetry={() => props.onRetryLayer('sfx')} onSkip={() => props.onSkipLayer('sfx')} />
           </>
         ) : (
-          <Section icon={<Sparkles size={15} />} title="Audio — narration, music & SFX" hint="planned by Opus from the original script">
+          <Section icon={<Sparkles size={15} />} title="Audio — voiceover, music & SFX" hint="planned by Opus from the original script">
             <div style={{ color: T.muted, fontSize: 12, lineHeight: 1.6 }}>
-              Opus writes a voice plan and a natural spoken narration for each scene (faithful to your script — nothing invented), ElevenLabs records it with one consistent voice, a music bed is composed to match the story arc, and subtle SFX land the key moments. You can also just press Final Assembly — it prepares whatever is missing first.
+              Opus writes a natural spoken narration for each scene (faithful to your script — nothing invented), a music bed is composed to match the story arc, and subtle SFX land the key moments. The voiceover is optional: pick its source on the VOICEOVER card above — No Voiceover, ElevenLabs, or the built-in AI voice — and the rest of the pipeline runs either way. You can also just press Final Assembly; it prepares whatever is missing first.
             </div>
             <button style={{ ...smallBtn(true), marginTop: 10 }} disabled={busy || assembling || !ready.length} onClick={props.onPrepareAudio}>
               {busy ? <Loader2 size={12} className="animate-spin" /> : <Mic size={12} />} Prepare narration, music &amp; SFX

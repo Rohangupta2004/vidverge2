@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { Clapperboard, Copy, Eye, GitBranch, Image, Loader2, Plus, Scissors, Trash2, Type, Upload, Video, Volume2, VolumeX, X } from 'lucide-react';
 import { IMAGE_MODELS } from '../lib/imageTool';
 import { AVATAR_SAFE_POSITIONS, COMPOSITION_MODES, EFFECT_PRESETS, KIND_COLORS, KIND_LABELS, MEDIA_LAYOUTS, OVERLAY_POSITIONS, OVERLAY_SIZES, TEXT_ANIMATIONS, defaultOverlay, effectPresetMeta, effectiveComposition, normalizeEffect, visualKindOf, type CompositionPosition, type CompositionSpec, type EffectSetting, type MediaLayout, type OverlayConfig, type VisualKind } from '../lib/effects';
@@ -149,7 +150,7 @@ export default function ScenePlanner(props: Props) {
       syncScenes(result.scenes.map((row) => row.id === scene.id ? { ...row, script_end_sec: midpoint } : row));
     } finally { setTimelineBusy(null); }
   };
-  const beginRetime = (event: React.PointerEvent, scene: Scene, mode: 'move' | 'start' | 'end') => {
+  const beginRetime = (event: ReactPointerEvent, scene: Scene, mode: 'move' | 'start' | 'end') => {
     event.preventDefault(); event.stopPropagation();
     const rect = timelineRef.current?.getBoundingClientRect(); if (!rect || duration <= 0) return;
     const originX = event.clientX; const originalStart = Number(scene.script_start_sec); const originalEnd = Number(scene.script_end_sec); const length = originalEnd - originalStart;
@@ -201,7 +202,7 @@ export default function ScenePlanner(props: Props) {
   // Where the composited visual sits inside the preview frame — mirrors
   // portraitPlacement (9:16 FFmpeg composite) and the Remotion card frame
   // (16:9), so "preview on video" shows the real final position.
-  const previewRectStyle = (comp: CompositionSpec): React.CSSProperties => {
+  const previewRectStyle = (comp: CompositionSpec): CSSProperties => {
     if (aspect === '9:16') {
       const rect = portraitPlacement(comp, { tall: true });
       return { position: 'absolute', left: `${(rect.x / 1080) * 100}%`, top: `${(rect.y / 1920) * 100}%`, width: `${(rect.w / 1080) * 100}%`, height: `${(rect.h / 1920) * 100}%` };
@@ -209,13 +210,13 @@ export default function ScenePlanner(props: Props) {
     if (comp.mode === 'central') { const w = Math.min(0.8, Math.max(0.5, comp.scale || 0.62)); return { position: 'absolute', left: `${((1 - w) / 2) * 100}%`, top: '16%', width: `${w * 100}%`, aspectRatio: '16 / 9' }; }
     const w = Math.min(0.5, Math.max(0.22, comp.scale || 0.34));
     const pos = comp.position || 'lower_third';
-    const style: React.CSSProperties = { position: 'absolute', width: `${w * 100}%`, aspectRatio: '16 / 9' };
+    const style: CSSProperties = { position: 'absolute', width: `${w * 100}%`, aspectRatio: '16 / 9' };
     if (pos.includes('left')) style.left = '4%'; else style.right = '4%';
     if (pos.startsWith('top')) style.top = '7%'; else style.bottom = '9%';
     return style;
   };
 
-  return <div className="mx-auto max-w-6xl px-6 py-9">
+  return <div className="sf-step-shell mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-9">
     <style>{PREVIEW_KEYFRAMES}</style>
     <p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Step 5 · Video blueprint</p>
     <h1 className="mt-2 text-3xl font-bold text-[var(--space-text-primary)]">Talking head, cut with middle visuals</h1>
@@ -223,7 +224,7 @@ export default function ScenePlanner(props: Props) {
     <div className="mt-6 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-5">
       <div className="mb-3 flex items-center justify-between text-sm text-[var(--space-text-secondary)]"><span>Timeline · {duration.toFixed(1)} seconds</span><span>{approved} of {scenes.length} approved</span></div>
       <div ref={timelineRef} className="overflow-x-auto rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-muted)] p-2 select-none">
-        <div className="grid min-w-[760px] gap-1" style={{ gridTemplateColumns: '112px minmax(620px, 1fr)' }}>
+        <div className="grid min-w-[760px] gap-1 sm:min-w-0" style={{ gridTemplateColumns: 'minmax(88px, 112px) minmax(620px, 1fr)' }}>
           <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">Track</div>
           <div className="relative h-5 border-b border-[var(--space-border-default)]">{Array.from({ length: 7 }).map((_, index) => <span key={index} className="absolute -translate-x-1/2 text-[9px] text-[var(--space-text-muted)]" style={{ left: `${index * 100 / 6}%` }}>{Math.round(duration * index / 6)}s</span>)}</div>
           {[

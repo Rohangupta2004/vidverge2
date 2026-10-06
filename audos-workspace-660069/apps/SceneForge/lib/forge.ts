@@ -12,9 +12,10 @@
  */
 // Types only: `supabase.ts` imports this module back, so nothing here may be a
 // runtime import from it.
-import type { Asset, Project, Scene } from './supabase';
+import type { AssemblyJob, Asset, Project, Scene } from './supabase';
 
 export const FORGE_HOOK = '/api/hooks/execute/workspace-660069/sceneforge-v2';
+export const ASSEMBLY_RENDER_HOOK = '/api/hooks/execute/workspace-660069/sceneforge-assembly-render';
 
 export interface ForgeProgress {
   scenes: number;
@@ -45,19 +46,34 @@ function unwrap(payload: any): any {
 }
 
 export interface MixResult { mixed: boolean; finalUrl?: string; pending?: boolean; note?: string }
+export interface AssemblyRenderResult {
+  status: 'rendering' | 'complete' | 'failed';
+  operationId?: string;
+  videoUrl?: string;
+  error?: string;
+  note?: string;
+}
 
-export async function forge<T = any>(op: string, params: Record<string, unknown> = {}): Promise<T> {
+async function callHook<T>(url: string, payload: Record<string, unknown>): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const auth = token();
   const sid = sessionId();
   if (auth) headers['X-Workspace-DB-Token'] = auth;
   if (sid) headers['X-Session-Id'] = sid;
-  const response = await fetch(FORGE_HOOK, { method: 'POST', headers, body: JSON.stringify({ op, session_id: sid, ...params }) });
+  const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ session_id: sid, ...payload }) });
   const data = unwrap(await response.json().catch(() => null));
   if (!response.ok || !data || data.success === false || data.error) {
     throw new Error(String((data && data.error) || `SceneForge did not answer (HTTP ${response.status}).`));
   }
   return data as T;
+}
+
+export async function forge<T = any>(op: string, params: Record<string, unknown> = {}): Promise<T> {
+  return callHook<T>(FORGE_HOOK, { op, ...params });
+}
+
+export async function assemblyRender<T = AssemblyRenderResult>(op: 'submit' | 'status', params: Record<string, unknown>): Promise<T> {
+  return callHook<T>(ASSEMBLY_RENDER_HOOK, { op, ...params });
 }
 
 export const forgeApi = {
@@ -78,4 +94,8 @@ export const forgeApi = {
     forge<{ musicUrl: string; durationMs: number; prompt: string }>('music', { project_id: projectId, prompt, length_s: lengthSec }),
   mixMusic: (projectId: string) => forge<MixResult>('mix_music', { project_id: projectId }),
   mixStatus: (projectId: string) => forge<MixResult>('mix_status', { project_id: projectId }),
+  assemblySubmit: (projectId: string, input: { compositionTsx: string; props: unknown; durationInFrames: number; job?: Partial<AssemblyJob> }) =>
+    assemblyRender<AssemblyRenderResult>('submit', { project_id: projectId, ...input }),
+  assemblyStatus: (projectId: string, operationId?: string, progress?: number) =>
+    assemblyRender<AssemblyRenderResult>('status', { project_id: projectId, operationId, progress }),
 };

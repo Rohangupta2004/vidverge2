@@ -484,6 +484,69 @@ export async function regenerateScenePlanForClip(params: {
 }
 
 // ---------------------------------------------------------------------------
+// CAST — the locked presenter, written ONCE and reused by every clip
+// ---------------------------------------------------------------------------
+
+const CASTING_SYSTEM = `You cast the ONE presenter who fronts every clip of a short-form video ad.
+
+Write a LOCKED, exhaustively specific appearance: perceived age, build, face, skin tone, hair (cut, colour, how it sits), the exact outfit with colours and fabrics, and one or two distinguishing details. Every clip reuses this description verbatim — it is the continuity contract, so it must be concrete enough that two separate renders produce the same recognisable person.
+
+RULES:
+- An ordinary, believable real person who fits the target audience and plausibly owns the locked voice.
+- Never a celebrity, never a real person's name or likeness, never a fictional or fantasy character.
+- No camera direction, no environment, no wardrobe changes — appearance only.
+
+Return ONE JSON object: { "appearance": str (one dense paragraph under 500 characters) }`;
+
+/** Cast the presenter for an ad. Called once per session; the description is
+ * the TEXT half of the character lock and the brief below turns it into the
+ * reference image every clip is generated against. */
+export async function castPresenter(params: {
+  research: ProductResearch;
+  voiceDescription: string;
+  accent: string;
+  plans: ScenePlan[];
+}): Promise<string> {
+  const first = params.plans[0];
+  const out = await askOpusJson<any>({
+    system: CASTING_SYSTEM,
+    user: [
+      `PRODUCT: ${params.research.product_name} — ${params.research.one_liner}`,
+      `TARGET AUDIENCE: ${params.research.target_audience}`,
+      `LOCKED VOICE (the presenter must plausibly own it): ${params.voiceDescription} · ${params.accent}`,
+      first ? `WHERE THEY FILM: ${first.environment} · lighting: ${first.lighting} · look: ${first.visual_style}` : '',
+      first?.continuity_notes ? `CONTINUITY ALREADY WRITTEN FOR THIS AD (respect it): ${first.continuity_notes}` : '',
+    ].filter(Boolean).join('\n'),
+    maxTokens: 1200,
+    effort: 'low',
+  });
+  return String(out?.appearance || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+}
+
+/** The casting call is best-effort: when it cannot run, the scene plan's own
+ * continuity language still locks one presenter across the clips. */
+export function presenterFallbackDescription(plans: ScenePlan[], voiceDescription: string): string {
+  const first = plans[0];
+  return [
+    voiceDescription ? `One presenter with a ${voiceDescription} delivery` : 'One consistent presenter',
+    first?.continuity_notes || '',
+    first?.environment ? `filming in ${first.environment}` : '',
+  ].filter(Boolean).join(', ').slice(0, 500);
+}
+
+/** The one-off portrait brief for the locked presenter's reference image. A
+ * model-made portrait is never rejected by the provider's real-person filter. */
+export function presenterPortraitBrief(appearance: string, visualStyle: string): string {
+  return [
+    `Waist-up studio reference portrait of a fictional ad presenter: ${appearance}.`,
+    'Neutral relaxed pose, facing camera, face fully visible and sharply lit, hands out of frame.',
+    'Plain seamless mid-grey backdrop, soft even lighting, photorealistic, sharp focus.',
+    visualStyle ? `Rendered in the ad's visual style: ${visualStyle}.` : '',
+    'No text, no logos, no watermark.',
+  ].filter(Boolean).join(' ');
+}
+
+// ---------------------------------------------------------------------------
 // STEP 6 — inspection + continuity (vision)
 // ---------------------------------------------------------------------------
 

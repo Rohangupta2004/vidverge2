@@ -4,6 +4,7 @@ import { effectiveComposition, normalizeEffect, visualKindOf } from '../lib/effe
 import { normalizeMotionSpec } from '../lib/motionSpec';
 import { chooseTransition, normalizeSceneDirection, type TransitionSpec } from '../lib/visualTimeline';
 import { defaultMotionTreatment, effectivePresenterState, normalizeMotionTreatment, normalizeOverlays, type MotionTreatment, type PipPosition, type SceneOverlayElement } from '../lib/directorPlan';
+import { normalizeBroll, type BrollClip } from '../lib/broll';
 
 export interface TimelineSegment {
   type: 'avatar' | 'scene';
@@ -45,6 +46,20 @@ export interface TimelineSegment {
   /** Deterministic Ken Burns motion for still visuals (Director-specified,
    * with a default so images never sit as dead slides). */
   motion?: MotionTreatment | null;
+  /** AUDIO-TRANSPARENT B-ROLL: a muted corner picture-in-picture composited
+   * over this scene for its own sub-window. The film's narration and music
+   * bed are never touched — the overlay layer carries no audio at all. */
+  broll?: BrollClip | null;
+  /** PER-SCENE SPEECH (the studio's Audio tab). An ElevenLabs line narrated
+   * for this scene alone, mounted inside the scene's own Sequence. The
+   * presenter master is muted for the window so two voices never overlap. */
+  voiceoverUrl?: string;
+  /** Measured length of `voiceoverUrl` in ms; the clip is never stretched. */
+  voiceoverMs?: number;
+  /** A HeyGen avatar clip ALREADY lip-synced to this scene's line. It takes
+   * the place of the scene's visual for the window and carries the speech
+   * itself, so no separate <Audio> is mounted beside it. */
+  lipsyncUrl?: string;
 }
 
 // Decide from the URL itself, not from "this scene has code": a scene whose
@@ -119,6 +134,7 @@ export function buildTimeline(project: Project, scenes: Scene[], assets: Asset[]
     const stillMotion = !hasCodedRender && renderUrl
       ? (normalizeMotionTreatment((scene as any).motion_treatment) || (kind === 'image' ? defaultMotionTreatment(scene.scene_index) : null))
       : normalizeMotionTreatment((scene as any).motion_treatment);
+    const broll = normalizeBroll((scene as any).broll);
     segments.push({
       type: 'scene',
       visualKind: visualKindOf(scene.visual_kind),
@@ -134,6 +150,7 @@ export function buildTimeline(project: Project, scenes: Scene[], assets: Asset[]
       ...(presenter.audio === 'mute' ? { presenterMuted: true } : {}),
       ...(overlayElements.length ? { overlayElements } : {}),
       ...(stillMotion ? { motion: stillMotion } : {}),
+      ...(broll ? { broll } : {}),
       audioMuted: scene.audio_muted !== false,
       audioVolume: Math.max(0, Math.min(1, Number(scene.audio_volume || 0))),
     });
@@ -197,6 +214,12 @@ export function timelineDurationInFrames(timeline: TimelineSegment[], fallbackSe
  * With props, it derives the furthest segment end and clamps it to the
  * renderer's 1–18000 frame contract.
  *
+ * MUSIC: when the project has a bed, `props.musicUrl` (with `musicBed`,
+ * `musicDuck` and the merged `speech` windows from
+ * remotion/compositionRuntime.musicBedProps) mounts it as an <Audio> track
+ * under the whole film, ducked while the presenter speaks. The score is part
+ * of THIS render - the film is never re-encoded afterwards to add it.
+ *
  * JOIN CONTRACT: the avatar master plays CONTINUOUSLY as the base layer for
  * the whole film — picture and audio are never chopped into per-segment
  * slices — and each supporting scene renders on top of it inside its own
@@ -208,7 +231,7 @@ export function timelineDurationInFrames(timeline: TimelineSegment[], fallbackSe
  */
 export function createAssemblySource(fallbackDurationInFrames = 900) {
   const fallback = Math.max(1, Math.min(18000, Math.round(Number(fallbackDurationInFrames) || 900)));
-  return `import React from 'react'; import {AbsoluteFill,Img,OffthreadVideo,Sequence,Video,interpolate,useCurrentFrame} from 'remotion';
+  return `import React from 'react'; import {AbsoluteFill,Audio,Img,OffthreadVideo,Sequence,Video,interpolate,useCurrentFrame} from 'remotion';
 var FALLBACK_FRAMES = ${fallback};
 var segmentsOf = function (p) { var t = p && p.timeline; return Array.isArray(t) ? t.filter(Boolean) : []; };
 var startAt = function (s) { var n = Math.round(Number(s && s.startFrame) || 0); return n > 0 ? n : 0; };
@@ -381,9 +404,17 @@ function LightSweep(props) {
 // transition reads the segment's declared move (chosen content-aware in
 // buildTimeline or by the Motion Director) and shapes transform + clip-path +
 // opacity together — a bare opacity crossfade exists only as the fallback.
-var transitionStyle = function (s, frame, frames) {
+var transitionStyle = function (s, frame, frames, preset) {
   var tin = s.transitionIn || null;
   var tout = s.transitionOut || null;
+  // POST-PROCESSING OVERRIDE. The studio's transition control replaces
+  // every scene's individually chosen move with ONE consistent language, so
+  // the finished film cuts the same way all the way through: 'fade' is a
+  // clean crossfade, 'slide' pushes laterally, 'none' hard-cuts. With no
+  // preset the Director's content-aware choice stands.
+  if (preset === 'none') return {opacity: 1, transform: '', clipPath: ''};
+  if (preset === 'fade') { tin = {type:'crossfade', frames: (tin && tin.frames) || 12}; tout = {type:'crossfade', frames: (tout && tout.frames) || 12}; }
+  else if (preset === 'slide') { tin = {type:'slide_context', frames: (tin && tin.frames) || 14, direction:'right'}; tout = {type:'slide_context', frames: (tout && tout.frames) || 14, direction:'left'}; }
   var cap = Math.max(4, Math.floor(frames / 3));
   var inF = Math.min(cap, tin && tin.frames > 0 ? tin.frames : 12);
   var outF = Math.min(cap, tout && tout.frames > 0 ? tout.frames : 12);
@@ -539,11 +570,98 @@ function Captions(props) {
     <div style={{maxWidth:'74%', background:'rgba(6,10,20,0.72)', border:'1.5px solid rgba(255,255,255,0.14)', borderRadius:14, padding:'10px 22px', opacity: inO, fontFamily:"'Inter', system-ui, sans-serif", fontSize: 34, fontWeight: 700, lineHeight: 1.25, color:'#fff', textAlign:'center', textShadow:'0 2px 12px rgba(0,0,0,0.8)'}}>{String(active.text)}</div>
   </AbsoluteFill>;
 }
+// MUSIC BED - the film's score, mounted by THIS render so the finished MP4
+// already carries it. There is no second mix pass over the rendered film: a
+// re-encode of a finished master is the step that used to hand back a file
+// with no music (and once, no picture at all). The bed ducks under the
+// presenter's narration and returns in the gaps, from the same merged speech
+// windows the draft preview rides. KEEP IN SYNC with
+// remotion/compositionRuntime.musicVolumeAt.
+var musicVolumeOf = function (windows, duck, bed) {
+  return function (f) {
+    if (!windows.length) return duck;
+    var t = f / 30;
+    var inSpeech = function (x) { for (var i = 0; i < windows.length; i += 1) { if (x >= windows[i][0] - 0.15 && x <= windows[i][1] + 0.3) return true; } return false; };
+    var mix = 0;
+    for (var j = -2; j <= 2; j += 1) { if (inSpeech(t + j * 0.12)) mix += 1; }
+    mix /= 5;
+    return Math.max(0, bed + (duck - bed) * mix);
+  };
+};
+// B-ROLL PICTURE-IN-PICTURE - AUDIO-TRANSPARENT BY CONSTRUCTION. The overlay
+// clip is mounted MUTED in a corner card for its own sub-window of the scene,
+// so the presenter's narration and the music bed keep running underneath
+// without a single frame of interruption. Nothing is re-encoded afterwards:
+// this is a layer inside the ONE assembly render.
+var brollFrameStyle = function (b) {
+  var w = Number(b && b.width_pct); if (!(w > 0)) w = 0.3; if (w > 0.5) w = 0.5; if (w < 0.15) w = 0.15;
+  var pos = String((b && b.position) || 'top_right');
+  var style = {position:'absolute', width:(w * 100) + '%', aspectRatio:'16 / 9', borderRadius:16, overflow:'hidden', boxShadow:'0 18px 54px rgba(0,0,0,0.55)', border:'2px solid rgba(255,255,255,0.22)', zIndex:34};
+  if (pos === 'bottom_left' || pos === 'bottom_right') style.bottom = '6%'; else style.top = '6%';
+  if (pos === 'top_left' || pos === 'bottom_left') style.left = '4%'; else style.right = '4%';
+  return style;
+};
+function BrollCard(props) {
+  var frame = useCurrentFrame();
+  var b = props.clip || {};
+  var frames = props.frames || 1;
+  var fade = Math.max(0, Math.min(1, Math.min(frame / 8, (frames - frame) / 8)));
+  var style = brollFrameStyle(b);
+  style.opacity = fade;
+  style.transform = 'translateY(' + ((1 - fade) * -10) + 'px)';
+  return <div style={style}><Video src={b.url} muted loop style={COVER}/></div>;
+}
+function BrollPip(props) {
+  var s = props.segment || {};
+  var b = props.enabled === false ? null : (s.broll || null);
+  if (!b || !b.url) return null;
+  var frames = frameCount(s);
+  var startF = Math.max(0, Math.round((Number(b.start_sec) || 0) * 30));
+  if (startF >= frames) return null;
+  var endF = Math.round((Number(b.end_sec) || 0) * 30);
+  if (!(endF > startF)) endF = startF + 90;
+  if (endF > frames) endF = frames;
+  var span = Math.max(1, endF - startF);
+  return <Sequence from={startF} durationInFrames={span}><BrollCard clip={b} frames={span}/></Sequence>;
+}
+// TITLE CARD - the branded opening plate the post-processing layer draws
+// over the first beat of the film.
+function TitleCard(props) {
+  var frame = useCurrentFrame();
+  var card = props.card;
+  if (!card || !card.title) return null;
+  var frames = Math.max(12, Math.round(Number(card.frames) || 72));
+  var accent = String(props.accent || '#6366F1');
+  var intro = ease(clamp01(frame / 14), 'ease-out');
+  var outro = ease(clamp01((frames - frame) / 14), 'ease-out');
+  var o = Math.min(intro, outro);
+  return <AbsoluteFill style={{zIndex:100, background:'linear-gradient(140deg, rgba(6,9,20,0.97), rgba(13,10,34,0.97))', alignItems:'center', justifyContent:'center', opacity:o, pointerEvents:'none'}}>
+    <div style={{width:112, height:6, borderRadius:999, background:accent, marginBottom:42, transform:'scaleX(' + intro + ')'}}/>
+    <div style={{fontFamily:"'Inter', system-ui, sans-serif", fontSize:92, fontWeight:900, color:'#fff', letterSpacing:'-0.02em', textAlign:'center', maxWidth:'78%', lineHeight:1.08, transform:'translateY(' + ((1 - intro) * 18) + 'px)'}}>{card.title}</div>
+    {card.subtitle ? <div style={{marginTop:26, fontFamily:"'Inter', system-ui, sans-serif", fontSize:34, fontWeight:500, color:'rgba(255,255,255,0.78)', textAlign:'center', maxWidth:'64%', lineHeight:1.35}}>{card.subtitle}</div> : null}
+  </AbsoluteFill>;
+}
+// CTA CARD - the closing plate on the last beat.
+function CtaCard(props) {
+  var frame = useCurrentFrame();
+  var card = props.card;
+  if (!card || !card.headline) return null;
+  var frames = Math.max(12, Math.round(Number(card.frames) || 84));
+  var accent = String(props.accent || '#6366F1');
+  var intro = ease(clamp01(frame / 16), 'ease-out');
+  var outro = ease(clamp01((frames - frame) / 10), 'ease-out');
+  var o = Math.min(intro, outro);
+  return <AbsoluteFill style={{zIndex:100, background:'linear-gradient(140deg, rgba(5,8,18,0.96), rgba(10,9,30,0.98))', alignItems:'center', justifyContent:'center', opacity:o, pointerEvents:'none'}}>
+    <div style={{fontFamily:"'Inter', system-ui, sans-serif", fontSize:78, fontWeight:900, color:'#fff', letterSpacing:'-0.02em', textAlign:'center', maxWidth:'74%', lineHeight:1.1, transform:'translateY(' + ((1 - intro) * 22) + 'px)'}}>{card.headline}</div>
+    {card.subline ? <div style={{marginTop:22, fontFamily:"'Inter', system-ui, sans-serif", fontSize:32, fontWeight:500, color:'rgba(255,255,255,0.76)', textAlign:'center', maxWidth:'58%', lineHeight:1.35}}>{card.subline}</div> : null}
+    {card.button ? <div style={{marginTop:44, padding:'20px 46px', borderRadius:999, background:accent, color:'#fff', fontFamily:"'Inter', system-ui, sans-serif", fontSize:34, fontWeight:800, letterSpacing:'0.01em', boxShadow:'0 20px 60px rgba(0,0,0,0.45)', transform:'scale(' + (0.9 + 0.1 * intro) + ')'}}>{card.button}</div> : null}
+  </AbsoluteFill>;
+}
 function SceneOverlay(props) {
   var frame = useCurrentFrame();
   var s = props.segment || {};
   var frames = frameCount(s);
-  var ts = transitionStyle(s, frame, frames);
+  var ts = transitionStyle(s, frame, frames, props.transitionPreset);
   var opacity = ts.opacity;
   var overlay = s.overlay || {};
   var fx = overlay.effect || null;
@@ -551,7 +669,15 @@ function SceneOverlay(props) {
   // Director-specified Ken Burns wins over the generic preset for stills.
   var kb = s.motion ? kenBurnsStyle(s.motion, frame, frames) : null;
   var stills = (Array.isArray(s.assetUrls) ? s.assetUrls : []).filter(Boolean);
-  var isVideo = s.sceneRenderKind === 'video' && s.sceneRenderUrl;
+  // LIP-SYNC: a HeyGen clip rendered to this scene's own ElevenLabs line
+  // stands in for the generated footage. It is the one scene clip that is
+  // never muted or looped, because it IS the speech for the window.
+  var lipsync = typeof s.lipsyncUrl === 'string' && s.lipsyncUrl ? s.lipsyncUrl : '';
+  var isVideo = lipsync ? true : (s.sceneRenderKind === 'video' && s.sceneRenderUrl);
+  var sceneClip = function () {
+    if (lipsync) return <OffthreadVideo src={lipsync} style={COVER}/>;
+    return <Video src={s.sceneRenderUrl} muted={s.audioMuted !== false} volume={Math.max(0, Math.min(1, Number(s.audioVolume) || 0))} loop style={COVER}/>;
+  };
   var showAsset = overlay.showAsset !== false;
   var imageUrl = !isVideo && showAsset ? s.sceneRenderUrl : null;
   var visualWrap = {position:'absolute', inset:0, transform: fxStyle.transform || undefined, opacity: fxStyle.opacity, filter: fxStyle.filter || undefined};
@@ -574,6 +700,7 @@ function SceneOverlay(props) {
     var chipOnRight = textPos.indexOf('right') < 0;
     return <AbsoluteFill style={{opacity: opacity, transform: ts.transform || undefined, clipPath: ts.clipPath || undefined, background:'transparent', overflow:'hidden'}}>
       {chipUrl ? <div style={{position:'absolute', bottom:'6%', left: chipOnRight ? undefined : '4%', right: chipOnRight ? '4%' : undefined, width:'16%', aspectRatio:'1 / 1', borderRadius:24, overflow:'hidden', border:'2px solid rgba(255,255,255,0.25)', boxShadow:'0 14px 40px rgba(0,0,0,0.45)'}}><Img src={chipUrl} style={COVER}/></div> : null}
+      <BrollPip segment={s} enabled={props.brollEnabled}/>
       <OverlayElements overlays={s.overlayElements} frames={frames}/>
       <TextOverlay overlay={overlay} frames={frames} callout={true}/>
     </AbsoluteFill>;
@@ -595,9 +722,10 @@ function SceneOverlay(props) {
     return <AbsoluteFill style={{opacity: opacity, transform: ts.transform || undefined, clipPath: ts.clipPath || undefined, background:'transparent', overflow:'hidden'}}>
       <div style={cardStyle}>
         <div style={{position:'absolute', inset:0, transform: (kb && !isVideo ? kb.transform : fxStyle.transform) || undefined, opacity: fxStyle.opacity, filter: fxStyle.filter || undefined}}>
-          {isVideo ? <Video src={s.sceneRenderUrl} muted={s.audioMuted !== false} volume={Math.max(0, Math.min(1, Number(s.audioVolume) || 0))} loop style={COVER}/> : <Img src={imageUrl} style={COVER}/>}
+          {isVideo ? sceneClip() : <Img src={imageUrl} style={COVER}/>}
         </div>
       </div>
+      <BrollPip segment={s} enabled={props.brollEnabled}/>
       <OverlayElements overlays={s.overlayElements} frames={frames}/>
       {(overlay.text || overlay.subtext) ? <TextOverlay overlay={overlay} frames={frames} callout={true}/> : null}
     </AbsoluteFill>;
@@ -614,11 +742,11 @@ function SceneOverlay(props) {
     {framed
       ? [
           <div key="bg" style={bgStyle}>{props.motionBgUrl ? <Video src={props.motionBgUrl} muted loop style={COVER}/> : <AbsoluteFill style={{background:'radial-gradient(1100px 560px at 22% -10%, rgba(59,130,246,0.22), transparent 60%), #0A0F1E'}}/>}</div>,
-          <div key="media" style={frameStyle}><div style={{position:'absolute', inset:0, transform: fxStyle.transform || undefined, opacity: fxStyle.opacity, filter: fxStyle.filter || undefined}}>{isVideo ? <Video src={s.sceneRenderUrl} muted={s.audioMuted !== false} volume={Math.max(0, Math.min(1, Number(s.audioVolume) || 0))} loop style={COVER}/> : <Img src={imageUrl} style={COVER}/>}</div></div>
+          <div key="media" style={frameStyle}><div style={{position:'absolute', inset:0, transform: fxStyle.transform || undefined, opacity: fxStyle.opacity, filter: fxStyle.filter || undefined}}>{isVideo ? sceneClip() : <Img src={imageUrl} style={COVER}/>}</div></div>
         ]
       : props.motionBgUrl && !isVideo ? <div style={bgStyle}><Video src={props.motionBgUrl} muted loop style={COVER}/></div> : null}
     {framed ? null : isVideo
-      ? <div style={visualWrap}><Video src={s.sceneRenderUrl} muted={s.audioMuted !== false} volume={Math.max(0, Math.min(1, Number(s.audioVolume) || 0))} loop style={COVER}/></div>
+      ? <div style={visualWrap}>{sceneClip()}</div>
       : imageUrl
         ? <div style={kb ? {position:'absolute', inset:0, transform: kb.transform || undefined, opacity: fxStyle.opacity} : visualWrap}><Img src={imageUrl} style={COVER}/></div>
         : showAsset && stills.length
@@ -626,6 +754,7 @@ function SceneOverlay(props) {
           : <AbsoluteFill style={{background:'radial-gradient(1100px 560px at 50% -10%, rgba(59,130,246,0.25), transparent 60%), #0A0F1E'}}/>}
     <LightSweep effect={fx} frames={frames}/>
     <PresenterPip segment={s} avatarVideoUrl={props.avatarVideoUrl}/>
+    <BrollPip segment={s} enabled={props.brollEnabled}/>
     <OverlayElements overlays={s.overlayElements} frames={frames}/>
     <TextOverlay overlay={overlay} frames={frames} positionOverride={textOverride || undefined}/>
   </AbsoluteFill>;
@@ -640,20 +769,41 @@ export default function Assembly(props) {
   // explicitly mute it for its window (rare, Director-deliberate); everything
   // else leaves narration untouched — hiding the presenter's PICTURE never
   // touches its AUDIO, so a fullscreen cutaway keeps narrating underneath.
+  // A scene that speaks for itself (per-scene voiceover or a lip-synced
+  // clip) also silences the master for its window: the film has one voice
+  // at a time, and the scene's own line is the one the customer chose.
   var muteWindows = [];
-  sceneSegments.forEach(function (s) { if (s.presenterMuted === true) muteWindows.push([startAt(s), startAt(s) + frameCount(s)]); });
+  sceneSegments.forEach(function (s) { if (s.presenterMuted === true || s.voiceoverUrl || s.lipsyncUrl) muteWindows.push([startAt(s), startAt(s) + frameCount(s)]); });
   var presenterVolume = function (f) {
     for (var i = 0; i < muteWindows.length; i += 1) { if (f >= muteWindows[i][0] && f < muteWindows[i][1]) return 0; }
     return 1;
   };
+  var musicUrl = typeof p.musicUrl === 'string' ? p.musicUrl : '';
+  var musicWindows = (Array.isArray(p.speech) ? p.speech : []).filter(function (w) { return Array.isArray(w) && w.length === 2; });
+  var musicBed = Number(p.musicBed); if (!(musicBed > 0)) musicBed = 0.3;
+  var musicDuck = Number(p.musicDuck); if (!(musicDuck >= 0)) musicDuck = 0.12;
+  // An uploaded audio track rides as a SECOND bed under the same ducking as
+  // the music, so it survives the post-processing render intact without
+  // ever burying the narration.
+  var audioTrackUrl = typeof p.audioTrackUrl === 'string' ? p.audioTrackUrl : '';
   return <AbsoluteFill style={{background:'#0A0F1E'}}>
     {avatarVideoUrl ? (muteWindows.length ? <OffthreadVideo src={avatarVideoUrl} volume={presenterVolume} style={COVER}/> : <OffthreadVideo src={avatarVideoUrl} style={COVER}/>) : null}
     {sceneSegments.map(function (s, i) {
       return <Sequence key={i} from={startAt(s)} durationInFrames={frameCount(s)}>
-        <SceneOverlay segment={s} motionBgUrl={motionBgUrl} avatarVideoUrl={avatarVideoUrl}/>
+        <SceneOverlay segment={s} motionBgUrl={motionBgUrl} avatarVideoUrl={avatarVideoUrl} transitionPreset={p.transitionPreset} brollEnabled={p.brollEnabled}/>
       </Sequence>;
     })}
+    {sceneSegments.map(function (s, i) {
+      // A lip-synced clip already carries its line; only a plain voiceover
+      // needs its own track. The Sequence bounds it to the scene window.
+      if (s.lipsyncUrl || typeof s.voiceoverUrl !== 'string' || !s.voiceoverUrl) return null;
+      return <Sequence key={'speech-' + i} from={startAt(s)} durationInFrames={frameCount(s)}><Audio src={s.voiceoverUrl}/></Sequence>;
+    })}
+    {musicUrl ? <Audio src={musicUrl} volume={musicVolumeOf(musicWindows, musicDuck, musicBed)} loop/> : null}
+    {audioTrackUrl ? <Audio src={audioTrackUrl} volume={musicVolumeOf(musicWindows, musicDuck, musicBed)} loop/> : null}
     <Captions captions={p.captions}/>
+    {p.titleCard ? <Sequence from={0} durationInFrames={Math.max(12, Math.round(Number(p.titleCard.frames) || 72))}><TitleCard card={p.titleCard} accent={p.accent}/></Sequence> : null}
+    {p.ctaCard ? <Sequence from={Math.max(0, Math.round(Number(p.ctaCard.from) || 0))} durationInFrames={Math.max(12, Math.round(Number(p.ctaCard.frames) || 84))}><CtaCard card={p.ctaCard} accent={p.accent}/></Sequence> : null}
   </AbsoluteFill>;
 }
 `;

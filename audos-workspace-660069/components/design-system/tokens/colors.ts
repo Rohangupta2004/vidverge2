@@ -4,9 +4,17 @@
  * Black space + flowing gold-amber energy. Every LightBeam component reads its
  * colors from here; nothing hardcodes a hex value of its own.
  *
- * The same values are mirrored into the shell's `--space-*` CSS variables in
- * config.json, so the dock, the agent chat, Settings and the email gate stay
- * on the identical palette. When one changes, change both.
+ * These values are mirrored into the shell's `--space-*` CSS variables in
+ * config.json, so the dock, the agent chat and Settings stay on the identical
+ * palette. When one changes, change both.
+ *
+ * TWO SURFACES DELIBERATELY DO NOT INHERIT THIS, and neither is a bug:
+ * `components/EmailGate.tsx` runs the "Prismatic Refraction" landing palette
+ * (a #06060f canvas with a spectral pink-to-violet gradient) and
+ * `apps/VFXDropSite/App.tsx` runs a violet/cyan microsite palette. Both are
+ * marketing pages with their own art direction, each declares its colours at
+ * the top of its own file, and neither should be "corrected" back to gold
+ * without the founder asking for it.
  */
 export const colors = {
   // Backgrounds

@@ -249,7 +249,8 @@ export interface RunwayModeDef {
   inputs: string;
   kind: 'video' | 'image';
   recipeId?: RunwayRecipeId;
-  /** Models this mode can run on — empty for recipes, which are version-pinned. */
+  /** Documentation only. The selectable roster comes from runwayModeModels(),
+   * which reads the live engine catalog — never from a list pinned here. */
   models?: RunwayVideoModel[];
 }
 
@@ -290,13 +291,13 @@ export const RUNWAY_MODES: RunwayModeDef[] = [
     inputs: 'A description of the image and the quality level. Returns several images.',
   },
   {
-    id: 'text_to_video', label: 'Text → Video', kind: 'video', models: ['gen4.5'],
-    blurb: 'A fresh clip generated straight from a written prompt on Gen-4.5.',
+    id: 'text_to_video', label: 'Text → Video', kind: 'video',
+    blurb: 'A fresh clip generated straight from a written prompt, on any model in the roster.',
     inputs: 'A prompt, a duration and an aspect ratio.',
   },
   {
-    id: 'image_to_video', label: 'Image → Video', kind: 'video', models: ['gen4.5', 'gen4_turbo'],
-    blurb: 'Animate a still image — Gen-4.5 for fidelity, Gen-4 Turbo when speed matters.',
+    id: 'image_to_video', label: 'Image → Video', kind: 'video',
+    blurb: 'Animate a still image — Gen-4.5 for fidelity, Gen-4 Turbo when speed matters, or any other roster model.',
     inputs: 'An image, a motion prompt, a duration and an aspect ratio.',
   },
 ];

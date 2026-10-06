@@ -13,7 +13,7 @@ export function useProject() {
     const moveStage = (event: Event) => {
       const detail = (event as CustomEvent<{ projectId?: string; status?: Project['status'] }>).detail;
       if (!detail?.projectId || !detail.status) return;
-      setProject((current) => current?.id === detail.projectId ? { ...current, status: detail.status! } : current);
+      setProject((current) => current && current.id === detail.projectId ? { ...current, status: detail.status! } : current);
     };
     window.addEventListener('sceneforge:project-stage', moveStage);
     return () => window.removeEventListener('sceneforge:project-stage', moveStage);

@@ -4,25 +4,44 @@
  * Mounted by the shell and rendered as an overlay above everything (dock,
  * agent panel, app windows) so the plans always get the whole screen whatever
  * state the shell is in. It opens from the crown button in the shell chrome,
- * the Plans button in My Videos, or the first time a free-trial visitor
- * reaches for a second video (`trigger: 'trial-limit'`).
+ * the credit pill, the Plans button in Settings, and automatically whenever a
+ * generation is blocked for want of credits (`trigger: 'credits'`).
  *
- * Checkout is not connected yet (Stripe is a separate task). The CTAs log the
- * chosen plan and say so plainly instead of pretending to take money.
+ * The prices and credit amounts are LOCKED — they come from REELIO_PLANS in
+ * lib/plans.ts and are never restated here. Checkout is live and runs through
+ * native Audos payments: Creator and Pro are subscriptions resolved
+ * server-side from data/payment-config.json, pay-as-you-go is a one-time sale
+ * in whole $9 blocks.
  */
-import { useEffect, useState } from 'react';
-import { Check, Clapperboard, Crown, Sparkles, X } from 'lucide-react';
-import { hasUnlimitedVideos, isPaidTier, isProTier, REELIO_PLANS } from '../lib/plans';
-import type { PlanId, PricingTrigger, ReelioPlan } from '../lib/plans';
+import { useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { Check, Coins, Crown, Minus, Plus, Sparkles, X, Zap } from 'lucide-react';
+import { currentUserEmail, REELIO_PLANS } from '../lib/plans';
+import type { PlanId, PricingRequest, PricingTrigger, ReelioPlan } from '../lib/plans';
+import {
+  PAYG_BLOCK_CREDITS,
+  PAYG_BLOCK_PRICE_CENTS,
+  formatCredits,
+  paygBlocksFor,
+  startCreditPackCheckout,
+  startSubscriptionCheckout,
+  useCredits,
+} from '../lib/credits';
 
 interface PricingScreenProps {
   trigger?: PricingTrigger;
-  /** Plan the visitor is on today — marked "Current plan" on its card. */
+  /** Extra context when a generation was blocked (credits needed vs held). */
+  request?: PricingRequest | null;
+  /** Plan the visitor is on today — marked "Current" on its card. */
   currentPlanId?: PlanId;
   onClose: () => void;
 }
 
 const FONT = "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+
+/** The brand amber. The plans screen is the one place money is discussed, so
+ *  it stays on the shell's accent rather than inventing a second palette. */
+const BRAND = '#f59e0b';
 
 const STYLES = `
 @keyframes rlpFade { from { opacity: 0 } to { opacity: 1 } }
@@ -38,9 +57,13 @@ const STYLES = `
   .rlp-feat:hover { transform: translateY(-14px); }
 }
 .rlp-cta { transition: transform .18s ease, filter .18s ease, box-shadow .28s ease, border-color .2s ease, background .2s ease; }
-.rlp-cta:hover { transform: translateY(-1px); filter: brightness(1.08); }
+.rlp-cta:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.08); }
+.rlp-cta:disabled { opacity: .6; cursor: default; }
 .rlp-ghost { transition: color .2s ease, border-color .2s ease, background .2s ease; }
 .rlp-ghost:hover { color: #fff; border-color: rgba(255,255,255,.26); background: rgba(255,255,255,.06); }
+.rlp-step { transition: background .18s ease, border-color .18s ease; }
+.rlp-step:not(:disabled):hover { background: rgba(255,255,255,.08); }
+.rlp-step:disabled { opacity: .35; cursor: default; }
 .rlp-scroll::-webkit-scrollbar { width: 9px; }
 .rlp-scroll::-webkit-scrollbar-track { background: transparent; }
 .rlp-scroll::-webkit-scrollbar-thumb { background: #262626; border-radius: 999px; }
@@ -54,38 +77,65 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function dollars(cents: number): string {
+  return `$${Math.round(cents / 100)}`;
+}
+
+function formatGrantDate(iso: string | null): string {
+  if (!iso) return '';
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return '';
+  return when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+/** The four rules that define the meter, said once, in plain language. */
+const CREDIT_RULES = [
+  '1 credit = 1 second of finished video',
+  'Same price on every engine — we pick it, you never think about it',
+  'Scripting, briefs and talking to the agent are free',
+  'Subscription credits roll over month to month',
+];
+
 function PlanCard({
   plan,
   index,
   isCurrent,
-  unlimitedQuota,
+  highlighted,
+  busy,
+  error,
+  paygBlocks,
+  onPaygBlocksChange,
   onChoose,
-  chosen,
 }: {
   plan: ReelioPlan;
   index: number;
   isCurrent: boolean;
-  /** This is the visitor's own plan and their row lifts the monthly cap. */
-  unlimitedQuota?: boolean;
+  /** The card this visitor should look at first. */
+  highlighted: boolean;
+  busy: boolean;
+  error: string | null;
+  paygBlocks: number;
+  onPaygBlocksChange: (blocks: number) => void;
   onChoose: (plan: ReelioPlan) => void;
-  chosen: boolean;
 }) {
-  const featured = !!plan.featured;
+  const isPayg = plan.id === 'payg';
+  const paygCredits = paygBlocks * PAYG_BLOCK_CREDITS;
+  const paygPrice = paygBlocks * PAYG_BLOCK_PRICE_CENTS;
 
   return (
     <div
-      className={`rlp-card rlp-rise${featured ? ' rlp-feat' : ''}`}
+      className={`rlp-card rlp-rise${highlighted ? ' rlp-feat' : ''}`}
       style={{
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         borderRadius: 20,
-        padding: featured ? '30px 24px 26px' : '26px 22px 24px',
-        background: featured
+        padding: highlighted ? '30px 24px 26px' : '26px 22px 24px',
+        background: highlighted
           ? `linear-gradient(180deg, ${hexToRgba(plan.accent, 0.16)} 0%, #101010 46%, #0d0d0d 100%)`
           : '#101010',
-        border: `1px solid ${featured ? hexToRgba(plan.accent, 0.5) : '#212121'}`,
-        boxShadow: featured
+        border: `1px solid ${highlighted ? hexToRgba(plan.accent, 0.5) : '#212121'}`,
+        boxShadow: highlighted
           ? `0 0 0 1px ${hexToRgba(plan.accent, 0.18)}, 0 28px 74px ${hexToRgba(plan.accent, 0.3)}`
           : '0 14px 40px rgba(0,0,0,0.45)',
         animationDelay: `${120 + index * 80}ms`,
@@ -106,9 +156,9 @@ function PlanCard({
             fontWeight: 700,
             letterSpacing: 1,
             textTransform: 'uppercase',
-            color: '#fff',
-            background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
-            boxShadow: '0 8px 22px rgba(37,99,235,0.5)',
+            color: '#180f02',
+            background: `linear-gradient(90deg, ${plan.accent} 0%, ${hexToRgba(plan.accent, 0.75)} 100%)`,
+            boxShadow: `0 8px 22px ${hexToRgba(plan.accent, 0.45)}`,
           }}
         >
           {plan.badge}
@@ -140,6 +190,7 @@ function PlanCard({
               color: '#9ca3af',
               border: '1px solid rgba(255,255,255,0.12)',
             }}
+            data-testid={`plan-current-${plan.id}`}
           >
             Current
           </span>
@@ -149,14 +200,14 @@ function PlanCard({
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
         <span
           style={{
-            fontSize: featured ? 44 : 40,
+            fontSize: highlighted ? 44 : 40,
             fontWeight: 700,
             letterSpacing: -1.4,
             color: '#fff',
             lineHeight: 1,
           }}
         >
-          {plan.price}
+          {isPayg ? dollars(paygPrice) : plan.price}
         </span>
         <span style={{ fontSize: 13.5, fontWeight: 500, color: '#6b7280' }}>{plan.cadence}</span>
       </div>
@@ -176,12 +227,17 @@ function PlanCard({
           background: hexToRgba(plan.accent, 0.1),
           border: `1px solid ${hexToRgba(plan.accent, 0.26)}`,
         }}
+        data-testid={`plan-credits-${plan.id}`}
       >
-        <Clapperboard size={13} />
-        {unlimitedQuota ? 'Unlimited videos' : plan.quota}
+        <Coins size={13} />
+        {isPayg ? `${formatCredits(paygCredits)} credits` : plan.quota}
       </div>
 
-      <p style={{ margin: '16px 0 0', fontSize: 13.5, lineHeight: 1.55, color: '#9ca3af' }}>{plan.pitch}</p>
+      <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.5, color: hexToRgba(plan.accent, 0.85) }}>
+        {plan.creditNote}
+      </p>
+
+      <p style={{ margin: '12px 0 0', fontSize: 13.5, lineHeight: 1.55, color: '#9ca3af' }}>{plan.pitch}</p>
 
       <ul style={{ listStyle: 'none', margin: '18px 0 0', padding: 0, display: 'grid', gap: 10 }}>
         {plan.features.map((feature) => (
@@ -208,12 +264,59 @@ function PlanCard({
 
       <div style={{ flex: 1, minHeight: 22 }} />
 
+      {isPayg && (
+        <div
+          style={{
+            marginTop: 18,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+            padding: '8px 10px',
+            borderRadius: 12,
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: 'rgba(255,255,255,0.03)',
+          }}
+        >
+          <span style={{ fontSize: 11.5, color: '#9ca3af' }}>$9 blocks</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="rlp-step"
+              onClick={() => onPaygBlocksChange(paygBlocks - 1)}
+              disabled={paygBlocks <= 1}
+              aria-label="One block fewer"
+              style={stepStyle}
+              data-testid="button-payg-less"
+            >
+              <Minus size={13} />
+            </button>
+            <span style={{ minWidth: 20, textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#fff' }}>
+              {paygBlocks}
+            </span>
+            <button
+              type="button"
+              className="rlp-step"
+              onClick={() => onPaygBlocksChange(paygBlocks + 1)}
+              disabled={paygBlocks >= 50}
+              aria-label="One block more"
+              style={stepStyle}
+              data-testid="button-payg-more"
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <button
         type="button"
         onClick={() => onChoose(plan)}
+        disabled={busy || (plan.id === 'free' && isCurrent)}
         className="rlp-cta"
         style={{
           width: '100%',
+          marginTop: 14,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -223,46 +326,83 @@ function PlanCard({
           fontSize: 13.5,
           fontWeight: 600,
           cursor: 'pointer',
-          color: '#fff',
-          border: featured ? 'none' : `1px solid ${hexToRgba(plan.accent, 0.4)}`,
-          background: featured
-            ? 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)'
+          color: highlighted ? '#180f02' : '#fff',
+          border: highlighted ? 'none' : `1px solid ${hexToRgba(plan.accent, 0.4)}`,
+          background: highlighted
+            ? `linear-gradient(90deg, ${plan.accent} 0%, ${hexToRgba(plan.accent, 0.8)} 100%)`
             : hexToRgba(plan.accent, 0.1),
-          boxShadow: featured ? '0 12px 32px rgba(37,99,235,0.45)' : 'none',
+          boxShadow: highlighted ? `0 12px 32px ${hexToRgba(plan.accent, 0.4)}` : 'none',
         }}
         data-testid={`button-plan-${plan.id}`}
       >
-        {chosen || isCurrent ? <Check size={15} /> : null}
-        {isCurrent && plan.id !== 'free' ? 'Your plan' : chosen ? 'Noted' : plan.cta}
-        {!chosen && !isCurrent && featured ? <span aria-hidden style={{ marginLeft: 2 }}>→</span> : null}
+        {busy
+          ? 'Opening checkout…'
+          : plan.id === 'free'
+            ? isCurrent
+              ? 'Your current plan'
+              : 'Included on every plan'
+            : isPayg
+              ? `Buy ${formatCredits(paygCredits)} credits — ${dollars(paygPrice)}`
+              : isCurrent
+                ? 'Manage in Settings'
+                : plan.cta}
       </button>
 
-      {chosen && (
-        <p style={{ margin: '9px 0 0', fontSize: 11.5, lineHeight: 1.45, textAlign: 'center', color: '#6b7280' }}>
-          {plan.id === 'free'
-            ? 'Go tell Verger your idea — your first video is on us.'
-            : "Checkout isn't live yet — we've logged that this is the plan you want."}
+      {error && (
+        <p style={{ margin: '9px 0 0', fontSize: 11.5, lineHeight: 1.45, textAlign: 'center', color: '#f87171' }}>
+          {error}
         </p>
       )}
     </div>
   );
 }
 
-export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free', onClose }: PricingScreenProps) {
-  const [chosenPlanId, setChosenPlanId] = useState<PlanId | null>(null);
-  // A paid tier comes from the `subscriptions` access list, so this screen is
-  // a receipt for them rather than an upgrade pitch — and the trial-wall copy
-  // must never appear for someone who is already entitled.
-  const subscriber = isPaidTier(currentPlanId);
-  // A row with video_limit NULL means no monthly cap at all, so the card and
-  // the banner say "unlimited" instead of quoting the published quota.
-  const unlimited = subscriber && hasUnlimitedVideos(currentPlanId);
-  const tierLabel = isProTier(currentPlanId)
-    ? 'Pro'
-    : currentPlanId === 'creator'
-      ? 'Creator'
-      : 'Pay-as-you-go';
-  const atTrialWall = trigger === 'trial-limit' && !subscriber;
+const stepStyle: CSSProperties = {
+  width: 26,
+  height: 26,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderRadius: 8,
+  cursor: 'pointer',
+  color: '#d1d5db',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.12)',
+};
+
+export default function PricingScreen({
+  trigger = 'nav',
+  request = null,
+  currentPlanId = 'free',
+  onClose,
+}: PricingScreenProps) {
+  const { credits } = useCredits();
+  const [busyPlan, setBusyPlan] = useState<PlanId | null>(null);
+  const [errors, setErrors] = useState<Partial<Record<PlanId, string>>>({});
+
+  // A credit wall knows exactly what it blocked, so it can say so instead of
+  // showing a generic upsell.
+  const atCreditWall = trigger === 'credits';
+  const required = Math.max(0, Math.round(Number(request?.required) || 0));
+  const seconds = Math.max(0, Math.round(Number(request?.seconds) || 0));
+  const balance = credits ? credits.balance : Math.max(0, Math.round(Number(request?.balance) || 0));
+  const shortfall = Math.max(0, required - balance);
+
+  const plan: PlanId = credits ? credits.plan : currentPlanId;
+  const [paygBlocks, setPaygBlocks] = useState(() => (shortfall > 0 ? paygBlocksFor(shortfall) : 1));
+
+  useEffect(() => {
+    if (shortfall > 0) setPaygBlocks(paygBlocksFor(shortfall));
+  }, [shortfall]);
+
+  // Free Trial leads for anyone who has not paid yet — it is the front door,
+  // and a first-time visitor should see "start free" before they see a price.
+  // Once they are paying (or out of credits) Pro leads instead.
+  const highlightId: PlanId = useMemo(() => {
+    if (plan === 'creator' || plan === 'pro' || plan === 'payg') return 'pro';
+    if (atCreditWall) return 'creator';
+    return 'free';
+  }, [plan, atCreditWall]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -272,24 +412,30 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
-  const choosePlan = (plan: ReelioPlan) => {
-    console.log('[VidVerge] plan selected', {
-      planId: plan.id,
-      plan: plan.name,
-      price: `${plan.price}${plan.cadence}`,
-      trigger,
-      note: 'payments not integrated yet — intent only',
-    });
-    setChosenPlanId(plan.id);
+  const choosePlan = async (chosen: ReelioPlan) => {
+    setErrors((prev) => ({ ...prev, [chosen.id]: '' }));
 
-    // The free tier needs no checkout: send them straight back to Reel.
-    if (plan.id === 'free') {
-      window.setTimeout(() => {
-        onClose();
-        window.dispatchEvent(new CustomEvent('openAgentChat'));
-      }, 650);
+    if (chosen.id === 'free') {
+      onClose();
+      window.dispatchEvent(new CustomEvent('openAgentChat'));
+      return;
+    }
+
+    const email = currentUserEmail() || (credits ? credits.email : '');
+    setBusyPlan(chosen.id);
+    try {
+      const result =
+        chosen.id === 'payg'
+          ? await startCreditPackCheckout(paygBlocks, email)
+          : await startSubscriptionCheckout(chosen.id as 'creator' | 'pro', email);
+      // A successful start navigates away; only a refusal comes back here.
+      if (!result.ok) setErrors((prev) => ({ ...prev, [chosen.id]: result.error || 'Checkout could not be opened.' }));
+    } finally {
+      setBusyPlan(null);
     }
   };
+
+  const nextGrant = credits && credits.rollover ? formatGrantDate(credits.nextGrantAt) : '';
 
   return (
     <div
@@ -310,7 +456,7 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
     >
       <style>{STYLES}</style>
 
-      {/* Cinematic wash — blue over the middle, teal creeping in from the edge */}
+      {/* Cinematic wash — brand amber over the middle, teal creeping in at the edge */}
       <div aria-hidden style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
         <div
           className="rlp-breathe"
@@ -321,7 +467,7 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
             transform: 'translateX(-50%)',
             width: 900,
             height: 640,
-            background: 'radial-gradient(circle at 50% 50%, rgba(37,99,235,0.34), transparent 62%)',
+            background: 'radial-gradient(circle at 50% 50%, rgba(245,158,11,0.3), transparent 62%)',
             filter: 'blur(90px)',
           }}
         />
@@ -333,7 +479,7 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
             left: '-12%',
             width: 620,
             height: 620,
-            background: 'radial-gradient(circle at 50% 50%, rgba(13,148,136,0.26), transparent 62%)',
+            background: 'radial-gradient(circle at 50% 50%, rgba(13,148,136,0.22), transparent 62%)',
             filter: 'blur(100px)',
             animationDelay: '3s',
           }}
@@ -346,7 +492,7 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
             right: '-14%',
             width: 560,
             height: 560,
-            background: 'radial-gradient(circle at 50% 50%, rgba(29,78,216,0.26), transparent 60%)',
+            background: 'radial-gradient(circle at 50% 50%, rgba(217,119,6,0.24), transparent 60%)',
             filter: 'blur(100px)',
             animationDelay: '6s',
           }}
@@ -388,8 +534,31 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
           padding: '64px 24px 56px',
         }}
       >
-        {/* Header */}
-        {subscriber && (
+        {/* The credit wall: what was blocked, what it cost, what is missing. */}
+        {atCreditWall && required > 0 && (
+          <div
+            className="rlp-rise"
+            style={{
+              maxWidth: 660,
+              margin: '0 auto 26px',
+              padding: '14px 20px',
+              borderRadius: 14,
+              textAlign: 'center',
+              border: `1px solid ${hexToRgba(BRAND, 0.45)}`,
+              background: `linear-gradient(90deg, ${hexToRgba(BRAND, 0.18)} 0%, ${hexToRgba(BRAND, 0.06)} 100%), #0d0d0d`,
+            }}
+            data-testid="banner-credit-wall"
+          >
+            <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.55, color: '#f3f4f6' }}>
+              <strong style={{ color: BRAND }}>{formatCredits(shortfall)} credits short.</strong>{' '}
+              {seconds > 0 ? `That ${seconds}-second video costs ${formatCredits(required)} credits` : `That video costs ${formatCredits(required)} credits`}
+              {' '}and you have {formatCredits(balance)}. Top up below and your render picks up where it left off.
+            </p>
+          </div>
+        )}
+
+        {/* Live balance — the same number the shell pill shows. */}
+        {credits && (
           <div
             className="rlp-rise"
             style={{
@@ -398,16 +567,15 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 10,
-              maxWidth: 620,
+              maxWidth: 660,
               margin: '0 auto 26px',
               padding: '12px 18px',
               borderRadius: 14,
               textAlign: 'center',
-              border: '1px solid rgba(37,99,235,0.4)',
-              background:
-                'linear-gradient(90deg, rgba(37,99,235,0.18) 0%, rgba(29,78,216,0.10) 100%), #0d0d0d',
+              border: '1px solid rgba(255,255,255,0.1)',
+              background: '#0d0d0d',
             }}
-            data-testid="banner-active-plan"
+            data-testid="banner-credit-balance"
           >
             <span
               style={{
@@ -420,24 +588,18 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
                 fontWeight: 700,
                 letterSpacing: 0.6,
                 textTransform: 'uppercase',
-                color: '#fff',
-                background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
+                color: '#180f02',
+                background: `linear-gradient(90deg, ${BRAND} 0%, #d97706 100%)`,
               }}
             >
-              <Crown size={12} /> {tierLabel}
+              <Crown size={12} /> {credits.planLabel}
             </span>
             <span style={{ fontSize: 13.5, color: '#d1d5db' }}>
-              {unlimited ? (
-                <>
-                  You&apos;re on VidVerge {tierLabel} with unlimited videos — no monthly cap, no trial
-                  limit, and nothing to buy.
-                </>
-              ) : (
-                <>
-                  You&apos;re on VidVerge {tierLabel} — everything below is already unlocked, and
-                  there&apos;s no trial limit on your account.
-                </>
-              )}
+              You have <strong style={{ color: '#fff' }}>{formatCredits(credits.balance)} credits</strong>
+              {' '}— {formatCredits(credits.balance)} seconds of video
+              {credits.rollover && credits.monthlyCredits > 0
+                ? `. Another ${formatCredits(credits.monthlyCredits)} land${nextGrant ? ` on ${nextGrant}` : ' next month'}, on top of whatever is left.`
+                : '.'}
             </span>
           </div>
         )}
@@ -454,13 +616,13 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
               fontWeight: 600,
               letterSpacing: 1.4,
               textTransform: 'uppercase',
-              color: '#93c5fd',
-              background: 'rgba(37,99,235,0.12)',
-              border: '1px solid rgba(37,99,235,0.28)',
+              color: '#fcd34d',
+              background: hexToRgba(BRAND, 0.12),
+              border: `1px solid ${hexToRgba(BRAND, 0.28)}`,
             }}
           >
-            {atTrialWall ? <Sparkles size={12} /> : <Crown size={12} />}
-            {atTrialWall ? 'Free trial used' : 'VidVerge plans'}
+            {atCreditWall ? <Zap size={12} /> : <Sparkles size={12} />}
+            {atCreditWall ? 'Out of credits' : 'VidVerge plans'}
           </span>
 
           <h1
@@ -473,43 +635,23 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
               color: '#fff',
             }}
           >
-            {atTrialWall ? (
-              <>
-                That one&apos;s in the can.
-                <br />
-                <span
-                  style={{
-                    background: 'linear-gradient(90deg, #60a5fa 0%, #5eead4 100%)',
-                    WebkitBackgroundClip: 'text',
-                    backgroundClip: 'text',
-                    color: 'transparent',
-                  }}
-                >
-                  Make your next video.
-                </span>
-              </>
-            ) : (
-              <>
-                Make your next video.
-                <br />
-                <span
-                  style={{
-                    background: 'linear-gradient(90deg, #60a5fa 0%, #5eead4 100%)',
-                    WebkitBackgroundClip: 'text',
-                    backgroundClip: 'text',
-                    color: 'transparent',
-                  }}
-                >
-                  And the ten after it.
-                </span>
-              </>
-            )}
+            One credit.
+            <br />
+            <span
+              style={{
+                background: 'linear-gradient(90deg, #fbbf24 0%, #5eead4 100%)',
+                WebkitBackgroundClip: 'text',
+                backgroundClip: 'text',
+                color: 'transparent',
+              }}
+            >
+              One second of video.
+            </span>
           </h1>
 
-          <p style={{ margin: '18px auto 0', maxWidth: 540, fontSize: 15.5, lineHeight: 1.6, color: '#9ca3af' }}>
-            {atTrialWall
-              ? 'Your free video is yours to keep. Pick the pace you want to post at and Verger keeps rolling — same character, same voice, every time.'
-              : 'Every plan runs the full pipeline: your brief becomes a script, a character who stays the same in every shot and speaks your lines on camera, and a finished MP4 with sound. The only question is how often you ship.'}
+          <p style={{ margin: '18px auto 0', maxWidth: 560, fontSize: 15.5, lineHeight: 1.6, color: '#9ca3af' }}>
+            That is the whole pricing model. Every engine costs the same, we pick the right one behind the
+            scenes, and the only thing you ever spend on is the video itself.
           </p>
         </div>
 
@@ -523,46 +665,57 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
             paddingTop: 12,
           }}
         >
-          {REELIO_PLANS.map((plan, index) => (
+          {REELIO_PLANS.map((entry, index) => (
             <PlanCard
-              key={plan.id}
-              plan={plan}
+              key={entry.id}
+              plan={entry}
               index={index}
-              isCurrent={plan.id === currentPlanId}
-              unlimitedQuota={unlimited && plan.id === currentPlanId}
-              chosen={chosenPlanId === plan.id}
+              isCurrent={entry.id === plan}
+              highlighted={entry.id === highlightId}
+              busy={busyPlan === entry.id}
+              error={errors[entry.id] || null}
+              paygBlocks={paygBlocks}
+              onPaygBlocksChange={(next) => setPaygBlocks(Math.min(50, Math.max(1, next)))}
               onChoose={choosePlan}
             />
           ))}
         </div>
 
-        {/* Reassurance */}
+        {/* How credits work */}
         <div
           className="rlp-rise"
           style={{
             marginTop: 40,
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'center',
-            gap: '10px 26px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+            gap: 14,
             animationDelay: '440ms',
           }}
+          data-testid="credit-rules"
         >
-          {['No watermarks, ever', 'Cancel any time', 'Your videos stay yours', 'Sound built in'].map((item) => (
-            <span key={item} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: '#6b7280' }}>
-              <Check size={12} color="#5eead4" strokeWidth={3} />
-              {item}
-            </span>
+          {CREDIT_RULES.map((rule) => (
+            <div
+              key={rule}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 9,
+                padding: '13px 15px',
+                borderRadius: 14,
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'rgba(255,255,255,0.02)',
+              }}
+            >
+              <Coins size={14} color={BRAND} style={{ flex: '0 0 auto', marginTop: 2 }} />
+              <span style={{ fontSize: 12.5, lineHeight: 1.5, color: '#d1d5db' }}>{rule}</span>
+            </div>
           ))}
         </div>
 
-        <p style={{ margin: '22px auto 0', maxWidth: 560, textAlign: 'center', fontSize: 12, lineHeight: 1.6, color: '#4b5563' }}>
-          Every video: 15–60 seconds, up to eight scenes, one character who looks the same in all of them, with sound.
-          {subscriber
-            ? unlimited
-              ? ` Your ${tierLabel} access is already active on this account, with no cap on how many you make — nothing to buy.`
-              : ` Your ${tierLabel} access is already active on this account — nothing to buy.`
-            : ' Payments aren\u2019t switched on yet — picking a plan just tells us where you\u2019re headed.'}
+        <p style={{ margin: '22px auto 0', maxWidth: 580, textAlign: 'center', fontSize: 12, lineHeight: 1.6, color: '#4b5563' }}>
+          A {PAYG_BLOCK_CREDITS}-credit block is {dollars(PAYG_BLOCK_PRICE_CENTS)} and buys a full minute of video — buy as many as
+          you want, whenever you want, on any plan. Cancel a subscription any time; credits you already
+          have stay yours.
         </p>
 
         <div style={{ marginTop: 26, textAlign: 'center' }}>
@@ -582,7 +735,7 @@ export default function PricingScreen({ trigger = 'nav', currentPlanId = 'free',
             }}
             data-testid="button-dismiss-pricing"
           >
-            {atTrialWall ? 'Not right now — back to my videos' : 'Back to making videos'}
+            {atCreditWall ? 'Not right now — back to my videos' : 'Back to making videos'}
           </button>
         </div>
       </div>

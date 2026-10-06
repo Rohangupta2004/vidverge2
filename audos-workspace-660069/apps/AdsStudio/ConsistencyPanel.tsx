@@ -18,20 +18,24 @@
  */
 
 import { useRef } from 'react';
-import { Upload, X } from 'lucide-react';
-import {
-  AD_DURATIONS, AD_PLATFORMS, AdDuration, AdPlatform, T, UploadedAsset,
-} from './api';
+import type { CSSProperties } from 'react';
+import { Loader2, Upload, X } from 'lucide-react';
+import { T, UploadedAsset } from './api';
+
+type AdDuration = 15 | 30 | 45 | 60;
+type AdPlatform = 'TikTok' | 'Instagram Reels' | 'YouTube Shorts';
+const AD_DURATIONS: AdDuration[] = [15, 30, 45, 60];
+const AD_PLATFORMS: AdPlatform[] = ['TikTok', 'Instagram Reels', 'YouTube Shorts'];
 import { HEYGEN_OFFLINE_TOOLTIP, HeygenHealth } from './heygen';
 
-const card: React.CSSProperties = {
+const card: CSSProperties = {
   background: T.card,
   border: `1px solid ${T.line}`,
   borderRadius: 14,
   padding: 16,
 };
 
-const label: React.CSSProperties = {
+const label: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   color: T.muted,
@@ -41,7 +45,7 @@ const label: React.CSSProperties = {
   display: 'block',
 };
 
-const input: React.CSSProperties = {
+const input: CSSProperties = {
   width: '100%',
   background: T.panel,
   border: `1px solid ${T.line}`,
@@ -54,7 +58,7 @@ const input: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
-const pill = (active: boolean): React.CSSProperties => ({
+const pill = (active: boolean): CSSProperties => ({
   background: active ? T.accent : 'transparent',
   color: active ? '#0A0A0A' : T.soft,
   border: `1px solid ${active ? T.accent : T.line}`,
@@ -111,7 +115,7 @@ export function SeedBadge(props: {
       >
         🔑 Seed: {props.seed}
       </span>
-      <button
+      <button className="ads-btn"
         type="button"
         title="Re-roll the seed — a brand-new character and look, shared with Script-to-Video"
         disabled={props.disabled}
@@ -174,7 +178,7 @@ export function CharacterCard(props: {
   const ref = useRef<HTMLInputElement>(null);
   const portrait = props.characterImageUrl || props.avatarThumbnailUrl || props.avatarUrl || '';
   return (
-    <div style={{ ...card, borderColor: T.lineStrong }}>
+    <div className="ads-card ads-rise" style={{ ...card, borderColor: T.lineStrong }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 14, fontWeight: 800, color: T.ink }}>🎭 Character</span>
         <span style={{ fontSize: 12, color: T.muted }}>
@@ -192,7 +196,7 @@ export function CharacterCard(props: {
               </div>
             )}
           <div style={{ display: 'flex', gap: 4 }}>
-            <button
+            <button className="ads-btn"
               type="button"
               disabled={props.disabled}
               onClick={() => ref.current?.click()}
@@ -201,7 +205,7 @@ export function CharacterCard(props: {
               <Upload size={11} /> {props.characterImageUrl ? 'Replace' : 'Upload'}
             </button>
             {props.characterImageUrl ? (
-              <button
+              <button className="ads-btn"
                 type="button"
                 title="Stop using this character reference"
                 disabled={props.disabled}
@@ -218,7 +222,7 @@ export function CharacterCard(props: {
           />
         </div>
 
-        <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
           <span style={label}>Character description (auto-filled)</span>
           <textarea
             style={{ ...input, minHeight: 74, resize: 'vertical', fontSize: 13 }}
@@ -264,7 +268,7 @@ export function ProductScreenZone(props: {
 }) {
   const ref = useRef<HTMLInputElement>(null);
   return (
-    <div style={card}>
+    <div className="ads-card ads-rise" style={card}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 14, fontWeight: 800, color: T.ink }}>Product Screen Segment</span>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: T.soft, cursor: props.screenshot ? 'pointer' : 'default', opacity: props.screenshot ? 1 : 0.5 }}>
@@ -293,7 +297,7 @@ export function ProductScreenZone(props: {
               alt="product screen"
               style={{ width: 132, height: 76, objectFit: 'cover', borderRadius: 8, border: `1px solid ${T.lineStrong}` }}
             />
-            <button
+            <button className="ads-btn"
               type="button"
               disabled={props.disabled}
               onClick={props.onRemove}
@@ -304,15 +308,15 @@ export function ProductScreenZone(props: {
           </div>
         ) : null}
 
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <button
+        <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+          <button className="ads-btn"
             type="button"
             disabled={props.disabled || props.busy}
             onClick={() => ref.current?.click()}
             style={{ ...input, cursor: props.disabled || props.busy ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, color: T.muted, border: `1px dashed ${T.lineStrong}` }}
           >
-            <Upload size={15} />
-            {props.busy ? 'Uploading…' : props.screenshot ? `Replace ${props.screenshot.name.slice(0, 28)}` : 'Add Product Screenshot'}
+            {props.busy ? <Loader2 size={15} style={{ animation: 'adsspin 1s linear infinite' }} /> : <Upload size={15} />}
+            {props.busy ? 'Uploading your screenshot…' : props.screenshot ? `Replace ${props.screenshot.name.slice(0, 28)}` : 'Add Product Screenshot'}
           </button>
           <div style={{ fontSize: 11, color: T.muted, marginTop: 6 }}>PNG, JPG or WEBP · up to 10MB</div>
           <input
@@ -337,11 +341,11 @@ export function AdBriefControls(props: {
   onPlatform: (value: AdPlatform) => void;
 }) {
   return (
-    <div style={card}>
+    <div className="ads-card ads-rise" style={card}>
       <span style={label}>Ad length</span>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {AD_DURATIONS.map((d) => (
-          <button key={d} type="button" disabled={props.disabled} onClick={() => props.onDuration(d)} style={pill(props.targetDurationS === d)}>
+          <button className="ads-btn" key={d} type="button" disabled={props.disabled} onClick={() => props.onDuration(d)} style={pill(props.targetDurationS === d)}>
             {d}s
           </button>
         ))}
@@ -350,7 +354,7 @@ export function AdBriefControls(props: {
       <span style={label}>Platform</span>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {AD_PLATFORMS.map((p) => (
-          <button key={p} type="button" disabled={props.disabled} onClick={() => props.onPlatform(p)} style={pill(props.adPlatform === p)}>
+          <button className="ads-btn" key={p} type="button" disabled={props.disabled} onClick={() => props.onPlatform(p)} style={pill(props.adPlatform === p)}>
             {p}
           </button>
         ))}
@@ -368,7 +372,7 @@ export function AdBriefControls(props: {
 // ---------------------------------------------------------------------------
 
 export function GeneratedInFooter(props: { seconds: number | null; note?: string }) {
-  if (!props.seconds) return null;
+  if (props.seconds === null) return null;
   return (
     <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12, color: T.muted }}>
       <span style={{ fontFamily: T.mono, color: T.accent, fontWeight: 700 }}>Generated in {props.seconds}s</span>

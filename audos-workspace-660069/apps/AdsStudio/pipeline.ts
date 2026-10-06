@@ -1,11 +1,19 @@
 /**
  * ADS STUDIO — the agentic generation loop and assembly orchestration.
  *
- * Per clip: GENERATE (Veo, avatar-seeded) → INSPECT (Opus vision against the
- * scene plan + script line) → on rejection, ONE auto-regenerate with the
- * inspector's adjusted prompt (max 2 attempts — after the retake the clip is
- * always accepted so the run never loops) → CONTINUITY (Opus reads the final
- * frame; the note is injected into the next clip's [Continuity] clause).
+ * Per clip: GENERATE (locked presenter reference + the previous clip's final
+ * frame as the seed) → INSPECT (Opus vision against the scene plan + script
+ * line) → on rejection, ONE auto-regenerate with the inspector's adjusted
+ * prompt (max 2 attempts — after the retake the clip is always accepted so
+ * the run never loops) → CONTINUITY (Opus reads the final frame; the note is
+ * injected into the next clip's [Continuity] clause).
+ *
+ * CHARACTER CONSISTENCY works the way Script-to-Video's does: ONE reference
+ * image is locked for the whole run and sent with every clip, the clips are
+ * generated sequentially, and each clip is seeded with the previous clip's
+ * extracted final frame. The locked appearance also rides in the prompt's
+ * [Continuity] clause, so identity survives even on an engine that takes no
+ * reference image.
  *
  * A clip failure never crashes the run — it is marked failed and the loop
  * moves on; the Review step regenerates failed clips individually.
@@ -16,6 +24,8 @@ import {
 } from './api';
 import { assembleVeoPrompt, continuityNoteFromFrame, inspectClip } from './opus';
 import { VEO_MODEL, extractFrame, probeClipDuration, renderAdClip } from './veo';
+import type { VideoIntegrationId } from '../../lib/videoIntegrations';
+import { newChargeKey } from '../../lib/credits';
 import { buildClipOverlay, recordOverlay, OverlayContext } from './overlays';
 import { adFrameSize, assembleAd, AssemblyClip, AssemblyResult } from './assemble';
 
@@ -30,34 +40,48 @@ export interface ClipRunResult {
   promptUsed: string;
   /** The ACTUAL model the clip rendered on — recorded, never assumed. */
   modelUsed: string;
+  /** Set when the chosen engine refused and Omni Flash filmed it instead. */
+  fallbackFrom?: string;
   note: string;
   continuityNote: string;
   measuredDurationS: number;
 }
 
 /**
- * Generate ONE clip agentically. `previousFrameUrl` is the prior clip's final
- * frame (vision context for the inspector); `continuityNote` is the Opus-read
- * consistency note injected into this clip's prompt.
+ * Generate ONE clip agentically.
+ *
+ * `characterRefUrl` is the LOCKED presenter reference — the same image on
+ * every clip of the ad, which is what keeps the actor from changing between
+ * cuts. `previousFrameUrl` is the prior clip's final frame: it seeds this
+ * clip's generation AND gives the inspector its continuity context.
+ * `characterDescription` and `continuityNote` are the text half of the same
+ * lock, folded into the prompt's [Continuity] clause.
  */
 export async function generateClipAgentic(params: {
   plan: ScenePlan;
   script: ScriptClip;
   aspect: '9:16' | '16:9' | '1:1';
-  avatarUrl: string | null;
+  characterRefUrl: string | null;
+  characterDescription?: string | null;
   continuityNote: string | null;
   previousFrameUrl: string | null;
   promptOverride?: string | null;
   /** Engine for this clip — a Group A model id or a Runway model id.
    * Defaults to the proven Omni Flash path. */
   model?: string;
+  integration?: VideoIntegrationId;
   onNote: (n: string) => void;
 }): Promise<ClipRunResult> {
   const { plan, script } = params;
   const engine = params.model || VEO_MODEL;
   const negative = `${BASE_NEGATIVE}${plan.do_not_show ? `, ${plan.do_not_show}` : ''}`;
+  const lockedAppearance = String(params.characterDescription || '').trim();
+  const continuityClause = [
+    lockedAppearance ? `Same presenter in every clip: ${lockedAppearance.slice(0, 220)}` : '',
+    params.continuityNote || '',
+  ].filter(Boolean).join(' ') || null;
   let prompt = params.promptOverride?.trim()
-    || assembleVeoPrompt(plan, script.duration_seconds, params.continuityNote);
+    || assembleVeoPrompt(plan, script.duration_seconds, continuityClause);
   let issues: string[] = [];
   let note = '';
   let status: GeneratedClip['status'] = 'accepted';
@@ -65,6 +89,13 @@ export async function generateClipAgentic(params: {
   const MAX_ATTEMPTS = 2; // initial take + one auto-regenerate
   let videoUrl: string | null = null;
   let attempts = 0;
+  // The engine the clip really rendered on — it is not always the one asked
+  // for, since a refused engine is re-filmed on the Omni Flash stand-in.
+  let renderedModel = engine;
+  let fallbackFrom = '';
+  // One logical clip may take one bounded retake; both submits reuse this key
+  // so the customer is never billed twice for the same clip.
+  const creditKey = newChargeKey('ads-clip');
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     attempts = attempt;
@@ -72,13 +103,18 @@ export async function generateClipAgentic(params: {
     try {
       const rendered = await renderAdClip({
         model: engine,
+        integration: params.integration,
         prompt,
         negative,
         aspect: params.aspect,
         durationS: script.duration_seconds,
-        referenceImageUrl: params.avatarUrl,
+        characterImageUrl: params.characterRefUrl,
+        seedImageUrl: params.previousFrameUrl,
+        creditKey,
       });
       videoUrl = rendered.videoUrl;
+      renderedModel = rendered.modelUsed;
+      fallbackFrom = rendered.fallbackFrom || '';
     } catch (e: any) {
       const message = String(e?.message || e);
       if (attempt < MAX_ATTEMPTS && !/billing|declined|402/i.test(message)) {
@@ -86,7 +122,7 @@ export async function generateClipAgentic(params: {
         params.onNote(`Clip ${script.clip_number}: the take failed (${message.slice(0, 100)}). Trying once more…`);
         continue;
       }
-      return { videoUrl: null, status: 'failed', issues: [...issues, message.slice(0, 300)], attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: engine, note: 'Render failed — regenerate manually.', continuityNote: '', measuredDurationS: 0 };
+      return { videoUrl: null, status: 'failed', issues: [...issues, message.slice(0, 300)], attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: renderedModel, note: 'Render failed — regenerate manually.', continuityNote: '', measuredDurationS: 0 };
     }
 
     // Inspection — frames out, Opus verdict in.
@@ -106,7 +142,7 @@ export async function generateClipAgentic(params: {
       issues = [...issues, ...(verdict.issues.length ? verdict.issues : [verdict.regenerate_reason || 'Rejected by inspection.'])];
       note = verdict.regenerate_reason || verdict.issues.join(' · ');
       prompt = verdict.adjusted_prompt?.trim()
-        || `${assembleVeoPrompt(plan, script.duration_seconds, params.continuityNote)}\n[Fix]: ${(verdict.regenerate_reason || verdict.issues.join('; ')).slice(0, 220)}`;
+        || `${assembleVeoPrompt(plan, script.duration_seconds, continuityClause)}\n[Fix]: ${(verdict.regenerate_reason || verdict.issues.join('; ')).slice(0, 220)}`;
       params.onNote(`Clip ${script.clip_number}: rejected (${note.slice(0, 120)}). Auto-regenerating once…`);
       continue;
     }
@@ -128,11 +164,11 @@ export async function generateClipAgentic(params: {
     let measured = 0;
     try { measured = await probeClipDuration(videoUrl); } catch { /* planned duration stands */ }
 
-    return { videoUrl, status, issues, attempts, lastFrameUrl: lastFrame || null, promptUsed: prompt, modelUsed: engine, note, continuityNote: continuity, measuredDurationS: measured };
+    return { videoUrl, status, issues, attempts, lastFrameUrl: lastFrame || null, promptUsed: prompt, modelUsed: renderedModel, fallbackFrom: fallbackFrom || undefined, note, continuityNote: continuity, measuredDurationS: measured };
   }
 
   // Unreachable, but keeps the type checker honest.
-  return { videoUrl, status: 'failed', issues, attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: engine, note: 'Generation did not complete.', continuityNote: '', measuredDurationS: 0 };
+  return { videoUrl, status: 'failed', issues, attempts, lastFrameUrl: null, promptUsed: prompt, modelUsed: renderedModel, note: 'Generation did not complete.', continuityNote: '', measuredDurationS: 0 };
 }
 
 // ---------------------------------------------------------------------------

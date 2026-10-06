@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { AlertCircle, Check, Download, Loader2, RefreshCw, Sparkles, Upload } from 'lucide-react';
+import { AlertCircle, Check, Download, Loader2, Pencil, RefreshCw, Sparkles, Upload, X } from 'lucide-react';
 import {
   RUNWAY_MODES, catalogRecipeInfo, catalogVideoModelInfo, modeSupported,
   ratioLabel, runwayCapabilities, runwayMode, runwayModeModels, runwayPoll,
@@ -23,6 +23,15 @@ import type {
   RunwayCapabilities, RunwayModeId, RunwayQuote, RunwayResult, RunwayVideoModel,
 } from '../lib/runway';
 import { routeShotIntent, runwayInputLabel, runwayModel as engineRunwayModel } from '../lib/videoEngines';
+import {
+  AdAngleIdea, AdCharacter, AdPersona, PersonaTarget, ProductBrief,
+  briefReady, extendAdAngle, generateAdPersona, generatePresenterPortrait,
+  personaConceptLines, personaSignature,
+} from '../lib/adPersona';
+import {
+  OMNI_FALLBACK_LABEL, generateWithOmniFlash, isModelRejection, omniFallbackMessage,
+} from '../lib/omniFallback';
+import { buildRecipePrompt, logRecipePrompt, saveRecipeGeneration } from '../lib/recipeLibrary';
 
 // ---------------------------------------------------------------------------
 // Theme
@@ -103,20 +112,68 @@ interface RunState {
   status: string;
   error: string;
   result: RunwayResult | null;
+  /** Runway refused this model, so Generate runs it on Omni Flash instead. */
+  fallback: boolean;
 }
 
-const IDLE_RUN: RunState = { phase: 'idle', quote: null, status: '', error: '', result: null };
+const IDLE_RUN: RunState = { phase: 'idle', quote: null, status: '', error: '', result: null, fallback: false };
+
+/** The quote shown when Runway will not price a model and Omni Flash takes it. */
+function omniQuote(): RunwayQuote {
+  return {
+    credits: 0,
+    usd: 0,
+    outputs: 1,
+    label: `${OMNI_FALLBACK_LABEL} · billed as workspace credits, one per second of video`,
+    raw: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Auto-written presenter + angle (opt-in via `autoPersona`)
+// ---------------------------------------------------------------------------
+
+/** The recipes that put a presenter on camera, so a cast persona means something. */
+const PERSONA_MODES: RunwayModeId[] = ['product_ad', 'product_ugc'];
+
+interface PersonaState {
+  /** The product the current persona was written for. */
+  signature: string;
+  character: AdCharacter | null;
+  angle: AdAngleIdea | null;
+  characterBusy: boolean;
+  angleBusy: boolean;
+  error: string;
+  /** The presenter's face: drawn from the description, or the customer's own photo. */
+  portraitUrl: string;
+  portraitSource: 'auto' | 'upload';
+  portraitBusy: boolean;
+  portraitError: string;
+}
+
+const IDLE_PERSONA: PersonaState = {
+  signature: '', character: null, angle: null, characterBusy: false, angleBusy: false, error: '',
+  portraitUrl: '', portraitSource: 'auto', portraitBusy: false, portraitError: '',
+};
 
 // ---------------------------------------------------------------------------
 // Request bodies
 // ---------------------------------------------------------------------------
 
-function composeConcept(f: FormState): string {
+/** The creative brief a recipe reads. Built through buildRecipePrompt, so it
+ * is always control-character free, never double-spaced, never empty and
+ * never over the 500-character ceiling the proxies answer 400 to. */
+function composeConcept(f: FormState, persona?: AdPersona | null): string {
   const bits: string[] = [];
   if (f.productName.trim()) bits.push(`Product: ${f.productName.trim()}.`);
   if (f.productDescription.trim()) bits.push(f.productDescription.trim());
   if (f.concept.trim()) bits.push(f.concept.trim());
-  return bits.join(' ').trim();
+  // The auto-written presenter and angle ride along in the same creative brief
+  // the recipe already reads its character direction from.
+  personaConceptLines(persona || null).forEach((line) => bits.push(line));
+  // An empty concept would be an automatic refusal, so the product description
+  // (and then a generic direction) stands in.
+  return buildRecipePrompt(bits, f.productDescription || f.productName);
 }
 
 /**
@@ -209,7 +266,7 @@ function validate(mode: RunwayModeId, f: FormState, caps: RunwayCapabilities): s
   }
 }
 
-function buildRequest(mode: RunwayModeId, f: FormState, caps: RunwayCapabilities): BuiltRequest {
+function buildRequest(mode: RunwayModeId, f: FormState, caps: RunwayCapabilities, persona?: AdPersona | null): BuiltRequest {
   const def = runwayMode(mode);
   const ratio = f.ratio || caps.ratios[0] || '';
 
@@ -242,7 +299,12 @@ function buildRequest(mode: RunwayModeId, f: FormState, caps: RunwayCapabilities
 
   if (mode === 'product_ad') {
     if (f.productImage) body.productImages = [{ uri: f.productImage }];
-    body.userConcept = composeConcept(f);
+    // Product Ad does not advertise characterImage in the static catalogue,
+    // but pass it when the live capabilities response explicitly opts in.
+    if (f.characterImage && recipeAccepts(caps, recipeId, 'characterImage')) {
+      body.characterImage = { uri: f.characterImage };
+    }
+    body.userConcept = composeConcept(f, persona);
     if (ratio && recipeAccepts(caps, recipeId, 'ratio')) body.ratio = ratio;
     if (f.duration && recipeAccepts(caps, recipeId, 'duration')) body.duration = f.duration;
   } else if (mode === 'product_swap') {
@@ -253,7 +315,7 @@ function buildRequest(mode: RunwayModeId, f: FormState, caps: RunwayCapabilities
   } else if (mode === 'product_ugc') {
     body.productImage = { uri: f.productImage };
     if (f.characterImage) body.characterImage = { uri: f.characterImage };
-    body.userConcept = composeConcept(f);
+    body.userConcept = composeConcept(f, persona);
     if (ratio && recipeAccepts(caps, recipeId, 'ratio')) body.ratio = ratio;
     if (f.duration && recipeAccepts(caps, recipeId, 'duration')) body.duration = f.duration;
   } else if (mode === 'multi_shot_video') {
@@ -277,6 +339,31 @@ function buildRequest(mode: RunwayModeId, f: FormState, caps: RunwayCapabilities
   }
 
   return { endpoint: 'recipe', recipeId, body, quoteBody: { recipeId, ...body } };
+}
+
+/**
+ * What Omni Flash is asked to film when Runway refuses the chosen model. It
+ * reads the SAME brief the recipe would have read — the written prompt, the
+ * shot list and the composed creative direction including the cast presenter
+ * and the ad angle — so the stand-in shoots the ad the customer described,
+ * not a generic clip.
+ */
+function omniBriefFor(mode: RunwayModeId, f: FormState, persona: AdPersona | null): {
+  prompt: string;
+  seed: string;
+  reference: string;
+} {
+  const shots = f.shots.map((s) => s.trim()).filter(Boolean);
+  const prompt = buildRecipePrompt([
+    f.prompt.trim(),
+    shots.length ? shots.map((s, i) => `Shot ${i + 1}: ${s}`).join(' ') : '',
+    composeConcept(f, persona),
+  ], f.productDescription || f.productName);
+  return {
+    prompt,
+    seed: f.productImage || f.sourceImage || '',
+    reference: mode === 'product_ugc' ? f.characterImage : '',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +518,12 @@ export interface RunwayStudioProps {
   onModeChange?: (mode: RunwayModeId) => void;
   /** Drops the header when the host already provides one. */
   bare?: boolean;
+  /**
+   * Write the ad's presenter and angle automatically as soon as the customer
+   * has given a product image and a line about the product. Off by default, so
+   * only hosts that ask for it (Ads Studio's Recipes surface) pay for the call.
+   */
+  autoPersona?: boolean;
 }
 
 const RW_CSS = `
@@ -464,12 +557,19 @@ export default function RunwayStudio(props: RunwayStudioProps) {
   }, [onModeChange]);
   const [caps, setCaps] = useState<RunwayCapabilities | null>(null);
   const [capsBusy, setCapsBusy] = useState(true);
+  const [toast, setToast] = useState('');
   const [forms, setForms] = useState<Record<string, FormState>>({});
   const [runs, setRuns] = useState<Record<string, RunState>>({});
   const alive = useRef(true);
   const cancelSignals = useRef<Record<string, { cancelled: boolean }>>({});
 
   useEffect(() => () => { alive.current = false; }, []);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(() => setToast(''), 9000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const loadCaps = useCallback(async (refresh = false) => {
     setCapsBusy(true);
@@ -490,7 +590,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
     setRuns((prev) => {
       const cur = prev[mode];
       if (!cur || cur.phase !== 'quoted') return prev;
-      return { ...prev, [mode]: { ...cur, phase: 'idle', quote: null } };
+      return { ...prev, [mode]: { ...cur, phase: 'idle', quote: null, fallback: false } };
     });
   }, [mode]);
 
@@ -533,7 +633,181 @@ export default function RunwayStudio(props: RunwayStudioProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillKey, modes]);
 
+  // ---- auto-written presenter + angle ----
+
+  const [persona, setPersona] = useState<PersonaState>(IDLE_PERSONA);
+  // A photo the customer chose themselves outranks the automatic portrait: it
+  // is only replaced when they ask for the creator to be rewritten.
+  const ownPortrait = useRef(false);
+  const portraitInput = useRef<HTMLInputElement>(null);
+  const [portraitUploading, setPortraitUploading] = useState(false);
+  // Write-your-own angle — the alternative path to Regenerate.
+  const [angleWriterOpen, setAngleWriterOpen] = useState(false);
+  const [angleDraft, setAngleDraft] = useState('');
+  const [angleExtendBusy, setAngleExtendBusy] = useState(false);
+  const [angleExtendError, setAngleExtendError] = useState('');
+  const personaCapable = !!props.autoPersona && PERSONA_MODES.indexOf(mode) >= 0;
+  const personaBrief: ProductBrief = { productName: form.productName, productDescription: form.productDescription };
+  const personaSig = personaCapable && briefReady(form.productImage, personaBrief)
+    ? personaSignature(form.productImage, personaBrief)
+    : '';
+  // Only a persona written for the product currently in the form is shown or sent
+  // downstream — changing the product, or moving to a tab holding a different one,
+  // never carries the old cast over.
+  const personaMatches = !!personaSig && persona.signature === personaSig;
+  const personaForRequest = personaMatches && (persona.character || persona.angle) ? persona : null;
+
+  const writePersona = useCallback(async (
+    want: PersonaTarget,
+    sig: string,
+    brief: ProductBrief,
+    opts: { regeneratePortrait?: boolean } = {},
+  ) => {
+    const wantsCharacter = want !== 'angle';
+    // Writing the creator draws their portrait in the same pass, from the
+    // description that just came back — so the card never shows a face that
+    // disagrees with the words under it.
+    const wantsPortrait = wantsCharacter && (opts.regeneratePortrait === true || !ownPortrait.current);
+    setPersona((prev) => ({
+      ...prev,
+      signature: sig,
+      error: '',
+      characterBusy: wantsCharacter,
+      angleBusy: want !== 'character',
+      portraitBusy: wantsPortrait,
+      portraitError: wantsPortrait ? '' : prev.portraitError,
+    }));
+    try {
+      const written = await generateAdPersona({ brief, want });
+      if (!alive.current) return;
+      setPersona((prev) => ({
+        ...prev,
+        signature: sig,
+        character: written.character || prev.character,
+        angle: written.angle || prev.angle,
+        characterBusy: false,
+        angleBusy: false,
+        error: '',
+      }));
+      if (!wantsPortrait || !written.character) {
+        setPersona((prev) => ({ ...prev, portraitBusy: false }));
+        return;
+      }
+      try {
+        const url = await generatePresenterPortrait({ character: written.character, brief });
+        if (!alive.current) return;
+        ownPortrait.current = false;
+        setPersona((prev) => ({
+          ...prev, portraitUrl: url, portraitSource: 'auto', portraitBusy: false, portraitError: '',
+        }));
+      } catch (e: any) {
+        // A face that cannot be drawn never blocks the ad — the written
+        // description still carries the casting downstream.
+        if (!alive.current) return;
+        setPersona((prev) => ({ ...prev, portraitBusy: false, portraitError: String(e?.message || e) }));
+      }
+    } catch (e: any) {
+      if (!alive.current) return;
+      setPersona((prev) => ({
+        ...prev, characterBusy: false, angleBusy: false, portraitBusy: false, error: String(e?.message || e),
+      }));
+    }
+  }, []);
+
+  // A new product writes a new presenter and angle, once the typing settles.
+  // A failed attempt keeps its signature, so it never retries in a loop — the
+  // card offers a retry button instead.
+  useEffect(() => {
+    if (!personaSig || personaSig === persona.signature) return;
+    const brief: ProductBrief = { productName: form.productName, productDescription: form.productDescription };
+    const timer = window.setTimeout(() => { void writePersona('both', personaSig, brief); }, 900);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personaSig, persona.signature, writePersona]);
+
+  // Regenerate is always explicit, so it refreshes the description AND the
+  // portrait together — including over a photo the customer uploaded.
+  const rewritePersona = useCallback((want: PersonaTarget) => {
+    const brief: ProductBrief = { productName: form.productName, productDescription: form.productDescription };
+    const sig = personaSignature(form.productImage, brief);
+    void writePersona(want, sig, brief, { regeneratePortrait: true });
+  }, [form.productImage, form.productName, form.productDescription, writePersona]);
+
+  /** Swap the generated portrait for the customer's own photo. */
+  const uploadPortrait = useCallback(async (file: File | null) => {
+    if (!file) return;
+    setPortraitUploading(true);
+    setPersona((prev) => ({ ...prev, portraitError: '' }));
+    try {
+      const url = await runwayUpload(file);
+      if (!alive.current) return;
+      ownPortrait.current = true;
+      setPersona((prev) => ({
+        ...prev, portraitUrl: url, portraitSource: 'upload', portraitBusy: false, portraitError: '',
+      }));
+    } catch (e: any) {
+      if (!alive.current) return;
+      setPersona((prev) => ({ ...prev, portraitError: String(e?.message || e) }));
+    } finally {
+      if (alive.current) setPortraitUploading(false);
+    }
+  }, []);
+
+  const openAngleWriter = useCallback(() => {
+    setAngleExtendError('');
+    setAngleWriterOpen(true);
+    setAngleDraft((prev) => prev || persona.angle?.hook || '');
+  }, [persona.angle]);
+
+  /** Take the customer's draft as the angle, exactly as they typed it. */
+  const applyOwnAngle = useCallback(() => {
+    const text = angleDraft.trim().replace(/\s+/g, ' ');
+    if (!text) return;
+    const brief: ProductBrief = { productName: form.productName, productDescription: form.productDescription };
+    setPersona((prev) => ({
+      ...prev,
+      signature: personaSignature(form.productImage, brief),
+      angle: { name: 'Your angle', pain: '', hook: text, cta: prev.angle?.cta || '' },
+      angleBusy: false,
+      error: '',
+    }));
+    setAngleExtendError('');
+  }, [angleDraft, form.productImage, form.productName, form.productDescription]);
+
+  /** Complete the draft into a full angle without losing their wording. */
+  const autoExtendAngle = useCallback(async () => {
+    const draft = angleDraft.trim();
+    if (!draft) { setAngleExtendError('Write a line or two first — Auto-extend finishes your own draft.'); return; }
+    setAngleExtendBusy(true);
+    setAngleExtendError('');
+    const brief: ProductBrief = { productName: form.productName, productDescription: form.productDescription };
+    try {
+      const angle = await extendAdAngle({ draft, brief });
+      if (!alive.current) return;
+      setPersona((prev) => ({
+        ...prev,
+        signature: personaSignature(form.productImage, brief),
+        angle,
+        angleBusy: false,
+        error: '',
+      }));
+      setAngleDraft(angle.hook || draft);
+    } catch (e: any) {
+      if (!alive.current) return;
+      setAngleExtendError(String(e?.message || e));
+    } finally {
+      if (alive.current) setAngleExtendBusy(false);
+    }
+  }, [angleDraft, form.productImage, form.productName, form.productDescription]);
+
   // ---- quote / generate ----
+
+  /** The model name the customer actually picked, for the fallback message. */
+  const chosenModelLabel = useCallback((id: RunwayModeId) => (
+    (id === 'text_to_video' || id === 'image_to_video') && caps
+      ? modelLabelOf(resolvedVideoModel(id, form, caps))
+      : runwayMode(id).label
+  ), [caps, form]);
 
   const getQuote = useCallback(async () => {
     if (!caps) return;
@@ -541,24 +815,91 @@ export default function RunwayStudio(props: RunwayStudioProps) {
     if (problem) { setRun(mode, { phase: 'error', error: problem, result: null }); return; }
     setRun(mode, { phase: 'quoting', error: '', quote: null, status: '' });
     try {
-      const request = buildRequest(mode, form, caps);
+      const request = buildRequest(mode, form, caps, personaForRequest);
       const quote = await runwayQuote(request.quoteBody, caps.creditUsd);
       if (!alive.current) return;
-      setRun(mode, { phase: 'quoted', quote, error: '' });
+      setRun(mode, { phase: 'quoted', quote, error: '', fallback: false });
     } catch (e: any) {
       if (!alive.current) return;
-      setRun(mode, { phase: 'error', error: String(e?.message || e), quote: null });
+      // Runway prices only the models its own catalogue lists, so a refused
+      // price check on a roster model is not a dead end — it is the signal to
+      // quote Omni Flash instead and keep the customer moving.
+      if (runwayMode(mode).kind === 'video' && isModelRejection(e)) {
+        setToast(omniFallbackMessage(chosenModelLabel(mode)));
+        setRun(mode, { phase: 'quoted', quote: omniQuote(), error: '', fallback: true });
+        return;
+      }
+      setRun(mode, { phase: 'error', error: String(e?.message || e), quote: null, fallback: false });
     }
-  }, [caps, form, mode, setRun]);
+  }, [caps, chosenModelLabel, form, mode, personaForRequest, setRun]);
+
+  /** Re-run the brief on Omni Flash. Resolves false when it could not stand in. */
+  const runOmniFallback = useCallback(async (
+    id: RunwayModeId,
+    signal: { cancelled: boolean },
+  ): Promise<boolean> => {
+    const brief = omniBriefFor(id, form, personaForRequest);
+    logRecipePrompt(`${id} via ${OMNI_FALLBACK_LABEL}`, brief.prompt);
+    try {
+      const out = await generateWithOmniFlash({
+        prompt: brief.prompt,
+        aspect: form.ratio,
+        durationSeconds: form.duration,
+        seedImageUrl: brief.seed,
+        referenceImageUrl: brief.reference,
+        onStatus: (status) => { if (alive.current) setRun(id, { status }); },
+        isCancelled: () => signal.cancelled,
+      });
+      if (!alive.current) return true;
+      const result: RunwayResult = {
+        taskId: '', status: 'succeeded', mediaUrls: [out.videoUrl], mediaIds: [], kind: 'video', raw: null,
+      };
+      setRun(id, { phase: 'done', result, status: '', error: '', fallback: true });
+      setToast(omniFallbackMessage(chosenModelLabel(id)));
+      props.onResult?.({ mode: id, result });
+      // The stand-in's clip belongs in Saved Videos too — it is the ad the
+      // customer asked for, filmed by a different engine.
+      void saveRecipeGeneration({
+        mediaUrls: result.mediaUrls,
+        provider: 'gemini',
+        kind: 'video',
+        recipeId: id,
+        model: OMNI_FALLBACK_LABEL,
+        prompt: brief.prompt,
+        aspectRatio: form.ratio,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [chosenModelLabel, form, personaForRequest, props, setRun]);
 
   const generate = useCallback(async () => {
     if (!caps) return;
     const id = mode;
     const signal = { cancelled: false };
     cancelSignals.current[id] = signal;
-    setRun(id, { phase: 'running', error: '', status: 'Submitting to Runway…', result: null });
+    const viaOmni = (runs[id] || IDLE_RUN).fallback;
+
+    setRun(id, {
+      phase: 'running',
+      error: '',
+      status: viaOmni ? `Generating on ${OMNI_FALLBACK_LABEL}…` : 'Submitting to Runway…',
+      result: null,
+    });
+
+    if (viaOmni) {
+      const ok = await runOmniFallback(id, signal);
+      if (!ok && alive.current) {
+        setRun(id, { phase: 'error', status: '', error: `${OMNI_FALLBACK_LABEL} could not generate this either — adjust the brief and try again.` });
+      }
+      return;
+    }
+
     try {
-      const request = buildRequest(id, form, caps);
+      const request = buildRequest(id, form, caps, personaForRequest);
+      const sentPrompt = String(request.body.promptText || request.body.prompt || request.body.userConcept || '');
+      logRecipePrompt(request.recipeId || id, sentPrompt);
       const submission = request.endpoint === 'video'
         ? await runwaySubmitVideo(request.body)
         : await runwaySubmitRecipe(request.recipeId as any, request.body);
@@ -571,11 +912,32 @@ export default function RunwayStudio(props: RunwayStudioProps) {
       if (!alive.current) return;
       setRun(id, { phase: 'done', result, status: '', error: '' });
       props.onResult?.({ mode: id, result });
+      // NORMALISE AT SAVE TIME. A Runway generation lands straight in the
+      // browser, so nothing else would ever register it — this is what makes
+      // it show up under Recipes → Saved Videos → Runway.
+      void saveRecipeGeneration({
+        mediaUrls: result.mediaUrls,
+        provider: 'runway',
+        kind: result.kind === 'image' ? 'image' : 'video',
+        recipeId: request.recipeId || id,
+        model: String(request.body.model || request.recipeId || id),
+        prompt: sentPrompt,
+        aspectRatio: String(request.body.ratio || form.ratio || ''),
+        taskId: result.taskId || submission.taskId,
+      });
     } catch (e: any) {
+      if (!alive.current) return;
+      // A model Runway will not accept hands the shot to Omni Flash. If the
+      // stand-in cannot film it either, the customer reads the ORIGINAL
+      // refusal — not a second one about a model they never chose.
+      if (!signal.cancelled && runwayMode(id).kind === 'video' && isModelRejection(e)) {
+        setRun(id, { status: `Generating on ${OMNI_FALLBACK_LABEL}…` });
+        if (await runOmniFallback(id, signal)) return;
+      }
       if (!alive.current) return;
       setRun(id, { phase: 'error', error: String(e?.message || e), status: '' });
     }
-  }, [caps, form, mode, props, setRun]);
+  }, [caps, form, mode, personaForRequest, props, runOmniFallback, runs, setRun]);
 
   const cancel = useCallback(() => {
     const signal = cancelSignals.current[mode];
@@ -621,6 +983,339 @@ export default function RunwayStudio(props: RunwayStudioProps) {
     </>
   );
 
+  /** One half of the auto-written persona, with its own Rewrite button. */
+  const personaCard = (opts: { title: string; busy: boolean; want: PersonaTarget; children: any; extra?: any }) => (
+    <div style={{ background: t.card, border: `1px solid ${t.line}`, borderRadius: 10, padding: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: t.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          {opts.title}
+        </span>
+        {opts.extra || null}
+        <button
+          type="button" className="rw-btn"
+          disabled={persona.characterBusy || persona.angleBusy || (opts.want !== 'angle' && persona.portraitBusy)}
+          onClick={() => rewritePersona(opts.want)}
+          title={`Write a different ${opts.title.toLowerCase()}`}
+          style={{
+            marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5,
+            background: 'none', border: `1px solid ${t.line}`, borderRadius: 7, padding: '4px 9px',
+            color: t.muted, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: t.font,
+          }}
+        >
+          {opts.busy ? <Loader2 size={11} className="rw-spin" /> : <RefreshCw size={11} />} Regenerate
+        </button>
+      </div>
+      {opts.busy
+        ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: t.muted }}>
+            <Loader2 size={13} className="rw-spin" color={t.accent} /> Writing…
+          </div>
+        )
+        : opts.children}
+    </div>
+  );
+
+  const productAdAcceptsCharacterImage = mode === 'product_ad'
+    && !!caps
+    && recipeAccepts(caps, 'product_ad', 'characterImage');
+  const acceptsCharacterReference = mode === 'product_ugc' || productAdAcceptsCharacterImage;
+  const portraitIsCreatorReference = acceptsCharacterReference
+    && !!form.characterImage
+    && form.characterImage === persona.portraitUrl;
+
+  /**
+   * The presenter's face. Drawn from the same description the recipe is asked
+   * to film, or replaced by a photo the customer uploads themselves. Choosing
+   * it as recipe input is explicit: the visible Creator reference field remains
+   * the source of truth for pricing and generation.
+   */
+  const portraitFrame = (
+    <div style={{ width: 120, flexShrink: 0 }}>
+      <div
+        style={{
+          width: 120, height: 120, borderRadius: 12, overflow: 'hidden', background: t.panel,
+          border: `1px solid ${t.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        {persona.portraitBusy ? (
+          <Loader2 size={18} className="rw-spin" color={t.accent} />
+        ) : persona.portraitUrl ? (
+          <img
+            src={persona.portraitUrl}
+            alt={persona.character?.name ? `${persona.character.name}, the presenter` : 'The presenter'}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        ) : (
+          <span style={{ fontSize: 10.5, color: t.muted, textAlign: 'center', padding: 10, lineHeight: 1.45 }}>
+            No portrait yet
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 10, color: t.muted, marginTop: 5, textAlign: 'center', lineHeight: 1.4 }}>
+        {persona.portraitBusy
+          ? 'Drawing the portrait…'
+          : persona.portraitUrl
+            ? (persona.portraitSource === 'upload' ? 'Your photo' : '✨ Auto-generated')
+            : ''}
+      </div>
+      <button
+        type="button" className="rw-btn" disabled={portraitUploading}
+        onClick={() => portraitInput.current?.click()}
+        title="Use your own photo of the presenter instead"
+        style={{
+          marginTop: 6, width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+          background: t.panel, border: `1px dashed ${t.lineStrong}`, borderRadius: 8, padding: '6px 8px',
+          color: t.soft, fontSize: 11, fontWeight: 600, cursor: portraitUploading ? 'progress' : 'pointer', fontFamily: t.font,
+        }}
+        data-testid="persona-portrait-upload"
+      >
+        {portraitUploading ? <Loader2 size={11} className="rw-spin" /> : <Upload size={11} />}
+        {portraitUploading ? 'Uploading…' : 'Upload your own'}
+      </button>
+      <input
+        ref={portraitInput} type="file" accept="image/*" style={{ display: 'none' }}
+        onChange={(e) => { void uploadPortrait(e.target.files?.[0] || null); e.target.value = ''; }}
+      />
+      {personaMatches && persona.portraitUrl && acceptsCharacterReference && !form.characterImage ? (
+        <button
+          type="button" className="rw-btn"
+          onClick={() => setForm({ characterImage: persona.portraitUrl })}
+          title="Send this visible portrait to Runway as the creator reference"
+          style={{
+            marginTop: 6, width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+            background: t.accent, border: 'none', borderRadius: 8, padding: '7px 8px',
+            color: t.onAccent, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', fontFamily: t.font,
+          }}
+          data-testid="persona-use-as-reference"
+        >
+          <Check size={11} /> Use as creator reference
+        </button>
+      ) : null}
+      {personaMatches && portraitIsCreatorReference ? (
+        <div style={{ marginTop: 6, textAlign: 'center' }}>
+          <div style={{ fontSize: 10.5, color: t.good, fontWeight: 700, lineHeight: 1.4 }}>
+            <Check size={10} style={{ verticalAlign: '-1px', marginRight: 3 }} /> Sent with this recipe
+          </div>
+          <button
+            type="button" className="rw-btn"
+            onClick={() => setForm({ characterImage: '' })}
+            style={{
+              marginTop: 3, background: 'none', border: 'none', padding: 0,
+              color: t.muted, fontSize: 10.5, cursor: 'pointer', fontFamily: t.font,
+            }}
+            data-testid="persona-clear-reference"
+          >
+            Clear reference
+          </button>
+        </div>
+      ) : null}
+      {persona.portraitError ? (
+        <div style={{ fontSize: 10.5, color: t.bad, marginTop: 5, lineHeight: 1.45 }}>{persona.portraitError}</div>
+      ) : null}
+    </div>
+  );
+
+  /** The write-your-own angle editor, with Auto-extend. */
+  const angleWriter = !angleWriterOpen ? null : (
+    <div style={{ marginTop: 10, borderTop: `1px solid ${t.line}`, paddingTop: 10 }}>
+      <span style={s.label}>Your angle</span>
+      <textarea
+        style={{ ...s.input, minHeight: 74, resize: 'vertical' }}
+        value={angleDraft}
+        onChange={(e) => setAngleDraft(e.target.value)}
+        placeholder="Your own headline, quote or CTA — e.g. “I stopped buying three of these a year”"
+        data-testid="angle-own-draft"
+      />
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+        <button
+          type="button" className="rw-btn" disabled={angleExtendBusy || !angleDraft.trim() || !personaSig}
+          onClick={() => void autoExtendAngle()}
+          title="Finish this draft into a full angle"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, background: t.accent, color: t.onAccent,
+            border: 'none', borderRadius: 8, padding: '7px 13px', fontSize: 12, fontWeight: 700,
+            cursor: 'pointer', fontFamily: t.font,
+          }}
+          data-testid="angle-auto-extend"
+        >
+          {angleExtendBusy ? <Loader2 size={12} className="rw-spin" /> : <Sparkles size={12} />}
+          {angleExtendBusy ? 'Extending…' : 'Auto-extend'}
+        </button>
+        <button
+          type="button" className="rw-btn" disabled={angleExtendBusy || !angleDraft.trim() || !personaSig}
+          onClick={applyOwnAngle}
+          title="Run the ad on exactly what you typed"
+          style={{
+            background: t.panel, border: `1px solid ${t.line}`, borderRadius: 8, padding: '7px 13px',
+            color: t.soft, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: t.font,
+          }}
+          data-testid="angle-own-apply"
+        >
+          Use my angle
+        </button>
+        <button
+          type="button" className="rw-btn"
+          onClick={() => { setAngleWriterOpen(false); setAngleExtendError(''); }}
+          style={{
+            background: 'none', border: 'none', color: t.muted, fontSize: 12, cursor: 'pointer', fontFamily: t.font,
+          }}
+        >
+          Close
+        </button>
+      </div>
+      <div style={{ fontSize: 11.5, color: t.muted, marginTop: 7, lineHeight: 1.5 }}>
+        {personaSig
+          ? 'Auto-extend finishes your draft into a full angle — the pain it speaks to, one spoken hook and a call to action — in your own words.'
+          : 'Name the product and say what it is first — your angle is written against that brief.'}
+      </div>
+      {angleExtendError ? (
+        <div style={{ fontSize: 11.5, color: t.bad, marginTop: 6, lineHeight: 1.5 }}>{angleExtendError}</div>
+      ) : null}
+    </div>
+  );
+
+  const angleWriterToggle = (
+    <button
+      type="button" className="rw-btn"
+      onClick={() => (angleWriterOpen ? setAngleWriterOpen(false) : openAngleWriter())}
+      title="Write the angle yourself instead of regenerating it"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        background: angleWriterOpen ? `color-mix(in srgb, ${t.accent} 16%, transparent)` : 'none',
+        border: `1px solid ${angleWriterOpen ? `color-mix(in srgb, ${t.accent} 42%, transparent)` : t.line}`,
+        borderRadius: 7, padding: '4px 9px', color: angleWriterOpen ? t.accent : t.muted,
+        fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: t.font,
+      }}
+      data-testid="angle-write-own"
+    >
+      <Pencil size={11} /> Write your own
+    </button>
+  );
+
+  /**
+   * The presenter + angle card. It sits directly under the product inputs and
+   * writes itself — nothing here has to be filled in by hand, and whatever it
+   * says is what the recipe is asked to film.
+   */
+  const personaBlock = !personaCapable ? null : (
+    <div style={{ background: t.panel, border: `1px solid ${t.line}`, borderRadius: 11, padding: 12, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <Sparkles size={14} color={t.accent} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: t.ink }}>Presenter &amp; angle</span>
+        {personaMatches && (persona.character || persona.angle) ? (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 999, padding: '3px 9px',
+            background: `color-mix(in srgb, ${t.accent} 16%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${t.accent} 38%, transparent)`,
+            color: t.accent, fontSize: 11, fontWeight: 700,
+          }}>
+            ✨ Auto-generated
+          </span>
+        ) : null}
+      </div>
+
+      {!personaMatches || (!persona.character && !persona.angle && !persona.characterBusy && !persona.angleBusy) ? (
+        <div>
+          <div style={{ fontSize: 12.5, color: t.muted, lineHeight: 1.55 }}>
+            {!personaSig
+              ? 'Say what the product is (name it and give it a short sentence) — the creator who presents it and the angle the ad runs on are written for you.'
+              : persona.error
+                ? 'The presenter and angle could not be written this time.'
+                : 'Reading your product…'}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            <button
+              type="button" className="rw-btn"
+              disabled={!personaSig || persona.characterBusy || persona.angleBusy}
+              onClick={() => rewritePersona('both')}
+              title={personaSig ? 'Write the creator and the angle from your product brief' : 'Name the product and say what it is first'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: t.accent, color: t.onAccent, border: 'none', borderRadius: 8,
+                padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: t.font,
+              }}
+              data-testid="persona-generate"
+            >
+              <Sparkles size={13} /> Generate presenter &amp; angle
+            </button>
+            <button
+              type="button" className="rw-btn" disabled={!personaSig}
+              onClick={() => (angleWriterOpen ? setAngleWriterOpen(false) : openAngleWriter())}
+              title={personaSig ? 'Write the angle yourself instead' : 'Name the product and say what it is first'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: t.panel, border: `1px solid ${t.line}`, borderRadius: 8,
+                padding: '8px 14px', fontSize: 12.5, fontWeight: 700, color: t.soft,
+                cursor: 'pointer', fontFamily: t.font,
+              }}
+              data-testid="angle-write-own-empty"
+            >
+              <Pencil size={13} /> Write your own angle
+            </button>
+          </div>
+          {angleWriter}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 10 }}>
+          {personaCard({
+            title: 'Creator', busy: persona.characterBusy, want: 'character',
+            children: persona.character ? (
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                {portraitFrame}
+                <div style={{ flex: 1, minWidth: 180 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: t.ink, marginBottom: 5 }}>{persona.character.name}</div>
+                  {persona.character.appearance ? (
+                    <div style={{ fontSize: 12.5, color: t.soft, lineHeight: 1.55 }}>{persona.character.appearance}</div>
+                  ) : null}
+                  {persona.character.personality ? (
+                    <div style={{ fontSize: 12.5, color: t.muted, lineHeight: 1.55, marginTop: 5 }}>{persona.character.personality}</div>
+                  ) : null}
+                </div>
+              </div>
+            ) : <div style={{ fontSize: 12.5, color: t.muted }}>Not written yet.</div>,
+          })}
+          {personaCard({
+            title: 'Angle', busy: persona.angleBusy, want: 'angle', extra: angleWriterToggle,
+            children: (
+              <div>
+                {persona.angle ? (
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: t.ink, marginBottom: 5 }}>{persona.angle.name}</div>
+                    {persona.angle.pain ? (
+                      <div style={{ fontSize: 12.5, color: t.soft, lineHeight: 1.55 }}>{persona.angle.pain}</div>
+                    ) : null}
+                    {persona.angle.hook ? (
+                      <div style={{ fontSize: 13.5, fontWeight: 700, fontStyle: 'italic', color: t.ink, lineHeight: 1.5, marginTop: 7 }}>
+                        “{persona.angle.hook}”
+                      </div>
+                    ) : null}
+                    {persona.angle.cta ? (
+                      <div style={{ fontSize: 12.5, color: t.accent, fontWeight: 700, marginTop: 6 }}>{persona.angle.cta}</div>
+                    ) : null}
+                  </div>
+                ) : <div style={{ fontSize: 12.5, color: t.muted }}>Not written yet — regenerate it, or write your own.</div>}
+                {angleWriter}
+              </div>
+            ),
+          })}
+        </div>
+      )}
+
+      {persona.error ? (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10 }}>
+          <AlertCircle size={13} color={t.bad} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span style={{ fontSize: 12, color: t.soft, lineHeight: 1.5 }}>{persona.error}</span>
+          <button
+            type="button" className="rw-btn" onClick={() => rewritePersona('both')}
+            style={{ marginLeft: 'auto', background: 'none', border: `1px solid ${t.line}`, borderRadius: 7, padding: '4px 9px', color: t.muted, fontSize: 11.5, cursor: 'pointer', fontFamily: t.font }}
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+
   const ratioField = (
     ratioOptions.length ? (
       <Field label="Aspect ratio" t={t}>
@@ -655,8 +1350,9 @@ export default function RunwayStudio(props: RunwayStudioProps) {
   );
 
   /** Shared model picker for the two base-model modes — rendered from the
-   * FULL Runway roster; entries the live catalogue does not list render
-   * disabled with the reason instead of failing at submit. */
+   * FULL Runway roster, every entry selectable. What the live catalogue is
+   * currently listing shows up in each button's tooltip rather than greying
+   * the choice out, so nothing in the roster is unreachable. */
   const modelField = (modeId: 'text_to_video' | 'image_to_video') => {
     const roster = runwayModeModels(modeId);
     const active = caps ? resolvedVideoModel(modeId, form, caps) : form.model;
@@ -680,19 +1376,16 @@ export default function RunwayStudio(props: RunwayStudioProps) {
           {roster.map((m) => {
             const cat = engineRunwayModel(m);
             const on = form.modelMode === 'manual' && form.model === m;
-            const offline = !!caps && caps.models.length > 0 && !caps.models.some((cm) => cm.id === m);
             return (
               <button
-                key={m} type="button" className="rw-btn" disabled={offline}
+                key={m} type="button" className="rw-btn"
                 onClick={() => setForm({ model: m, modelMode: 'manual' })}
-                title={offline
-                  ? (cat?.unavailableReason || 'Not available on this workspace right now')
-                  : (cat ? `${runwayInputLabel(cat)} — ${cat.blurb}` : '')}
+                title={cat ? `${runwayInputLabel(cat)} — ${cat.blurb}` : ''}
                 style={{
                   background: on ? t.accent : t.panel, color: on ? t.onAccent : t.soft,
                   border: `1px solid ${on ? 'transparent' : t.line}`, borderRadius: 8,
                   padding: '7px 14px', fontSize: 12.5, fontWeight: 700,
-                  cursor: offline ? 'not-allowed' : 'pointer', opacity: offline ? 0.45 : 1, fontFamily: t.font,
+                  cursor: 'pointer', fontFamily: t.font,
                 }}
               >
                 {cat?.label || m}
@@ -714,8 +1407,14 @@ export default function RunwayStudio(props: RunwayStudioProps) {
             </div>
           </div>
         ) : (
-          <div style={{ color: t.muted, fontSize: 11.5, marginTop: 6 }}>
+          <div style={{ color: t.muted, fontSize: 11.5, marginTop: 6, lineHeight: 1.5 }}>
             {manualCat ? `${runwayInputLabel(manualCat)} · ${manualCat.blurb}` : 'Manual override — this concrete Runway model is quoted and submitted.'}
+            {caps && caps.models.length > 0 && !caps.models.some((cm) => cm.id === form.model) ? (
+              <div style={{ marginTop: 3 }}>
+                The live Runway catalogue is not listing this model today. Check price still works: if Runway refuses it, the shot is
+                generated on {OMNI_FALLBACK_LABEL} instead and the result says so.
+              </div>
+            ) : null}
           </div>
         )}
       </Field>
@@ -730,9 +1429,22 @@ export default function RunwayStudio(props: RunwayStudioProps) {
             {productBlock({
               imageLabel: 'Product image',
               imageHint: 'A clean shot of the real product. Runway builds the whole ad around it.',
-              conceptLabel: 'Tone / creative direction',
+              conceptLabel: 'Tone / creative direction (optional)',
               conceptPlaceholder: 'e.g. Premium editorial finish, warm studio light, calm and confident.',
             })}
+            {personaBlock}
+            {productAdAcceptsCharacterImage ? (
+              <MediaField
+                label="Creator reference"
+                accept="image/*"
+                value={form.characterImage}
+                t={t}
+                hint={portraitIsCreatorReference
+                  ? 'Using the portrait above. Replace it here with another photo, or remove it before checking the price.'
+                  : 'Optional. The live Runway catalog accepts a creator image for this Product Ad.'}
+                onChange={(url) => setForm({ characterImage: url })}
+              />
+            ) : null}
             {durationField}
             {ratioField}
           </>
@@ -755,10 +1467,20 @@ export default function RunwayStudio(props: RunwayStudioProps) {
           <>
             {productBlock({
               imageLabel: 'Product image',
-              conceptLabel: 'Creator persona / angle',
+              conceptLabel: 'Creator persona / angle (optional)',
               conceptPlaceholder: 'e.g. Busy parent filming on their phone before the school run, upbeat and unscripted.',
             })}
-            <MediaField label="Creator reference" accept="image/*" value={form.characterImage} t={t} hint="The creator who presents the product. Strongly recommended — it keeps the same face across takes." onChange={(url) => setForm({ characterImage: url })} />
+            {personaBlock}
+            <MediaField
+              label="Creator reference"
+              accept="image/*"
+              value={form.characterImage}
+              t={t}
+              hint={portraitIsCreatorReference
+                ? 'Using the portrait above. Replace it here with another photo, or remove it before checking the price.'
+                : 'The creator who presents the product. Use the portrait above or upload a different photo; this is what Runway receives.'}
+              onChange={(url) => setForm({ characterImage: url })}
+            />
             {durationField}
             {ratioField}
           </>
@@ -996,7 +1718,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
         <div style={{ ...s.card, borderColor: t.lineStrong, marginBottom: 14, display: 'flex', gap: 9, alignItems: 'flex-start' }}>
           <AlertCircle size={15} color={t.muted} style={{ flexShrink: 0, marginTop: 1 }} />
           <span style={{ fontSize: 12.5, color: t.soft, lineHeight: 1.55 }}>
-            Runway is not answering right now, so generation is disabled. {caps.reason}
+            Runway is not answering right now — video recipes fall back to {OMNI_FALLBACK_LABEL}. {caps.reason}
           </span>
         </div>
       ) : null}
@@ -1011,7 +1733,9 @@ export default function RunwayStudio(props: RunwayStudioProps) {
             <button
               key={id} type="button" role="tab" aria-selected={active} className="rw-btn"
               onClick={() => setMode(id)}
-              title={offline ? 'Not offered by the live Runway catalogue right now' : m.blurb}
+              title={offline
+                ? `Not offered by the live Runway catalogue right now — it runs on ${OMNI_FALLBACK_LABEL} instead`
+                : m.blurb}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 13px',
                 borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: t.font,
@@ -1028,13 +1752,15 @@ export default function RunwayStudio(props: RunwayStudioProps) {
         })}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', gap: 14, alignItems: 'start' }}>
         {/* Form */}
         <div style={s.card}>
           <div style={{ fontSize: 13, color: t.soft, lineHeight: 1.55, marginBottom: 12 }}>{def.blurb}</div>
           {!supported ? (
             <div style={{ fontSize: 12.5, color: t.muted, lineHeight: 1.55, marginBottom: 12 }}>
-              The live catalogue is not offering this mode right now, so it cannot be submitted.
+              {runwayMode(mode).kind === 'video'
+                ? `The live Runway catalogue is not offering this recipe right now — it runs on ${OMNI_FALLBACK_LABEL} instead, from the same brief.`
+                : 'The live Runway catalogue is not offering this mode right now, so it cannot be submitted.'}
             </div>
           ) : null}
           {renderForm()}
@@ -1045,11 +1771,13 @@ export default function RunwayStudio(props: RunwayStudioProps) {
               <div>
                 <div style={{ fontSize: 14, fontWeight: 800, color: t.ink, marginBottom: 4 }}>{run.quote.label}</div>
                 <div style={{ fontSize: 12, color: t.muted, marginBottom: 10, lineHeight: 1.5 }}>
-                  Quoted by Runway for exactly these inputs. Nothing is charged until you generate.
+                  {run.fallback
+                    ? `Runway will not price this model, so Generate films the same brief on ${OMNI_FALLBACK_LABEL}. Nothing is charged until you generate.`
+                    : 'Quoted by Runway for exactly these inputs. Nothing is charged until you generate.'}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button
-                    type="button" className="rw-btn" disabled={!supported} onClick={() => void generate()}
+                    type="button" className="rw-btn" onClick={() => void generate()}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: t.accent, color: t.onAccent, border: 'none', borderRadius: 9, padding: '10px 18px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: t.font }}
                     data-testid="runway-generate"
                   >
@@ -1065,7 +1793,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
               </div>
             ) : (
               <button
-                type="button" className="rw-btn" disabled={busy || !supported || !caps?.available}
+                type="button" className="rw-btn" disabled={busy}
                 onClick={() => void getQuote()}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: t.accent, color: t.onAccent, border: 'none', borderRadius: 9, padding: '10px 18px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: t.font }}
                 data-testid="runway-quote"
@@ -1101,6 +1829,29 @@ export default function RunwayStudio(props: RunwayStudioProps) {
           ) : null}
         </div>
       </div>
+
+      {toast ? (
+        <div
+          role="status"
+          style={{
+            position: 'fixed', right: 20, bottom: 20, zIndex: 60, maxWidth: 380,
+            display: 'flex', alignItems: 'flex-start', gap: 9,
+            background: t.card, borderRadius: 12, padding: '12px 14px',
+            border: `1px solid color-mix(in srgb, ${t.accent} 45%, transparent)`,
+            boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
+          }}
+          data-testid="runway-fallback-toast"
+        >
+          <Sparkles size={14} color={t.accent} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span style={{ flex: 1, fontSize: 12.5, color: t.soft, lineHeight: 1.5 }}>{toast}</span>
+          <button
+            type="button" onClick={() => setToast('')} aria-label="Dismiss"
+            style={{ background: 'none', border: 'none', color: t.muted, cursor: 'pointer', padding: 0, lineHeight: 0 }}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

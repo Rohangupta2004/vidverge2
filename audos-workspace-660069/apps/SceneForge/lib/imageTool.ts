@@ -1,6 +1,8 @@
 import { updateProject, type Asset, type Project, type Scene } from './supabase';
 import { forgeApi } from './forge';
-import { sleep, workspaceToken } from './proxy';
+import { sleep } from './proxy';
+import { generationHeaders, postGeneration } from '../../../lib/videoEngineClient';
+import { APP_IDS } from '../../../lib/appIds';
 import type { ForgeStyle } from '../styles/registry';
 
 // IMAGE TOOL — not an agent. This module contains no LLM: the single
@@ -52,7 +54,7 @@ async function withImageRetry<T>(request: () => Promise<T>): Promise<T> {
 }
 
 /** One scene, one picture. Callers fan these out so each card lights up alone. */
-export async function generateSceneImage(project: Project, scene: Scene, imageModel = DEFAULT_IMAGE_MODEL, style?: ForgeStyle, promptOverride?: string): Promise<SceneImageResult> {
+export async function generateSceneImage(project: Project, scene: Scene, imageModel: string = DEFAULT_IMAGE_MODEL, style?: ForgeStyle, promptOverride?: string): Promise<SceneImageResult> {
   const result = await withImageRetry(() => forgeApi.sceneImage(project.id, scene.id, {
     prompt: promptOverride || scene.image_prompts?.[0] || scene.description,
     model: imageModel,
@@ -63,7 +65,7 @@ export async function generateSceneImage(project: Project, scene: Scene, imageMo
 }
 
 /** Used by the batch run: reuses a picture the scene already has. */
-export async function ensureSceneImage(project: Project, scene: Scene, style: ForgeStyle, imageModel = DEFAULT_IMAGE_MODEL): Promise<SceneImageResult> {
+export async function ensureSceneImage(project: Project, scene: Scene, style: ForgeStyle, imageModel: string = DEFAULT_IMAGE_MODEL): Promise<SceneImageResult> {
   const result = await withImageRetry(() => forgeApi.sceneImage(project.id, scene.id, {
     prompt: scene.image_prompts?.[0] || scene.description,
     model: imageModel,
@@ -81,12 +83,15 @@ export function sceneImageAssets(assets: Asset[], sceneId: string) {
 export async function ensureMotionBackground(project: Project, style: ForgeStyle) {
   if (project.motion_bg_url) return project.motion_bg_url;
   // HyperFrames + Omni Flash policy: the motion background renders on Gemini
-  // Omni Flash, not Veo -- no other video model is called from this app.
-  const response = await fetch('/api/veo/generate/video', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() }, body: JSON.stringify({ model: 'gemini-omni-flash-preview', prompt: `A seamless subtle motion background for ${style.name}: ${style.description}. Abstract texture only, no people, objects, logos or text. Designed to loop behind transparent elements.`, aspectRatio: project.aspect_ratio, duration: 8, generateAudio: false }) });
-  const start = await response.json().catch(() => ({})); if (!response.ok || !start.operationId) throw new Error(start.error || 'Motion background generation failed');
+  // Omni Flash, not Veo -- no other video model is called from this app. The
+  // job goes through the shared engine client so it is recorded against
+  // SceneForge like every scene clip, instead of being left for the proxy to
+  // attribute from the session.
+  const { res: response, data } = await postGeneration('/api/veo/generate/video', { model: 'gemini-omni-flash-preview', prompt: `A seamless subtle motion background for ${style.name}: ${style.description}. Abstract texture only, no people, objects, logos or text. Designed to loop behind transparent elements.`, aspectRatio: project.aspect_ratio, duration: 8, generateAudio: false }, APP_IDS.sceneForge);
+  const start = data || {}; if (!response.ok || !start.operationId) throw new Error(start.error || 'Motion background generation failed');
   for (let i = 0; i < 90; i += 1) {
     await sleep(5000);
-    const status = await fetch(`/api/veo/status/${encodeURIComponent(start.operationId)}`).then((r) => r.json());
+    const status = await fetch(`/api/veo/status/${encodeURIComponent(start.operationId)}`, { headers: generationHeaders(APP_IDS.sceneForge) }).then((r) => r.json());
     if (status.status === 'completed' && status.videoUrl) { await updateProject(project.id, { motion_bg_url: status.videoUrl }); return String(status.videoUrl); }
     if (status.status === 'failed') throw new Error(status.errorMessage || 'Motion background failed');
   }

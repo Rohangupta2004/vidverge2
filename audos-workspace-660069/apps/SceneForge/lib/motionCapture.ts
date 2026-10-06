@@ -34,6 +34,93 @@ function recorderMime(): string {
   return candidates.find((mime) => MediaRecorder.isTypeSupported(mime)) || '';
 }
 
+/** Serialize independent capture work through the shared queue — recording is
+ * realtime work, and two simultaneous MediaRecorders starve each other. */
+export function enqueueCapture<T>(work: () => Promise<T>): Promise<T> {
+  return enqueue(work);
+}
+
+/**
+ * Record an arbitrary prepared SVG + GSAP timeline to a WebM blob — the same
+ * realtime rasterization loop recordMotionGraphic uses, for callers that build
+ * their own SVG scene (e.g. the Vox layered captures). The timeline is played
+ * from 0 and killed afterwards; the SVG is detached when recording ends.
+ */
+export async function recordSvgTimeline(
+  built: { svg: SVGSVGElement; timeline: { play: (from?: number) => unknown; kill: () => void } },
+  W: number,
+  H: number,
+  durationSec: number,
+  opts: { background?: string; onProgress?: (fraction: number) => void } = {},
+): Promise<Blob> {
+  const mime = recorderMime();
+  if (!mime) throw new Error('This browser cannot record motion graphics (MediaRecorder is unavailable). Switch the scene to Image or AI Video instead.');
+
+  const host = document.createElement('div');
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${W}px;height:${H}px;pointer-events:none;opacity:0;`;
+  host.appendChild(built.svg);
+  document.body.appendChild(host);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) { host.remove(); throw new Error('Canvas 2D is unavailable in this browser.'); }
+  ctx.fillStyle = opts.background || '#05060c'; ctx.fillRect(0, 0, W, H);
+
+  const serializer = new XMLSerializer();
+  let rasterBusy = false;
+  let stopped = false;
+  const paintLatestFrame = () => {
+    if (rasterBusy || stopped) return;
+    rasterBusy = true;
+    const markup = serializer.serializeToString(built.svg);
+    const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }));
+    const frame = new Image();
+    frame.onload = () => { try { if (!stopped) ctx.drawImage(frame, 0, 0, W, H); } finally { URL.revokeObjectURL(url); rasterBusy = false; } };
+    frame.onerror = () => { URL.revokeObjectURL(url); rasterBusy = false; };
+    frame.src = url;
+  };
+
+  const stream = canvas.captureStream(FPS);
+  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: H > W ? 7_000_000 : 8_000_000 });
+  const chunks: BlobPart[] = [];
+  recorder.ondataavailable = (event) => { if (event.data && event.data.size) chunks.push(event.data); };
+  const done = new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
+
+  const totalMs = (durationSec + 0.25) * 1000;
+  const startedAt = performance.now();
+  let raf = 0;
+  const tick = () => {
+    if (stopped) return;
+    paintLatestFrame();
+    if (opts.onProgress) opts.onProgress(Math.min(1, (performance.now() - startedAt) / totalMs));
+    raf = requestAnimationFrame(tick);
+  };
+
+  try {
+    paintLatestFrame();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    recorder.start(500);
+    built.timeline.play(0);
+    raf = requestAnimationFrame(tick);
+    await new Promise((resolve) => setTimeout(resolve, totalMs));
+    stopped = true;
+    cancelAnimationFrame(raf);
+    recorder.stop();
+    await done;
+  } finally {
+    stopped = true;
+    cancelAnimationFrame(raf);
+    built.timeline.kill();
+    stream.getTracks().forEach((track) => track.stop());
+    host.remove();
+  }
+  const blob = new Blob(chunks, { type: 'video/webm' });
+  const minBytes = Math.max(24_000, Math.round(durationSec * 6_000));
+  if (!blob.size || blob.size < minBytes) throw new Error(`The recording came back with no real frames (${blob.size} bytes). Keep this tab visible and in the foreground while the scene records, then try again.`);
+  return blob;
+}
+
 /** Fetch a remote image and inline it as a data: URL — SVG rasterized through
  * an <img> loads no external resources, so every image must travel inside the
  * markup. A fetch that fails (CORS, network) degrades to no image rather than

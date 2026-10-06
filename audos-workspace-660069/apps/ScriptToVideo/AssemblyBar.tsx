@@ -12,7 +12,7 @@
  */
 import { AlertTriangle, Check, CircleDot, Download, Layers, Loader2, Mic, Pencil, Play, RefreshCw } from 'lucide-react';
 import { Film, FilmScene, T } from './api';
-import { audioReady, musicReady, narrationReady, sfxReady } from './pipeline/audio';
+import { audioReady, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
 import { AssemblyProgress } from './pipeline/orchestrator';
 
 const DONE = new Set(['completed', 'skipped']);
@@ -69,7 +69,8 @@ export default function AssemblyBar(props: {
   const nReady = !!audio && narrationReady(audio);
   const mReady = !!audio && musicReady(audio);
   const sReady = !!audio && sfxReady(audio);
-  const nFail = !!audio && audio.narration.some((n) => n.status === 'failed');
+  const nFail = !!audio && audio.narration.some((n) => isSpokenSource(n.voice_source) && n.status === 'failed');
+  const silentVoice = audio?.voice_source === 'none';
   const mFail = audio?.music?.status === 'failed';
   const sFail = audio?.sfx_status === 'failed';
   const anyAudioFail = nFail || !!mFail || !!sFail;
@@ -86,7 +87,7 @@ export default function AssemblyBar(props: {
       {/* —— Real layer states —— */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', minWidth: 0, flex: '1 1 240px' }}>
         <Chip state={allDone ? 'done' : sceneFailed ? 'failed' : 'active'} label={allDone ? `${completedN} Scenes` : `Scenes ${completedN}/${total}`} />
-        <Chip state={layerChip(nReady, nFail, audioRunning && !nReady)} label="Narration" />
+        <Chip state={layerChip(nReady, nFail, audioRunning && !nReady)} label={silentVoice ? 'No voiceover' : 'Voiceover'} />
         <Chip state={layerChip(mReady, !!mFail, audioRunning && nReady && !mReady)} label={audio?.music?.status === 'skipped' ? 'Music skipped' : 'Music'} />
         <Chip state={layerChip(sReady, !!sFail, audioRunning && nReady && mReady && !sReady)} label={audio?.sfx_status === 'skipped' ? 'SFX skipped' : audio?.sfx_status === 'none' ? 'No SFX' : 'SFX'} />
         {props.screen === 'board' && allDone && !complete ? (
@@ -126,11 +127,11 @@ export default function AssemblyBar(props: {
             <Layers size={14} /> FINAL ASSEMBLY — {completedN}/{total} SCENES
           </button>
         ) : canAssemble ? (
-          <button className="s2v-lift" style={barBtn('accent')} onClick={props.onFinalAssembly} title="Existing scene videos + ElevenLabs narration + music + SFX → FFmpeg merge → final MP4. No scene is ever regenerated.">
+          <button className="s2v-lift" style={barBtn('accent')} onClick={props.onFinalAssembly} title="Existing scene videos + whatever audio layers are ready (voiceover is optional) → FFmpeg merge → final MP4. No scene is ever regenerated.">
             <Layers size={15} /> FINAL ASSEMBLY
           </button>
         ) : anyAudioFail ? (
-          <button style={barBtn('fault')} onClick={props.onOpenFinal} title="An audio layer failed — retry it or continue without it. Completed scenes are untouched.">
+          <button style={barBtn('fault')} onClick={props.onOpenFinal} title="An audio layer failed — retry it, or continue without it: every layer, the voiceover included, is optional. Completed scenes are untouched.">
             <AlertTriangle size={14} /> FINAL ASSEMBLY — AUDIO NEEDS ATTENTION
           </button>
         ) : audioRunning || busy ? (
@@ -138,7 +139,7 @@ export default function AssemblyBar(props: {
             <Loader2 size={14} className="animate-spin" /> FINAL ASSEMBLY — PREPARING ASSETS…
           </button>
         ) : (
-          <button className="s2v-lift" style={barBtn('accent')} onClick={props.onPrepareAudio} title="Runs the post-production steps: narration → music → SFX. Video scenes are reused, never regenerated.">
+          <button className="s2v-lift" style={barBtn('accent')} onClick={props.onPrepareAudio} title="Runs the post-production steps: voiceover (optional) → music → SFX. Video scenes are reused, never regenerated.">
             <Mic size={14} /> {audio ? 'FINISH AUDIO PREP' : 'PREPARE AUDIO'}
           </button>
         )}

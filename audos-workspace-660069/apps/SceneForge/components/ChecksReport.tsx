@@ -27,7 +27,7 @@ export default function ChecksReport({ checks, busy, assembled, onRetry }: { che
         {pass ? 'All six checks passed' : failing ? 'Assembly needs attention' : busy ? 'Checks run as soon as the film is assembled' : assembled ? 'Checks have not been tallied for this cut yet' : 'The six checks run once the film is assembled'}
       </div>
     </div>
-    {checks.map((check) => <div key={check.id} className="flex gap-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4">
+    {checks.map((check, index) => <div key={check.id} className="sf-card flex gap-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4 transition-all hover:-translate-y-0.5 hover:border-[var(--space-border-strong)] hover:shadow-xl" style={{ animationDelay: `${index * 45}ms` }}>
       {check.pass ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-[var(--space-semantic-success)]" /> : <AlertTriangle className="mt-0.5 h-4 w-4 text-[var(--space-semantic-danger)]" />}
       <div>
         <div className="text-sm font-semibold text-[var(--space-text-primary)]">{check.label}</div>

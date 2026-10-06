@@ -33,6 +33,14 @@ export function appId(): string {
   return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
 }
 
+/** The workspace's UUID, injected by the platform at serve time. Used for
+ *  provider-credential proxy and server-stitch endpoints that address the
+ *  workspace by UUID rather than by space id. */
+export function workspaceUuid(): string {
+  if (typeof window === 'undefined') return '';
+  return String((window as any).__WORKSPACE_ID__ || '');
+}
+
 // ---------------------------------------------------------------------------
 // Data model
 // ---------------------------------------------------------------------------
@@ -192,6 +200,12 @@ export interface AdsSession {
   scenePlan: ScenePlan[];
   voiceDescription: string;
   generatedAssets: GeneratedAsset[];
+  // Cast — the ONE presenter every clip renders from. castUrl is the locked
+  // reference image (the uploaded avatar, or a portrait cast and generated
+  // once), castDescription its text half. Both are remembered on the session
+  // so a resume, a retake or a variation reuses the same person.
+  castUrl: string | null;
+  castDescription: string;
   // Generation
   clips: GeneratedClip[];
   // Assembly
@@ -215,6 +229,7 @@ export function emptySession(): AdsSession {
     angles: [], selectedAngleIds: [], activeAngleId: null, opusPick: null,
     script: [],
     scenePlan: [], voiceDescription: '', generatedAssets: [],
+    castUrl: null, castDescription: '',
     clips: [],
     finalVideoUrl: null, assemblyStatus: 'idle', assemblyError: null,
     matrix: null, variations: [],

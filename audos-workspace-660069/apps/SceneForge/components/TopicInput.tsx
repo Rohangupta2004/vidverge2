@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { ArrowRight, Film, Loader2, Sparkles, Upload } from 'lucide-react';
 import { EDITING_PRESETS, type EditingPresetId } from '../styles/registry';
 import { WORKSPACE_ID } from '../lib/supabase';
+import type { VidvergeAttachment } from '../../../lib/vidvergeHandoff';
 
 type StartInput = { topic: string; audience?: string; language: string; target_length_sec: number; aspect_ratio: '16:9' | '9:16'; editing_preset?: EditingPresetId; reference_video_url?: string; reference_style_analysis?: Record<string, unknown> };
 
-export default function TopicInput({ busy, onStart }: { busy: boolean; onStart: (input: StartInput) => void }) {
-  const [topic, setTopic] = useState(''); const [audience, setAudience] = useState(''); const [language, setLanguage] = useState('en'); const [customLanguage, setCustomLanguage] = useState(''); const [minutes, setMinutes] = useState(5); const [ratio, setRatio] = useState<'16:9' | '9:16'>('9:16');
+export default function TopicInput({ busy, onStart, initialTopic = '', initialAttachment = null }: { busy: boolean; onStart: (input: StartInput) => void; initialTopic?: string; initialAttachment?: VidvergeAttachment | null }) {
+  const isVideoReference = Boolean(initialAttachment?.type?.startsWith('video/'));
+  const [topic, setTopic] = useState(initialTopic); const [audience, setAudience] = useState(''); const [language, setLanguage] = useState('en'); const [customLanguage, setCustomLanguage] = useState(''); const [minutes, setMinutes] = useState(5); const [ratio, setRatio] = useState<'16:9' | '9:16'>('9:16');
   const [preset, setPreset] = useState<EditingPresetId>('documentary');
-  const [referenceName, setReferenceName] = useState('');
-  const [referenceUrl, setReferenceUrl] = useState('');
-  const [referenceAnalysis, setReferenceAnalysis] = useState<Record<string, unknown> | null>(null);
+  const [referenceName, setReferenceName] = useState(isVideoReference ? initialAttachment?.name || '' : '');
+  const [referenceUrl, setReferenceUrl] = useState(isVideoReference ? initialAttachment?.url || '' : '');
+  const [referenceAnalysis, setReferenceAnalysis] = useState<Record<string, unknown> | null>(isVideoReference ? { summary: 'Reference supplied with the Vidverge brief', source: 'vidverge-agent' } : null);
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [referenceError, setReferenceError] = useState('');
 
@@ -37,12 +39,39 @@ export default function TopicInput({ busy, onStart }: { busy: boolean; onStart: 
   return <div className="mx-auto max-w-3xl px-6 py-12">
     <div className="mb-8 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--space-surface-accent-soft)]"><Sparkles className="h-6 w-6 text-[var(--space-text-brand)]" /></div>
     <p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Step 1 of 8</p><h1 className="mt-2 text-3xl font-bold text-[var(--space-text-primary)]">What should Verger explain?</h1><p className="mt-2 text-[var(--space-text-secondary)]">Start with the idea. The research agent turns it into a natural presenter script.</p>
+    {initialAttachment && !isVideoReference ? <p className="mt-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-3 py-2 text-sm text-[var(--space-text-secondary)]">Attached with the brief: {initialAttachment.name} · {initialAttachment.url}</p> : null}
     <textarea value={topic} onChange={(e) => setTopic(e.target.value)} rows={7} placeholder="Explain why cities are getting hotter, using memorable examples and practical takeaways…" className="mt-7 w-full rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 text-lg leading-relaxed text-[var(--space-text-primary)] outline-none transition-colors placeholder:text-[var(--space-text-muted)] focus:border-[var(--space-brand-primary-500)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--space-brand-primary-500)_22%,transparent)]" />
+    {/* ORIENTATION is a first-class choice, not an Advanced one: it decides the
+        aspect ratio every scene image, AI clip and motion graphic is generated
+        at. The DEFAULT stays Portrait on purpose — the platform's FFmpeg
+        overlay compositor is portrait-only, so a 9:16 film keeps the avatar's
+        narration audio uninterrupted, while 16:9 falls back to a deterministic
+        compositing render. */}
+    <div className="mt-6">
+      <p className="text-xs font-bold uppercase tracking-[.18em] text-[var(--space-text-muted)]">Orientation</p>
+      <div role="radiogroup" aria-label="Video orientation" className="relative mt-2 grid max-w-sm grid-cols-2 rounded-full border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-1">
+        <span aria-hidden className="pointer-events-none absolute bottom-1 left-1 top-1 w-[calc(50%-0.25rem)] rounded-full bg-[var(--space-brand-primary-600)] shadow-[0_2px_10px_color-mix(in_srgb,var(--space-brand-primary-600)_45%,transparent)] transition-transform duration-300 ease-out" style={{ transform: `translateX(${ratio === '16:9' ? 0 : 100}%)` }} />
+        {([['16:9', 'Landscape'], ['9:16', 'Portrait']] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={ratio === value}
+            onClick={() => setRatio(value)}
+            className={`relative z-10 flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-colors active:scale-[.97] ${ratio === value ? 'text-white' : 'text-[var(--space-text-secondary)] hover:text-[var(--space-text-primary)]'}`}
+          >
+            <span aria-hidden className={`rounded-[3px] border-2 transition-colors ${value === '16:9' ? 'h-2.5 w-4' : 'h-4 w-2.5'} ${ratio === value ? 'border-white' : 'border-[var(--space-text-muted)]'}`} />
+            {label} <span className="font-medium opacity-75">{value}</span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-2.5 text-sm text-[var(--space-text-muted)]">Every scene — avatar, AI clips, stills and motion graphics — is generated at {ratio}, and the final assembly follows.</p>
+    </div>
     <details className="mt-5 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-4">
-      <summary className="cursor-pointer text-sm font-semibold text-[var(--space-text-primary)]">Advanced <span className="font-normal text-[var(--space-text-muted)]">— Documentary · {minutes} min · {ratio === '9:16' ? 'Portrait' : 'Landscape'}</span></summary>
+      <summary className="cursor-pointer text-sm font-semibold text-[var(--space-text-primary)]">Advanced <span className="font-normal text-[var(--space-text-muted)]">— Documentary · {minutes} min</span></summary>
       <div className="mt-4 grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-[var(--space-text-secondary)]">Audience<input value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="Curious non-experts" className="mt-1.5 w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-3 py-2.5 text-[var(--space-text-primary)] outline-none transition-colors placeholder:text-[var(--space-text-muted)] focus:border-[var(--space-brand-primary-500)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--space-brand-primary-500)_22%,transparent)]" /></label><label className="text-sm font-medium text-[var(--space-text-secondary)]">Language<select value={language} onChange={(e) => setLanguage(e.target.value)} className="mt-1.5 w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-3 py-2.5 text-[var(--space-text-primary)] outline-none transition-colors focus:border-[var(--space-brand-primary-500)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--space-brand-primary-500)_22%,transparent)]"><option value="en">English</option><option value="hi">Hindi</option><option value="hinglish">Hinglish</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="custom">Other…</option></select></label></div>
     {language === 'custom' ? <input value={customLanguage} onChange={(e) => setCustomLanguage(e.target.value)} placeholder="Language name or code" className="mt-3 w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-3 py-2.5 text-[var(--space-text-primary)] outline-none transition-colors placeholder:text-[var(--space-text-muted)] focus:border-[var(--space-brand-primary-500)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--space-brand-primary-500)_22%,transparent)]" /> : null}
-    <div className="mt-5 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-4"><div className="flex justify-between text-sm text-[var(--space-text-secondary)]"><span>Target length</span><strong className="text-[var(--space-text-primary)]">{minutes} min</strong></div><input type="range" min={1} max={15} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} className="mt-3 w-full" /><div className="mt-4 flex gap-2">{(['9:16','16:9'] as const).map((r) => <button key={r} onClick={() => setRatio(r)} className={`rounded-lg px-4 py-2 text-sm font-medium transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)] ${ratio === r ? 'bg-[var(--space-brand-primary-600)] text-white shadow-[0_2px_8px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)]' : 'bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_8%,var(--space-surface-muted))] hover:text-[var(--space-text-primary)]'}`}>{r} {r === '16:9' ? 'Landscape' : 'Portrait full-face'}</button>)}</div></div>
+    <div className="mt-5 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-4"><div className="flex justify-between text-sm text-[var(--space-text-secondary)]"><span>Target length</span><strong className="text-[var(--space-text-primary)]">{minutes} min</strong></div><input type="range" min={1} max={15} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} className="mt-3 w-full" /></div>
     <section className="mt-5 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-4">
       <div className="flex items-center gap-2"><Film className="h-4 w-4 text-[var(--space-text-brand)]" /><h2 className="font-semibold text-[var(--space-text-primary)]">Editing strategy</h2></div>
       <p className="mt-1 text-sm text-[var(--space-text-secondary)]">This controls pacing, B-roll frequency, graphics and captions. You will still choose the visual skin later.</p>
@@ -56,6 +85,6 @@ export default function TopicInput({ busy, onStart }: { busy: boolean; onStart: 
       {referenceError ? <p className="mt-3 text-sm text-[var(--space-semantic-danger)]">{referenceError}</p> : null}
     </section>
     </details>
-    <button disabled={busy || referenceBusy || topic.trim().length < 10} onClick={() => { (window as any).__sceneForgePlanningContext = { editingPreset: preset, referenceVideoUrl: referenceUrl || null, referenceStyleAnalysis: referenceAnalysis }; onStart({ topic: topic.trim(), audience: audience.trim(), language: language === 'custom' ? customLanguage.trim() || 'en' : language, target_length_sec: minutes * 60, aspect_ratio: ratio, editing_preset: preset, ...(referenceUrl && referenceAnalysis ? { reference_video_url: referenceUrl, reference_style_analysis: referenceAnalysis } : {}) }); }} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_6px_18px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)] disabled:opacity-40 disabled:shadow-none disabled:hover:translate-y-0">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />} {busy ? 'Researching…' : 'Research & Write Script'}</button>
+    <button disabled={busy || referenceBusy || topic.trim().length < 10} onClick={() => { (window as any).__sceneForgePlanningContext = { editingPreset: preset, referenceVideoUrl: referenceUrl || null, referenceStyleAnalysis: referenceAnalysis }; onStart({ topic: initialAttachment && !isVideoReference ? `${topic.trim()}\n\nReference asset (${initialAttachment.name}): ${initialAttachment.url}` : topic.trim(), audience: audience.trim(), language: language === 'custom' ? customLanguage.trim() || 'en' : language, target_length_sec: minutes * 60, aspect_ratio: ratio, editing_preset: preset, ...(referenceUrl && referenceAnalysis ? { reference_video_url: referenceUrl, reference_style_analysis: referenceAnalysis } : {}) }); }} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_6px_18px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)] disabled:opacity-40 disabled:shadow-none disabled:hover:translate-y-0">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />} {busy ? 'Researching…' : 'Research & Write Script'}</button>
   </div>;
 }

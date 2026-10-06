@@ -30,7 +30,7 @@ export default function BackgroundJobIndicator({ project, scenes, note }: { proj
   const Icon = status === 'failed' ? TriangleAlert : status === 'completed' ? CheckCircle2 : status === 'waiting_for_capacity' || status === 'queued' ? Clock3 : GitBranch;
 
   return <div className="border-b border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-4 py-2">
-    <button onClick={() => setOpen((value) => !value)} className="flex w-full items-center gap-2 text-left">
+    <button aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex w-full items-center gap-2 text-left">
       <Icon className={`h-3.5 w-3.5 shrink-0 ${status === 'failed' ? 'text-[var(--space-semantic-danger)]' : status === 'completed' ? 'text-[var(--space-semantic-success)]' : 'text-[var(--space-text-brand)]'}`} />
       <span className="text-xs font-semibold text-[var(--space-text-primary)]">{String(stage || 'pipeline').replace(/_/g, ' ')}</span>
       <span className="rounded-full bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--space-text-muted)]">{STATUS_LABELS[status] || status}</span>
@@ -43,7 +43,7 @@ export default function BackgroundJobIndicator({ project, scenes, note }: { proj
       showValue={false}
       state={status === 'failed' ? 'error' : status === 'completed' ? 'complete' : running ? 'processing' : 'idle'}
     />
-    {open ? <div className="mt-2 grid gap-1 text-[11px] text-[var(--space-text-muted)] sm:grid-cols-[1fr_auto]">
+    {open ? <div className="sf-fade-up mt-2 grid gap-1 text-[11px] text-[var(--space-text-muted)] sm:grid-cols-[1fr_auto]">
       <p>{message}</p><span>{settled}/{scenes.length} scenes</span>
       {pipeline?.idempotency_key ? <p className="flex items-center gap-1"><ShieldCheck className="h-3 w-3" />One durable job · duplicate starts are ignored</p> : null}
       {pipeline?.error ? <p className="text-[var(--space-semantic-danger)]">{pipeline.error}</p> : null}

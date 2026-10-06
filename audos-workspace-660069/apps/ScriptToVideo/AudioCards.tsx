@@ -1,18 +1,24 @@
 /**
- * Compact AUDIO PREVIEW cards — narration / music / SFX — shown before Final
+ * Compact AUDIO PREVIEW cards — voiceover / music / SFX — shown before Final
  * Assembly. Each card reflects the layer's REAL backend state (queued /
  * generating / ready / failed / skipped), previews the actual generated audio,
  * and carries that layer's own actions. Changing any audio layer NEVER
  * triggers scene regeneration — only that layer is re-made.
+ *
+ * EVERY layer here is optional, the voiceover included: its card opens with a
+ * VOICE SOURCE choice (No Voiceover / ElevenLabs / built-in AI voice), and
+ * "No Voiceover" needs nothing generated — so a missing or failing voice
+ * provider can never stop a film from reaching Final Assembly.
  */
 import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, Check, Circle, Loader2, Mic, Music, Pause, Play, RefreshCw,
   SkipForward, Volume2,
 } from 'lucide-react';
-import { Film, FilmScene, T, fmtClock } from './api';
+import { Film, FilmScene, T, VoiceSourceId, fmtClock } from './api';
 import { MUSIC_PRESETS, MusicPreset, VoiceOption } from './pipeline/finish';
-import { audioScenes, musicReady, narrationReady, sfxReady } from './pipeline/audio';
+import { audioScenes, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
+import { OPENAI_VOICES, VOICE_SOURCES, openAiVoiceLabel } from './pipeline/voiceSource';
 
 type LayerState = 'done' | 'active' | 'failed' | 'todo' | 'skipped';
 
@@ -88,19 +94,100 @@ function useSequencePlayer() {
   return { playing, posMs, play, stop };
 }
 
+/**
+ * VOICE SOURCE — the first control on the voiceover card, because it decides
+ * whether the step does anything at all. Radio cards rather than a dropdown:
+ * this is a fork in the pipeline, not a preference buried in a list.
+ *
+ * ElevenLabs is greyed out (with the reason in its tooltip) only once the
+ * platform has actually refused its voice catalog — the built-in AI voice and
+ * No Voiceover are always selectable.
+ */
+function VoiceSourcePicker(props: {
+  value: VoiceSourceId;
+  openaiVoice: string;
+  elevenLabsOffered: boolean;
+  disabled: boolean;
+  onChange: (source: VoiceSourceId, openaiVoice?: string) => void;
+}) {
+  return (
+    <div id="s2v-voice-source">
+      <div style={{ color: T.dim, fontSize: 9.5, fontWeight: 800, letterSpacing: 0.9, textTransform: 'uppercase', marginBottom: 5 }}>Voice source</div>
+      <div role="radiogroup" aria-label="Voice source" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {VOICE_SOURCES.map((option) => {
+          const off = option.id === 'elevenlabs' && !props.elevenLabsOffered;
+          const active = props.value === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={props.disabled || off}
+              title={off ? 'ElevenLabs not connected.' : option.blurb}
+              onClick={() => props.onChange(option.id)}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 7, width: '100%', textAlign: 'left',
+                background: active ? 'rgba(245,158,11,0.14)' : '#101014',
+                border: `1px solid ${active ? T.live : T.dim}`,
+                borderRadius: 9, padding: '7px 9px',
+                cursor: props.disabled || off ? 'default' : 'pointer',
+                opacity: off ? 0.5 : 1,
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 11, height: 11, borderRadius: 999, flexShrink: 0, marginTop: 2,
+                  border: `2px solid ${active ? T.live : T.dim}`,
+                  background: active ? T.live : 'transparent',
+                }}
+              />
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', color: active ? T.bone : T.muted, fontSize: 11.5, fontWeight: 700 }}>{option.label}</span>
+                <span style={{ display: 'block', color: T.dim, fontSize: 10, lineHeight: 1.45 }}>
+                  {off ? 'ElevenLabs not connected.' : option.blurb}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {props.value === 'openai' ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7 }}>
+          <span style={{ color: T.dim, fontSize: 10.5, flexShrink: 0 }}>AI voice</span>
+          <select
+            value={props.openaiVoice}
+            disabled={props.disabled}
+            onChange={(e) => props.onChange('openai', e.target.value)}
+            style={{ ...selStyle, flex: 1, minWidth: 0 }}
+            aria-label="Built-in AI voice"
+          >
+            {OPENAI_VOICES.map((v) => <option key={v.id} value={v.id}>{v.label} — {v.blurb}</option>)}
+          </select>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function AudioCards(props: {
   film: Film;
   scenes: FilmScene[];
   voices: VoiceOption[];
   busy: boolean;
   generating: boolean;
+  voiceSource: VoiceSourceId;
+  openaiVoice: string;
+  elevenLabsOffered: boolean;
+  onChangeVoiceSource: (source: VoiceSourceId, openaiVoice?: string) => void;
   onRunLayer: (layer: 'narration' | 'music' | 'sfx') => void;
   onRegenNarration: () => void;
   onRegenSfx: () => void;
   onChangeVoice: (voiceId: string, voiceName?: string) => void;
   onChangeMusic: (preset: string) => void;
   onRetryLayer: (layer: 'narration' | 'music' | 'sfx') => void;
-  onSkipLayer: (layer: 'music' | 'sfx') => void;
+  onSkipLayer: (layer: 'narration' | 'music' | 'sfx') => void;
 }) {
   const { film, busy, generating } = props;
   const audio = film.audio || null;
@@ -115,20 +202,24 @@ export default function AudioCards(props: {
     player.play(urls);
   };
 
-  // —— Narration ——
+  // —— Voiceover ——
+  const silent = props.voiceSource === 'none';
   const orderKeys = done.map((s) => s.scene_key);
   const narrReadyEntries = (audio?.narration || [])
-    .filter((n) => n.voice_source === 'elevenlabs' && n.status === 'ready' && n.audioUrl)
+    .filter((n) => isSpokenSource(n.voice_source) && n.status === 'ready' && n.audioUrl)
     .sort((a, b) => orderKeys.indexOf(a.scene_key) - orderKeys.indexOf(b.scene_key));
   const narrUrls = narrReadyEntries.map((n) => String(n.audioUrl));
   const narrTotalMs = narrReadyEntries.reduce((n, e) => n + (Number(e.duration_s) || 0) * 1000, 0);
   const nReady = !!audio && narrationReady(audio);
-  const nFailed = !!audio && audio.narration.some((n) => n.status === 'failed');
-  const nState: LayerState = nReady ? 'done' : nFailed ? 'failed' : generating && !nReady ? 'active' : 'todo';
+  const nFailed = !!audio && audio.narration.some((n) => isSpokenSource(n.voice_source) && n.status === 'failed');
+  const nState: LayerState = silent ? 'skipped' : nReady ? 'done' : nFailed ? 'failed' : generating && !nReady ? 'active' : 'todo';
   const voiceId = audio?.voice_plan?.voiceId || '';
 
   // —— Music ——
   const music = audio?.music || null;
+  const musicProvider = music?.provider === 'gemini'
+    ? 'Google Gemini (Lyria)'
+    : music?.provider === 'elevenlabs' ? 'ElevenLabs' : '';
   const mReady = !!audio && musicReady(audio);
   const mState: LayerState = music?.status === 'skipped' ? 'skipped' : music?.status === 'failed' ? 'failed' : mReady && music?.audioUrl ? 'done' : mReady ? 'done' : generating && nReady && !mReady ? 'active' : 'todo';
 
@@ -141,54 +232,83 @@ export default function AudioCards(props: {
 
   return (
     <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap', alignItems: 'stretch' }}>
-      {/* —— NARRATION —— */}
+      {/* —— VOICEOVER (optional) —— */}
       <div style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <Mic size={13} color={T.live} />
-          <span style={{ color: T.bone, fontSize: 11, fontWeight: 800, letterSpacing: 0.8 }}>NARRATION</span>
+          <span style={{ color: T.bone, fontSize: 11, fontWeight: 800, letterSpacing: 0.8 }}>VOICEOVER</span>
+          <span style={{ color: T.dim, fontSize: 10, fontWeight: 600 }}>optional</span>
           <span style={{ marginLeft: 'auto' }}><Dot state={nState} /></span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <button
-            style={{ ...playBtn, opacity: narrUrls.length ? 1 : 0.4, cursor: narrUrls.length ? 'pointer' : 'default' }}
-            disabled={!narrUrls.length}
-            onClick={() => toggle('narration', narrUrls)}
-            aria-label="Voice preview"
-          >
-            {player.playing && previewing === 'narration' ? <Pause size={13} /> : <Play size={13} />}
-          </button>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ color: narrUrls.length ? T.bone : T.dim, fontSize: 12, fontWeight: 600 }}>Voice preview</div>
-            <div style={{ color: T.muted, fontSize: 11, fontFamily: T.mono }}>
-              {narrUrls.length ? `${fmtClock(player.playing && previewing === 'narration' ? player.posMs : 0)} — ${fmtClock(narrTotalMs)}` : nState === 'active' ? 'generating…' : nState === 'failed' ? 'failed' : 'not generated yet'}
-            </div>
+
+        <VoiceSourcePicker
+          value={props.voiceSource}
+          openaiVoice={props.openaiVoice}
+          elevenLabsOffered={props.elevenLabsOffered}
+          disabled={locked}
+          onChange={props.onChangeVoiceSource}
+        />
+
+        {silent ? (
+          <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.55, marginTop: 'auto' }}>
+            No narration layer. Your scenes keep their own sound and Final Assembly is ready as soon as the clips are — pick a voice above if you want one.
           </div>
-        </div>
-        {audio?.voice_plan?.voiceName ? <div style={{ color: T.dim, fontSize: 10.5 }}>Voice: {audio.voice_plan.voiceName}</div> : null}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 'auto' }}>
-          {!audio || (!nReady && !nFailed && !generating) ? (
-            <button style={actBtn(true)} disabled={locked || !done.length} onClick={() => props.onRunLayer('narration')}><Mic size={11} /> Generate narration</button>
-          ) : null}
-          {nFailed ? <button style={actBtn(true)} disabled={locked} onClick={() => props.onRetryLayer('narration')}><RefreshCw size={11} /> Retry</button> : null}
-          {nReady && narrUrls.length ? <button style={actBtn()} disabled={locked} onClick={props.onRegenNarration}><RefreshCw size={11} /> Regenerate Narration</button> : null}
-        </div>
-        <div id="s2v-voice-picker" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ color: T.dim, fontSize: 10.5, flexShrink: 0 }}>Change Voice</span>
-          <select
-            value={voiceId}
-            disabled={locked}
-            onChange={(e) => {
-              const v = props.voices.find((x) => x.id === e.target.value);
-              if (e.target.value) props.onChangeVoice(e.target.value, v?.name);
-            }}
-            style={{ ...selStyle, flex: 1, minWidth: 0 }}
-            aria-label="Change narration voice"
-          >
-            {voiceId && !props.voices.some((v) => v.id === voiceId) ? <option value={voiceId}>{audio?.voice_plan?.voiceName || voiceId}</option> : null}
-            {!voiceId ? <option value="">Choose a voice…</option> : null}
-            {props.voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
-        </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              <button
+                style={{ ...playBtn, opacity: narrUrls.length ? 1 : 0.4, cursor: narrUrls.length ? 'pointer' : 'default' }}
+                disabled={!narrUrls.length}
+                onClick={() => toggle('narration', narrUrls)}
+                aria-label="Voice preview"
+              >
+                {player.playing && previewing === 'narration' ? <Pause size={13} /> : <Play size={13} />}
+              </button>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: narrUrls.length ? T.bone : T.dim, fontSize: 12, fontWeight: 600 }}>Voice preview</div>
+                <div style={{ color: T.muted, fontSize: 11, fontFamily: T.mono }}>
+                  {narrUrls.length ? `${fmtClock(player.playing && previewing === 'narration' ? player.posMs : 0)} — ${fmtClock(narrTotalMs)}` : nState === 'active' ? 'generating…' : nState === 'failed' ? 'failed' : 'not generated yet'}
+                </div>
+              </div>
+            </div>
+            <div style={{ color: T.dim, fontSize: 10.5 }}>
+              {props.voiceSource === 'openai'
+                ? `Voice: ${openAiVoiceLabel(props.openaiVoice)} · built-in`
+                : audio?.voice_plan?.voiceName ? `Voice: ${audio.voice_plan.voiceName} · ElevenLabs` : 'Voice: chosen with the audio plan'}
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 'auto' }}>
+                {!audio || (!nReady && !nFailed && !generating) ? (
+                <button style={actBtn(true)} disabled={locked || !done.length} onClick={() => props.onRunLayer('narration')}><Mic size={11} /> Generate narration</button>
+              ) : null}
+              {nFailed ? <button style={actBtn(true)} disabled={locked} onClick={() => props.onRetryLayer('narration')}><RefreshCw size={11} /> Retry</button> : null}
+              {nFailed || (!nReady && !generating) ? (
+                <button style={actBtn()} disabled={locked} onClick={() => props.onSkipLayer('narration')} title="Drop the voiceover and assemble from the clips’ own sound. Nothing is regenerated.">
+                  <SkipForward size={11} /> Continue Without Voiceover
+                </button>
+              ) : null}
+              {nReady && narrUrls.length ? <button style={actBtn()} disabled={locked} onClick={props.onRegenNarration}><RefreshCw size={11} /> Regenerate Narration</button> : null}
+            </div>
+            {props.voiceSource === 'elevenlabs' ? (
+              <div id="s2v-voice-picker" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ color: T.dim, fontSize: 10.5, flexShrink: 0 }}>Change Voice</span>
+                <select
+                  value={voiceId}
+                  disabled={locked}
+                  onChange={(e) => {
+                    const v = props.voices.find((x) => x.id === e.target.value);
+                    if (e.target.value) props.onChangeVoice(e.target.value, v?.name);
+                  }}
+                  style={{ ...selStyle, flex: 1, minWidth: 0 }}
+                  aria-label="Change narration voice"
+                >
+                  {voiceId && !props.voices.some((v) => v.id === voiceId) ? <option value={voiceId}>{audio?.voice_plan?.voiceName || voiceId}</option> : null}
+                  {!voiceId ? <option value="">Choose a voice…</option> : null}
+                  {props.voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
 
       {/* —— MUSIC —— */}
@@ -210,7 +330,11 @@ export default function AudioCards(props: {
           <div style={{ minWidth: 0 }}>
             <div style={{ color: music?.audioUrl ? T.bone : T.dim, fontSize: 12, fontWeight: 600 }}>Music preview</div>
             <div style={{ color: T.muted, fontSize: 11 }}>
-              {music?.status === 'ready' && music.audioUrl ? `Selected track · ${music.preset || 'custom bed'}` : music?.status === 'skipped' ? 'Skipped — no music bed' : music?.status === 'failed' ? 'Music preparation failed' : mState === 'active' ? 'Selecting a bed…' : 'Not selected yet'}
+              {music?.status === 'ready' && music.audioUrl
+                ? `Selected track · ${music.preset || 'custom bed'}${musicProvider ? ` · ${musicProvider}` : ''}`
+                : music?.status === 'skipped'
+                  ? music.skip_reason === 'providers_unavailable' ? 'Continuing without music · providers unavailable' : 'Skipped — no music bed'
+                  : music?.status === 'failed' ? 'Music preparation failed' : mState === 'active' ? 'Selecting a bed…' : 'Not selected yet'}
             </div>
           </div>
         </div>

@@ -22,13 +22,12 @@
  * Ads Studio does: check GET /api/generate/kling/models at runtime and fall
  * back to Omni Flash on 503.
  *
- * Higgsfield endpoints are absent from THIS catalog by founder ruling of
- * 23 Sep 2026. (The retired Model Lab kept a lab-only exception listing
- * Higgsfield and MiniMax Hailuo; that surface is gone — this catalog and the
- * shared EnginePicker are now the single model-selection source.)
+ * Higgsfield video models live in HIGGSFIELD_VIDEO_MODELS below (native
+ * /api/generate/higgsfield/* proxy). Kling is live when GET
+ * /api/generate/kling/models answers 200.
  */
 
-export type EngineGroup = 'group-a' | 'runway-video' | 'runway-recipe' | 'kling';
+export type EngineGroup = 'group-a' | 'runway-video' | 'runway-recipe' | 'kling' | 'higgsfield';
 
 export type EngineTier = 'Fast' | 'Standard' | 'Cinematic' | 'Lite' | 'Character' | 'Pro' | 'Recipe';
 
@@ -69,6 +68,10 @@ const gA = (m: Omit<GroupAModel, 'group' | 'supportsImageData' | 'supportsNegati
   ({ group: 'group-a', supportsImageData: true, supportsNegativePrompt: true, ...m });
 
 export const GROUP_A_MODELS: GroupAModel[] = [
+  // Omni Flash has exactly one accepted spelling on this platform: the proxy's
+  // model enum lists `gemini-omni-flash-preview` and nothing versioned, so
+  // `gemini-omni-flash-1.1` / `-1.5` / `-2.0` answer 400 invalid_enum_value.
+  // TODO: upgrade to 1.1 when platform key is confirmed
   gA({
     id: 'gemini-omni-flash-preview', name: 'Gemini Omni Flash', provider: 'Google', tier: 'Character',
     blurb: 'Character consistency champion — send the same reference images with every scene and the same face, product or mascot carries across cuts. Refs + seed image may combine.',
@@ -776,21 +779,50 @@ export interface KlingModel {
   name: string;
   tier: EngineTier;
   blurb: string;
-  comingSoon: true;
+  /** When true the picker greys the model out (platform key missing). */
+  comingSoon?: boolean;
 }
 
 export const KLING_COMING_SOON_MESSAGE =
-  'Kling is being configured on the platform — it will activate automatically when ready.';
+  'Kling is not reachable from this workspace yet — connect Kling on the platform or pick another engine.';
 
 export const KLING_MODELS: KlingModel[] = [
-  { group: 'kling', id: 'kling-v2-master', name: 'Kling v2 Master', tier: 'Cinematic', comingSoon: true,
+  { group: 'kling', id: 'kling-v2-master', name: 'Kling v2 Master', tier: 'Cinematic',
     blurb: 'Best Kling quality. Text-to-video, image-to-video, multi-image, video-extend and lip-sync. Modes std/pro, durations "5"/"10".' },
-  { group: 'kling', id: 'kling-v1-6', name: 'Kling v1.6', tier: 'Standard', comingSoon: true,
+  { group: 'kling', id: 'kling-v1-6', name: 'Kling v1.6', tier: 'Standard',
     blurb: 'Balanced Kling generation — text-to-video and image-to-video.' },
-  { group: 'kling', id: 'kling-v1-5', name: 'Kling v1.5', tier: 'Standard', comingSoon: true,
-    blurb: 'Earlier Kling tier — text-to-video and image-to-video.' },
-  { group: 'kling', id: 'kling-v1', name: 'Kling v1', tier: 'Lite', comingSoon: true,
+  { group: 'kling', id: 'kling-v1-5', name: 'Kling v1.5', tier: 'Standard',
+    blurb: 'Default Kling tier — text-to-video, image-to-video, and Elements.' },
+  { group: 'kling', id: 'kling-v1', name: 'Kling v1', tier: 'Lite',
     blurb: 'First-generation Kling.' },
+];
+
+export interface HiggsfieldVideoModel {
+  group: 'higgsfield';
+  id: string;
+  name: string;
+  tier: EngineTier;
+  blurb: string;
+  mode: 'text-to-video' | 'image-to-video';
+}
+
+export const HIGGSFIELD_VIDEO_MODELS: HiggsfieldVideoModel[] = [
+  {
+    group: 'higgsfield', id: 'minimax-hailuo-02', name: 'Hailuo 02 (text-to-video)', tier: 'Cinematic', mode: 'text-to-video',
+    blurb: 'MiniMax Hailuo cinematic text-to-video via /api/generate/higgsfield/video.',
+  },
+  {
+    group: 'higgsfield', id: 'dop-turbo', name: 'DoP Turbo (image-to-video)', tier: 'Fast', mode: 'image-to-video',
+    blurb: 'Fast camera-motion animation from a seed image.',
+  },
+  {
+    group: 'higgsfield', id: 'dop-standard', name: 'DoP Standard (image-to-video)', tier: 'Standard', mode: 'image-to-video',
+    blurb: 'Higher-quality DoP image-to-video.',
+  },
+  {
+    group: 'higgsfield', id: 'dop-lite', name: 'DoP Lite (image-to-video)', tier: 'Lite', mode: 'image-to-video',
+    blurb: 'Fastest / cheapest DoP path.',
+  },
 ];
 
 export function isKlingModel(id: string | null | undefined): boolean {
@@ -1090,6 +1122,7 @@ export interface ShotRoute {
   reason: string;
 }
 
+// TODO: upgrade to 1.1 when platform key is confirmed
 const OMNI = 'gemini-omni-flash-preview';
 const VEO_31 = 'veo-3.1-generate-preview';
 const VEO_31_FAST = 'veo-3.1-fast-generate-preview';

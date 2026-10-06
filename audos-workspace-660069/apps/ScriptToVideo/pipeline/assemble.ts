@@ -169,7 +169,11 @@ async function applyFinish(
   let narrationIndex = -1;
   let musicIndex = -1;
   if (narration) { narrationIndex = nextInput; nextInput += 1; args.push('-i', narration); }
-  if (music) { musicIndex = nextInput; args.push('-i', music); }
+  // The music bed is composed in one provider request (at most 600s of
+  // audio), but the film can be any length: `-stream_loop -1` repeats the bed
+  // for as long as the mix needs it, and the music filter's atrim plus
+  // `-shortest` end it exactly at the film's duration.
+  if (music) { musicIndex = nextInput; args.push('-stream_loop', '-1', '-i', music); }
 
   const filters: string[] = ['[0:a:0]aformat=sample_rates=44100:channel_layouts=stereo[native]'];
   if (narrationIndex >= 0) {
@@ -207,6 +211,18 @@ async function applyFinish(
   return output;
 }
 
+/** Free FFmpeg.wasm intermediates the moment they are no longer needed. The
+ * in-memory FS would otherwise hold every downloaded clip and every normalized
+ * copy until the end of the run — fine for a dozen scenes, fatal for a long
+ * film of 60–120 clips. */
+async function drop(ff: any, cleanup: string[], ...names: string[]): Promise<void> {
+  for (const name of names) {
+    try { await ff.deleteFile(name); } catch { /* already gone */ }
+    const at = cleanup.indexOf(name);
+    if (at >= 0) cleanup.splice(at, 1);
+  }
+}
+
 export async function assembleFilm(
   clips: AssemblyInput[],
   aspect: Aspect,
@@ -241,6 +257,7 @@ export async function assembleFilm(
         rc = await ff.exec(['-y', '-i', inName, '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100', '-vf', vf, ...common, '-map', '0:v:0', '-map', '1:a:0', '-shortest', outName]);
       }
       if (rc !== 0) throw new Error(`Scene ${i + 1} could not be normalized for assembly.`);
+      await drop(ff, cleanup, inName);
       // Per-scene audio mix: the authoritative ElevenLabs narration rides over
       // the clip with the native audio reduced to ambience, scene SFX drop in
       // at their offsets, and a narration that slightly overruns extends the
@@ -254,9 +271,11 @@ export async function assembleFilm(
         : Math.max(0.25, Number(clip.targetDurationS) || 0);
       const pad = clipDur && targetDur > clipDur + 0.05 ? targetDur - clipDur : 0;
       const needsMix = !!clip.narrationUrl || sfxList.length > 0 || nativeVol < 0.999 || pad > 0;
+      const sceneTemp: string[] = [];
       if (needsMix) {
         try {
           const mixName = `segmix_${i}.mp4`;
+          sceneTemp.push(mixName);
           const args2: string[] = ['-y', '-i', outName];
           let inputIdx = 1;
           let narrIdx = -1;
@@ -264,6 +283,7 @@ export async function assembleFilm(
             const narrName = `narr_${i}.mp3`;
             await ff.writeFile(narrName, await fetchFile(clip.narrationUrl));
             cleanup.push(narrName);
+            sceneTemp.push(narrName);
             narrIdx = inputIdx; inputIdx += 1;
             args2.push('-i', narrName);
           }
@@ -272,6 +292,7 @@ export async function assembleFilm(
             const fxName = `sfx_${i}_${k}.mp3`;
             await ff.writeFile(fxName, await fetchFile(sfxList[k].url));
             cleanup.push(fxName);
+            sceneTemp.push(fxName);
             fxIdx.push(inputIdx); inputIdx += 1;
             args2.push('-i', fxName);
           }
@@ -311,6 +332,8 @@ export async function assembleFilm(
           say(`Scene ${i + 1}: the scene audio could not be mixed — the scene ships with native sound only.`, (i / (clips.length + 1)) * 0.88);
         }
       }
+      // Only the segment that goes into the join stays in memory.
+      await drop(ff, cleanup, ...sceneTemp.filter((n) => n !== segName), ...(segName !== outName ? [outName] : []));
       names.push(segName);
     }
 

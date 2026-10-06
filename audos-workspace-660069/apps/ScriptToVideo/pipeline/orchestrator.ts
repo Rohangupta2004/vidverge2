@@ -28,25 +28,32 @@
  */
 
 import {
-  Aspect, Film, FilmCharacter, FilmScene, MachineState, ReferenceAsset,
-  VideoClipSpec, db, generateBackdropImage, newSceneKey, sceneFingerprint,
+  Aspect, Film, FilmCharacter, FilmScene, MachineState, ParsedScene, PlanScene,
+  ReferenceAsset, ReferenceType, SceneDialogue, VideoClipSpec, db,
+  generateBackdropImage, newSceneKey, sceneFingerprint,
 } from '../api';
+import {
+  buildManualScenePrompt, manualSceneNegative, manualSceneSegment, parseManualScript,
+} from '../manualScript';
 import {
   characterPortraitBrief, extractVisualAttributes, prepareScenePrompt,
   segmentScript, validateScene,
 } from './opus';
-import { VideoModelService, resolveVideoModel } from './videoModelService';
+import { VideoModelService, capText, resolveVideoModel, snapDuration } from './videoModelService';
+import type { VideoModelConfig } from './videoModelService';
+import { fallbackChain, isBadRequest, rephraseVideoPrompt } from './resilience';
 import { extractFinalFrame, probeVideoDuration } from './frames';
 import { extractFrame as canvasExtractFrame } from './capture';
 import { assembleFilm } from './assemble';
 import { FinishSettings, buildCaptions, prepareFinish } from './finish';
 import {
-  AudioLayer, AudioLayerError, MAX_SCENE_EXTENSION_S, audioFingerprint,
+  AudioLayer, AudioLayerError, MAX_SCENE_EXTENSION_S, audioPlanCurrent,
   audioReady, audioScenes, ensureAudioPlan, generateMusicAudio,
-  generateNarrationAudio, generateSfxAudio, musicReady, narrationReady,
-  persistSceneNarration, sfxReady, skipMusicLayer, skipSfxLayer,
-  withMusicPreset,
+  generateNarrationAudio, generateSfxAudio, isSpokenSource, musicReady,
+  narrationReady, persistSceneNarration, sfxReady, skipMusicLayer,
+  skipNarrationLayer, skipSfxLayer, withMusicPreset, withVoiceSource,
 } from './audio';
+import type { VoiceSourceId } from './voiceSource';
 
 export interface RunHooks {
   onFilm?: (patch: Partial<Film>) => void;
@@ -149,6 +156,89 @@ export function allScenesDone(scenes: FilmScene[]): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Manual Script Mode + the dual-reference (n+1) method
+// ---------------------------------------------------------------------------
+
+/** True when this film's scenes were parsed from a script the customer pasted
+ * rather than segmented by the director model. A manual film never calls the
+ * director: not to segment, not to write a prompt, not to review a clip. */
+export function isManualFilm(film: Film): boolean {
+  return film.plan?.input_mode === 'manual';
+}
+
+/** The uploaded character reference, when it is a durable URL the generation
+ * proxies can actually fetch. */
+function characterRefUrl(film: Film): string {
+  const url = String(film.character_ref_url || '').trim();
+  return /^https:\/\//.test(url) ? url : '';
+}
+
+/** What the character reference image shows, in words. A provider that
+ * carries only ONE image reference gets this appended to the prompt instead
+ * of the picture, so identity still travels with every clip. */
+function characterReferenceNote(film: Film, characterId?: string | null): string {
+  const roster = Array.isArray(film.plan?.characters) ? film.plan!.characters! : [];
+  const match = (characterId ? roster.find((c) => c.id === characterId) : null) || roster[0] || null;
+  const appearance = String(match?.appearance || '').trim();
+  return appearance
+    ? `Character continuity (matching the supplied character reference image): ${capText(appearance, 220)} — identical face, hair, build and wardrobe in this clip.`
+    : 'Character continuity: the same person as the supplied character reference image — identical face, hair, build, wardrobe and colors in every clip.';
+}
+
+/** Append a note to a prompt without the proxy's hard character cap cutting
+ * the note itself back off the end. */
+function appendPromptNote(prompt: string, note: string, maxChars: number): string {
+  const body = String(prompt || '').trim();
+  if (!note) return body;
+  return `${capText(body, Math.max(160, maxChars - note.length - 1))}\n${note}`;
+}
+
+/**
+ * DUAL REFERENCE — the n+1 method, active in EVERY generation mode and on
+ * every provider whenever the film carries a character reference image.
+ *
+ * Scene N+1 is staged from two images at once: the character reference (WHO
+ * the person is) and scene N's extracted final frame (WHERE the shot left
+ * off). A provider that takes a seed frame AND reference images (Omni Flash,
+ * Kling) receives both simultaneously. A provider that takes only one image
+ * (Runway) keeps the final frame — continuity is the half a prompt cannot
+ * replace — and the character reference travels as a description appended to
+ * the prompt text instead.
+ *
+ * Scene 1 has no previous frame, so the character reference IS the reference
+ * frame. An independent mid-film scene is treated the same way: borrowing the
+ * previous frame there would contaminate it visually, which is a bug.
+ *
+ * With no character reference uploaded this is a no-op, so a film without one
+ * behaves exactly as it did before.
+ */
+function applyDualReference(params: {
+  film: Film;
+  assets: ReferenceAsset[];
+  prompt: string;
+  referenceType: ReferenceType;
+  characterId?: string | null;
+}): { assets: ReferenceAsset[]; prompt: string; referenceType: ReferenceType } {
+  const charRef = characterRefUrl(params.film);
+  if (!charRef) return { assets: params.assets, prompt: params.prompt, referenceType: params.referenceType };
+  const model = resolveVideoModel(params.film.video_model);
+  const assets = params.assets.filter((a) => a.url !== charRef);
+  if (!assets.some((a) => a.role === 'first_frame')) {
+    assets.unshift({ role: 'first_frame', url: charRef });
+    return { assets, prompt: params.prompt, referenceType: 'character_reference' };
+  }
+  if (model.maxReferenceImages > 0) {
+    assets.push({ role: 'reference', url: charRef });
+    return { assets, prompt: params.prompt, referenceType: params.referenceType };
+  }
+  return {
+    assets,
+    prompt: appendPromptNote(params.prompt, characterReferenceNote(params.film, params.characterId), model.promptMaxChars),
+    referenceType: params.referenceType,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Stage 1 — script received → analyzed → segmented → first scene prepared
 // ---------------------------------------------------------------------------
 
@@ -156,6 +246,8 @@ export async function createAndSegmentFilm(params: {
   script: string;
   aspect: Aspect;
   referenceImageUrl?: string | null;
+  /** Character reference image for the dual-reference (n+1) method. */
+  characterRefUrl?: string | null;
   note?: string;
   /** Video model registry id (see VIDEO_MODELS); null/undefined = default. */
   videoModel?: string | null;
@@ -168,6 +260,7 @@ export async function createAndSegmentFilm(params: {
     machine_state: 'SCRIPT_RECEIVED',
     stage_note: 'Script received.',
     product_screenshot_url: params.referenceImageUrl || null,
+    character_ref_url: params.characterRefUrl || null,
     video_model: resolveVideoModel(params.videoModel).id,
   });
   try {
@@ -219,6 +312,7 @@ export async function createAndSegmentFilm(params: {
         visual_style: plan.visual_style,
         characters: plan.characters,
         scenes: planScenes,
+        input_mode: 'ai',
       },
       character_refs: characterRefs,
       stage_note: `${plan.scenes.length} clips planned. Preparing scene 1…`,
@@ -270,6 +364,9 @@ export async function prepareScene(
   hooks: RunHooks,
   opts: { revisionNote?: string | null; forceIndependent?: boolean } = {},
 ): Promise<void> {
+  // Manual Script Mode writes its own prompt straight from the pasted text —
+  // the director model is never called for a manual film.
+  if (isManualFilm(film)) { await prepareManualScene(film, scenes, scene, hooks, opts); return; }
   const statusBefore = scene.status;
   const prev = previousCompletedScene(scenes, scene.idx);
   await setState(
@@ -326,6 +423,11 @@ export async function prepareScene(
       }
     }
 
+    // DUAL REFERENCE (n+1): the uploaded character reference rides along with
+    // the previous scene's final frame, or stands in as the reference frame
+    // when this clip has no frame to continue from.
+    const dual = applyDualReference({ film, assets, prompt: prepared.prompt, referenceType, characterId: prepared.needs_character });
+
     const spec: VideoClipSpec = {
       ...((scene.spec || {}) as VideoClipSpec),
       negative: prepared.negative,
@@ -334,10 +436,10 @@ export async function prepareScene(
     await patchScene(scene, hooks, {
       status: 'ready',
       error: null,
-      prompt: prepared.prompt,
+      prompt: dual.prompt,
       continuation,
-      reference_type: referenceType,
-      reference_assets: assets,
+      reference_type: dual.referenceType,
+      reference_assets: dual.assets,
       spec,
       clip_fingerprint: sceneFingerprint({ type: scene.type, spec }, (film.aspect_ratio || '16:9') as Aspect),
     });
@@ -349,6 +451,192 @@ export async function prepareScene(
       ? { status: 'completed', error: String(e?.message || e) }
       : { status: 'failed', error: String(e?.message || e) });
     await patchFilm(film, hooks, { stage_note: `Scene ${scene.idx + 1} could not be prepared.`, error: String(e?.message || e) });
+    throw e;
+  }
+}
+
+/**
+ * Prepare ONE manual scene. No model is called at any point: the prompt is
+ * assembled from the scene's own parsed visual, camera and dialogue plus the
+ * script's overall style block, and the references follow the same
+ * dual-reference rule every other mode uses.
+ */
+async function prepareManualScene(
+  film: Film,
+  scenes: FilmScene[],
+  scene: FilmScene,
+  hooks: RunHooks,
+  opts: { revisionNote?: string | null; forceIndependent?: boolean } = {},
+): Promise<void> {
+  const statusBefore = scene.status;
+  const prev = previousCompletedScene(scenes, scene.idx);
+  await setState(
+    film, hooks,
+    scene.idx === 0 || !prev ? 'PREPARING_SCENE' : 'PREPARE_NEXT_SCENE',
+    `Scene ${scene.idx + 1}: building the prompt from your script…`,
+  );
+  try {
+    const spec = (scene.spec || {}) as VideoClipSpec;
+    const manual = spec.manual;
+    if (!manual) throw new Error(`Scene ${scene.idx + 1} carries no parsed script data — re-create this film from the pasted script.`);
+
+    const continuation = !opts.forceIndependent && !!prev?.keyframe_url;
+    const assets: ReferenceAsset[] = [];
+    if (continuation && prev?.keyframe_url) assets.push({ role: 'first_frame', url: prev.keyframe_url });
+
+    const model = resolveVideoModel(film.video_model);
+    const dual = applyDualReference({
+      film,
+      assets,
+      prompt: buildManualScenePrompt({
+        scene: manual,
+        globalStyle: String(film.plan?.global_style || ''),
+        continuity: continuation,
+        revisionNote: opts.revisionNote,
+        maxChars: model.promptMaxChars,
+      }),
+      referenceType: continuation ? 'previous_final_frame' : 'none',
+    });
+
+    const nextSpec: VideoClipSpec = {
+      ...spec,
+      negative: manualSceneNegative(manual),
+      reasoning: continuation
+        ? `Manual Script Mode — continuing from scene ${(prev?.idx ?? 0) + 1}'s final frame.`
+        : 'Manual Script Mode — staged exactly as written in your script.',
+    };
+    await patchScene(scene, hooks, {
+      status: 'ready',
+      error: null,
+      prompt: dual.prompt,
+      continuation,
+      reference_type: dual.referenceType,
+      reference_assets: dual.assets,
+      spec: nextSpec,
+      clip_fingerprint: sceneFingerprint({ type: scene.type, spec: nextSpec }, (film.aspect_ratio || '16:9') as Aspect),
+    });
+    await setState(film, hooks, 'PROMPT_READY', `Scene ${scene.idx + 1} is ready — review the prompt and generate when you are.`);
+  } catch (e: any) {
+    await patchScene(scene, hooks, statusBefore === 'completed'
+      ? { status: 'completed', error: String(e?.message || e) }
+      : { status: 'failed', error: String(e?.message || e) });
+    await patchFilm(film, hooks, { stage_note: `Scene ${scene.idx + 1} could not be prepared.`, error: String(e?.message || e) });
+    throw e;
+  }
+}
+
+/** A manual scene's on-camera line, as the audio stage reads it: a scene that
+ * speaks keeps the clip's own generated voice and is never narrated over. */
+function manualSceneDialogue(scene: ParsedScene): SceneDialogue | null {
+  const spoken = scene.dialogue.filter((entry) => entry.line.trim());
+  if (!spoken.length) return null;
+  return {
+    line: spoken.map((entry) => entry.line.trim()).join(' '),
+    speaker: spoken[0].speaker || 'the speaker',
+    delivery: 'natural, exactly as written in the script',
+    language: 'English',
+  };
+}
+
+/**
+ * MANUAL SCRIPT MODE — create a film straight from a pre-formatted script.
+ * The parser is the only thing that reads the text: no scene detection and no
+ * directing pass run. The scenes it produces enter the normal generation
+ * pipeline exactly as a planned film's would, so everything downstream —
+ * sequential rendering, frame extraction, the review board, post-production
+ * and Final Assembly — is unchanged.
+ */
+export async function createManualScriptFilm(params: {
+  script: string;
+  aspect: Aspect;
+  /** Character reference image for the dual-reference (n+1) method. */
+  characterRefUrl?: string | null;
+  referenceImageUrl?: string | null;
+  note?: string | null;
+  videoModel?: string | null;
+}, hooks: RunHooks = {}): Promise<{ film: Film; scenes: FilmScene[] }> {
+  const parsed = parseManualScript(params.script);
+  if (!parsed.scenes.length) {
+    throw new Error('No scenes were found in that script. Every scene must open with a line like "Scene 1 — Title | 8 sec".');
+  }
+  // A director note has nobody to direct in this mode, so it joins the
+  // overall style block and reaches every clip that way.
+  const globalStyle = [parsed.globalStyle, String(params.note || '').trim()].filter(Boolean).join(' ');
+  const model = resolveVideoModel(params.videoModel);
+  const film = await db.createFilm({
+    title: parsed.scenes[0].title || 'Manual script film',
+    script: params.script,
+    aspect_ratio: params.aspect,
+    status: 'planning',
+    machine_state: 'SEGMENTING_SCRIPT',
+    stage_note: `${parsed.scenes.length} scenes read from your script.`,
+    product_screenshot_url: params.referenceImageUrl || null,
+    character_ref_url: params.characterRefUrl || null,
+    video_model: model.id,
+  });
+  try {
+    const planScenes: PlanScene[] = [];
+    for (const parsedScene of parsed.scenes) {
+      const idx = parsedScene.index - 1;
+      const duration = snapDuration(parsedScene.durationSec, model);
+      const segment = manualSceneSegment(parsedScene);
+      const dialogue = manualSceneDialogue(parsedScene);
+      const sceneKey = newSceneKey();
+      const spec: VideoClipSpec = {
+        summary: parsedScene.title,
+        visual_goal: parsedScene.visual,
+        duration_s: duration,
+        manual: parsedScene,
+      };
+      planScenes.push({
+        scene_key: sceneKey,
+        idx,
+        type: 'video_clip',
+        script_segment: segment,
+        duration_s: duration,
+        continuity_group: null,
+        spec,
+        dialogue,
+        summary: parsedScene.title,
+        visual_goal: parsedScene.visual,
+      });
+      await db.insertScene({
+        film_id: film.id,
+        idx,
+        scene_key: sceneKey,
+        type: 'video_clip',
+        script_segment: segment,
+        spec,
+        status: 'waiting',
+        duration_s: duration,
+        continuity_group: null,
+        dialogue,
+      });
+    }
+    await patchFilm(film, hooks, {
+      status: 'plan_ready',
+      plan: {
+        title: String(film.title || 'Manual script film'),
+        style_direction: globalStyle,
+        visual_style: globalStyle,
+        story_summary: parsed.scenes.map((s) => `${s.index}. ${s.title}`).join(' · ').slice(0, 1200),
+        world: '',
+        characters: [],
+        scenes: planScenes,
+        input_mode: 'manual',
+        global_style: globalStyle,
+      },
+      character_refs: [],
+      stage_note: `${parsed.scenes.length} scenes read from your script. Preparing scene 1…`,
+    });
+
+    const scenes = await db.listScenes(film.id);
+    // One prompt at a time, exactly as in AI Mode — only the author differs.
+    await prepareScene(film, scenes, scenes[0], hooks);
+    const fresh = await db.getFilm(film.id);
+    return { film: fresh || film, scenes };
+  } catch (e: any) {
+    await db.updateFilm(film.id, { status: 'error', error: String(e?.message || e), stage_note: 'The pasted script could not be turned into scenes.' });
     throw e;
   }
 }
@@ -370,21 +658,59 @@ export async function generateScene(film: Film, scenes: FilmScene[], scene: Film
   await patchFilm(film, hooks, { status: 'producing', error: null });
   await setState(film, hooks, 'GENERATING_VIDEO', `Scene ${scene.idx + 1}: generating the clip…`);
   await patchScene(scene, hooks, { status: 'generating', error: null });
+  const creditKey = `stv:film:${film.id}:scene:${scene.id}`;
   try {
     const spec = (scene.spec || {}) as VideoClipSpec;
-    const job = await VideoModelService.createVideo({
-      prompt: preparedPrompt,
-      negative: spec.negative,
-      aspect: (film.aspect_ratio || '16:9') as Aspect,
-      durationS: Number(scene.duration_s) || 6,
-      referenceAssets: scene.reference_assets,
-      // The film's chosen model (Create screen); unknown/null ids fall back
-      // to the default so pre-picker films keep rendering on Omni Flash.
-      model: resolveVideoModel(film.video_model),
-    });
+    const aspect = (film.aspect_ratio || '16:9') as Aspect;
+    const durationS = Number(scene.duration_s) || 6;
+    const hasSeedFrame = (scene.reference_assets || []).some((asset) => asset?.role === 'first_frame');
+    // The film's chosen model (Create screen); unknown/null ids fall back
+    // to the default so pre-picker films keep rendering on Omni Flash.
+    const chosenModel = resolveVideoModel(film.video_model);
+
+    // 400 LADDER (see ./resilience): original prompt → rephrased prompt →
+    // rephrased prompt on the next provider. The aspect, duration, references,
+    // negative prompt and creditKey are IDENTICAL on every attempt, so the
+    // shot never changes and the scene is never billed twice.
+    const attempts: { prompt: string; model: VideoModelConfig }[] = [{ prompt: preparedPrompt, model: chosenModel }];
+    let job: { jobId: string; model: string } | null = null;
+    let submitError: any = null;
+    let rephrased = '';
+    for (let step = 0; step < attempts.length && !job; step += 1) {
+      const attempt = attempts[step];
+      try {
+        job = await VideoModelService.createVideo({
+          prompt: attempt.prompt,
+          negative: spec.negative,
+          aspect,
+          durationS,
+          referenceAssets: scene.reference_assets,
+          model: attempt.model,
+          creditKey,
+        });
+        // The board shows the prompt that actually rendered.
+        if (step > 0 && attempt.prompt !== preparedPrompt) await patchScene(scene, hooks, { prompt: attempt.prompt });
+      } catch (e: any) {
+        submitError = e;
+        if (!isBadRequest(e)) throw e;
+        if (step === 0) {
+          say(hooks, `Scene ${scene.idx + 1}: the provider refused this request — retrying with a rephrased prompt…`);
+          rephrased = await rephraseVideoPrompt(preparedPrompt, String(e?.message || e));
+          if (rephrased && rephrased !== preparedPrompt) attempts.push({ prompt: rephrased, model: attempt.model });
+        } else if (step === 1) {
+          const next = fallbackChain(attempt.model, { hasSeedFrame })[0];
+          if (next) {
+            say(hooks, `Scene ${scene.idx + 1}: switching provider to ${next.label}…`);
+            attempts.push({ prompt: attempt.prompt, model: next });
+          }
+        }
+      }
+    }
+    if (!job) throw submitError || new Error(`Scene ${scene.idx + 1} could not be submitted to any video provider.`);
     await patchScene(scene, hooks, { veo_operation_id: job.jobId });
     const videoUrl = await VideoModelService.getVideoResult(job.jobId, {
       onProgress: (p) => say(hooks, `Scene ${scene.idx + 1}: rendering… ${Math.round(p)}%`),
+      creditKey,
     });
     await setState(film, hooks, 'VIDEO_COMPLETED', `Scene ${scene.idx + 1}: clip landed.`);
     await patchScene(scene, hooks, { asset_url: videoUrl, veo_operation_id: null });
@@ -430,14 +756,20 @@ async function finalizeScene(
 
   await setState(film, hooks, 'FRAME_READY', frameNote || `Scene ${scene.idx + 1}: final frame captured and validated.`);
 
+  // A manual film has no director, so neither the end-state read nor the
+  // review runs on it. The frame itself is still extracted — it is half of
+  // the next clip's dual reference.
+  const manual = isManualFilm(film);
   let attrs: any = null;
-  if (finalFrameUrl) {
+  if (finalFrameUrl && !manual) {
     say(hooks, `Scene ${scene.idx + 1}: reading the end state for continuity…`);
     try { attrs = await withTimeout(extractVisualAttributes(finalFrameUrl), DIRECTOR_TIMEOUT_MS, 'Reading the end state'); } catch { attrs = null; }
   }
   const frames = [firstFrameUrl, finalFrameUrl].filter(Boolean) as string[];
-  let verdict: { pass: boolean; issues: string; method: string } = { pass: true, issues: 'No frame could be captured for review — accepted on trust.', method: 'trust' };
-  if (frames.length) {
+  let verdict: { pass: boolean; issues: string; method: string } = manual
+    ? { pass: true, issues: 'Manual Script Mode — your pasted script is the director, so no AI review runs on this clip.', method: 'manual' }
+    : { pass: true, issues: 'No frame could be captured for review — accepted on trust.', method: 'trust' };
+  if (frames.length && !manual) {
     try { verdict = await withTimeout(validateScene(scene, frames), DIRECTOR_TIMEOUT_MS, 'The director’s review'); }
     catch { verdict = { pass: true, issues: 'The review could not be completed in time — accepted on trust.', method: 'trust' }; }
   }
@@ -577,18 +909,42 @@ export async function skipScene(film: Film, scenes: FilmScene[], scene: FilmScen
 // ---------------------------------------------------------------------------
 
 export async function autoProduce(film: Film, scenes: FilmScene[], hooks: RunHooks, shouldContinue: () => boolean): Promise<void> {
+  // PARTIAL FAILURE IS NOT A STOP. A scene that exhausted the 400 ladder stays
+  // 'failed' and fully recoverable from the board, but it no longer blocks the
+  // scenes after it: one refused clip must never cost the rest of the film.
+  const stalled = new Set<number>();
   for (;;) {
     if (!shouldContinue()) { say(hooks, 'Auto-generate paused.'); return; }
-    const next = activeScene(scenes);
+    const next = orderedScenes(scenes).find((s) => !DONE.has(String(s.status)) && !stalled.has(s.id)) || null;
     if (!next) {
       if (allScenesDone(scenes)) await setState(film, hooks, 'ALL_SCENES_COMPLETED', 'All video scenes are complete — prepare the audio and run Final Assembly.');
+      else if (stalled.size) say(hooks, `${stalled.size} scene${stalled.size === 1 ? '' : 's'} failed and ${stalled.size === 1 ? 'was' : 'were'} left for you — every other scene finished. Retry them from the board.`);
       return;
     }
-    if (next.status === 'failed') { say(hooks, `Auto-generate stopped at scene ${next.idx + 1} — it needs your decision (retry, new prompt, character fallback, or skip).`); return; }
+    if (next.status === 'failed') {
+      stalled.add(next.id);
+      say(hooks, `Scene ${next.idx + 1} failed — continuing with the remaining scenes. Retry, reprompt, fall back to the character reference, or skip it from the board.`);
+      continue;
+    }
     if (next.status === 'generating') return; // already in flight elsewhere
-    if (next.status === 'waiting') await prepareScene(film, scenes, next, hooks);
+    if (next.status === 'waiting') {
+      try {
+        await prepareScene(film, scenes, next, hooks);
+      } catch {
+        stalled.add(next.id);
+        say(hooks, `Scene ${next.idx + 1} could not be prepared — continuing with the remaining scenes.`);
+        continue;
+      }
+    }
     if (!shouldContinue()) { say(hooks, 'Auto-generate paused.'); return; }
-    if (next.status === 'ready') await generateScene(film, scenes, next, hooks);
+    if (next.status === 'ready') {
+      try {
+        await generateScene(film, scenes, next, hooks);
+      } catch {
+        stalled.add(next.id);
+        say(hooks, `Scene ${next.idx + 1} failed — continuing with the remaining scenes. The error is kept on its card.`);
+      }
+    }
   }
 }
 
@@ -710,7 +1066,7 @@ const ASSEMBLY_STEPS: { key: AssemblyStepKey; label: string }[] = [
  * extended (capped) when its narration needs slightly more room. */
 export function sceneTargetDuration(scene: FilmScene, narration?: { voice_source?: string; duration_s?: number } | null): number {
   const base = Number(scene.duration_s) || 6;
-  if (!narration || narration.voice_source !== 'elevenlabs' || !narration.duration_s) return base;
+  if (!narration || !isSpokenSource(narration.voice_source) || !narration.duration_s) return base;
   return Math.max(base, Math.min(narration.duration_s + 0.3, base + MAX_SCENE_EXTENSION_S));
 }
 
@@ -722,7 +1078,14 @@ export async function prepareFilmAudioStage(
   film: Film,
   scenes: FilmScene[],
   hooks: RunHooks,
-  opts: { voiceId?: string; voiceName?: string; forceReplan?: boolean } = {},
+  opts: {
+    voiceId?: string;
+    voiceName?: string;
+    forceReplan?: boolean;
+    /** Voice source for this run; omitted = the film's own choice. */
+    voiceSource?: VoiceSourceId;
+    openaiVoice?: string;
+  } = {},
 ): Promise<void> {
   await setState(film, hooks, 'AUDIO_PLANNING', film.audio ? 'Updating the audio plan…' : 'Opus is planning narration, music and SFX together with the scenes…');
   try {
@@ -768,7 +1131,13 @@ async function generateAudioLayers(film: Film, scenes: FilmScene[], hooks: RunHo
     });
     throw firstFailure;
   }
-  await patchFilm(film, hooks, { machine_state: 'AUDIO_READY', stage_note: 'Narration, music and SFX are ready — run Final Assembly.', error: null });
+  await patchFilm(film, hooks, {
+    machine_state: 'AUDIO_READY',
+    stage_note: audio.music?.skip_reason === 'providers_unavailable'
+      ? 'Music providers are unavailable — continuing without music. Run Final Assembly.'
+      : 'Narration, music and SFX are ready — run Final Assembly.',
+    error: null,
+  });
 }
 
 /** [Retry Voice] / [Retry] per layer — clears only that layer's failures and
@@ -778,12 +1147,14 @@ export async function retryAudioLayer(film: Film, scenes: FilmScene[], hooks: Ru
   const audio = film.audio;
   if (layer === 'narration') {
     audio.narration.forEach((n) => {
-      if (n.voice_source === 'elevenlabs' && (n.status === 'failed' || !n.audioUrl)) { n.status = 'pending'; n.error = undefined; }
+      if (isSpokenSource(n.voice_source) && (n.status === 'failed' || !n.audioUrl)) { n.status = 'pending'; n.error = undefined; }
     });
   } else if (layer === 'music' && audio.music) {
     audio.music.required = true;
     audio.music.status = 'pending';
     audio.music.audioUrl = undefined;
+    audio.music.provider = undefined;
+    audio.music.skip_reason = undefined;
     audio.music.error = undefined;
   } else if (layer === 'sfx') {
     audio.sfx.forEach((f) => { if (f.status === 'failed') { f.status = 'pending'; f.error = undefined; } });
@@ -793,13 +1164,60 @@ export async function retryAudioLayer(film: Film, scenes: FilmScene[], hooks: Ru
   await generateAudioLayers(film, scenes, hooks);
 }
 
-/** [Continue Without Music] / [Continue Without SFX]. */
-export async function skipAudioLayer(film: Film, scenes: FilmScene[], hooks: RunHooks, layer: 'music' | 'sfx'): Promise<void> {
+/** [Continue Without Voiceover] / [Continue Without Music] / [Continue Without
+ * SFX]. Every audio layer is optional: dropping one leaves the clips and the
+ * other layers exactly as they are and unlocks Final Assembly. */
+export async function skipAudioLayer(film: Film, scenes: FilmScene[], hooks: RunHooks, layer: 'narration' | 'music' | 'sfx'): Promise<void> {
   if (!film.audio) return;
-  const audio = layer === 'music' ? skipMusicLayer(film.audio) : skipSfxLayer(film.audio);
+  const audio = layer === 'narration' ? skipNarrationLayer(film.audio)
+    : layer === 'music' ? skipMusicLayer(film.audio)
+      : skipSfxLayer(film.audio);
   await patchFilm(film, hooks, { audio, error: null });
   if (audioReady(audio)) {
-    await patchFilm(film, hooks, { machine_state: 'AUDIO_READY', stage_note: layer === 'music' ? 'Continuing without music — run Final Assembly.' : 'Continuing without SFX — run Final Assembly.' });
+    await patchFilm(film, hooks, {
+      machine_state: 'AUDIO_READY',
+      stage_note: layer === 'narration' ? 'Continuing without a voiceover — run Final Assembly.'
+        : layer === 'music' ? 'Continuing without music — run Final Assembly.'
+        : 'Continuing without SFX — run Final Assembly.',
+    });
+  }
+}
+
+/**
+ * [Voice Source] — No Voiceover / ElevenLabs / built-in AI voice.
+ *
+ * The choice only re-shapes the narration layer: music, SFX and every video
+ * clip are untouched, and 'No Voiceover' completes the step immediately, so
+ * Final Assembly is never held up waiting on a voice provider. Recording the
+ * new lines stays an explicit step (the narration card's own button, or Final
+ * Assembly), so switching engines never spends the wallet by itself.
+ */
+export async function changeVoiceSource(
+  film: Film,
+  scenes: FilmScene[],
+  hooks: RunHooks,
+  source: VoiceSourceId,
+  openaiVoice?: string,
+): Promise<void> {
+  // Nothing planned yet: the plan is built with this choice when it runs.
+  if (!film.audio) return;
+  const audio = withVoiceSource(film.audio, source, openaiVoice);
+  await patchFilm(film, hooks, { audio, error: null });
+  if (!allScenesDone(scenes)) return;
+  if (audioReady(audio)) {
+    await patchFilm(film, hooks, {
+      machine_state: 'AUDIO_READY',
+      stage_note: source === 'none'
+        ? 'No voiceover — run Final Assembly whenever you are ready.'
+        : 'Narration, music and SFX are ready — run Final Assembly.',
+    });
+  } else {
+    await patchFilm(film, hooks, {
+      machine_state: 'ALL_SCENES_COMPLETED',
+      stage_note: source === 'openai'
+        ? 'Built-in AI voice selected — generate the narration, or just run Final Assembly.'
+        : 'ElevenLabs selected — generate the narration, or just run Final Assembly.',
+    });
   }
 }
 
@@ -830,7 +1248,7 @@ const LAYER_NOTES: Record<'narration' | 'music' | 'sfx', { run: string; done: st
 };
 
 async function ensurePlanPersisted(film: Film, scenes: FilmScene[], hooks: RunHooks): Promise<void> {
-  if (film.audio && film.audio.planned_fingerprint === audioFingerprint(scenes)) return;
+  if (audioPlanCurrent(film, scenes)) return;
   await setState(film, hooks, 'AUDIO_PLANNING', 'Opus is planning narration, music and SFX together with the scenes…');
   try {
     const audio = await ensureAudioPlan(film, scenes, (n) => say(hooks, n));
@@ -861,9 +1279,19 @@ export async function runAudioLayerStep(film: Film, scenes: FilmScene[], hooks: 
     }
     await patchFilm(film, hooks, { audio: { ...audio }, error: null });
     if (audioReady(audio)) {
-      await patchFilm(film, hooks, { machine_state: 'AUDIO_READY', stage_note: 'Narration, music and SFX are ready — run Final Assembly.' });
+      await patchFilm(film, hooks, {
+        machine_state: 'AUDIO_READY',
+        stage_note: audio.music?.skip_reason === 'providers_unavailable'
+          ? 'Music providers are unavailable — continuing without music. Run Final Assembly.'
+          : 'Narration, music and SFX are ready — run Final Assembly.',
+      });
     } else {
-      await patchFilm(film, hooks, { machine_state: 'ALL_SCENES_COMPLETED', stage_note: LAYER_NOTES[layer].done });
+      await patchFilm(film, hooks, {
+        machine_state: 'ALL_SCENES_COMPLETED',
+        stage_note: layer === 'music' && audio.music?.skip_reason === 'providers_unavailable'
+          ? 'Music providers are unavailable — continuing without music.'
+          : LAYER_NOTES[layer].done,
+      });
     }
   } catch (e: any) {
     await patchFilm(film, hooks, {
@@ -876,13 +1304,13 @@ export async function runAudioLayerStep(film: Film, scenes: FilmScene[], hooks: 
   }
 }
 
-/** [Regenerate Narration] — re-records EVERY ElevenLabs line with the same
- * voice identity. Music, SFX and every video clip are untouched. */
+/** [Regenerate Narration] — re-records EVERY spoken line on the film's current
+ * engine and voice. Music, SFX and every video clip are untouched. */
 export async function regenerateNarration(film: Film, scenes: FilmScene[], hooks: RunHooks): Promise<void> {
   if (!film.audio) { await prepareFilmAudioStage(film, scenes, hooks); return; }
   const audio = film.audio;
   audio.narration.forEach((n) => {
-    if (n.voice_source === 'elevenlabs') { n.status = 'pending'; n.audioUrl = undefined; n.duration_s = undefined; n.error = undefined; }
+    if (isSpokenSource(n.voice_source)) { n.status = 'pending'; n.audioUrl = undefined; n.duration_s = undefined; n.error = undefined; }
   });
   await patchFilm(film, hooks, { audio: { ...audio }, error: null });
   await runAudioLayerStep(film, scenes, hooks, 'narration');
@@ -904,17 +1332,23 @@ export async function regenerateSfx(film: Film, scenes: FilmScene[], hooks: RunH
  * Ready layers are reused; video is never regenerated. */
 export async function autoPostProduce(film: Film, scenes: FilmScene[], hooks: RunHooks): Promise<void> {
   if (!allScenesDone(scenes)) return;
-  if (film.audio && film.audio.planned_fingerprint === audioFingerprint(scenes) && audioReady(film.audio)) {
-    await patchFilm(film, hooks, { machine_state: 'AUDIO_READY', stage_note: 'Narration, music and SFX are ready — run Final Assembly.' });
+  if (audioPlanCurrent(film, scenes) && audioReady(film.audio)) {
+    await patchFilm(film, hooks, {
+      machine_state: 'AUDIO_READY',
+      stage_note: film.audio?.music?.skip_reason === 'providers_unavailable'
+        ? 'Music providers are unavailable — continuing without music. Run Final Assembly.'
+        : 'Narration, music and SFX are ready — run Final Assembly.',
+    });
     return;
   }
   await prepareFilmAudioStage(film, scenes, hooks);
 }
 
-/** FINAL ASSEMBLY — one click: existing video scenes + ElevenLabs narration +
- * music + SFX → FFmpeg → audio mix + composition → final render. NEVER
- * regenerates video; missing audio layers are generated first, ready ones are
- * reused, so re-assembly after a voice/music change is fast. */
+/** FINAL ASSEMBLY — one click: existing video scenes + the chosen voiceover
+ * (optional) + music + SFX → FFmpeg → audio mix + composition → final render.
+ * NEVER regenerates video; missing audio layers are generated first, ready ones
+ * are reused, so re-assembly after a voice/music change is fast. A film with no
+ * voiceover simply has one less layer to mix. */
 export async function runFinalAssembly(
   film: Film,
   scenes: FilmScene[],
@@ -938,7 +1372,7 @@ export async function runFinalAssembly(
     // regenerated here — Final Assembly only reads existing clips.
     report('scenes', 'done', 6);
 
-    if (!film.audio || film.audio.planned_fingerprint !== audioFingerprint(scenes) || !audioReady(film.audio)) {
+    if (!audioPlanCurrent(film, scenes) || !audioReady(film.audio)) {
       report('narration', 'active', 8);
       await prepareFilmAudioStage(film, scenes, hooks);
     }
@@ -953,7 +1387,7 @@ export async function runFinalAssembly(
     const narrationByKey = new Map(audio.narration.map((n) => [n.scene_key, n]));
     const inputs = done.map((s) => {
       const entry = narrationByKey.get(s.scene_key) || null;
-      const narrated = !!entry && entry.voice_source === 'elevenlabs' && entry.status === 'ready' && !!entry.audioUrl;
+      const narrated = !!entry && isSpokenSource(entry.voice_source) && entry.status === 'ready' && !!entry.audioUrl;
       const sfx = audio.sfx
         .filter((f) => f.scene_key === s.scene_key && f.status === 'ready' && f.audioUrl && audio.sfx_status === 'ready')
         .map((f) => ({ url: String(f.audioUrl), atS: Number(f.at_s) || 0, volume: Number(f.volume) || 0.25, durationS: Number(f.duration_s) || undefined }));
@@ -996,8 +1430,11 @@ export async function runFinalAssembly(
     progress.running = false;
     report('validate', 'done', 100);
 
+    const narrationLabel = audio.voice_source === 'openai'
+      ? `built-in AI narration (${audio.openai_voice || 'alloy'})`
+      : `ElevenLabs narration (${audio.voice_plan?.voiceName || 'one voice'})`;
     const layerSummary = [
-      inputs.some((c) => c.narrationUrl) ? `ElevenLabs narration (${audio.voice_plan?.voiceName || 'one voice'})` : '',
+      inputs.some((c) => c.narrationUrl) ? narrationLabel : '',
       musicUrl ? `${audio.music?.preset || ''} music, ducked under speech`.trim() : '',
       inputs.some((c) => c.sfx.length) ? 'SFX' : '',
       captionsSrt ? 'captions' : '',
@@ -1051,7 +1488,9 @@ export async function resumeFilm(film: Film, scenes: FilmScene[], hooks: RunHook
     } else if (scene.veo_operation_id) {
       try {
         say(hooks, `Scene ${scene.idx + 1}: picking the render back up…`);
-        const videoUrl = await VideoModelService.getVideoResult(scene.veo_operation_id);
+        const videoUrl = await VideoModelService.getVideoResult(scene.veo_operation_id, {
+          creditKey: `stv:film:${film.id}:scene:${scene.id}`,
+        });
         await patchScene(scene, hooks, { asset_url: videoUrl, veo_operation_id: null });
         await finalizeScene(film, scenes, scene, hooks, videoUrl);
       } catch (e: any) {

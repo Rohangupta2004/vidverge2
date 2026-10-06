@@ -27,7 +27,7 @@
  *   registry lists the FULL Runway text-to-video roster from ../runwayRoster
  *   (Gen 4.5, Veo 3.1, Seedance 2.0 / Fast / Mini / 2.5, MiniMax H3 and H3
  *   Max, WAN 3.0 and 3.0 Prime, Grok Imagine Video 1.5, HappyHorse 1.0,
- *   Gemini Omni Flash and Omni Flash 1.1, plus image-only Gen 4 Turbo).
+ *   Gemini Omni Flash, plus image-only Gen 4 Turbo).
  *   THAT module owns the id spellings and resolves the platform's own spelling
  *   from GET /api/generate/runway/capabilities, so a submit always carries the
  *   id the proxy actually accepts. A model is refused before the round trip
@@ -50,6 +50,7 @@
 
 import { Aspect, ReferenceAsset, appId, sessionId, uploadBlob, uploadDataUrl, wsToken } from '../api';
 import { checkRunway, runwaySubmitVideo } from '../../../lib/videoEngineClient';
+import { refundCredits } from '../../../lib/credits';
 import {
   RUNWAY_ROSTER, RunwayRosterModel, clampRosterDuration, rosterInputLabel,
   rosterModel, rosterRatio, rosterState, submitModelId, syncRunwayRoster,
@@ -94,6 +95,9 @@ export const VIDEO_MODEL: VideoModelConfig = {
   label: 'Omni Flash (Google)',
   provider: 'google',
   model: 'omni-flash',
+  // The proxy's model enum accepts `gemini-omni-flash-preview` and no
+  // versioned spelling; `gemini-omni-flash-1.1` answers 400 invalid_enum_value.
+  // TODO: upgrade to 1.1 when platform key is confirmed
   apiModel: 'gemini-omni-flash-preview',
   supportedDurations: [4, 6, 8, 10],
   safeMaxDuration: 8,
@@ -190,7 +194,12 @@ export const DEFAULT_FILM_MODEL: VideoModelConfig = RUNWAY_GEN_4_5;
 /** Resolve a stored model id (s2v_films.video_model) onto its config.
  * Unknown/null ids fall back to the default so old films keep working. */
 export function resolveVideoModel(id?: string | null): VideoModelConfig {
-  return VIDEO_MODELS.find((m) => m.id === String(id || '')) || VIDEO_MODEL;
+  const key = String(id || '');
+  const byId = VIDEO_MODELS.find((m) => m.id === key);
+  if (byId) return byId;
+  const byApi = VIDEO_MODELS.find((m) => m.apiModel === key);
+  if (byApi) return { ...byApi, apiModel: key };
+  return VIDEO_MODEL;
 }
 
 /** Snap an arbitrary duration onto the nearest supported clip length. */
@@ -223,6 +232,8 @@ export interface CreateVideoParams {
   /** first_frame → seed image (continuation); reference → reference image. */
   referenceAssets?: ReferenceAsset[] | null;
   model?: VideoModelConfig;
+  /** Stable scene-row key reused across retries so one clip is never billed twice. */
+  creditKey?: string;
 }
 
 export interface VideoJob { jobId: string; model: string }
@@ -276,8 +287,8 @@ function classifySubmitError(status: number, data: any): string {
 
 /** Submit one generation through the server hook. The hook applies the
  * duration fallback and rejects placeholder failure ids itself. */
-async function submitViaHook(provider: VideoProvider, body: Record<string, unknown>, safeMaxDuration: number): Promise<{ ok: true; jobId: string } | { ok: false; status: number; data: any }> {
-  const out = await callGenerateHook({ op: 'submit', provider, body, safeMaxDuration });
+async function submitViaHook(provider: VideoProvider, body: Record<string, unknown>, safeMaxDuration: number, creditKey?: string): Promise<{ ok: true; jobId: string } | { ok: false; status: number; data: any }> {
+  const out = await callGenerateHook({ op: 'submit', provider, body, safeMaxDuration, creditKey });
   if (out?.status === 'submitted' && typeof out.operationId === 'string' && out.operationId) {
     return { ok: true, jobId: String(out.operationId) };
   }
@@ -328,7 +339,7 @@ export const VideoModelService = {
         runwayBody.promptImage = seedUrl;
       }
       try {
-        const kickoff = await runwaySubmitVideo(runwayBody);
+        const kickoff = await runwaySubmitVideo(runwayBody, { seconds: duration, creditKey: params.creditKey });
         return { jobId: `runway:${kickoff.taskId}`, model: cfg.model };
       } catch (e: any) {
         throw new Error(classifySubmitError(Number(e?.status) || 0, { error: String(e?.message || e) }));
@@ -347,7 +358,7 @@ export const VideoModelService = {
       };
       if (params.negative) klingBody.negativePrompt = capText(params.negative, cfg.negativeMaxChars);
       if (seed) klingBody.imageData = seed.url;
-      const attempt = await submitViaHook('kling', klingBody, cfg.safeMaxDuration);
+      const attempt = await submitViaHook('kling', klingBody, cfg.safeMaxDuration, params.creditKey);
       if (!attempt.ok) throw new Error(classifySubmitError(attempt.status, attempt.data));
       return { jobId: attempt.jobId, model: cfg.model };
     }
@@ -368,7 +379,7 @@ export const VideoModelService = {
     if (refs.length) body.referenceImages = refs.map((r) => ({ imageData: r.url, referenceType: 'asset' }));
 
     // The hook retries once at safeMaxDuration when a long clip is rejected.
-    const attempt = await submitViaHook(cfg.provider, body, cfg.safeMaxDuration);
+    const attempt = await submitViaHook(cfg.provider, body, cfg.safeMaxDuration, params.creditKey);
     if (!attempt.ok) throw new Error(classifySubmitError(attempt.status, attempt.data));
     return { jobId: attempt.jobId, model: cfg.model };
   },
@@ -376,7 +387,7 @@ export const VideoModelService = {
   /** One status check for a running job, answered by the server hook. Kling
    * jobs carry a 'kling:' prefix on their stored id, so polling routes
    * correctly even after a reload (the hook reads the prefix). */
-  async getGenerationStatus(jobId: string): Promise<VideoJobStatus> {
+  async getGenerationStatus(jobId: string, opts: { creditKey?: string } = {}): Promise<VideoJobStatus> {
     if (jobId.indexOf('runway:') === 0) {
       try {
         const result = await checkRunway(jobId.slice('runway:'.length));
@@ -385,6 +396,7 @@ export const VideoModelService = {
         }
         if (result.status === 'failed' || result.status === 'cancelled') {
           const reason = String(result.raw?.error?.message || result.raw?.error || 'no successful output');
+          if (opts.creditKey) void refundCredits(opts.creditKey, `Runway ended ${result.status}`);
           return { status: 'failed', error: `Runway ended this clip ${result.status}: ${reason}. The credits were refunded automatically.` };
         }
         // 'uncertain' and 'persisting' keep polling on purpose and are NEVER
@@ -396,7 +408,7 @@ export const VideoModelService = {
     }
     let out: any;
     try {
-      out = await callGenerateHook({ op: 'status', operationId: jobId });
+      out = await callGenerateHook({ op: 'status', operationId: jobId, creditKey: opts.creditKey });
     } catch (e: any) {
       return { status: 'processing', error: String(e?.message || e) };
     }
@@ -408,13 +420,13 @@ export const VideoModelService = {
 
   /** Poll a job to completion; resolves with the clip URL or throws with the
    * provider's reason. Times out so a dead job never hangs a scene forever. */
-  async getVideoResult(jobId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number } = {}): Promise<string> {
+  async getVideoResult(jobId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number; creditKey?: string } = {}): Promise<string> {
     const cfg = jobId.indexOf('runway:') === 0 ? RUNWAY_GEN_4_5 : VIDEO_MODEL;
     const deadline = Date.now() + (opts.timeoutMs || cfg.timeoutMs);
     let misses = 0;
     while (Date.now() < deadline) {
       if (cancelled.has(jobId)) { cancelled.delete(jobId); throw new Error('This generation was cancelled.'); }
-      const st = await this.getGenerationStatus(jobId);
+      const st = await this.getGenerationStatus(jobId, { creditKey: opts.creditKey });
       if (st.status === 'completed' && st.videoUrl) return st.videoUrl;
       if (st.status === 'failed') throw new Error(st.error || 'The render failed.');
       if (st.error) { misses += 1; if (misses >= 6) throw new Error(`The video service stopped answering: ${st.error}`); }

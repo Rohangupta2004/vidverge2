@@ -1,6 +1,13 @@
 /**
  * VidVerge plan catalog + entitlement helpers.
  *
+ * PRICING IS CREDIT-BASED (locked Sep 2026). 1 credit = 1 second of finished
+ * video, on every provider, no exceptions. This file owns the CATALOG — what
+ * each tier costs and includes — plus the email -> tier access list. The live
+ * balance, the meter and checkout live in `lib/credits.ts` and the
+ * `vv-credits` server function. The old monthly VIDEO-COUNT gate is retired;
+ * see `videoLimitFor` near the bottom.
+ *
  * OPEN ENROLLMENT WINDOW (self-expiring) — open until Sep 9 2026, 23:59 UTC.
  * `SUBSCRIPTION_GATE_DISABLED` (below) is no longer a hand-flipped boolean: it
  * is derived from `OPEN_ENROLLMENT_UNTIL`. While the window is open everything
@@ -39,8 +46,12 @@ export interface ReelioPlan {
   price: string;
   /** What the price buys — rendered next to it, e.g. "/mo". */
   cadence: string;
-  /** Videos included, the number people actually compare on. */
+  /** Credits included. On pay-as-you-go this is what one $9 block buys. */
+  credits: number;
+  /** The credit line people actually compare on. */
   quota: string;
+  /** The one rule that matters most on this tier. */
+  creditNote: string;
   /** One line of creator-facing positioning. */
   pitch: string;
   cta: string;
@@ -51,78 +62,106 @@ export interface ReelioPlan {
   featured?: boolean;
 }
 
+/**
+ * LOCKED PRICING — a founder decision, not a tuning knob. Do not restate these
+ * numbers anywhere else; import the catalog.
+ *
+ *   Free Trial      $0       30 credits   no credit card
+ *   Creator         $35/mo   250 credits  rollover
+ *   Pro             $70/mo   500 credits  rollover
+ *   Pay-as-you-go   $9 min   60 credits per $9, no cap
+ *
+ * 1 credit = 1 second of finished video, on every provider. Scripting and
+ * talking to the agent cost nothing — only generation spends.
+ */
 export const REELIO_PLANS: ReelioPlan[] = [
   {
     id: 'free',
     name: 'Free Trial',
     price: '$0',
     cadence: 'no card',
-    quota: '1 video',
-    pitch: 'Run one idea through the whole pipeline and see it come out finished.',
-    cta: 'Get started free',
+    credits: 30,
+    quota: '30 credits',
+    creditNote: '30 seconds of finished video, on the house.',
+    pitch: 'Run a real idea through the whole pipeline before you pay anything.',
+    cta: 'Start free',
     accent: '#2dd4bf',
+    badge: 'Start here',
     features: [
-      'One finished, downloadable video',
-      'Sound built in — your character speaks the script on camera',
-      'Your character, identical in every shot',
+      '30 credits — 30 seconds of finished video',
       'No credit card, no countdown',
+      'Scripting and chat with the agent stay free',
+      'The same pipeline the paid tiers run',
     ],
   },
   {
     id: 'creator',
     name: 'Creator',
-    price: '$29',
+    price: '$35',
     cadence: '/mo',
-    quota: '5 videos / month',
+    credits: 250,
+    quota: '250 credits / month',
+    creditNote: 'Unused credits roll over to next month.',
     pitch: 'For the creator shipping something every week.',
-    cta: 'Subscribe',
+    cta: 'Choose Creator',
     accent: '#3b82f6',
     features: [
-      '5 finished videos every month',
-      '15–60 seconds, up to 3 scenes',
-      'Character consistency across the cut',
-      'Dialogue, music & ambience on every video',
-      'Your landing page as the closing shot',
+      '250 credits every month',
+      'Credits roll over — nothing expires at month end',
+      'About four minutes of finished video a month',
+      'Every studio, every format',
+      'Top up any time in $9 blocks',
     ],
   },
   {
     id: 'pro',
     name: 'Pro',
-    price: '$79',
+    price: '$70',
     cadence: '/mo',
-    quota: '15 videos / month',
+    credits: 500,
+    quota: '500 credits / month',
+    creditNote: 'Unused credits roll over to next month.',
     pitch: 'For the series, the campaign, the whole content calendar.',
-    cta: 'Subscribe',
-    accent: '#2563eb',
+    cta: 'Choose Pro',
+    accent: '#f59e0b',
     badge: 'Most popular',
     featured: true,
     features: [
-      '15 finished videos every month',
+      '500 credits every month',
+      'Credits roll over — nothing expires at month end',
+      'About eight minutes of finished video a month',
       'Everything in Creator',
       'Priority spot in the render queue',
-      'Bring a recurring character back, video after video',
-      'First access to new looks and formats',
     ],
   },
   {
     id: 'payg',
     name: 'Pay-as-you-go',
     price: '$9',
-    cadence: '/video',
-    quota: '1 video, whenever',
+    cadence: 'minimum',
+    credits: 60,
+    quota: '60 credits per $9',
+    creditNote: 'Buy in $9 blocks, as many as you like. No cap.',
     pitch: 'For the one-off drop. No subscription, no calendar.',
-    cta: 'Pay per video',
+    cta: 'Buy credits',
     accent: '#22d3ee',
     features: [
-      '$9 per finished video',
-      'No monthly commitment',
-      'Same pipeline, same quality',
-      'Buy one the moment the idea lands',
+      '60 credits for every $9 — a minute of video',
+      'Buy as many blocks as you need, no cap',
+      'No subscription, no monthly commitment',
+      'Credits sit in your account until you spend them',
     ],
   },
 ];
 
-/** Videos a free-trial visitor gets before the plans screen shows up. */
+/** Credits a brand-new account starts with, no card required. */
+export const FREE_TRIAL_CREDITS = 30;
+
+/**
+ * Retired. VidVerge used to meter a monthly VIDEO COUNT; the locked credit
+ * pricing replaced it, so nothing counts videos any more. Kept only so older
+ * surfaces still compile — treat it as history, not a limit.
+ */
 export const FREE_TRIAL_VIDEOS = 1;
 
 // ---------------------------------------------------------------------------
@@ -542,16 +581,32 @@ export function useUserTier(
 // ---------------------------------------------------------------------------
 export const PRICING_EVENT = 'vidverge:open-pricing';
 
-/** 'nav' = the visitor asked for plans. 'trial-limit' = they hit the trial wall. */
-export type PricingTrigger = 'nav' | 'trial-limit';
+/**
+ * 'nav'         the visitor asked to see plans
+ * 'credits'     a generation was blocked because the wallet is short
+ * 'trial-limit' the retired video-count wall; no surface raises it any more
+ */
+export type PricingTrigger = 'nav' | 'trial-limit' | 'credits';
 
-export function openPricing(trigger: PricingTrigger = 'nav'): void {
+/** What the plans screen is being opened about. */
+export interface PricingRequest {
+  trigger: PricingTrigger;
+  /** Credits the blocked generation needed. */
+  required?: number;
+  /** Credits the visitor had when it was blocked. */
+  balance?: number;
+  /** Length of the video they were trying to make, in seconds. */
+  seconds?: number;
+}
+
+export function openPricing(
+  trigger: PricingTrigger = 'nav',
+  detail?: Omit<PricingRequest, 'trigger'>,
+): void {
   if (typeof window === 'undefined') return;
-  // OPEN ENROLLMENT WINDOW — while it is open, plans stay reachable as
-  // navigation, but never as a wall: a 'trial-limit' open is downgraded to
-  // 'nav' so its "free trial used" copy cannot appear.
-  const effective: PricingTrigger = SUBSCRIPTION_GATE_DISABLED ? 'nav' : trigger;
-  window.dispatchEvent(new CustomEvent(PRICING_EVENT, { detail: { trigger: effective } }));
+  window.dispatchEvent(
+    new CustomEvent(PRICING_EVENT, { detail: { trigger, ...(detail || {}) } }),
+  );
 }
 
 const PLAN_STORAGE_KEY = 'reelio.plan';
@@ -637,45 +692,28 @@ export async function fetchOwnVideoCount(spaceId?: string): Promise<number | nul
   }
 }
 
-/**
- * How many videos this account may make before the count gate fires, or null
- * for unlimited. Resolution order:
- *   1. An explicit numeric `video_limit` on the visitor's `subscriptions` row.
- *   2. NULL `video_limit` on a paid row (or a paid plan from the checkout
- *      marker) — unlimited. The Creator/Pro monthly caps are only enforced
- *      once a row spells one out as a number, which is what lets the
- *      founder/team rows run without a cap.
- *   3. Otherwise the free-trial allowance, exactly as before — so a visitor
- *      with no row is gated the way they always were.
- */
-export function videoLimitFor(planId: PlanId = getPlanId(), spaceId?: string): number | null {
-  // OPEN ENROLLMENT WINDOW — all users have full access while it is open
-  // (null = unlimited, so the video-count gate never fires for anybody).
-  if (SUBSCRIPTION_GATE_DISABLED) return null;
-  const access = getUserAccess(spaceId);
-  if (access && typeof access.videoLimit === 'number') return access.videoLimit;
-  if (planId !== 'free') return null;
-  if (access && isPaidTier(access.tier)) return null;
-  return FREE_TRIAL_VIDEOS;
+// ---------------------------------------------------------------------------
+// The retired video-count meter
+//
+// VidVerge used to cap how many VIDEOS an account could make per month. The
+// locked credit pricing replaced that: credits meter SECONDS (1 credit = 1
+// second), and `lib/credits.ts` is the only gate in the product. These three
+// functions stay so every surface that still reads them compiles, and they all
+// answer "no video-count cap" — so no screen can raise a second, contradictory
+// wall on top of the credit one.
+// ---------------------------------------------------------------------------
+
+/** Always null: no account has a video-COUNT cap. Credits cap the seconds. */
+export function videoLimitFor(_planId: PlanId = getPlanId(), _spaceId?: string): number | null {
+  return null;
 }
 
-/** True when nothing caps this account's video count. */
-export function hasUnlimitedVideos(planId: PlanId = getPlanId(), spaceId?: string): boolean {
-  // OPEN ENROLLMENT WINDOW — all users have full access while it is open
-  if (SUBSCRIPTION_GATE_DISABLED) return true;
-  if (isAdminUser(spaceId)) return true;
-  return videoLimitFor(planId, spaceId) === null;
+/** Always true: nothing limits the NUMBER of videos — credits limit the length. */
+export function hasUnlimitedVideos(_planId: PlanId = getPlanId(), _spaceId?: string): boolean {
+  return true;
 }
 
-export function isTrialSpent(planId: PlanId, videosUsed: number | null): boolean {
-  // OPEN ENROLLMENT WINDOW — while it is open no visitor is ever "out of
-  // videos" and no trial wall can be raised.
-  if (SUBSCRIPTION_GATE_DISABLED) return false;
-  // Whitelisted founder/team accounts are never gated, whatever the count says.
-  if (isAdminUser()) return false;
-  const limit = videoLimitFor(planId);
-  // Unlimited (video_limit NULL on a paid row) skips the count gate entirely.
-  if (limit === null) return false;
-  if (typeof videosUsed !== 'number') return false;
-  return videosUsed >= limit;
+/** Always false: the trial wall is retired, and credits raise the only wall. */
+export function isTrialSpent(_planId: PlanId, _videosUsed: number | null): boolean {
+  return false;
 }

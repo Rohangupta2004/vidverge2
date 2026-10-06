@@ -1,11 +1,12 @@
 import { useState, Suspense, LazyExoticComponent, ComponentType, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
-import { Bot, Folder, X, Activity, Clapperboard, Moon, Heart, Calendar, Users, FileText, BarChart, Settings as SettingsIcon, MessageCircle, Plane, TrendingUp, LineChart, Dumbbell, Brain, Target, Zap, Star, Clock, CheckCircle, List, BookOpen, Coffee, Music, Camera, MapPin, Wallet, ShoppingCart, Gift, Lightbulb, Sparkles, Rocket, Home, Building, Globe, Mail, Phone, Video, Mic, Image, Play, Pause, Volume2, Wifi, Cloud, Sun, Umbrella, Thermometer, Wind, Droplets, Leaf, Flower2, Film, Mountain, Waves, Compass, Map, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond, Gem, Key, Lock, Unlock, Shield, Eye, Search, Filter, SortAsc, Download, Upload, Share2, Link, ExternalLink, Copy, Clipboard, Trash2, Edit, Pencil, PenTool, Scissors, Bookmark, Flag, Bell, AlertCircle, Info, HelpCircle, XCircle, CheckCircle2, Circle, Square, Triangle, Hexagon, Octagon, Hash, AtSign, DollarSign, Percent, Calculator, Code, Terminal, Database, Server, Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker, Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote, PiggyBank, TrendingDown, AreaChart, PieChart, FlaskConical } from 'lucide-react';
+import { Bot, Folder, X, Activity, Clapperboard, Moon, Heart, Calendar, Users, FileText, BarChart, Settings as SettingsIcon, MessageCircle, Plane, TrendingUp, LineChart, Dumbbell, Brain, Target, Zap, Star, Clock, CheckCircle, List, BookOpen, Coffee, Music, Camera, MapPin, Wallet, ShoppingCart, Gift, Lightbulb, Sparkles, Rocket, Home, Building, Globe, Mail, Phone, Video, Mic, Image, Play, Pause, Volume2, Wifi, Cloud, Sun, Umbrella, Thermometer, Wind, Droplets, Leaf, Flower2, Film, Mountain, Waves, Compass, Map, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond, Gem, Key, Lock, Unlock, Shield, Eye, Search, Filter, SortAsc, Download, Upload, Share2, Link, ExternalLink, Copy, Clipboard, Trash2, Edit, Pencil, PenTool, Scissors, Bookmark, Flag, Bell, AlertCircle, Info, HelpCircle, XCircle, CheckCircle2, Circle, Square, Triangle, Hexagon, Octagon, Hash, AtSign, DollarSign, Percent, Calculator, Code, Terminal, Database, Server, Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker, Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote, PiggyBank, TrendingDown, AreaChart, PieChart, FlaskConical, Ghost, Radar, Crosshair, Wand2 } from 'lucide-react';
 import type { SpaceConfig, DesktopBranding, DesktopThemeTokens } from './types';
 import { useSpaceRuntime } from './SpaceRuntimeContext';
 import FileBrowser from './components/FileBrowser';
 import EmailGate from './components/EmailGate';
 import Settings from './components/Settings';
 import PricingScreen from './components/PricingScreen';
+import CreditBalance from './components/CreditBalance';
 import {
   getPlanId,
   isPaidTier,
@@ -14,7 +15,8 @@ import {
   SUBSCRIPTION_GATE_DISABLED,
   useUserTier,
 } from './lib/plans';
-import type { PricingTrigger } from './lib/plans';
+import type { PricingRequest, PricingTrigger } from './lib/plans';
+import { consumeCheckoutReturn, refreshCredits } from './lib/credits';
 import { tw } from './lib/colors';
 import { isTenantDelegationCanvas } from './lib/tenant-delegation-canvas';
 import { LauncherFX } from './components/HomeLauncher';
@@ -175,7 +177,7 @@ const baseIconMap: Record<string, ComponentType<any>> = {
   Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker,
   Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote,
   PiggyBank, TrendingDown, AreaChart, PieChart, Flower2, Clapperboard, Film,
-  FlaskConical,
+  FlaskConical, Ghost, Radar, Crosshair, Wand2,
 };
 
 // Create case-insensitive lookup with common aliases
@@ -247,7 +249,7 @@ interface SpaceDesktopProps {
   spaceId: string;
   sessionId?: string;
   config: SpaceConfig;
-  apps: Record<string, LazyExoticComponent<any>>;
+  apps: Record<string, LazyExoticComponent<ComponentType<any>>>;
   LoadingSpinner: ComponentType;
   initialAppId?: string | null;
 }
@@ -341,7 +343,9 @@ export default function SpaceDesktop({
   const [fileAccessLogs] = useState<FileAccessLog[]>([]);
   // Plans overlay. Mounted here rather than inside an app so it can take the
   // whole screen from any shell state, and so every surface can raise it.
-  const [pricingTrigger, setPricingTrigger] = useState<PricingTrigger | null>(null);
+  // The whole request is kept rather than just the trigger: a credit wall
+  // carries what the blocked render needed, so the screen can say it.
+  const [pricingRequest, setPricingRequest] = useState<PricingRequest | null>(null);
 
   // Track whether hash changes were triggered by this shell.
   const isInternalHashChange = useRef(false);
@@ -528,16 +532,29 @@ export default function SpaceDesktop({
     return () => window.removeEventListener('closeApp', handleCloseApp as EventListener);
   }, []);
 
-  // Listen for plans requests from app and Settings surfaces.
+  // Listen for plans requests from app, chat and Settings surfaces.
   useEffect(() => {
     const handleOpenPricing = (event: Event) => {
-      const detail = (event as CustomEvent).detail || {};
-      setPricingTrigger(detail.trigger === 'trial-limit' ? 'trial-limit' : 'nav');
+      const detail = ((event as CustomEvent).detail || {}) as Partial<PricingRequest>;
+      const trigger: PricingTrigger =
+        detail.trigger === 'credits' || detail.trigger === 'trial-limit' ? detail.trigger : 'nav';
+      setPricingRequest({ ...detail, trigger });
     };
 
     window.addEventListener(PRICING_EVENT, handleOpenPricing as EventListener);
     return () => window.removeEventListener(PRICING_EVENT, handleOpenPricing as EventListener);
   }, []);
+
+  // Credits: resolve the balance once a session exists, and finish any checkout
+  // the visitor has just come back from. The wallet function re-reads the
+  // payment from the platform before crediting anything, so a hand-typed
+  // return URL buys nothing.
+  useEffect(() => {
+    if (!sessionId) return;
+    void consumeCheckoutReturn().then((applied) => {
+      if (!applied) void refreshCredits();
+    });
+  }, [sessionId]);
 
   // Keyboard shortcut: Cmd+M (Mac) / Ctrl+M (Windows) to toggle Memory window
   useEffect(() => {
@@ -672,25 +689,27 @@ export default function SpaceDesktop({
         className="min-h-screen"
         style={rootStyle}
       >
-        {/* Plans - always reachable from the shell chrome (mobile uses the dock) */}
-        <button
-          onClick={() => setPricingTrigger('nav')}
-          className="hidden md:flex fixed top-4 right-4 items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold text-white transition-all hover:scale-105"
-          style={{
-            zIndex: 60,
-            // Brand-neutral chrome: the amber primary CTA stays the ONE accent —
-            // the plan badge no longer competes in blue.
-            background: 'linear-gradient(90deg, #10141f 0%, #0b0e16 100%)',
-            border: isSubscriber ? '1px solid rgba(245,158,11,0.45)' : '1px solid rgba(148,163,184,0.28)',
-            boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
-          }}
-          title={planButtonTitle}
-          data-testid="button-open-plans"
-          data-plan-tier={userTier || 'unknown'}
-        >
-          <Crown className="w-4 h-4" style={{ color: '#fbbf24' }} />
-          {planLabel}
-        </button>
+        {/* Credits + Plans - always reachable from the shell chrome (mobile uses the dock) */}
+        <div className="hidden md:flex fixed top-4 right-4 items-center gap-2" style={{ zIndex: 60 }}>
+          <CreditBalance />
+          <button
+            onClick={() => setPricingRequest({ trigger: 'nav' })}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold text-white transition-all hover:scale-105"
+            style={{
+              // Brand-neutral chrome: the amber primary CTA stays the ONE accent —
+              // the plan badge no longer competes in blue.
+              background: 'linear-gradient(90deg, #10141f 0%, #0b0e16 100%)',
+              border: isSubscriber ? '1px solid rgba(245,158,11,0.45)' : '1px solid rgba(148,163,184,0.28)',
+              boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+            }}
+            title={planButtonTitle}
+            data-testid="button-open-plans"
+            data-plan-tier={userTier || 'unknown'}
+          >
+            <Crown className="w-4 h-4" style={{ color: '#fbbf24' }} />
+            {planLabel}
+          </button>
+        </div>
 
         {/* Left Dock - Desktop Only - Animates away in launcher mode */}
       {/* Always visible — the app nav lives here in every shell state, launcher included */}
@@ -749,7 +768,7 @@ export default function SpaceDesktop({
       <div className="hidden md:block h-screen min-h-0 overflow-hidden">
         {/* Launcher = the VidVerge agent front and center, full height beside the dock */}
         {isLauncherMode && (
-          <div className="relative h-screen flex flex-col overflow-hidden pl-28 pr-8 animate-in fade-in duration-500">
+          <div className="relative h-screen flex flex-col overflow-hidden pl-32 pr-8 animate-in fade-in duration-500">
             <LauncherFX />
             {/* Headline above the hero chat */}
             <div className="relative text-center pt-7 pb-4 vv-fade-up">
@@ -776,7 +795,7 @@ export default function SpaceDesktop({
         {/* Normal window layout */}
         {!isLauncherMode && (
         <>
-        <div className="flex h-full w-full items-stretch gap-px overflow-hidden pl-20">
+        <div className="flex h-full w-full items-stretch gap-px overflow-hidden pl-32">
           {/* App Window - LEFT side, slides in when selected */}
           {activeWindowId && (
             <div className="min-w-0 h-full flex-1 transition-all duration-500 ease-in-out">
@@ -816,8 +835,11 @@ export default function SpaceDesktop({
                     Close
                   </button>
                 </div>
-                {/* App Content */}
-                <div className="flex-1 overflow-y-auto min-h-0">
+                {/* App Content — `relative` is load-bearing: apps that fill
+                    their frame with `position:absolute; inset:0` need a
+                    positioned ancestor here, or they anchor to the viewport
+                    and render underneath the left dock. */}
+                <div className="relative flex-1 overflow-y-auto min-h-0">
                   {activeWindowId === 'files' && (
                     <FileBrowser fileAccessLogs={fileAccessLogs} />
                   )}
@@ -919,7 +941,7 @@ export default function SpaceDesktop({
                   Close
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto min-h-0">
+              <div className="relative flex-1 overflow-y-auto min-h-0">
                 {activeWindowId === 'files' && (
                   <FileBrowser fileAccessLogs={fileAccessLogs} />
                 )}
@@ -978,9 +1000,12 @@ export default function SpaceDesktop({
               );
             })}
 
+            {/* Credits */}
+            <CreditBalance variant="dock" />
+
             {/* Plans */}
             <button
-              onClick={() => setPricingTrigger('nav')}
+              onClick={() => setPricingRequest({ trigger: 'nav' })}
               aria-label="Plans"
               className={`relative p-1.5 rounded-xl transition-all ${
                 isSubscriber
@@ -1012,11 +1037,12 @@ export default function SpaceDesktop({
       </div>
       </div>
 
-      {pricingTrigger && (
+      {pricingRequest && (
         <PricingScreen
-          trigger={pricingTrigger}
+          trigger={pricingRequest.trigger}
+          request={pricingRequest}
           currentPlanId={getPlanId()}
-          onClose={() => setPricingTrigger(null)}
+          onClose={() => setPricingRequest(null)}
         />
       )}
     </>

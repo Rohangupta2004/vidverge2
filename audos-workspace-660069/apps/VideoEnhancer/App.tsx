@@ -1,131 +1,308 @@
 /**
- * Video Enhancer — professional timeline NLE (Sep 27 2026 redesign).
+ * VIDEO STUDIO — Vidverge's all-in-one AI editor (Oct 1 2026 rework).
  *
- * Three-panel layout:
- *   TOP     preview player (16:9) — play/pause, timecode, volume, fullscreen
- *   MIDDLE  AI Tools (Gemini Describe · Generate B-roll · Add Captions ·
- *           Style Transfer) + Properties (trim, speed, opacity, text overlay,
- *           music bed, color grade)
- *   BOTTOM  3-track timeline (Video / Audio / Captions) with drag-to-reorder,
- *           trim handles, amber playhead and click-to-seek
+ * One editor, no round trips. Upload footage and within a couple of minutes
+ * you have a reviewable CUT PLAN; from there everything happens on the same
+ * timeline:
  *
- * React + CSS + canvas only. Heavy work runs in server hooks:
- * veh-gemini-describe (frame analysis), veh-broll-generate (Auto Director or manual Group A model),
- * veh-render (the whole edit → platform Remotion render → MP4).
+ *   · agentic editing      cut-plan cards with a reason and a predicted
+ *                          retention score, Accept / Reject, plus a chat
+ *                          sidebar that proposes more edits mid-session
+ *   · transcript-first     word-timed transcript; delete text and the video
+ *                          cuts with it; one tap clears every filler word
+ *   · auto-reframe         16:9 / 9:16 / 1:1 / 4:5 with subject tracking and a
+ *                          side-by-side proof; export several formats at once
+ *   · b-roll slots         silence, pause and low-action gaps detected and
+ *                          fillable from a prompt, your own clip or the library
+ *   · pro timeline         colour-coded tracks, trim handles, split, reorder,
+ *                          multi-select, per-clip crop / adjust / speed
+ *   · overlays             logo and image layers with masks, blend modes and
+ *                          optical-flow-approximation auto-tracking
+ *   · captions             eight presets, full type control, burn-in or SRT
+ *   · text + FX            animated text layers, visual effects, transitions
+ *   · export               MP4 at 720p / 1080p / 4K, per format, with progress
  *
- * The SceneForge handoff contract is preserved: a fresh (<10 min)
- * `sceneforge_handoff_v1` localStorage entry loads that video as the first
- * clip, exactly like the previous editor did.
+ * The heavy lifting is split deliberately: measurement and compositing run in
+ * the browser (Web Audio, canvas, CSS), judgement runs through the platform AI
+ * proxy, and the final render runs server-side in the veh-render hook from the
+ * same descriptors the preview used.
+ *
+ * The SceneForge and Vidverge Agent handoff contracts are preserved, and the
+ * merged Product Video suite still lives behind the second mode tab.
  */
-import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
-import { AlertCircle, Download, Loader2, Maximize, Pause, Play, Rocket, Sparkles, UploadCloud, Volume2 } from 'lucide-react';
-import { LB_SHIMMER_CSS } from '../../components/LightBeam';
-import AgentStreak from '../../components/AgentStreak';
-import ProductSuiteHeader from '../../components/ProductSuiteHeader';
-import { MAX_UPLOAD_BYTES, WORKSPACE_UUID, buildCaptionSegments, fetchVideoAsFile, planEnhancements, transcribeVideo, uploadVideo } from './enhancerCore';
-import type { CaptionSegment } from './enhancerCore';
-import { decodeAudioMono, detectSilences } from './enhancerExtras';
+import { Component, Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import {
-  AspectId, COLOR_GRADES, ColorGradeId, DEFAULT_NLE_EFFECTS, GeminiAnalysis,
-  GraphicKind, LB, MUSIC_BEDS, MotionGraphic, MusicBedId, NleCaption, NleClip,
-  NleEffects, STYLE_TRANSFERS, callHook, captureFrameBase64,
-  clipStartOnTimeline, effectsFilterCss, estimateCaptions, fmtTimecode, locate,
-  newGraphic, newId, nleToken, replaceClipWithRanges, sourceToTimeline,
-  splitClipAt, timelineDuration,
-} from './nleCore';
-import GraphicOverlay from './nleGraphics';
-import NleTimeline from './nleTimeline';
-import { AiToolsPanel, PropertiesPanel } from './nleTools';
+  AlertCircle, Download, Loader2, Maximize, Pause, Play, Redo2, Rocket,
+  Scissors, Sparkles, Undo2, UploadCloud, Volume2, X,
+} from 'lucide-react';
+import { LB_SHIMMER_CSS } from '../../components/LightBeam';
+import ProductSuiteHeader from '../../components/ProductSuiteHeader';
+import ProductStudioApp from '../ProductStudio/App';
 import RunwayStudio from '../../components/RunwayStudio';
-import { engineDisplayName, usePersistentEngine } from '../../components/EngineSelector';
-import { isRunwayModel, routeShotIntent } from '../../lib/videoEngines';
-import { generateWithRunway } from '../../lib/runwayAdapter';
 import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
 import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
 import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
-// The full Product Studio suite (Brand Reel, Ad Director, galleries and the
-// studio-tools drawer) is merged into this app as the "Product Video" mode.
-// Its own file tree stays in place (apps/ProductStudio/*) — it is simply no
-// longer registered as a separate dock app in config.json.
-import ProductStudioApp from '../ProductStudio/App';
+import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
+import { APP_IDS, MODEL_CHOICES, VEO_31_FAST_MODEL } from '../../lib/appIds';
+import { generationHeaders, postGeneration } from '../../lib/videoEngineClient';
+import { MUSIC_BEDS, callHook } from './nleCore';
+import { fetchVideoAsFile, uploadVideo, workspaceToken } from './enhancerCore';
+import {
+  ASPECTS, AspectId, Adjust, BrollSlot, CameraShake, CaptionSettings,
+  ChromaKeyState, CropRect, EditCard, EditDoc, GradeId, LB, MAX_UPLOAD_BYTES,
+  MusicStyleId, Overlay, ResolutionId, ReframeState, SpeedRamp, STUDIO_FONTS_URL, StudioClip,
+  SubjectProfile, TextLayer, TransitionId, TRANSITIONS, VfxState, VideoOverlay, VisualEffectId,
+  WordToken, ZoomCut, aspectRatio, buildSrt, captionsFromWords, clampN,
+  clipLength, clipMotion, clipStart, cutSourceRanges, defaultChroma, defaultVfx, emptyDoc, fmtTimecode,
+  locate, mergeRanges, motionActive, newClip, newId, newOverlay, newTextLayer,
+  newVideoOverlay, outputDims, restoreSourceRanges, serialiseDoc,
+  sourceToTimeline, splitClipAt, timelineDuration, vfxActive,
+} from './studioModel';
+import { analyseAudio, fillerIds, removeWords, restoreWords, transcribeForStudio, type AudioAnalysis } from './studioTranscript';
+import {
+  brollPromptFromContext, buildCutPlan, chatForEdits, segmentRetention,
+  type ChatAction, type ChatTurn, type PlanContext,
+} from './studioAgent';
+import { captureThumb, detectSubjectTrack, lowActionRegions, trackOverlaySubject } from './studioVision';
+import StudioStage from './studioStage';
+import StudioTimeline from './studioTimeline';
+import { BrollPanel, ChatPanel, CutPlanPanel, TranscriptPanel, type ChatMessage } from './studioPanels';
+import {
+  ClipInspector, ExportInspector, LookInspector, OverlayInspector,
+  ReframeInspector, TextInspector, cropForAspect,
+} from './studioInspector';
+import EffectsSidebar, { type EffectsTabId } from './studioEffects';
+import { warp, warpRate } from './studioFx';
+import {
+  captionMaxWords, detectLanguage, mergeCues, retimeCue, saveCaptionTrack,
+  shiftCue, splitCue,
+} from './studioCaptionKit';
+import {
+  detectSubjectProfile, generateBackgroundMusic, rankBrollSuggestions,
+} from './studioPhase2';
+import { AiMusicPanel, ClipManagerPanel, StickyExportBar } from './studioPhase2Panels';
+import {
+  AiSuggestBar, FriendlyError, GUIDE_CSS, GuidedEmptyState, RailHost, STUDIO_STEPS,
+  StepBottomBar, StepRail, StylePresetRow, ToastStack, UpdatingPill, VE, copyLink,
+  useIsMobile, usePreviewPulse, useToasts, vePrimary,
+} from './studioGuide';
+import type { StepId } from './studioGuide';
+import {
+  SAMPLE_USES, STYLE_PRESETS, applyPreset, suggestedPreset, suggestionSentence,
+} from './studioPresets';
+import type { StudioPreset } from './studioPresets';
+import { HelpTip } from './uiControls';
+import { Clapperboard, Diamond } from 'lucide-react';
+import { WORKSPACE_UUID, clipFilterCss, keyframeAt } from './studioModel';
+import { PRO_CSS, PRO_FONTS_URL, type RunState } from './proUi';
+import ProControls, {
+  AgentStrip, EDIT_PRESETS, LOOKS, PRO_TABS, applyEditPreset, applyLook, motionKeys,
+  type EditPreset, type MotionKind, type ProTabId,
+} from './proPanels';
+import ProTimeline from './proTimeline';
+import ProAgent, { emptyJobs, routeInstruction, type AgentActionId, type AgentJobs } from './proAgent';
+import ProExport, { encodeGif, encodeWebm, type ExportResult, type ExportSpec } from './proExport';
+import { detectTempo } from './proAudio';
 
-function msg(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e);
-  const named = raw
-    .replace(/gemini-omni-flash-preview/g, engineDisplayName('gemini-omni-flash-preview'))
-    .replace(/veo-3\.1-fast-generate-preview/g, engineDisplayName('veo-3.1-fast-generate-preview'))
-    .replace(/veo-3\.1-generate-preview/g, engineDisplayName('veo-3.1-generate-preview'))
-    .replace(/openrouter\/bytedance\/seedance-2\.0-fast/g, engineDisplayName('openrouter/bytedance/seedance-2.0-fast'));
-  if (/no_credentials|\b401\b/i.test(named)) return 'Your workspace session is not ready for this tool yet. Try again in a moment.';
-  if (/insufficient|payment|required|\b402\b/i.test(named)) return 'This generation needs more workspace credits before it can start.';
-  if (/rate.?limit|\b429\b/i.test(named)) return 'The generation service is busy right now. Wait a moment, then try again.';
-  if (/provider[_ -]?error|\b50[0234]\b|service unavailable/i.test(named)) return 'The generation service is temporarily unavailable. Your edit is safe; try this step again shortly.';
-  return named;
-}
+/** Which legacy effects tab belongs under each pro tab. */
+const FX_FOR_TAB: Record<ProTabId, EffectsTabId> = {
+  effects: 'overlays',
+  presets: 'overlays',
+  text: 'captions',
+  motion: 'motion',
+  color: 'vfx',
+  audio: 'music',
+};
+
+const WORKSPACE_LOGO = 'https://storage.googleapis.com/audos-images/attachments/general/c0902809-6dc4-4e0c-b04e-1f60e01b31e6.png';
 
 /**
- * Film one b-roll clip on whichever engine is selected. Group A models go
- * through the veh-broll-generate hook, which is the only thing it accepts;
- * Runway models are submitted straight to the Runway proxy because the hook
- * has no Runway route at all. Either way the caller just gets a clip URL or a
- * message it can show next to the engine picker.
+ * Turn anything thrown anywhere in the studio into a sentence a first-time
+ * creator can act on. A raw error object, a stack, a JSON body or an HTML
+ * error page must never reach the screen — those go to the console instead.
  */
-async function filmBrollClip(
-  model: string,
-  prompt: string,
-  durationS: number,
-  alive: () => boolean,
-): Promise<{ videoUrl: string; error: string }> {
-  if (isRunwayModel(model)) {
-    try {
-      const out = await generateWithRunway({ model, prompt, duration: durationS, aspectRatio: '16:9' });
-      return { videoUrl: out.mediaUrls[0] || '', error: '' };
-    } catch (e) {
-      return { videoUrl: '', error: msg(e) };
-    }
+function msg(e: unknown): string {
+  const raw = (e instanceof Error ? e.message : typeof e === 'string' ? e : '').trim();
+  if (/no_credentials|\b401\b/i.test(raw)) return 'Your workspace session is still waking up. Try again in a moment.';
+  if (/insufficient|payment|\b402\b/i.test(raw)) return 'This step needs more workspace credits before it can run.';
+  if (/rate.?limit|\b429\b/i.test(raw)) return 'Things are busy right now. Wait a few seconds, then try again.';
+  if (/provider[_ -]?error|\b50[0234]\b|service unavailable|timed out|timeout/i.test(raw)) {
+    return 'That step could not finish just now. Your edit is saved — try again shortly.';
   }
-  let out = await callHook('veh-broll-generate', { model, prompt, aspect: '16:9', durationS });
+  if (/network|failed to fetch|load failed/i.test(raw)) return 'The connection dropped. Check your internet, then try again.';
+  if (!raw) return 'Something went wrong — please try again.';
+  if (raw.length > 170 || /[{}<>]|\[object |\bundefined\b|\bHTTP \d{3}\b/.test(raw)) {
+    console.error('[VideoStudio]', e);
+    return 'Something went wrong — please try again.';
+  }
+  return raw;
+}
+
+const STUDIO_CSS = `
+@keyframes vs-spin { to { transform: rotate(360deg); } }
+.vs-spin { animation: vs-spin 1s linear infinite; }
+.vs-btn, .ve-btn { transition: filter .15s ease, background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease; }
+.vs-btn:hover:not(:disabled), .ve-btn:hover:not(:disabled) { filter: brightness(1.15); }
+.vs-btn:disabled, .ve-btn:disabled { opacity: .5; cursor: default; }
+.vs-input:focus, .ve-input:focus { outline: none; border-color: rgba(245,158,11,0.55) !important; box-shadow: 0 0 0 3px rgba(245,158,11,0.12); }
+@keyframes vs-progress { 0% { background-position: 0 0; } 100% { background-position: 28px 0; } }
+.vs-progress { background-image: linear-gradient(45deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%, transparent); background-size: 28px 28px; animation: vs-progress .9s linear infinite; }
+.vs-rail::-webkit-scrollbar { width: 8px; }
+.vs-rail::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 8px; }
+${LB_SHIMMER_CSS}
+${GUIDE_CSS}
+/* Resizable timeline: the bottom grid row follows --ve-tl-h (auto when unset or collapsed). */
+.vp-root .vp-body { grid-template-rows: minmax(0, 1fr) var(--ve-tl-h, auto); }
+.vp-root .vp-body > .vp-stagecol, .vp-root .vp-body > .vp-side { min-height: 0; }
+.vp-root .vp-tl { min-height: 0; }
+.vp-root .vp-tl-grip { flex: 0 0 auto; height: 6px; cursor: ns-resize; touch-action: none; background: transparent; transition: background .15s ease; }
+.vp-root .vp-tl-grip:hover, .vp-root .vp-tl-grip[data-dragging="true"] { background: rgba(124,58,237,0.55); }
+@media (max-width: 900px) { .vp-root .vp-body { grid-template-rows: auto auto auto; } .vp-root .vp-tl-grip { display: none; } }
+/* Icons in rails and track labels: never squeeze the icon or clip it off the left edge. */
+.vp-root .vp-trkhead { flex-basis: auto; width: auto; min-width: 76px; }
+.vp-root .vp-trkhead b { white-space: nowrap; }
+.vp-root .vp-trkhead b > svg, .vp-root .vp-btn > svg, .vp-root .vp-ico > svg, .vp-root .vp-actico > svg { flex: 0 0 auto; }
+.vp-root .vp-btn { justify-content: safe center; }
+.vp-root .vp-tab { align-items: safe center; }
+@media (max-width: 900px) { .vp-root .vp-trkhead { min-width: 56px; } }
+@media (prefers-reduced-motion: reduce) { .vs-spin, .vs-progress { animation: none !important; } .vs-btn, .ve-btn { transition: none !important; } }
+`;
+
+/** The picker label for a Group A model id. */
+function modelLabel(model: string): string {
+  return MODEL_CHOICES.find((m) => m.id === model)?.label || 'The video model';
+}
+
+/** Film one b-roll clip through the generation hook. */
+async function filmBroll(prompt: string, durationS: number, aspect: AspectId, model: string, alive: () => boolean): Promise<{ url: string; error: string }> {
+  let out = await callHook('veh-broll-generate', {
+    model,
+    prompt,
+    aspect: aspect === '16:9' ? '16:9' : '9:16',
+    durationS: Math.min(8, Math.max(4, Math.round(durationS) || 5)),
+  });
   while (alive() && out?.status === 'generating' && out.operationId) {
     out = await callHook('veh-broll-generate', { operationId: out.operationId });
   }
-  if (out?.status === 'completed' && out.videoUrl) return { videoUrl: String(out.videoUrl), error: '' };
-  return { videoUrl: '', error: String(out?.error || 'The b-roll generation failed.') };
+  if (out?.status === 'completed' && out.videoUrl) return { url: String(out.videoUrl), error: '' };
+  return { url: '', error: String(out?.error || 'The b-roll generation did not complete.') };
 }
 
-const NLE_CSS = `
-@keyframes nle-spin { to { transform: rotate(360deg); } }
-.animate-spin { animation: nle-spin 1s linear infinite; }
-.nle-btn { transition: filter .15s ease, background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease; }
-.nle-btn:hover:not(:disabled) { filter: brightness(1.15); }
-.nle-btn:disabled { opacity: .55; cursor: default; }
-.nle-input:focus { border-color: rgba(245,158,11,0.5) !important; box-shadow: 0 0 0 3px rgba(245,158,11,0.12); }
-${LB_SHIMMER_CSS}
-@keyframes nle-progress { 0% { background-position: 0 0; } 100% { background-position: 28px 0; } }
-.nle-progress-fill { background-image: linear-gradient(45deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%, transparent); background-size: 28px 28px; animation: nle-progress .9s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .animate-spin, .nle-progress-fill { animation: none !important; } .nle-btn { transition: none !important; } }
-`;
+/** Generate one fast, subject-matched cutaway through the documented video proxy. */
+async function generateOmniBroll(
+  prompt: string,
+  model: string,
+  aspect: AspectId,
+  referenceImage: string,
+  onProgress: (progress: number) => void,
+  alive: () => boolean,
+): Promise<string> {
+  const token = workspaceToken();
+  if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
+  const label = modelLabel(model);
+  const body: Record<string, unknown> = {
+    model,
+    prompt,
+    aspectRatio: aspect === '16:9' ? '16:9' : '9:16',
+    duration: 5,
+    resolution: '1080p',
+    generateAudio: false,
+  };
+  if (referenceImage) {
+    body.referenceImages = [{ imageData: referenceImage, referenceType: 'asset' }];
+  }
+  const { res: start, data: started } = await postGeneration('/api/veo/generate/video', body, APP_IDS.videoEnhancer);
+  if (!start.ok || !started?.operationId) {
+    const details = Array.isArray(started?.details)
+      ? started.details.map((d: { message?: string }) => d?.message).filter(Boolean).join('; ')
+      : '';
+    throw new Error(details || String(started?.error || `${label} could not start (HTTP ${start.status}).`));
+  }
 
-function VideoEnhancerNle() {
-  // ---- Timeline state ----
-  const [clips, setClips] = useState<NleClip[]>([]);
-  const clipsRef = useRef<NleClip[]>([]);
-  useEffect(() => { clipsRef.current = clips; }, [clips]);
-  const [captions, setCaptions] = useState<NleCaption[]>([]);
-  const [captionOffset, setCaptionOffset] = useState(0);
-  const [musicBedId, setMusicBedId] = useState<MusicBedId | 'custom'>('none');
-  const [gradeId, setGradeId] = useState<ColorGradeId>('none');
-  const [styleId, setStyleId] = useState<string | null>(null);
-  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
-  const [effects, setEffects] = useState<NleEffects>({ ...DEFAULT_NLE_EFFECTS });
-  const [graphics, setGraphics] = useState<MotionGraphic[]>([]);
-  const [selectedGraphicId, setSelectedGraphicId] = useState<string | null>(null);
-  const [aspect, setAspect] = useState<AspectId>('16:9');
+  const operationId = String(started.operationId);
+  onProgress(Number(started.progress) || 10);
+  for (let attempt = 0; attempt < 72 && alive(); attempt += 1) {
+    await new Promise((resolve) => { setTimeout(resolve, 5000); });
+    if (!alive()) return '';
+    const statusRes = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, {
+      headers: generationHeaders(APP_IDS.videoEnhancer),
+    });
+    const status = await statusRes.json().catch(() => null);
+    if (!statusRes.ok || !status) throw new Error(`Could not check ${label} status (HTTP ${statusRes.status}).`);
+    onProgress(Number(status.progress) || 0);
+    if (status.status === 'completed' && status.videoUrl) return String(status.videoUrl);
+    if (status.status === 'failed') throw new Error(String(status.errorMessage || `${label} could not generate this clip.`));
+  }
+  if (!alive()) return '';
+  throw new Error(`${label} took too long to finish. Retry to start a fresh clip.`);
+}
 
-  // ---- Player state ----
+function probeDuration(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    const done = (d: number) => { v.removeAttribute('src'); try { v.load(); } catch { /* detached */ } resolve(d); };
+    v.addEventListener('loadedmetadata', () => done(Number.isFinite(v.duration) ? v.duration : 0), { once: true });
+    v.addEventListener('error', () => done(0), { once: true });
+    v.src = url;
+  });
+}
+
+function downloadText(name: string, text: string) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+// ===========================================================================
+// The studio
+// ===========================================================================
+
+function VideoStudio() {
+  // ---- the document, plus undo / redo -------------------------------------
+  const [doc, setDoc] = useState<EditDoc>(emptyDoc);
+  const docRef = useRef(doc);
+  useEffect(() => { docRef.current = doc; }, [doc]);
+  const undoRef = useRef<EditDoc[]>([]);
+  const redoRef = useRef<EditDoc[]>([]);
+  const [historyDepth, setHistoryDepth] = useState({ undo: 0, redo: 0 });
+
+  const checkpoint = useCallback(() => {
+    undoRef.current = [...undoRef.current.slice(-39), docRef.current];
+    redoRef.current = [];
+    setHistoryDepth({ undo: undoRef.current.length, redo: 0 });
+  }, []);
+
+  /** Change the doc without recording history (mid-drag updates). */
+  const patch = useCallback((fn: (d: EditDoc) => EditDoc) => setDoc((d) => fn(d)), []);
+  /** Record history, then change the doc (discrete actions). */
+  const commit = useCallback((fn: (d: EditDoc) => EditDoc) => { checkpoint(); setDoc((d) => fn(d)); }, [checkpoint]);
+
+  const undo = useCallback(() => {
+    const prev = undoRef.current.pop();
+    if (!prev) return;
+    redoRef.current = [...redoRef.current.slice(-39), docRef.current];
+    setDoc(prev);
+    setHistoryDepth({ undo: undoRef.current.length, redo: redoRef.current.length });
+  }, []);
+  const redo = useCallback(() => {
+    const next = redoRef.current.pop();
+    if (!next) return;
+    undoRef.current = [...undoRef.current.slice(-39), docRef.current];
+    setDoc(next);
+    setHistoryDepth({ undo: undoRef.current.length, redo: redoRef.current.length });
+  }, []);
+
+  // ---- playback ------------------------------------------------------------
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const stageRef = useRef<HTMLDivElement | null>(null);
+  const stageWrapRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const activeIndexRef = useRef(0);
   useEffect(() => { activeIndexRef.current = activeIndex; }, [activeIndex]);
@@ -133,191 +310,480 @@ function VideoEnhancerNle() {
   const playheadRef = useRef(0);
   useEffect(() => { playheadRef.current = playhead; }, [playhead]);
   const [isPlaying, setIsPlaying] = useState(false);
-  const isPlayingRef = useRef(false);
-  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  const playingRef = useRef(false);
+  useEffect(() => { playingRef.current = isPlaying; }, [isPlaying]);
   const [volume, setVolume] = useState(1);
-  const pendingSourceT = useRef<number | null>(null);
+  const [playWithEffects, setPlayWithEffects] = useState(true);
+  const pendingSeek = useRef<number | null>(null);
+  const mainAudioContextRef = useRef<AudioContext | null>(null);
+  const mainGainRef = useRef<GainNode | null>(null);
+  const mainSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const lastDuckRef = useRef({ id: '', target: 1 });
 
-  // ---- Upload / AI / export state ----
+  // ---- selection -----------------------------------------------------------
+  const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
+  const selectedClipRef = useRef<string[]>([]);
+  useEffect(() => { selectedClipRef.current = selectedClipIds; }, [selectedClipIds]);
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  const [showFocus, setShowFocus] = useState(false);
+
+  // ---- analysis + plan -----------------------------------------------------
+  const sourceFiles = useRef<Map<string, File>>(new Map());
+  const audioRefData = useRef<AudioAnalysis | null>(null);
+  const motionRef = useRef<{ t: number; score: number }[]>([]);
+  const [analysisReady, setAnalysisReady] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const [planNote, setPlanNote] = useState('');
+  const [planError, setPlanError] = useState('');
+  const [planSummary, setPlanSummary] = useState('');
+  const [hookVerdict, setHookVerdict] = useState('');
+  const [retention, setRetention] = useState<{ start: number; end: number; retention: number; why: string }[]>([]);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcriptNote, setTranscriptNote] = useState('');
+  const [exactTimings, setExactTimings] = useState(true);
+  const [detecting, setDetecting] = useState(false);
+  const [trackingId, setTrackingId] = useState<string | null>(null);
+  const [trackProgress, setTrackProgress] = useState(0);
+  const [brief, setBrief] = useState('');
+
+  // ---- chat ----------------------------------------------------------------
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
+
+  // ---- intake / errors -----------------------------------------------------
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
-  const [analysis, setAnalysis] = useState<GeminiAnalysis | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [brollBusy, setBrollBusy] = useState(false);
-  const [brollPrompt, setBrollPrompt] = useState('');
-  // The manual b-roll engine persists for the browser session, so the
-  // last-used model stays selected across generations and reopened panels.
-  const [brollModel, setBrollModel] = usePersistentEngine('video-enhancer:broll-engine', 'gemini-omni-flash-preview');
-  const [brollModelMode, setBrollModelMode] = useState<'auto' | 'manual'>('auto');
-  const [openRouterHealthy, setOpenRouterHealthy] = useState(false);
-  const [mediaAvailability, setMediaAvailability] = useState({ runwayEnabled: false, klingEnabled: false });
-  const [aiEditBusy, setAiEditBusy] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const [musicGenBusy, setMusicGenBusy] = useState(false);
-  const [customMusic, setCustomMusic] = useState<{ url: string; label: string } | null>(null);
-  const [appliedSuggestions, setAppliedSuggestions] = useState<string[]>([]);
-  // Original Files per clip id — AI Edit and transcription read the real bytes.
-  const sourceFiles = useRef<Map<string, File>>(new Map());
-  const [exporting, setExporting] = useState(false);
-  const [exportStartedAt, setExportStartedAt] = useState(0);
-  const [exportTick, setExportTick] = useState(0);
-  const [renderUrl, setRenderUrl] = useState('');
-  const [exportError, setExportError] = useState('');
-  // Runway Enhance — generative clips beside the editor. Collapsed by default
-  // so the timeline stays the focus, and nothing it makes reaches the timeline
-  // until the customer presses Add to timeline.
+  const [thumbUrl, setThumbUrl] = useState('');
+  const [generatingSlot, setGeneratingSlot] = useState('');
+  const [libraryFor, setLibraryFor] = useState<string | null>(null);
+  const [library, setLibrary] = useState<{ id: string; url: string; prompt: string; provider: string }[]>([]);
+  const [libraryBusy, setLibraryBusy] = useState(false);
   const [runwayOpen, setRunwayOpen] = useState(false);
-  const aliveRef = useRef(true);
-  useEffect(() => () => { aliveRef.current = false; }, []);
-  useEffect(() => {
-    let live = true;
-    void callHook('vv-media-capabilities', {})
-      .then((caps) => {
-        if (!live) return;
-        setMediaAvailability({
-          runwayEnabled: Boolean(caps?.runway?.available && caps?.runway?.generationEnabled !== false),
-          // The catalogue answering 200 is not enough: routeShotIntent only
-          // accepts Kling after a real submit succeeds, and this surface does
-          // not spend credits merely to probe it.
-          klingEnabled: false,
-        });
-      })
-      .catch(() => undefined);
-    return () => { live = false; };
-  }, []);
+  const [subjectBusyId, setSubjectBusyId] = useState('');
+  const [musicBusy, setMusicBusy] = useState(false);
+  const [musicNote, setMusicNote] = useState('');
+  const [musicError, setMusicError] = useState('');
+  const removedClipTimer = useRef<number | null>(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
-  const brollRoute = routeShotIntent('fast_broll', { ...mediaAvailability, openRouterHealthy });
-  const brollAutoId = brollRoute.engineId || 'gemini-omni-flash-preview';
-  const concreteBrollModel = brollModelMode === 'auto' ? brollAutoId : brollModel;
-  const concreteBrollName = engineDisplayName(concreteBrollModel);
-
-  const duration = Math.max(0.1, timelineDuration(clips));
-  const activeClip = clips[Math.min(activeIndex, clips.length - 1)] || null;
-  const selectedClip = clips.find((c) => c.id === selectedClipId) || null;
-  const styleCss = STYLE_TRANSFERS.find((s) => s.id === styleId)?.css || '';
-  const gradeCss = COLOR_GRADES.find((g) => g.id === gradeId)?.css || 'none';
-  const baseLook = styleCss && styleCss !== 'none' ? styleCss : gradeCss;
-  const previewFilter = [effectsFilterCss(effects), baseLook === 'none' ? '' : baseLook].filter(Boolean).join(' ') || 'none';
-
-  // ---------------------------------------------------------------------------
-  // Footage intake
-  // ---------------------------------------------------------------------------
-
-  const probeDuration = (url: string): Promise<number> => new Promise((resolve) => {
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.muted = true;
-    const done = (d: number) => { v.removeAttribute('src'); try { v.load(); } catch { /* no-op */ } resolve(d); };
-    v.addEventListener('loadedmetadata', () => done(Number.isFinite(v.duration) ? v.duration : 0), { once: true });
-    v.addEventListener('error', () => done(0), { once: true });
-    v.src = url;
+  // ---- the guided layer ----------------------------------------------------
+  const isMobile = useIsMobile();
+  const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
+  const [step, setStep] = useState<StepId>('trim');
+  const [stepsTicked, setStepsTicked] = useState<Record<StepId, boolean>>({
+    trim: false, effects: false, captions: false, music: false, export: false,
   });
+  const [presetId, setPresetId] = useState('');
+  const [sampleId, setSampleId] = useState('');
+  const [suggestDismissed, setSuggestDismissed] = useState(false);
+  const [suggestApplied, setSuggestApplied] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
-  const addClipFromUrl = useCallback(async (url: string, previewUrl: string, label: string, kind: 'source' | 'broll', atIndex?: number) => {
-    const d = (await probeDuration(previewUrl)) || (await probeDuration(url)) || 5;
-    const clip: NleClip = {
-      id: newId('clip'), label, url, previewUrl, sourceDuration: d,
-      in: 0, out: d, speed: 1, opacity: 1, text: '', textSize: 56, textColor: '#ffffff', kind,
-    };
-    setClips((list) => {
-      if (atIndex == null || atIndex >= list.length) return [...list, clip];
-      const next = [...list];
-      next.splice(Math.max(0, atIndex), 0, clip);
-      return next;
-    });
-    setSelectedClipId(clip.id);
-    return clip;
+  // ---- effects sidebar -----------------------------------------------------
+  const [fxTab, setFxTab] = useState<EffectsTabId>('overlays');
+  const [selectedBrollId, setSelectedBrollId] = useState<string | null>(null);
+  const [uploadingBroll, setUploadingBroll] = useState(false);
+  const [brollModel, setBrollModel] = useState<string>(VEO_31_FAST_MODEL);
+  const [omniPrompt, setOmniPrompt] = useState('');
+  const [omniGenerating, setOmniGenerating] = useState(false);
+  const [omniProgress, setOmniProgress] = useState(0);
+  const [omniError, setOmniError] = useState('');
+  const [omniNote, setOmniNote] = useState('');
+  const [captionsBusy, setCaptionsBusy] = useState(false);
+  const [captionNote, setCaptionNote] = useState('');
+  const captionRowRef = useRef<number | null>(null);
+
+  // ---- export --------------------------------------------------------------
+  const [exportAspects, setExportAspects] = useState<AspectId[]>(['16:9']);
+  const [exporting, setExporting] = useState(false);
+  const exportingRef = useRef(false);
+  useEffect(() => { exportingRef.current = exporting; }, [exporting]);
+  const [exportProgress, setExportProgress] = useState(0);
+  const [exportStage, setExportStage] = useState('');
+  const [exportEta, setExportEta] = useState(0);
+  const [exportError, setExportError] = useState('');
+  const [exportResults, setExportResults] = useState<{ aspect: AspectId; url: string; geometry: string }[]>([]);
+  const resultsRef = useRef<{ aspect: AspectId; url: string; geometry: string }[]>([]);
+  useEffect(() => { resultsRef.current = exportResults; }, [exportResults]);
+
+  // ---- autosave ------------------------------------------------------------
+  const projectIdRef = useRef<number | null>(null);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'retrying' | 'failed'>('idle');
+  const [savedAt, setSavedAt] = useState(0);
+
+  const aliveRef = useRef(true);
+  useEffect(() => () => {
+    aliveRef.current = false;
+    if (removedClipTimer.current != null) window.clearTimeout(removedClipTimer.current);
   }, []);
 
-  const runDescribe = useCallback(async (srcUrl?: string) => {
-    const source = srcUrl || clipsRef.current[0]?.previewUrl || clipsRef.current[0]?.url;
-    if (!source) return;
-    setAnalyzing(true);
-    setError('');
-    setNote('Gemini is reading a frame…');
+  // ---- the pro shell -------------------------------------------------------
+  const [proTab, setProTab] = useState<ProTabId>('effects');
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [tlCollapsed, setTlCollapsed] = useState(false);
+  const [tlZoom, setTlZoom] = useState(1);
+  // Timeline height in px; 0 means "auto" (the natural height of the tracks).
+  const [timelineHeight, setTimelineHeight] = useState<number>(() => {
     try {
-      const frame = await captureFrameBase64(source, 1);
-      const out = await callHook('veh-gemini-describe', { frameBase64: frame.base64, mimeType: frame.mimeType, wt: nleToken() });
-      if (!aliveRef.current) return;
-      const a: GeminiAnalysis = {
-        subject: String(out.subject || ''),
-        dominantColors: Array.isArray(out.dominantColors) ? out.dominantColors.map(String) : [],
-        backgroundType: String(out.backgroundType || ''),
-        lightingStyle: String(out.lightingStyle || ''),
-        mood: String(out.mood || ''),
-        suggestedEnhancements: Array.isArray(out.suggestedEnhancements) ? out.suggestedEnhancements.map(String) : [],
-      };
-      setAnalysis(a);
-      setNote('');
-      if (a.subject) setBrollPrompt((p) => p || `Cinematic b-roll that complements: ${a.subject}. ${a.mood ? `Mood: ${a.mood}.` : ''}`);
-    } catch (e) {
-      if (aliveRef.current) { setNote(''); setError(msg(e)); }
-    } finally {
-      if (aliveRef.current) setAnalyzing(false);
-    }
+      if (typeof window === 'undefined') return 0;
+      const saved = Number(window.localStorage.getItem('ve:timelineHeight'));
+      if (!Number.isFinite(saved) || saved <= 0) return 0;
+      return Math.round(Math.min(Math.max(saved, 80), window.innerHeight * 0.5));
+    } catch { return 0; }
+  });
+  const onTimelineResize = useCallback((height: number, persist: boolean) => {
+    const next = height > 0 ? Math.round(height) : 0;
+    setTimelineHeight(next);
+    if (!persist) return;
+    try {
+      if (next > 0) window.localStorage.setItem('ve:timelineHeight', String(next));
+      else window.localStorage.removeItem('ve:timelineHeight');
+    } catch { /* storage unavailable — the height still applies for this session */ }
   }, []);
+  const [activeLook, setActiveLook] = useState('');
+  const [lookStrength, setLookStrength] = useState(1);
+  const [activeMotion, setActiveMotion] = useState<MotionKind | ''>('');
+  const [motionAmount, setMotionAmount] = useState(0.6);
+  const [compareAB, setCompareAB] = useState(false);
+  const [voBusy, setVoBusy] = useState(false);
+  const [voNote, setVoNote] = useState('');
+  const [bpm, setBpm] = useState(0);
+  const [agentJobs, setAgentJobs] = useState<AgentJobs>(emptyJobs);
+  const [agentRunning, setAgentRunning] = useState<AgentActionId | ''>('');
+  const [customPresets, setCustomPresets] = useState<EditPreset[]>([]);
+  const [exportSpec, setExportSpec] = useState<ExportSpec>({
+    format: 'mp4', resolution: '1080p', aspects: ['16:9'], fps: 30, bitrate: 'auto',
+  });
+  const [clientResults, setClientResults] = useState<ExportResult[]>([]);
+
+  // Saved looks live on the device, not the server: they are a personal
+  // shortcut, not project data that has to survive a machine change.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem('vidverge_pro_presets');
+      const list = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(list)) setCustomPresets(list.slice(0, 12) as EditPreset[]);
+    } catch { /* storage unavailable — the built-in presets still work */ }
+  }, []);
+
+  // ---- derived -------------------------------------------------------------
+  const clips = doc.clips;
+  const duration = Math.max(0.1, timelineDuration(clips));
+  const hasFootage = clips.length > 0;
+  const activeClip = clips[Math.min(activeIndex, Math.max(0, clips.length - 1))] || null;
+  const selectedClips = clips.filter((c) => selectedClipIds.includes(c.id));
+  const located = useMemo(() => locate(clips, playhead), [clips, playhead]);
+  const sourceT = located ? located.sourceT : 0;
+  const clipLocalT = located ? playhead - located.start : 0;
+  const canSplit = (() => {
+    if (!located) return false;
+    const c = clips[located.index];
+    return !!c && located.sourceT - c.in > 0.2 && c.out - located.sourceT > 0.2;
+  })();
+  const busy = planning || transcribing || detecting || exporting || uploading || omniGenerating || musicBusy || Boolean(subjectBusyId) || Boolean(trackingId) || Boolean(generatingSlot);
+  const subjectProfile: SubjectProfile | null = clips.find((c) => c.subject)?.subject || null;
+  const rankedLibrary = useMemo(() => rankBrollSuggestions(library, subjectProfile), [library, subjectProfile]);
+  const stageDoc = useMemo<EditDoc>(() => {
+    if (playWithEffects) return doc;
+    return {
+      ...doc,
+      captions: [], textLayers: [], overlays: [], videoOverlays: [], globalEffects: [],
+      vfx: defaultVfx(), chroma: defaultChroma(),
+      clips: doc.clips.map((clip) => ({ ...clip, effects: [] })),
+    };
+  }, [doc, playWithEffects]);
+
+  const planContext = useCallback((): PlanContext => {
+    const d = docRef.current;
+    const audio = audioRefData.current;
+    const dur = audio?.duration || Math.max(1, timelineDuration(d.clips));
+    const motion = motionRef.current;
+    return {
+      durationS: dur,
+      words: d.words,
+      transcript: d.transcript,
+      silences: audio?.silences || [],
+      motion,
+      lowAction: lowActionRegions(motion, dur),
+      brief,
+    };
+  }, [brief]);
+
+  // =========================================================================
+  // Footage intake
+  // =========================================================================
+
+  const addClip = useCallback(async (
+    url: string,
+    previewUrl: string,
+    label: string,
+    kind: StudioClip['kind'],
+    atIndex?: number,
+  ): Promise<StudioClip> => {
+    const d = (await probeDuration(previewUrl)) || (await probeDuration(url)) || 5;
+    const clip = newClip({ previewUrl, sourceDuration: d, url: url || previewUrl, label, kind });
+    commit((cur) => {
+      const list = cur.clips.slice();
+      if (atIndex == null || atIndex >= list.length) list.push(clip);
+      else list.splice(Math.max(0, atIndex), 0, clip);
+      return { ...cur, clips: list, title: cur.clips.length ? cur.title : label };
+    });
+    setSelectedClipIds([clip.id]);
+    return clip;
+  }, [commit]);
+
+  const fileForClip = useCallback(async (clip: StudioClip): Promise<File> => {
+    const cached = sourceFiles.current.get(clip.id);
+    if (cached) return cached;
+    const f = await fetchVideoAsFile(clip.previewUrl || clip.url);
+    sourceFiles.current.set(clip.id, f);
+    return f;
+  }, []);
+
+  const makeMusic = useCallback(async (profile: SubjectProfile | null, style: MusicStyleId, variation: number) => {
+    if (style === 'none') {
+      patch((cur) => ({ ...cur, musicStyle: 'none', musicUrl: '', musicPrompt: '', musicVariation: variation }));
+      return;
+    }
+    setMusicBusy(true);
+    setMusicError('');
+    setMusicNote('Composing a subject-matched soundtrack…');
+    try {
+      const out = await generateBackgroundMusic({
+        profile,
+        style,
+        lengthSeconds: Math.max(3, timelineDuration(docRef.current.clips)),
+        variation,
+      });
+      if (!aliveRef.current) return;
+      patch((cur) => ({
+        ...cur,
+        musicStyle: style,
+        musicUrl: out.url,
+        musicBedId: 'none',
+        musicPrompt: out.prompt,
+        musicVariation: variation,
+      }));
+      setMusicNote(`Music ready · ${out.provider}`);
+    } catch (e) {
+      if (aliveRef.current) { setMusicError(msg(e)); setMusicNote(''); }
+    } finally {
+      if (aliveRef.current) setMusicBusy(false);
+    }
+  }, [patch]);
+
+  const runSubjectAnalysis = useCallback(async (clipId: string, url: string, sourceDuration: number) => {
+    setSubjectBusyId(clipId);
+    try {
+      const profile = await detectSubjectProfile(url, sourceDuration);
+      if (!aliveRef.current) return;
+      patch((cur) => ({
+        ...cur,
+        clips: cur.clips.map((clip) => (clip.id === clipId ? { ...clip, subject: profile } : clip)),
+        brollSlots: cur.brollSlots.map((slot) => ({
+          ...slot,
+          prompt: `${slot.prompt} Match the detected ${profile.subjectType}; background: ${profile.backgroundDescription}; dominant color: ${profile.dominantColor}; ${profile.mood} mood.`,
+        })),
+      }));
+      setOmniPrompt((current) => current || `${profile.subjectType} in ${profile.backgroundDescription}`);
+      const current = docRef.current;
+      if (!current.musicUrl && current.musicStyle === 'auto') void makeMusic(profile, 'auto', 1);
+    } catch (e) {
+      if (aliveRef.current) setError(`Subject detection could not finish: ${msg(e)}`);
+    } finally {
+      if (aliveRef.current) setSubjectBusyId('');
+    }
+  }, [makeMusic, patch]);
+
+  /**
+   * The upload pipeline: measure the audio, read the picture, transcribe, then
+   * plan. Measurement and vision run together because neither needs the other,
+   * which is what keeps the whole thing inside the two-minute budget.
+   */
+  const runPipeline = useCallback(async (clip: StudioClip, file: File) => {
+    setPlanning(true);
+    setPlanError('');
+    setError('');
+    const src = clip.previewUrl;
+
+    try {
+      setPlanNote('Measuring the audio and reading the picture…');
+      const [audio, vision] = await Promise.all([
+        analyseAudio(file).catch(() => null),
+        detectSubjectTrack(src, clip.sourceDuration, (p, n) => {
+          if (aliveRef.current) setPlanNote(`${n} ${Math.round(p * 100)}%`);
+        }).catch(() => null),
+      ]);
+      if (!aliveRef.current) return;
+      audioRefData.current = audio;
+      motionRef.current = vision?.motion || [];
+      setAnalysisReady(true);
+      if (vision) {
+        patch((cur) => ({
+          ...cur,
+          reframe: { ...cur.reframe, focus: vision.focus, detector: vision.detector, status: 'ready', note: vision.note },
+        }));
+      }
+
+      setPlanNote('Transcribing with word-level timing…');
+      setTranscribing(true);
+      let words: WordToken[] = [];
+      let transcript = '';
+      try {
+        const t = await transcribeForStudio(file, audio, (n) => { if (aliveRef.current) setPlanNote(n); });
+        words = t.words;
+        transcript = t.transcript;
+        setExactTimings(t.exactTimings);
+        setTranscriptNote(t.note);
+      } catch (e) {
+        setTranscriptNote(`Transcription failed: ${msg(e)} — the measured cuts and reframe still work.`);
+      } finally {
+        setTranscribing(false);
+      }
+      if (!aliveRef.current) return;
+      patch((cur) => ({ ...cur, words, transcript, transcriptSource: src }));
+
+      // B-roll slots: real silence, long pauses between words, static picture.
+      const dur = audio?.duration || clip.sourceDuration;
+      const motionGaps = lowActionRegions(motionRef.current, dur);
+      const slots: BrollSlot[] = [];
+      (audio?.silences || []).filter((s) => s.end - s.start >= 1.2).slice(0, 6).forEach((s) => {
+        slots.push({
+          id: newId('slot'), start: s.start, end: s.end, cause: 'silence',
+          reason: `${(s.end - s.start).toFixed(1)}s of silence — a cutaway covers it without a jump cut.`,
+          prompt: brollPromptFromContext(words, s.start, s.end),
+          status: 'open', clipUrl: '', error: '',
+        });
+      });
+      motionGaps.slice(0, 6).forEach((g) => {
+        if (slots.some((s) => Math.abs(s.start - g.start) < 2)) return;
+        slots.push({
+          id: newId('slot'), start: g.start, end: g.end, cause: 'lowAction',
+          reason: `${(g.end - g.start).toFixed(1)}s of near-static picture — visual variety holds attention here.`,
+          prompt: brollPromptFromContext(words, g.start, g.end),
+          status: 'open', clipUrl: '', error: '',
+        });
+      });
+      patch((cur) => ({ ...cur, brollSlots: slots.sort((a, b) => a.start - b.start) }));
+
+      setPlanNote('Writing the cut plan…');
+      const ctx: PlanContext = {
+        durationS: dur,
+        words,
+        transcript,
+        silences: audio?.silences || [],
+        motion: motionRef.current,
+        lowAction: motionGaps,
+        brief,
+      };
+      const plan = await buildCutPlan(ctx, (n) => { if (aliveRef.current) setPlanNote(n); });
+      if (!aliveRef.current) return;
+      setPlanSummary(plan.summary);
+      setHookVerdict(plan.hookVerdict);
+      setPlanError(plan.modelError);
+      setRetention(plan.segments);
+      patch((cur) => ({ ...cur, cards: plan.cards }));
+
+      // Thumbnails last — the cards are already usable without them.
+      setPlanNote('');
+      const thumbs = await Promise.all(
+        plan.cards.slice(0, 10).map(async (c) => ({ id: c.id, url: await captureThumb(src, c.start, 150).catch(() => '') })),
+      );
+      if (!aliveRef.current) return;
+      const byId = new Map(thumbs.map((t) => [t.id, t.url]));
+      patch((cur) => ({ ...cur, cards: cur.cards.map((c) => (byId.get(c.id) ? { ...c, thumbnail: byId.get(c.id) as string } : c)) }));
+    } catch (e) {
+      if (aliveRef.current) setError(msg(e));
+    } finally {
+      if (aliveRef.current) { setPlanning(false); setPlanNote(''); }
+    }
+  }, [brief, patch]);
 
   const handleFile = useCallback(async (file: File | null) => {
     if (!file) return;
-    if (!file.type.startsWith('video/')) { setError('That file is not a video.'); return; }
-    if (file.size > MAX_UPLOAD_BYTES) { setError('Videos up to 500 MB are supported.'); return; }
+    if (!file.type.startsWith('video/')) { setError('That file is not a video — try an MP4, MOV or WebM.'); return; }
+    if (file.size > MAX_UPLOAD_BYTES) { setError('That video is bigger than 500 MB. Try a shorter clip.'); return; }
     setError('');
     const localUrl = URL.createObjectURL(file);
-    const clip = await addClipFromUrl('', localUrl, file.name, 'source');
+    const clip = await addClip('', localUrl, file.name, 'raw');
     sourceFiles.current.set(clip.id, file);
-    // The durable copy uploads in the background — export needs it, preview does not.
+
     setUploading(true);
-    setNote('Uploading your footage…');
+    setNote('Uploading a durable copy for the export…');
     void (async () => {
       try {
         const up = await uploadVideo(file);
         if (!aliveRef.current) return;
-        setClips((list) => list.map((c) => (c.id === clip.id ? { ...c, url: up.url } : c)));
+        patch((cur) => ({ ...cur, clips: cur.clips.map((c) => (c.id === clip.id ? { ...c, url: up.url } : c)) }));
         setNote('');
+        void runSubjectAnalysis(clip.id, up.url, clip.sourceDuration);
       } catch (e) {
-        if (aliveRef.current) { setNote(''); setError(`The upload failed — preview still works, but export needs it. ${msg(e)}`); }
+        if (aliveRef.current) {
+          console.error('[VideoStudio] upload failed', e);
+          setNote('');
+          setError('Something went wrong saving your video. Editing still works — try uploading again before you export.');
+        }
       } finally {
         if (aliveRef.current) setUploading(false);
       }
     })();
-    // 2B: uploading auto-triggers Gemini Describe on the local copy.
-    void runDescribe(localUrl);
-  }, [addClipFromUrl, runDescribe]);
 
-  // SceneForge handoff — same contract as the previous editor.
-  useEffect(() => {
+    void captureThumb(localUrl, 1, 320).then((t) => { if (aliveRef.current) setThumbUrl(t); });
+    void runPipeline(clip, file);
+  }, [addClip, patch, runPipeline, runSubjectAnalysis]);
+
+  const replan = useCallback(async () => {
+    const first = docRef.current.clips[0];
+    if (!first || planning) return;
     try {
-      const raw = window.localStorage.getItem('sceneforge_handoff_v1');
-      if (!raw) return;
-      window.localStorage.removeItem('sceneforge_handoff_v1');
-      const h = JSON.parse(raw) as { url?: string; title?: string; ts?: number } | null;
-      if (!h || typeof h.url !== 'string' || !/^https?:\/\//.test(h.url)) return;
-      if (!h.ts || Date.now() - h.ts > 10 * 60 * 1000) return;
-      void (async () => {
-        await addClipFromUrl(h.url!, h.url!, h.title || 'SceneForge video', 'source');
-        void runDescribe(h.url!);
-      })();
-    } catch { /* localStorage unavailable — nothing to hand off */ }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      const file = await fileForClip(first);
+      await runPipeline(first, file);
+    } catch (e) {
+      setError(msg(e));
+    }
+  }, [fileForClip, planning, runPipeline]);
 
-  // ---------------------------------------------------------------------------
-  // Playback engine — one <video> element walks the clip sequence
-  // ---------------------------------------------------------------------------
+  const runTranscribe = useCallback(async () => {
+    const first = docRef.current.clips[0];
+    if (!first || transcribing) return;
+    setTranscribing(true);
+    setError('');
+    try {
+      const file = await fileForClip(first);
+      if (!audioRefData.current) audioRefData.current = await analyseAudio(file).catch(() => null);
+      const t = await transcribeForStudio(file, audioRefData.current, (n) => setTranscriptNote(n));
+      if (!aliveRef.current) return;
+      setExactTimings(t.exactTimings);
+      setTranscriptNote(t.note);
+      commit((cur) => ({ ...cur, words: t.words, transcript: t.transcript, transcriptSource: first.previewUrl }));
+    } catch (e) {
+      setError(msg(e));
+    } finally {
+      if (aliveRef.current) setTranscribing(false);
+    }
+  }, [commit, fileForClip, transcribing]);
 
-  // Keep the element on the active clip's source, trim window and rate.
+  // =========================================================================
+  // Playback engine — one <video> walks the clip sequence
+  // =========================================================================
+
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !activeClip) return;
     const src = activeClip.previewUrl || activeClip.url;
-    const seekTo = pendingSourceT.current != null ? pendingSourceT.current : activeClip.in;
-    pendingSourceT.current = null;
+    const seekTo = pendingSeek.current != null ? pendingSeek.current : activeClip.in;
+    pendingSeek.current = null;
     const apply = () => {
-      try { v.currentTime = Math.max(activeClip.in, Math.min(activeClip.out, seekTo)); } catch { /* not seekable yet */ }
-      v.playbackRate = activeClip.speed;
-      if (isPlayingRef.current) void v.play().catch(() => setIsPlaying(false));
+      try { v.currentTime = clampN(seekTo, activeClip.in, activeClip.out); } catch { /* not seekable yet */ }
+      v.playbackRate = clampN(activeClip.adjust.speed, 0.25, 4);
+      v.muted = activeClip.muted;
+      if (playingRef.current) void v.play().catch(() => setIsPlaying(false));
     };
     if (v.getAttribute('data-src') !== src) {
       v.setAttribute('data-src', src);
@@ -327,31 +793,104 @@ function VideoEnhancerNle() {
     } else {
       apply();
     }
-  }, [activeClip?.id, activeClip?.previewUrl, activeClip?.speed]);
+    // Deliberately NOT keyed on in/out: a trim-handle drag changes those every
+    // frame, and re-seeking on each change would fight the drag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeClip?.id, activeClip?.previewUrl, activeClip?.adjust.speed, activeClip?.muted]);
 
-  useEffect(() => { const v = videoRef.current; if (v) v.volume = volume; }, [volume]);
+  const ensureMainAudioGraph = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return null;
+    if (mainGainRef.current) return mainGainRef.current;
+    try {
+      const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) return null;
+      const context = new AudioContextCtor();
+      const source = context.createMediaElementSource(video);
+      const gain = context.createGain();
+      source.connect(gain);
+      gain.connect(context.destination);
+      mainAudioContextRef.current = context;
+      mainSourceRef.current = source;
+      mainGainRef.current = gain;
+      video.volume = 1;
+      return gain;
+    } catch {
+      return null;
+    }
+  }, []);
 
-  // rAF loop: playhead sync + clip advance + music sync.
+  useEffect(() => {
+    const active = doc.videoOverlays.find((o) => !o.muted && o.duckMain && playhead >= o.start && playhead <= o.end) || null;
+    const target = Math.max(0, Math.min(1, volume * (active ? active.duckVolume : 1)));
+    const gain = mainGainRef.current;
+    const context = mainAudioContextRef.current;
+    const changed = lastDuckRef.current.id !== (active?.id || '') || Math.abs(lastDuckRef.current.target - target) > 0.01;
+    if (gain && context && changed) {
+      const now = context.currentTime;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(target, now + (active ? 0.3 : 0.5));
+      lastDuckRef.current = { id: active?.id || '', target };
+    } else if (!gain && videoRef.current) {
+      videoRef.current.volume = target;
+    }
+  }, [doc.videoOverlays, playhead, volume]);
+
+  useEffect(() => () => {
+    try { void mainAudioContextRef.current?.close(); } catch { /* already closed */ }
+  }, []);
+
+  const lastTickRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!isPlaying) return;
     let raf = 0;
-    const step = () => {
+    lastTickRef.current = null;
+    const step = (now: number) => {
       const v = videoRef.current;
-      const list = clipsRef.current;
+      const list = docRef.current.clips;
       const i = activeIndexRef.current;
       const c = list[i];
+      const prevTick = lastTickRef.current;
+      lastTickRef.current = now;
       if (v && c) {
-        const start = clipStartOnTimeline(list, i);
-        const t = start + Math.max(0, (v.currentTime - c.in)) / Math.max(0.1, c.speed);
-        setPlayhead(Math.min(t, timelineDuration(list)));
-        if (v.currentTime >= c.out - 0.04 || v.ended) {
+        const start = clipStart(list, i);
+        const total = timelineDuration(list);
+        const ramp = clipMotion(c).ramp;
+        let reachedEnd = false;
+
+        if (ramp.enabled) {
+          // A ramped clip is driven FROM the timeline rather than read from
+          // the video element: the playhead advances on the wall clock, and
+          // the source time it should be showing is the warp of that
+          // progress. Reading currentTime back would drift, because the
+          // playback rate is different on every frame.
+          const len = Math.max(0.05, clipLength(c));
+          const dt = prevTick == null ? 0 : Math.min(0.25, (now - prevTick) / 1000);
+          const nextT = Math.min(start + len, playheadRef.current + dt);
+          const p = clampN((nextT - start) / len, 0, 1);
+          const want = c.in + warp(ramp, p) * (c.out - c.in);
+          v.playbackRate = clampN(warpRate(ramp, p) * c.adjust.speed, 0.1, 4);
+          if (Math.abs(v.currentTime - want) > 0.12) {
+            try { v.currentTime = want; } catch { /* not seekable yet */ }
+          }
+          setPlayhead(Math.min(nextT, total));
+          reachedEnd = nextT >= start + len - 0.02 || v.ended;
+        } else {
+          const t = start + Math.max(0, v.currentTime - c.in) / Math.max(0.25, c.adjust.speed);
+          setPlayhead(Math.min(t, total));
+          reachedEnd = v.currentTime >= c.out - 0.04 || v.ended;
+        }
+
+        if (reachedEnd) {
           if (i < list.length - 1) {
-            pendingSourceT.current = list[i + 1].in;
+            pendingSeek.current = list[i + 1].in;
             setActiveIndex(i + 1);
           } else {
             v.pause();
             setIsPlaying(false);
-            setPlayhead(timelineDuration(list));
+            setPlayhead(total);
           }
         }
       }
@@ -361,803 +900,2593 @@ function VideoEnhancerNle() {
     return () => cancelAnimationFrame(raf);
   }, [isPlaying]);
 
-  // Music bed preview follows play/pause and the playhead.
+  // Music bed preview follows play / pause.
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
-    const bed = musicBedId === 'custom'
-      ? (customMusic ? { url: customMusic.url } : null)
-      : (MUSIC_BEDS.find((m) => m.id === musicBedId) || null);
+    const bed = doc.musicUrl
+      ? { url: doc.musicUrl }
+      : MUSIC_BEDS.find((m) => m.id === doc.musicBedId) || null;
     if (!bed) { a.pause(); a.removeAttribute('src'); return; }
     if (a.getAttribute('data-src') !== bed.url) { a.setAttribute('data-src', bed.url); a.src = bed.url; a.loop = true; }
-    a.volume = 0.3 * volume;
-    if (isPlaying) { try { a.currentTime = playheadRef.current % Math.max(1, a.duration || 62); } catch { /* no-op */ } void a.play().catch(() => undefined); }
-    else a.pause();
-  }, [musicBedId, customMusic, isPlaying, volume]);
+    a.volume = doc.musicVolume * volume;
+    if (isPlaying) {
+      try { a.currentTime = playheadRef.current % Math.max(1, a.duration || 60); } catch { /* not ready */ }
+      void a.play().catch(() => undefined);
+    } else {
+      a.pause();
+    }
+  }, [doc.musicBedId, doc.musicUrl, doc.musicVolume, isPlaying, volume]);
 
   const seek = useCallback((t: number) => {
-    const list = clipsRef.current;
+    const list = docRef.current.clips;
     if (!list.length) return;
-    const clamped = Math.max(0, Math.min(timelineDuration(list), t));
+    const clamped = clampN(t, 0, timelineDuration(list));
     const loc = locate(list, clamped);
     if (!loc) return;
     setPlayhead(clamped);
-    pendingSourceT.current = loc.sourceT;
-    if (loc.index !== activeIndexRef.current) setActiveIndex(loc.index);
-    else {
+    pendingSeek.current = loc.sourceT;
+    if (loc.index !== activeIndexRef.current) {
+      setActiveIndex(loc.index);
+    } else {
       const v = videoRef.current;
-      if (v) { try { v.currentTime = loc.sourceT; } catch { /* no-op */ } }
-      pendingSourceT.current = null;
+      if (v) { try { v.currentTime = loc.sourceT; } catch { /* not seekable */ } }
+      pendingSeek.current = null;
     }
   }, []);
+
+  /** Seek by SOURCE time of the transcript's clip — what a word click does. */
+  const seekSource = useCallback((srcT: number) => {
+    const d = docRef.current;
+    const t = sourceToTimeline(d.clips, d.transcriptSource, srcT);
+    if (t != null) seek(t);
+  }, [seek]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
-    if (!v || !clipsRef.current.length) return;
-    if (isPlayingRef.current) { v.pause(); setIsPlaying(false); }
-    else {
-      if (playheadRef.current >= timelineDuration(clipsRef.current) - 0.05) seek(0);
-      setIsPlaying(true);
-      void v.play().catch(() => setIsPlaying(false));
-    }
-  }, [seek]);
+    if (!v || !docRef.current.clips.length) return;
+    if (playingRef.current) { v.pause(); setIsPlaying(false); return; }
+    if (playheadRef.current >= timelineDuration(docRef.current.clips) - 0.05) seek(0);
+    const gain = ensureMainAudioGraph();
+    if (gain && mainAudioContextRef.current?.state === 'suspended') void mainAudioContextRef.current.resume();
+    setIsPlaying(true);
+    void v.play().catch(() => setIsPlaying(false));
+  }, [ensureMainAudioGraph, seek]);
 
-  // ---------------------------------------------------------------------------
-  // Edit operations
-  // ---------------------------------------------------------------------------
+  // =========================================================================
+  // Timeline edits
+  // =========================================================================
 
   const onReorder = useCallback((from: number, to: number) => {
-    setClips((list) => {
-      const next = [...list];
-      const [moved] = next.splice(from, 1);
-      next.splice(Math.max(0, Math.min(next.length, to)), 0, moved);
-      return next;
+    commit((cur) => {
+      const list = cur.clips.slice();
+      const [moved] = list.splice(from, 1);
+      list.splice(clampN(to, 0, list.length), 0, moved);
+      return { ...cur, clips: list };
     });
-  }, []);
+  }, [commit]);
+
   const onTrim = useCallback((id: string, nextIn: number, nextOut: number) => {
-    setClips((list) => list.map((c) => (c.id === id ? { ...c, in: nextIn, out: nextOut } : c)));
-  }, []);
-  const onSpeed = useCallback((id: string, speed: number) => {
-    setClips((list) => list.map((c) => (c.id === id ? { ...c, speed } : c)));
-  }, []);
-  const onOpacity = useCallback((id: string, opacity: number) => {
-    setClips((list) => list.map((c) => (c.id === id ? { ...c, opacity } : c)));
-  }, []);
-  const onText = useCallback((id: string, patch: { text?: string; textSize?: number; textColor?: string }) => {
-    setClips((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-  }, []);
+    patch((cur) => ({ ...cur, clips: cur.clips.map((c) => (c.id === id ? { ...c, in: nextIn, out: nextOut, kind: c.kind === 'raw' ? 'cut' : c.kind } : c)) }));
+  }, [patch]);
 
-  // ---- Graphics, cut tools, AI Edit, transcription, custom music ----
-
-  function onAddGraphic(kind: GraphicKind) {
-    const g = newGraphic(kind, playheadRef.current);
-    setGraphics((l) => [...l, g]);
-    setSelectedGraphicId(g.id);
-    setSelectedClipId(null);
-  }
-  function onGraphicChange(id: string, patch: Partial<MotionGraphic>) {
-    setGraphics((l) => l.map((x) => (x.id === id ? { ...x, ...patch } : x)));
-  }
-  function onGraphicDelete(id: string) {
-    setGraphics((l) => l.filter((x) => x.id !== id));
-    setSelectedGraphicId(null);
-  }
-  function onMoveGraphic(id: string, start: number) {
-    onGraphicChange(id, { start: Math.round(start * 10) / 10 });
-  }
-
-  function onSplitAtPlayhead() {
-    const list = clipsRef.current;
-    const loc = locate(list, playheadRef.current);
+  const onSplit = useCallback(() => {
+    const d = docRef.current;
+    const loc = locate(d.clips, playheadRef.current);
     if (!loc) return;
-    const clip = list[loc.index];
-    const next = splitClipAt(list, clip.id, loc.sourceT);
-    if (next === list) return;
-    const f = sourceFiles.current.get(clip.id);
-    if (f) next.forEach((c) => { if (c.previewUrl === clip.previewUrl && !sourceFiles.current.has(c.id)) sourceFiles.current.set(c.id, f); });
-    setClips(next);
-    setSelectedClipId(null);
-  }
-  function onDeleteClip(id: string) {
-    setClips((l) => l.filter((c) => c.id !== id));
-    setSelectedClipId(null);
-  }
+    const clip = d.clips[loc.index];
+    const next = splitClipAt(d.clips, clip.id, loc.sourceT);
+    if (next === d.clips) return;
+    // The split halves share the original's decoded file, so analysis and
+    // transcription keep working on both without re-fetching.
+    const file = sourceFiles.current.get(clip.id);
+    if (file) next.forEach((c) => { if (c.previewUrl === clip.previewUrl && !sourceFiles.current.has(c.id)) sourceFiles.current.set(c.id, file); });
+    commit((cur) => ({ ...cur, clips: next }));
+    setSelectedClipIds([]);
+  }, [commit]);
 
-  async function fileForClip(clip: NleClip): Promise<File> {
-    const cached = sourceFiles.current.get(clip.id);
-    if (cached) return cached;
-    const f = await fetchVideoAsFile(clip.previewUrl || clip.url);
-    sourceFiles.current.set(clip.id, f);
-    return f;
-  }
+  const onDeleteSelected = useCallback(() => {
+    const ids = selectedClipRef.current;
+    if (ids.length) {
+      commit((cur) => {
+        const urls = new Set(cur.clips.filter((c) => ids.includes(c.id)).flatMap((c) => [c.url, c.previewUrl]).filter(Boolean));
+        return {
+          ...cur,
+          clips: cur.clips.filter((c) => !ids.includes(c.id)),
+          brollSlots: cur.brollSlots.filter((s) => !s.clipUrl || !urls.has(s.clipUrl)),
+        };
+      });
+      ids.forEach((id) => sourceFiles.current.delete(id));
+      setSelectedClipIds([]);
+      return;
+    }
+    if (selectedTextId) {
+      commit((cur) => ({ ...cur, textLayers: cur.textLayers.filter((l) => l.id !== selectedTextId) }));
+      setSelectedTextId(null);
+      return;
+    }
+    if (selectedOverlayId) {
+      commit((cur) => ({ ...cur, overlays: cur.overlays.filter((o) => o.id !== selectedOverlayId) }));
+      setSelectedOverlayId(null);
+      return;
+    }
+    if (selectedBrollId) {
+      commit((cur) => ({ ...cur, videoOverlays: cur.videoOverlays.filter((o) => o.id !== selectedBrollId) }));
+      setSelectedBrollId(null);
+    }
+  }, [commit, selectedBrollId, selectedOverlayId, selectedTextId]);
 
-  /** Detect silences in the source audio and cut them out of the clip as real
-   * timeline cuts. Returns true when something was cut. */
-  async function cutSilences(target: NleClip, file: File): Promise<boolean> {
-    const decoded = await decodeAudioMono(file);
-    const silences = detectSilences(decoded.samples, decoded.sampleRate, -38, 0.6);
-    if (!silences.length) return false;
-    const PAD = 0.12;
-    const keeps: { start: number; end: number }[] = [];
-    let cursor = 0;
-    silences.forEach((s) => {
-      if (s.start + PAD > cursor + 0.35) keeps.push({ start: cursor, end: s.start + PAD });
-      cursor = Math.max(cursor, s.end - PAD);
+  /**
+   * Removing a clip is reversible for five seconds. The restore closure holds
+   * the clip and its index directly instead of reading them back out of
+   * state, so the Undo on a toast always puts back the clip THAT toast is
+   * about, even if another clip is deleted before it expires.
+   */
+  const deleteClip = useCallback((id: string) => {
+    const current = docRef.current;
+    const index = current.clips.findIndex((clip) => clip.id === id);
+    const clip = current.clips[index];
+    if (!clip) return;
+    if (removedClipTimer.current != null) window.clearTimeout(removedClipTimer.current);
+    removedClipTimer.current = window.setTimeout(() => {
+      sourceFiles.current.delete(id);
+      removedClipTimer.current = null;
+    }, 5000);
+    commit((cur) => {
+      const urls = new Set([clip.url, clip.previewUrl].filter(Boolean));
+      return {
+        ...cur,
+        clips: cur.clips.filter((c) => c.id !== id),
+        brollSlots: cur.brollSlots.filter((s) => !s.clipUrl || !urls.has(s.clipUrl)),
+      };
     });
-    if (decoded.duration - cursor > 0.2) keeps.push({ start: cursor, end: decoded.duration });
-    const next = replaceClipWithRanges(clipsRef.current, target.id, keeps);
-    if (next === clipsRef.current) return false;
-    next.forEach((c) => { if (c.previewUrl === target.previewUrl && !sourceFiles.current.has(c.id)) sourceFiles.current.set(c.id, file); });
-    clipsRef.current = next;
-    setClips(next);
-    return true;
-  }
-
-  /** Map word-timed caption segments (SOURCE seconds of `srcUrl`) onto the
-   * timeline — segments that fall inside cut-away silences are dropped. */
-  function applyCaptionsFromSegments(segs: CaptionSegment[], srcUrl: string) {
-    const list = clipsRef.current;
-    const caps: NleCaption[] = [];
-    segs.forEach((s) => {
-      if (!String(s.text || '').trim()) return;
-      const a = sourceToTimeline(list, srcUrl, s.start);
-      const b = sourceToTimeline(list, srcUrl, s.end);
-      if (a == null && b == null) return;
-      const start = a == null ? Math.max(0, (b as number) - (s.end - s.start)) : a;
-      const end = b == null ? start + (s.end - s.start) : b;
-      if (end - start >= 0.25) caps.push({ id: newId('cap'), text: s.text, start, end });
+    setSelectedClipIds((ids) => ids.filter((x) => x !== id));
+    pushToast({
+      message: 'Clip removed',
+      actionLabel: 'Undo',
+      ttlMs: 5000,
+      onAction: () => {
+        if (removedClipTimer.current != null) {
+          window.clearTimeout(removedClipTimer.current);
+          removedClipTimer.current = null;
+        }
+        commit((cur) => {
+          if (cur.clips.some((c) => c.id === clip.id)) return cur;
+          const clips = cur.clips.slice();
+          clips.splice(Math.min(index, clips.length), 0, clip);
+          return { ...cur, clips };
+        });
+        setSelectedClipIds([clip.id]);
+      },
     });
-    setCaptions(caps);
-    setCaptionOffset(0);
-  }
+  }, [commit, pushToast]);
 
-  async function runTranscribe() {
-    const list = clipsRef.current;
-    if (!list.length || transcribing || aiEditBusy) return;
-    setTranscribing(true);
-    setError('');
-    setNote('Transcribing the footage (AI, word-timed)…');
+  const clearAllClips = useCallback(() => {
+    commit((cur) => ({ ...cur, clips: [], brollSlots: [], videoOverlays: [] }));
+    sourceFiles.current.clear();
+    setSelectedClipIds([]);
+    setActiveIndex(0);
+    setPlayhead(0);
+    setConfirmClearAll(false);
+    pushToast({ message: 'All clips cleared. Press Cmd+Z to bring them back.' });
+  }, [commit, pushToast]);
+
+  const applyToSelected = useCallback((fn: (c: StudioClip) => StudioClip) => {
+    const ids = selectedClipRef.current;
+    patch((cur) => ({ ...cur, clips: cur.clips.map((c) => (ids.includes(c.id) ? fn(c) : c)) }));
+  }, [patch]);
+
+  const onAdjust = useCallback((p: Partial<Adjust>) => {
+    applyToSelected((c) => ({ ...c, adjust: { ...c.adjust, ...p } }));
+  }, [applyToSelected]);
+
+  const onCrop = useCallback((p: Partial<CropRect>) => {
+    applyToSelected((c) => {
+      let crop = { ...c.crop, ...p };
+      if (c.cropLocked && p.w != null) {
+        const ratio = c.crop.h / Math.max(0.05, c.crop.w);
+        crop = { ...crop, h: clampN(crop.w * ratio, 0.1, 1) };
+      }
+      crop.x = clampN(crop.x, 0, Math.max(0, 1 - crop.w));
+      crop.y = clampN(crop.y, 0, Math.max(0, 1 - crop.h));
+      return { ...c, crop };
+    });
+  }, [applyToSelected]);
+
+  const sourceAspect = useMemo(() => {
+    const v = videoRef.current;
+    if (v && v.videoWidth && v.videoHeight) return v.videoWidth / v.videoHeight;
+    return 16 / 9;
+  }, [activeClip?.id, playhead]);
+
+  const onCropPreset = useCallback((id: AspectId | 'free') => {
+    applyToSelected((c) => ({ ...c, cropAspect: id, crop: cropForAspect(id, c.crop, sourceAspect) }));
+  }, [applyToSelected, sourceAspect]);
+
+  const onToggleClipEffect = useCallback((id: VisualEffectId) => {
+    applyToSelected((c) => ({
+      ...c,
+      effects: c.effects.includes(id) ? c.effects.filter((x) => x !== id) : [...c.effects, id],
+    }));
+  }, [applyToSelected]);
+
+  const onSetTransition = useCallback((clipId: string, id: TransitionId | null) => {
+    commit((cur) => ({
+      ...cur,
+      clips: cur.clips.map((c) => (c.id === clipId
+        ? { ...c, transitionIn: id ? { id, duration: TRANSITIONS.find((t) => t.id === id)?.defaultDuration || 0.5 } : null }
+        : c)),
+    }));
+  }, [commit]);
+
+  // =========================================================================
+  // Transcript editing — text deletions become timeline cuts
+  // =========================================================================
+
+  const rebuildCaptions = useCallback((d: EditDoc): EditDoc => {
+    if (!d.words.length || !d.captions.length) return d;
+    return { ...d, captions: captionsFromWords(d.clips, d.transcriptSource, d.words, captionMaxWords(d.captionSettings)) };
+  }, []);
+
+  const onRemoveWords = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    commit((cur) => {
+      const target = cur.words.filter((w) => ids.includes(w.id) && !w.removed);
+      if (!target.length) return cur;
+      const ranges = mergeRanges(target.map((w) => ({ start: Math.max(0, w.start - 0.04), end: w.end + 0.04 })));
+      const words = removeWords(cur.words, ids);
+      const next = { ...cur, words, clips: cutSourceRanges(cur.clips, cur.transcriptSource, ranges) };
+      return rebuildCaptions(next);
+    });
+  }, [commit, rebuildCaptions]);
+
+  const onRestoreWords = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    commit((cur) => {
+      const target = cur.words.filter((w) => ids.includes(w.id) && w.removed);
+      if (!target.length) return cur;
+      const ranges = mergeRanges(target.map((w) => ({ start: Math.max(0, w.start - 0.04), end: w.end + 0.04 })));
+      const words = restoreWords(cur.words, ids);
+      const next = { ...cur, words, clips: restoreSourceRanges(cur.clips, cur.transcriptSource, ranges) };
+      return rebuildCaptions(next);
+    });
+  }, [commit, rebuildCaptions]);
+
+  const onRemoveAllFillers = useCallback(() => {
+    onRemoveWords(fillerIds(docRef.current.words));
+  }, [onRemoveWords]);
+
+  const buildCaptionTrack = useCallback(() => {
+    commit((cur) => ({ ...cur, captions: captionsFromWords(cur.clips, cur.transcriptSource, cur.words, captionMaxWords(cur.captionSettings)) }));
+  }, [commit]);
+
+  const downloadSrt = useCallback(() => {
+    const d = docRef.current;
+    if (!d.captions.length) return;
+    downloadText(`${(d.title || 'captions').replace(/[^\w.-]+/g, '-').slice(0, 48)}.srt`, buildSrt(d.captions));
+  }, []);
+
+  // =========================================================================
+  // Cut-plan cards
+  // =========================================================================
+
+  const generateForSlot = useCallback(async (slotId: string) => {
+    const d = docRef.current;
+    const slot = d.brollSlots.find((s) => s.id === slotId);
+    if (!slot || slot.status === 'generating') return;
+    patch((cur) => ({ ...cur, brollSlots: cur.brollSlots.map((s) => (s.id === slotId ? { ...s, status: 'generating', error: '' } : s)) }));
+    setGeneratingSlot(slotId);
     try {
-      const first = list[0];
-      const file = await fileForClip(first);
-      const res = await transcribeVideo(file, (n) => setNote(n));
-      if (!res.words.length) {
-        setNote('');
-        setError('The transcription service returned no word timings — paste the transcript manually instead.');
+      const profile = d.clips.find((clip) => clip.subject)?.subject || null;
+      const matchedPrompt = profile
+        ? `${slot.prompt} Prioritize a visual match for ${profile.subjectType}; ${profile.backgroundDescription}; dominant color ${profile.dominantColor}; ${profile.mood} mood.`
+        : slot.prompt;
+      const shot = await filmBroll(matchedPrompt, slot.end - slot.start, d.aspect, brollModel, () => aliveRef.current);
+      if (!aliveRef.current) return;
+      if (!shot.url) {
+        patch((cur) => ({ ...cur, brollSlots: cur.brollSlots.map((s) => (s.id === slotId ? { ...s, status: 'failed', error: shot.error } : s)) }));
         return;
       }
-      const segs = buildCaptionSegments(res.words);
-      applyCaptionsFromSegments(segs, first.previewUrl);
-      setNote(`${segs.length} captions transcribed with word-accurate timing.`);
+      // The user may delete a slot while generation is in flight. In that
+      // case the completed result is intentionally ignored instead of being
+      // resurrected onto the timeline.
+      if (!docRef.current.brollSlots.some((s) => s.id === slotId)) return;
+      const at = locate(docRef.current.clips, slot.start);
+      await addClip(shot.url, shot.url, `B-roll ${fmtTimecode(slot.start)}`, 'broll', at ? at.index + 1 : undefined);
+      patch((cur) => ({ ...cur, brollSlots: cur.brollSlots.map((s) => (s.id === slotId ? { ...s, status: 'filled', clipUrl: shot.url } : s)) }));
     } catch (e) {
-      setError(msg(e));
-      setNote('');
+      if (aliveRef.current) {
+        patch((cur) => ({ ...cur, brollSlots: cur.brollSlots.map((s) => (s.id === slotId ? { ...s, status: 'failed', error: msg(e) } : s)) }));
+      }
     } finally {
-      setTranscribing(false);
+      if (aliveRef.current) setGeneratingSlot('');
     }
-  }
+  }, [addClip, brollModel, patch]);
 
-  /** ONE-CLICK AI EDIT — transcribe → cut dead air → word-timed captions →
-   * AI-planned motion graphics. Every step degrades gracefully. */
-  async function runAiEdit() {
-    const list = clipsRef.current;
-    if (!list.length || aiEditBusy) return;
-    setAiEditBusy(true);
-    setError('');
+  /** Map a card's source-time span onto the current timeline. */
+  const cardTimeline = useCallback((card: EditCard): { start: number; end: number } | null => {
+    const d = docRef.current;
+    const a = sourceToTimeline(d.clips, d.transcriptSource, card.start);
+    const b = sourceToTimeline(d.clips, d.transcriptSource, card.end);
+    if (a == null && b == null) return null;
+    const start = a == null ? Math.max(0, (b as number) - (card.end - card.start)) : a;
+    const end = b == null ? start + (card.end - card.start) : Math.max(start + 0.2, b);
+    return { start, end };
+  }, []);
+
+  const applyCard = useCallback(async (card: EditCard): Promise<string> => {
+    switch (card.type) {
+      case 'filler': {
+        const ids = Array.isArray(card.payload.wordIds) ? (card.payload.wordIds as string[]) : fillerIds(docRef.current.words);
+        onRemoveWords(ids);
+        return '';
+      }
+      case 'silence': {
+        const ranges = (card.payload.ranges as { start: number; end: number }[] | undefined) || [];
+        if (!ranges.length) return 'No silence ranges on this card.';
+        const PAD = 0.1;
+        const padded = ranges.map((r) => ({ start: r.start + PAD, end: Math.max(r.start + PAD + 0.1, r.end - PAD) }));
+        commit((cur) => rebuildCaptions({ ...cur, clips: cutSourceRanges(cur.clips, cur.transcriptSource, padded) }));
+        return '';
+      }
+      case 'trim': {
+        commit((cur) => rebuildCaptions({ ...cur, clips: cutSourceRanges(cur.clips, cur.transcriptSource, [{ start: card.start, end: card.end }]) }));
+        return '';
+      }
+      case 'caption': {
+        if (!docRef.current.words.length) return 'There is no transcript to caption from yet.';
+        buildCaptionTrack();
+        return '';
+      }
+      case 'effect': {
+        const id = String(card.payload.effect || 'vignette') as VisualEffectId;
+        const span = cardTimeline(card);
+        commit((cur) => {
+          // A card that covers most of the video is a global look; a short one
+          // belongs to the clips it actually overlaps.
+          const total = Math.max(0.5, timelineDuration(cur.clips));
+          if (!span || span.end - span.start > total * 0.7) {
+            return { ...cur, globalEffects: cur.globalEffects.includes(id) ? cur.globalEffects : [...cur.globalEffects, id] };
+          }
+          return {
+            ...cur,
+            clips: cur.clips.map((c, i) => {
+              const s = clipStart(cur.clips, i);
+              const e = s + clipLength(c);
+              const overlaps = e > span.start && s < span.end;
+              return overlaps && !c.effects.includes(id) ? { ...c, effects: [...c.effects, id] } : c;
+            }),
+          };
+        });
+        return '';
+      }
+      case 'transition': {
+        const id = String(card.payload.transition || 'crossfade') as TransitionId;
+        const span = cardTimeline(card);
+        const d = docRef.current;
+        if (!span || d.clips.length < 2) return 'There is no cut point here to put a transition on.';
+        let bestIndex = 1;
+        let bestGap = Infinity;
+        for (let i = 1; i < d.clips.length; i += 1) {
+          const gap = Math.abs(clipStart(d.clips, i) - span.start);
+          if (gap < bestGap) { bestGap = gap; bestIndex = i; }
+        }
+        onSetTransition(d.clips[bestIndex].id, id);
+        return '';
+      }
+      case 'text': {
+        const span = cardTimeline(card);
+        if (!span) return 'That moment is no longer on the timeline.';
+        const layer: TextLayer = {
+          ...newTextLayer(span.start, Math.max(1.2, Math.min(4, span.end - span.start))),
+          text: String(card.payload.text || card.title).slice(0, 48),
+        };
+        commit((cur) => ({ ...cur, textLayers: [...cur.textLayers, layer] }));
+        setSelectedTextId(layer.id);
+        return '';
+      }
+      case 'reframe': {
+        commit((cur) => ({ ...cur, reframe: { ...cur.reframe, mode: 'auto' } }));
+        return '';
+      }
+      case 'broll': {
+        const span = cardTimeline(card);
+        const prompt = String(card.payload.prompt || brollPromptFromContext(docRef.current.words, card.start, card.end));
+        const existing = docRef.current.brollSlots.find((s) => Math.abs(s.start - (span?.start ?? card.start)) < 1.5);
+        if (existing) {
+          patch((cur) => ({ ...cur, brollSlots: cur.brollSlots.map((s) => (s.id === existing.id ? { ...s, prompt } : s)) }));
+          await generateForSlot(existing.id);
+          return '';
+        }
+        const slot: BrollSlot = {
+          id: newId('slot'),
+          start: span?.start ?? card.start,
+          end: span?.end ?? card.end,
+          cause: 'pause',
+          reason: card.reason,
+          prompt,
+          status: 'open',
+          clipUrl: '',
+          error: '',
+        };
+        patch((cur) => ({ ...cur, brollSlots: [...cur.brollSlots, slot].sort((a, b) => a.start - b.start) }));
+        await generateForSlot(slot.id);
+        return '';
+      }
+      default:
+        return 'That card has no apply step.';
+    }
+  }, [buildCaptionTrack, cardTimeline, commit, generateForSlot, onRemoveWords, onSetTransition, patch, rebuildCaptions]);
+
+  const acceptCard = useCallback(async (id: string) => {
+    const card = docRef.current.cards.find((c) => c.id === id);
+    if (!card || card.status !== 'pending') return;
+    patch((cur) => ({ ...cur, cards: cur.cards.map((c) => (c.id === id ? { ...c, status: 'accepted' } : c)) }));
+    let failure = '';
     try {
-      const first = list[0];
-      const file = await fileForClip(first);
+      failure = await applyCard(card);
+    } catch (e) {
+      failure = msg(e);
+    }
+    if (!aliveRef.current) return;
+    patch((cur) => ({
+      ...cur,
+      cards: cur.cards.map((c) => (c.id === id ? { ...c, status: failure ? 'failed' : 'applied', note: failure } : c)),
+    }));
+  }, [applyCard, patch]);
 
-      setNote('AI Edit 1/4 — transcribing the footage…');
-      let words: { word: string; start: number; end: number }[] = [];
-      let transcript = '';
-      try {
-        const t = await transcribeVideo(file, (n) => setNote(n));
+  const rejectCard = useCallback((id: string) => {
+    patch((cur) => ({ ...cur, cards: cur.cards.map((c) => (c.id === id ? { ...c, status: 'rejected' } : c)) }));
+  }, [patch]);
+
+  /**
+   * Accept everything, cuts first. Applying a trim after a caption rebuild
+   * would leave the captions describing footage that is no longer there, so
+   * the destructive cards go through before the additive ones.
+   */
+  const acceptAll = useCallback(async () => {
+    const order: Record<string, number> = { filler: 0, silence: 1, trim: 2, caption: 3, reframe: 4, effect: 5, transition: 6, text: 7, broll: 8 };
+    const queue = docRef.current.cards
+      .filter((c) => c.status === 'pending')
+      .slice()
+      .sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9));
+    for (const card of queue) {
+      if (!aliveRef.current) return;
+      await acceptCard(card.id);
+    }
+  }, [acceptCard]);
+
+  // =========================================================================
+  // Chat
+  // =========================================================================
+
+  const runChatAction = useCallback(async (action: ChatAction) => {
+    switch (action) {
+      case 'captions': buildCaptionTrack(); return;
+      case 'removeFillers': onRemoveAllFillers(); return;
+      case 'removeSilences': {
+        const ranges = (audioRefData.current?.silences || []).filter((s) => s.end - s.start >= 0.5);
+        if (!ranges.length) return;
+        commit((cur) => rebuildCaptions({
+          ...cur,
+          clips: cutSourceRanges(cur.clips, cur.transcriptSource, ranges.map((r) => ({ start: r.start + 0.1, end: Math.max(r.start + 0.2, r.end - 0.1) }))),
+        }));
+        return;
+      }
+      case 'reframe': commit((cur) => ({ ...cur, aspect: '9:16', reframe: { ...cur.reframe, mode: 'auto' } })); return;
+      case 'punchUp': {
+        onRemoveAllFillers();
+        const ranges = (audioRefData.current?.silences || []).filter((s) => s.end - s.start >= 0.45);
+        if (ranges.length) {
+          commit((cur) => rebuildCaptions({
+            ...cur,
+            clips: cutSourceRanges(cur.clips, cur.transcriptSource, ranges.map((r) => ({ start: r.start + 0.08, end: Math.max(r.start + 0.18, r.end - 0.08) }))),
+          }));
+        }
+        return;
+      }
+      case 'addMusic': commit((cur) => ({ ...cur, musicBedId: cur.musicBedId === 'none' ? 'energetic' : cur.musicBedId })); return;
+      case 'replan': void replan(); return;
+      default: return;
+    }
+  }, [buildCaptionTrack, commit, onRemoveAllFillers, rebuildCaptions, replan]);
+
+  const sendChat = useCallback(async (text: string) => {
+    const mine: ChatMessage = { id: newId('m'), role: 'user', content: text };
+    setChat((c) => [...c, mine]);
+    setChatBusy(true);
+    try {
+      const d = docRef.current;
+      const history: ChatTurn[] = chat.slice(-6).map((m) => ({ role: m.role, content: m.content }));
+      const stateLine = [
+        `${d.clips.length} clips`,
+        `${timelineDuration(d.clips).toFixed(1)}s`,
+        `${d.captions.length} captions`,
+        `${d.textLayers.length} text layers`,
+        `${d.overlays.length} overlays`,
+        `format ${d.aspect}`,
+        `grade ${d.grade}`,
+        `${d.words.filter((w) => w.removed).length} words cut from the transcript`,
+      ].join(' · ');
+      const out = await chatForEdits(text, planContext(), history, stateLine);
+      if (!aliveRef.current) return;
+      setChat((c) => [...c, { id: newId('m'), role: 'assistant', content: out.reply }]);
+      if (out.cards.length) patch((cur) => ({ ...cur, cards: [...out.cards, ...cur.cards] }));
+      for (const action of out.actions) await runChatAction(action);
+    } catch (e) {
+      if (aliveRef.current) setChat((c) => [...c, { id: newId('m'), role: 'assistant', content: `I could not reach the editing model: ${msg(e)}` }]);
+    } finally {
+      if (aliveRef.current) setChatBusy(false);
+    }
+  }, [chat, patch, planContext, runChatAction]);
+
+  // =========================================================================
+  // Reframe / overlays
+  // =========================================================================
+
+  const detectSubject = useCallback(async () => {
+    const first = docRef.current.clips[0];
+    if (!first || detecting) return;
+    setDetecting(true);
+    patch((cur) => ({ ...cur, reframe: { ...cur.reframe, status: 'detecting', note: 'Reading frames…' } }));
+    try {
+      const out = await detectSubjectTrack(first.previewUrl, first.sourceDuration, (p, n) => {
+        if (aliveRef.current) patch((cur) => ({ ...cur, reframe: { ...cur.reframe, note: `${n} ${Math.round(p * 100)}%` } }));
+      });
+      if (!aliveRef.current) return;
+      motionRef.current = out.motion;
+      commit((cur) => ({
+        ...cur,
+        reframe: { ...cur.reframe, focus: out.focus, detector: out.detector, status: 'ready', note: out.note, mode: 'auto' },
+      }));
+    } catch (e) {
+      if (aliveRef.current) patch((cur) => ({ ...cur, reframe: { ...cur.reframe, status: 'failed', note: msg(e) } }));
+    } finally {
+      if (aliveRef.current) setDetecting(false);
+    }
+  }, [commit, detecting, patch]);
+
+  const addOverlayFromUrl = useCallback((url: string, label: string) => {
+    const overlay = newOverlay(url, label, Math.max(2, timelineDuration(docRef.current.clips)));
+    commit((cur) => ({ ...cur, overlays: [...cur.overlays, overlay] }));
+    setSelectedOverlayId(overlay.id);
+    // The server render cannot inspect the image file, so its natural aspect
+    // is measured here and travels with the overlay into the export spec.
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const ratio = img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
+      if (aliveRef.current) patch((cur) => ({ ...cur, overlays: cur.overlays.map((o) => (o.id === overlay.id ? { ...o, aspect: ratio } : o)) }));
+    };
+    img.src = url;
+  }, [commit, patch]);
+
+  const addOverlayFile = useCallback(async (file: File) => {
+    const local = URL.createObjectURL(file);
+    addOverlayFromUrl(local, file.name.slice(0, 28));
+    // The export needs a public URL, so the durable copy lands in the
+    // background and replaces the local one when it arrives.
+    try {
+      const up = await uploadVideo(file);
+      if (!aliveRef.current) return;
+      patch((cur) => ({ ...cur, overlays: cur.overlays.map((o) => (o.url === local ? { ...o, url: up.url } : o)) }));
+    } catch (e) {
+      if (aliveRef.current) setError(`The overlay image is only local for now — the export needs a durable copy. ${msg(e)}`);
+    }
+  }, [addOverlayFromUrl, patch]);
+
+  const trackOverlay = useCallback(async (id: string) => {
+    const d = docRef.current;
+    const overlay = d.overlays.find((o) => o.id === id);
+    const loc = locate(d.clips, playheadRef.current);
+    if (!overlay || !loc) return;
+    const clip = d.clips[loc.index];
+    setTrackingId(id);
+    setTrackProgress(0);
+    patch((cur) => ({ ...cur, overlays: cur.overlays.map((o) => (o.id === id ? { ...o, track: { ...o.track, status: 'tracking', note: 'Following the subject…' } } : o)) }));
+    try {
+      const out = await trackOverlaySubject(
+        clip.previewUrl,
+        loc.sourceT,
+        clip.out,
+        { x: overlay.x, y: overlay.y },
+        (p) => { if (aliveRef.current) setTrackProgress(p); },
+      );
+      if (!aliveRef.current) return;
+      // Tracker keys come back in source seconds; the overlay lives on the
+      // timeline, so they are converted before they are stored.
+      const keys = out.keys
+        .map((k) => {
+          const t = sourceToTimeline(docRef.current.clips, clip.previewUrl, k.t);
+          return t == null ? null : { t, x: k.x, y: k.y };
+        })
+        .filter(Boolean) as { t: number; x: number; y: number }[];
+      commit((cur) => ({
+        ...cur,
+        overlays: cur.overlays.map((o) => (o.id === id
+          ? { ...o, track: { enabled: keys.length > 1, keys, confidence: out.confidence, status: keys.length > 1 ? 'ready' : 'failed', note: out.note } }
+          : o)),
+      }));
+    } catch (e) {
+      if (aliveRef.current) {
+        patch((cur) => ({ ...cur, overlays: cur.overlays.map((o) => (o.id === id ? { ...o, track: { ...o.track, status: 'failed', note: msg(e) } } : o)) }));
+      }
+    } finally {
+      if (aliveRef.current) { setTrackingId(null); setTrackProgress(0); }
+    }
+  }, [commit, patch]);
+
+  // =========================================================================
+  // Library picker (B-roll from the workspace's own clips)
+  // =========================================================================
+
+  const openLibrary = useCallback(async (slotId: string) => {
+    setLibraryFor(slotId);
+    if (library.length) return;
+    setLibraryBusy(true);
+    try {
+      const out = await callHook('vv-workspace-videos', { provider: 'all', limit: 60 });
+      if (!aliveRef.current) return;
+      setLibrary(Array.isArray(out?.videos) ? out.videos : []);
+    } catch (e) {
+      if (aliveRef.current) setError(msg(e));
+    } finally {
+      if (aliveRef.current) setLibraryBusy(false);
+    }
+  }, [library.length]);
+
+  const useLibraryClip = useCallback(async (url: string) => {
+    const slotId = libraryFor;
+    setLibraryFor(null);
+    const d = docRef.current;
+    const slot = d.brollSlots.find((s) => s.id === slotId) || null;
+    const at = slot ? locate(d.clips, slot.start) : null;
+    await addClip(url, url, slot ? `B-roll ${fmtTimecode(slot.start)}` : 'Library clip', 'broll', at ? at.index + 1 : undefined);
+    if (slot) patch((cur) => ({ ...cur, brollSlots: cur.brollSlots.map((s) => (s.id === slot.id ? { ...s, status: 'filled', clipUrl: url } : s)) }));
+  }, [addClip, libraryFor, patch]);
+
+  const replaceSlotWithFile = useCallback(async (slotId: string, file: File) => {
+    const d = docRef.current;
+    const slot = d.brollSlots.find((s) => s.id === slotId);
+    if (!slot) return;
+    const local = URL.createObjectURL(file);
+    const at = locate(d.clips, slot.start);
+    const clip = await addClip('', local, file.name.slice(0, 28), 'broll', at ? at.index + 1 : undefined);
+    sourceFiles.current.set(clip.id, file);
+    patch((cur) => ({ ...cur, brollSlots: cur.brollSlots.map((s) => (s.id === slotId ? { ...s, status: 'filled', clipUrl: local } : s)) }));
+    try {
+      const up = await uploadVideo(file);
+      if (!aliveRef.current) return;
+      patch((cur) => ({
+        ...cur,
+        clips: cur.clips.map((c) => (c.id === clip.id ? { ...c, url: up.url } : c)),
+        brollSlots: cur.brollSlots.map((s) => (s.id === slotId ? { ...s, clipUrl: up.url } : s)),
+      }));
+    } catch (e) {
+      if (aliveRef.current) setError(`That cutaway is only local for now — the export needs a durable copy. ${msg(e)}`);
+    }
+  }, [addClip, patch]);
+
+  const removeBrollSlot = useCallback((slotId: string) => {
+    const current = docRef.current;
+    const slot = current.brollSlots.find((s) => s.id === slotId);
+    const clipUrl = slot?.clipUrl || '';
+    const removedIds = current.clips
+      .filter((c) => clipUrl && (c.url === clipUrl || c.previewUrl === clipUrl))
+      .map((c) => c.id);
+    removedIds.forEach((id) => sourceFiles.current.delete(id));
+    if (removedIds.length) setSelectedClipIds((ids) => ids.filter((id) => !removedIds.includes(id)));
+    commit((cur) => ({
+      ...cur,
+      brollSlots: cur.brollSlots.filter((s) => s.id !== slotId),
+      clips: clipUrl ? cur.clips.filter((c) => c.url !== clipUrl && c.previewUrl !== clipUrl) : cur.clips,
+    }));
+    setSelectedSlotId((selected) => (selected === slotId ? null : selected));
+  }, [commit]);
+
+  // =========================================================================
+  // Captions — generate, design, edit line by line
+  // =========================================================================
+
+  /**
+   * One button for the whole caption job: transcribe if we have not already,
+   * work out the language, then cut the words into lines. Running it again
+   * re-cuts the lines from the transcript already in hand rather than paying
+   * for a second transcription.
+   */
+  const generateCaptions = useCallback(async () => {
+    const first = docRef.current.clips[0];
+    if (!first || captionsBusy) return;
+    setCaptionsBusy(true);
+    setCaptionNote('');
+    try {
+      let words = docRef.current.words;
+      let transcript = docRef.current.transcript;
+      let source = docRef.current.transcriptSource || first.previewUrl;
+
+      if (!words.length) {
+        setCaptionNote('Listening to the footage…');
+        const file = await fileForClip(first);
+        if (!audioRefData.current) audioRefData.current = await analyseAudio(file).catch(() => null);
+        const t = await transcribeForStudio(file, audioRefData.current, (n) => { if (aliveRef.current) setCaptionNote(n); });
+        if (!aliveRef.current) return;
         words = t.words;
         transcript = t.transcript;
-      } catch (e) {
-        setNote(`Transcription unavailable (${msg(e).slice(0, 90)}) — continuing with the silence cut.`);
+        source = first.previewUrl;
+        setExactTimings(t.exactTimings);
+        setTranscriptNote(t.note);
       }
 
-      setNote('AI Edit 2/4 — listening for dead air…');
-      try {
-        await cutSilences(first, file);
-      } catch (e) {
-        setNote(`Silence analysis skipped (${msg(e).slice(0, 80)}).`);
+      if (!words.length) {
+        setCaptionNote('No speech was found in this footage, so there is nothing to caption.');
+        return;
       }
 
-      let segs: CaptionSegment[] = [];
-      if (words.length) {
-        setNote('AI Edit 3/4 — laying word-timed captions…');
-        segs = buildCaptionSegments(words);
-        applyCaptionsFromSegments(segs, first.previewUrl);
-      }
-
-      if (transcript && segs.length) {
-        setNote('AI Edit 4/4 — planning motion graphics…');
-        try {
-          const plan = await planEnhancements(transcript, segs, first.sourceDuration);
-          const mapped: MotionGraphic[] = [];
-          plan.graphics.forEach((cue) => {
-            const at = sourceToTimeline(clipsRef.current, first.previewUrl, cue.at);
-            if (at == null) return;
-            const g = newGraphic(cue.kind === 'title' ? 'hook' : 'pop', at);
-            g.text = cue.text;
-            g.duration = Math.max(1.2, Math.min(3.5, cue.duration));
-            mapped.push(g);
-          });
-          if (mapped.length) setGraphics((l) => [...l, ...mapped]);
-          // \"Apply b-roll in between too\": film the FIRST suggested cutaway
-          // (one Omni Flash render, wallet-billed) and insert it at its
-          // suggested moment between the cut clips — applied, not just listed.
-          const slot = Array.isArray(plan.broll) && plan.broll.length ? plan.broll[0] : null;
-          if (slot && slot.prompt) {
-            setNote(`AI Edit — filming one suggested b-roll cutaway on ${concreteBrollName} (1–3 min)…`);
-            try {
-              const cut = await filmBrollClip(
-                concreteBrollModel,
-                String(slot.prompt),
-                Math.min(6, Math.max(4, Math.round(slot.duration) || 5)),
-                () => aliveRef.current,
-              );
-              if (cut.videoUrl) {
-                const at = sourceToTimeline(clipsRef.current, first.previewUrl, slot.at);
-                const loc = at != null ? locate(clipsRef.current, at) : null;
-                await addClipFromUrl(cut.videoUrl, cut.videoUrl, 'B-roll: ' + String(slot.prompt).slice(0, 28), 'broll', loc ? loc.index + 1 : undefined);
-              }
-            } catch { /* the cutaway is a bonus — the edit stands without it */ }
-          }
-        } catch { /* the graphics plan is a bonus — captions and cuts stand */ }
-      }
-
-      setNote('AI Edit complete — dead air cut, captions laid, graphics placed, and a suggested b-roll cutaway inserted in between. Review the timeline, then Render & Export.');
-      seek(0);
+      const lang = detectLanguage(transcript || words.map((w) => w.text).join(' '));
+      commit((cur) => {
+        const next = { ...cur, words, transcript, transcriptSource: source, captionLanguage: lang.code };
+        return { ...next, captions: captionsFromWords(next.clips, next.transcriptSource, next.words, captionMaxWords(next.captionSettings)) };
+      });
+      setCaptionNote(lang.confident
+        ? `Caption track built in ${lang.label}.`
+        : 'Caption track built. The language could not be read confidently from the transcript.');
     } catch (e) {
-      setError(msg(e));
-      setNote('');
+      setCaptionNote(`The captions could not be built: ${msg(e)}`);
     } finally {
-      setAiEditBusy(false);
+      if (aliveRef.current) setCaptionsBusy(false);
     }
-  }
+  }, [captionsBusy, commit, fileForClip]);
 
-  async function onGenerateMusic(prompt: string) {
-    if (musicGenBusy) return;
-    setMusicGenBusy(true);
-    setError('');
-    setNote('ElevenLabs is composing your track (10–30s)…');
-    try {
-      const token = nleToken();
-      if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
-      const lengthMs = Math.min(120000, Math.max(15000, Math.round(timelineDuration(clipsRef.current) * 1000) || 30000));
-      const compose = async (provider?: string): Promise<string> => {
-        const res = await fetch(`/api/workspaces/${WORKSPACE_UUID}/audio/music/custom`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
-          body: JSON.stringify({ prompt, lengthMs, instrumental: true, ...(provider ? { provider } : {}) }),
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data?.audioUrl) {
-          const code = data?.code ? ` [${data.code}]` : '';
-          throw new Error(`${String(data?.error || `HTTP ${res.status}`)}${code}`);
-        }
-        return String(data.audioUrl);
-      };
-      let url = '';
-      let elevenErr = '';
-      try {
-        url = await compose();
-      } catch (e) {
-        elevenErr = msg(e);
-      }
-      if (!url) {
-        // The ElevenLabs engine refused — fall back to the Gemini (Lyria)
-        // music engine on the same platform endpoint before giving up.
-        setNote('ElevenLabs refused — trying the Gemini music engine…');
-        try {
-          url = await compose('gemini');
-        } catch (e2) {
-          throw new Error(`Music generation failed on both engines. ElevenLabs: ${elevenErr} — Gemini: ${msg(e2)}`);
-        }
-      }
-      setCustomMusic({ url, label: prompt.slice(0, 40) });
-      setMusicBedId('custom');
-      setNote('Custom track ready — it plays under the preview and mixes into the export.');
-    } catch (e) {
-      setError(msg(e));
-      setNote('');
-    } finally {
-      setMusicGenBusy(false);
+  const onEditCue = useCallback((id: string, text: string) => {
+    patch((cur) => ({ ...cur, captions: cur.captions.map((c) => (c.id === id ? retimeCue(c, text) : c)) }));
+  }, [patch]);
+
+  const onRetimeCue = useCallback((id: string, start: number, end: number) => {
+    patch((cur) => ({ ...cur, captions: cur.captions.map((c) => (c.id === id ? shiftCue(c, start, end) : c)) }));
+  }, [patch]);
+
+  const onDeleteCue = useCallback((id: string) => {
+    commit((cur) => ({ ...cur, captions: cur.captions.filter((c) => c.id !== id) }));
+  }, [commit]);
+
+  const onSplitCue = useCallback((id: string) => {
+    commit((cur) => {
+      const i = cur.captions.findIndex((c) => c.id === id);
+      if (i < 0) return cur;
+      const parts = splitCue(cur.captions[i], Math.ceil(cur.captions[i].words.length / 2));
+      return { ...cur, captions: [...cur.captions.slice(0, i), ...parts, ...cur.captions.slice(i + 1)] };
+    });
+  }, [commit]);
+
+  const onMergeCueUp = useCallback((id: string) => {
+    commit((cur) => {
+      const i = cur.captions.findIndex((c) => c.id === id);
+      if (i < 1) return cur;
+      const fused = mergeCues(cur.captions[i - 1], cur.captions[i]);
+      return { ...cur, captions: [...cur.captions.slice(0, i - 1), fused, ...cur.captions.slice(i + 1)] };
+    });
+  }, [commit]);
+
+  // The caption track also lives in its own table so a creator can pull the
+  // lines back out without reopening the whole project. Debounced, and
+  // deliberately silent on failure — the cues are inside the project JSON too.
+  useEffect(() => {
+    if (!doc.captions.length) return;
+    const timer = setTimeout(() => {
+      void saveCaptionTrack({
+        rowId: captionRowRef.current,
+        projectId: projectIdRef.current,
+        title: doc.title,
+        sourceUrl: doc.clips.find((c) => /^https:\/\//i.test(c.url))?.url || '',
+        language: doc.captionLanguage,
+        cues: doc.captions,
+        settings: doc.captionSettings,
+        srt: buildSrt(doc.captions),
+        durationS: timelineDuration(doc.clips),
+      }).then((id) => { if (id != null) captionRowRef.current = id; }).catch(() => undefined);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [doc.captions, doc.captionSettings, doc.captionLanguage, doc.clips, doc.title]);
+
+  // =========================================================================
+  // B-roll video overlays
+  // =========================================================================
+
+  const addBrollFiles = useCallback(async (files: File[]) => {
+    const usable = files.filter((f) => f.type.startsWith('video/') && f.size <= MAX_UPLOAD_BYTES);
+    if (files.length && !usable.length) {
+      setError('B-roll must be a video file of 500 MB or less.');
+      return;
     }
-  }
+    const queued: { id: string; file: File }[] = [];
+    let at = playheadRef.current;
 
-  /** ONE-CLICK APPLY for a Gemini suggestion — the fix is executed on the
-   * edit (effects, grade, captions, music, cuts, b-roll), not just displayed. */
-  function applySuggestion(s: string) {
-    const t = s.toLowerCase();
-    let what = '';
-    if (/(too bright|overexpos|blown)/.test(t)) { setEffects((e) => ({ ...e, brightness: Math.max(50, e.brightness - 12) })); what = 'lowered brightness'; }
-    else if (/(brighten|bright|light|dark|underexpos|dim|exposure)/.test(t)) { setEffects((e) => ({ ...e, brightness: Math.min(160, e.brightness + 14) })); what = 'raised brightness'; }
-    else if (/contrast/.test(t)) { setEffects((e) => ({ ...e, contrast: Math.min(160, e.contrast + 12) })); what = 'boosted contrast'; }
-    else if (/(black.?and.?white|monochrome|b&w)/.test(t)) { setGradeId('bw'); setStyleId(null); what = 'applied the BW grade'; }
-    else if (/(satur|vibran|vivid|colou?r)/.test(t)) { setEffects((e) => ({ ...e, saturation: Math.min(200, e.saturation + 20) })); what = 'boosted saturation'; }
-    else if (/(teal|orange|cinematic|film look|grade)/.test(t)) { setGradeId('tealorange'); setStyleId(null); what = 'applied the Teal+Orange cinematic grade'; }
-    else if (/(warm|golden|vintage)/.test(t)) { setGradeId('film'); setStyleId(null); what = 'applied the warm Film grade'; }
-    else if (/vignette/.test(t)) { setEffects((e) => ({ ...e, vignette: Math.max(e.vignette, 35) })); what = 'added a vignette'; }
-    else if (/(sharpen|crisp|clarity|punch)/.test(t)) { setEffects((e) => ({ ...e, contrast: Math.min(160, e.contrast + 8), saturation: Math.min(200, e.saturation + 8) })); what = 'added punch (contrast + saturation)'; }
-    else if (/(caption|subtitle|transcri|on.?screen text)/.test(t)) { void runTranscribe(); what = 'started auto-captions'; }
-    else if (/(b.?roll|cutaway|insert (footage|clips?)|supplement)/.test(t)) {
-      const p = `Cinematic b-roll cutaway, no on-screen text: ${s}`;
-      setBrollPrompt(p);
-      void onBroll(p);
-      what = 'filming a b-roll cutaway to insert at the playhead';
-    }
-    else if (/(music|soundtrack|score|audio bed)/.test(t)) { setMusicBedId('inspiring'); what = 'added the Inspiring music bed'; }
-    else if (/(cut|trim|silence|dead air|pacing|tighten)/.test(t)) {
-      const first = clipsRef.current[0];
-      if (!first) return;
-      what = 'cutting dead air';
-      void (async () => {
-        try {
-          setNote('Cutting dead air…');
-          const file = await fileForClip(first);
-          const did = await cutSilences(first, file);
-          setNote(did ? 'Dead air cut out of the timeline.' : 'No long silences found to cut.');
-        } catch (e) { setError(msg(e)); }
-      })();
-    }
-    else if (/(vertical|9:16|portrait|reels?|tiktok|shorts?)/.test(t)) { setAspect('9:16'); what = 'switched to the 9:16 TikTok frame'; }
-    else if (/(stabiliz|shak)/.test(t)) { setNote('Stabilization is not available in this editor yet — that one stays manual.'); return; }
-    else { setNote('That suggestion has no one-click control yet — use the Properties panel on the right.'); return; }
-    setAppliedSuggestions((l) => (l.includes(s) ? l : [...l, s]));
-    setNote(`Applied: ${what}.`);
-  }
-
-  const onCaptionsFromTranscript = useCallback((transcript: string) => {
-    const caps = estimateCaptions(transcript, timelineDuration(clipsRef.current));
-    setCaptions(caps);
-    setCaptionOffset(0);
-    setNote(caps.length ? `${caps.length} captions estimated across the cut.` : '');
-  }, []);
-
-  const onBroll = useCallback(async (overridePrompt?: string) => {
-    const prompt = (overridePrompt || brollPrompt).trim();
-    if (prompt.length < 10 || brollBusy) return;
-    setBrollBusy(true);
-    setError('');
-    setNote(`${concreteBrollName} is filming your b-roll (1–3 minutes)…`);
-    try {
-      const shot = await filmBrollClip(concreteBrollModel, prompt, 6, () => aliveRef.current);
+    for (const file of usable) {
+      const local = URL.createObjectURL(file);
+      const dur = (await probeDuration(local)) || 4;
+      const overlay = newVideoOverlay({
+        previewUrl: local,
+        sourceDuration: dur,
+        sourceOut: dur,
+        label: file.name.replace(/\.[^.]+$/, '').slice(0, 28) || 'B-roll',
+        start: Number(at.toFixed(2)),
+        end: Number((at + dur).toFixed(2)),
+      });
       if (!aliveRef.current) return;
-      if (shot.videoUrl) {
-        if (concreteBrollModel.startsWith('openrouter/')) setOpenRouterHealthy(true);
-        // Insert IN BETWEEN: right after the clip under the playhead, not at the end.
-        const loc = locate(clipsRef.current, playheadRef.current);
-        await addClipFromUrl(shot.videoUrl, shot.videoUrl, 'B-roll: ' + prompt.slice(0, 32), 'broll', loc ? loc.index + 1 : undefined);
-        setNote('B-roll inserted in between, right after the clip under the playhead.');
-      } else {
-        setError(shot.error);
-        setNote('');
-      }
-    } catch (e) {
-      if (aliveRef.current) { setError(msg(e)); setNote(''); }
-    } finally {
-      if (aliveRef.current) setBrollBusy(false);
+      commit((cur) => ({ ...cur, videoOverlays: [...cur.videoOverlays, overlay] }));
+      setSelectedBrollId(overlay.id);
+      queued.push({ id: overlay.id, file });
+      at += dur;
     }
-  }, [brollPrompt, brollBusy, concreteBrollModel, concreteBrollName, addClipFromUrl]);
 
-  const onStyle = useCallback((id: string) => {
-    setStyleId((prev) => (prev === id ? null : id));
-    const s = STYLE_TRANSFERS.find((x) => x.id === id);
-    if (s) setGradeId(s.grade);
+    if (!queued.length) return;
+    setUploadingBroll(true);
+    for (const q of queued) {
+      try {
+        const up = await uploadVideo(q.file);
+        if (!aliveRef.current) return;
+        patch((cur) => ({ ...cur, videoOverlays: cur.videoOverlays.map((o) => (o.id === q.id ? { ...o, url: up.url } : o)) }));
+      } catch (e) {
+        if (aliveRef.current) setError(`A cutaway is only local for now — the export needs a durable copy. ${msg(e)}`);
+      }
+    }
+    if (aliveRef.current) setUploadingBroll(false);
+  }, [commit, patch]);
+
+  const changeBroll = useCallback((id: string, p: Partial<VideoOverlay>) => {
+    patch((cur) => ({ ...cur, videoOverlays: cur.videoOverlays.map((o) => (o.id === id ? { ...o, ...p } : o)) }));
+  }, [patch]);
+
+  const deleteBroll = useCallback((id: string) => {
+    commit((cur) => ({ ...cur, videoOverlays: cur.videoOverlays.filter((o) => o.id !== id) }));
+    setSelectedBrollId((selected) => (selected === id ? null : selected));
+  }, [commit]);
+
+  const generateOmniClip = useCallback(async () => {
+    if (omniGenerating) return;
+    const d = docRef.current;
+    const inferred = (d.transcript || d.captions.map((c) => c.text).join(' ')).trim();
+    const profile = d.clips.find((clip) => clip.subject)?.subject || null;
+    const subject = omniPrompt.trim() || profile?.subjectType || inferred;
+    if (!subject && !thumbUrl) {
+      setOmniError('Describe the subject or generate a transcript first, then try again.');
+      return;
+    }
+
+    const sourceVideo = videoRef.current;
+    const hasSourceGeometry = Boolean(sourceVideo?.videoWidth && sourceVideo?.videoHeight);
+    const sourceIsLandscape = hasSourceGeometry
+      ? (sourceVideo as HTMLVideoElement).videoWidth >= (sourceVideo as HTMLVideoElement).videoHeight
+      : d.aspect === '16:9' || d.aspect === '1:1';
+    const generationAspect: AspectId = sourceIsLandscape ? '16:9' : '9:16';
+    const orientation = sourceIsLandscape ? 'horizontal' : 'vertical';
+    const scene = profile?.backgroundDescription || inferred || subject || 'the subject and scene in the reference frame';
+    const prompt = [
+      `Cinematic B-roll of ${subject || 'the same subject shown in the reference image'}.`,
+      `Match the tone and visual context of this scene: ${scene.slice(0, 420)}.`,
+      profile ? `Carry through the ${profile.dominantColor} palette and a ${profile.mood} mood.` : '',
+      `Five-second ${orientation} composition, natural continuity, polished camera movement, no on-screen text, no logos.`,
+    ].join(' ');
+
+    setOmniGenerating(true);
+    setOmniProgress(0);
+    setOmniError('');
+    setOmniNote(`Matching the subject and scene with ${modelLabel(brollModel)}…`);
+    try {
+      const url = await generateOmniBroll(prompt, brollModel, generationAspect, thumbUrl, setOmniProgress, () => aliveRef.current);
+      if (!aliveRef.current || !url) return;
+      const sourceDuration = (await probeDuration(url)) || 5;
+      const start = playheadRef.current;
+      const span = Math.min(5, sourceDuration);
+      const overlay = newVideoOverlay({
+        url,
+        previewUrl: url,
+        sourceDuration,
+        sourceOut: sourceDuration,
+        start,
+        end: start + span,
+        label: `${modelLabel(brollModel)} · ${(subject || 'Matched subject').slice(0, 24)}`,
+      });
+      commit((cur) => ({ ...cur, videoOverlays: [...cur.videoOverlays, overlay] }));
+      setSelectedBrollId(overlay.id);
+      setOmniProgress(100);
+      setOmniNote('Clip ready — it is on the canvas at the playhead. Generate again to make another option.');
+    } catch (e) {
+      if (aliveRef.current) {
+        setOmniError(msg(e));
+        setOmniNote('');
+      }
+    } finally {
+      if (aliveRef.current) setOmniGenerating(false);
+    }
+  }, [brollModel, commit, omniGenerating, omniPrompt, thumbUrl]);
+
+  // =========================================================================
+  // Chroma key, motion and VFX
+  // =========================================================================
+
+  const onChroma = useCallback((p: Partial<ChromaKeyState>) => {
+    patch((cur) => ({ ...cur, chroma: { ...cur.chroma, ...p } }));
+  }, [patch]);
+
+  const onChromaBackgroundFile = useCallback(async (file: File) => {
+    const local = URL.createObjectURL(file);
+    onChroma({ background: 'image', backgroundUrl: local });
+    try {
+      const up = await uploadVideo(file);
+      if (aliveRef.current) onChroma({ backgroundUrl: up.url });
+    } catch (e) {
+      if (aliveRef.current) setError(`The key background is only local for now — the export needs a durable copy. ${msg(e)}`);
+    }
+  }, [onChroma]);
+
+  /** Motion is per clip: the selection, or every clip when the toggle is on. */
+  const applyMotion = useCallback((all: boolean, fn: (c: StudioClip) => StudioClip) => {
+    const ids = selectedClipRef.current;
+    patch((cur) => ({
+      ...cur,
+      clips: cur.clips.map((c) => {
+        const target = all || (ids.length ? ids.includes(c.id) : cur.clips[0]?.id === c.id);
+        return target ? fn(c) : c;
+      }),
+    }));
+  }, [patch]);
+
+  const onRamp = useCallback((p: Partial<SpeedRamp>, all: boolean) => {
+    applyMotion(all, (c) => { const m = clipMotion(c); return { ...c, motion: { ...m, ramp: { ...m.ramp, ...p } } }; });
+  }, [applyMotion]);
+
+  const onZoomCut = useCallback((p: Partial<ZoomCut>, all: boolean) => {
+    applyMotion(all, (c) => { const m = clipMotion(c); return { ...c, motion: { ...m, zoomCut: { ...m.zoomCut, ...p } } }; });
+  }, [applyMotion]);
+
+  const onShake = useCallback((p: Partial<CameraShake>, all: boolean) => {
+    applyMotion(all, (c) => { const m = clipMotion(c); return { ...c, motion: { ...m, shake: { ...m.shake, ...p } } }; });
+  }, [applyMotion]);
+
+  const onVfx = useCallback((p: Partial<VfxState>) => {
+    patch((cur) => ({ ...cur, vfx: { ...cur.vfx, ...p } }));
+  }, [patch]);
+
+  // =========================================================================
+  // Autosave — every 30 seconds, with a backing-off retry
+  // =========================================================================
+
+  const saveProject = useCallback(async (attempt = 0): Promise<void> => {
+    const db = (window as unknown as { __workspaceDb?: { from?: (t: string) => any } }).__workspaceDb;
+    if (!db?.from) return;
+    const d = docRef.current;
+    if (!d.clips.length) return;
+    const row = {
+      title: d.title || 'Untitled edit',
+      source_url: d.clips.find((c) => /^https:\/\//i.test(c.url))?.url || '',
+      duration_s: Number(timelineDuration(d.clips).toFixed(2)),
+      aspect: d.aspect,
+      status: exportingRef.current ? 'rendering' : resultsRef.current.length ? 'exported' : 'editing',
+      render_url: resultsRef.current[0]?.url || '',
+      project: serialiseDoc(d),
+      subject: d.clips.find((clip) => clip.subject)?.subject || null,
+      music_url: d.musicUrl || null,
+      autosaved_at: new Date().toISOString(),
+    };
+    try {
+      setSaveState('saving');
+      if (projectIdRef.current == null) {
+        const res = await db.from('ve_projects').insert(row);
+        const id = res?.data?.[0]?.id ?? res?.data?.id ?? res?.id;
+        if (id != null) projectIdRef.current = Number(id);
+      } else {
+        await db.from('ve_projects').update(projectIdRef.current, row);
+      }
+      if (!aliveRef.current) return;
+      setSaveState('saved');
+      setSavedAt(Date.now());
+    } catch {
+      if (!aliveRef.current) return;
+      if (attempt < 3) {
+        setSaveState('retrying');
+        setTimeout(() => { void saveProject(attempt + 1); }, 8000 * (attempt + 1));
+      } else {
+        setSaveState('failed');
+      }
+    }
   }, []);
 
-  // ---------------------------------------------------------------------------
-  // Export — veh-render (server-side Remotion render)
-  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!hasFootage) return;
+    const timer = setInterval(() => { void saveProject(); }, 30000);
+    return () => clearInterval(timer);
+  }, [hasFootage, saveProject]);
 
-  const onExport = useCallback(async () => {
+  // =========================================================================
+  // Export
+  // =========================================================================
+
+  const renderPayload = useCallback((d: EditDoc, aspect: AspectId): Record<string, unknown> => {
+    const dims = outputDims(aspect, d.resolution);
+    return {
+      aspect,
+      width: dims.width,
+      height: dims.height,
+      grade: d.grade,
+      globalEffects: d.globalEffects,
+      reframe: {
+        mode: d.reframe.mode,
+        manualX: d.reframe.manualX,
+        manualY: d.reframe.manualY,
+        focus: d.reframe.focus.map((f) => ({ t: Number(f.t.toFixed(2)), x: Number(f.x.toFixed(4)), y: Number(f.y.toFixed(4)) })),
+      },
+      chroma: d.chroma.enabled ? d.chroma : null,
+      vfx: d.vfx,
+      videoOverlays: d.videoOverlays
+        .filter((o) => /^https:\/\//i.test(o.url))
+        .map((o) => ({
+          url: o.url,
+          start: Number(o.start.toFixed(3)),
+          end: Number(o.end.toFixed(3)),
+          sourceIn: Number(o.sourceIn.toFixed(3)),
+          sourceOut: Number(o.sourceOut.toFixed(3)),
+          position: o.position,
+          scale: o.scale,
+          opacity: o.opacity,
+          radius: o.radius,
+          muted: o.muted,
+          duckMain: o.duckMain,
+          duckVolume: o.duckVolume,
+          audioFadeIn: o.audioFadeIn,
+          audioFadeOut: o.audioFadeOut,
+          fadeOut: o.fadeOut,
+        })),
+      clips: d.clips.map((c, i) => ({
+        url: c.url,
+        focusable: c.kind !== 'broll',
+        keyframes: (c.keyframes || []).map((k) => ({
+          t: Number(k.t.toFixed(3)),
+          opacity: Number(k.opacity.toFixed(3)),
+          scale: Number(k.scale.toFixed(3)),
+          x: Number(k.x.toFixed(4)),
+          y: Number(k.y.toFixed(4)),
+        })),
+        in: Number(c.in.toFixed(3)),
+        out: Number(c.out.toFixed(3)),
+        speed: c.adjust.speed,
+        reverse: c.adjust.reverse,
+        opacity: c.opacity,
+        muted: c.muted,
+        brightness: c.adjust.brightness,
+        contrast: c.adjust.contrast,
+        saturation: c.adjust.saturation,
+        highlights: c.adjust.highlights,
+        shadows: c.adjust.shadows,
+        temperature: c.adjust.temperature,
+        tint: c.adjust.tint,
+        crop: c.crop,
+        effects: c.effects,
+        transitionIn: c.transitionIn,
+        motion: clipMotion(c),
+        timelineStart: Number(clipStart(d.clips, i).toFixed(3)),
+      })),
+      captions: d.captionSettings.burnIn
+        ? d.captions.map((c) => ({
+          text: c.text,
+          start: Number(c.start.toFixed(3)),
+          end: Number(c.end.toFixed(3)),
+          words: c.words.map((w) => ({ text: w.text, start: Number(w.start.toFixed(3)), end: Number(w.end.toFixed(3)) })),
+        }))
+        : [],
+      captionSettings: d.captionSettings,
+      textLayers: d.textLayers,
+      overlays: d.overlays
+        .filter((o) => /^https:\/\//i.test(o.url))
+        .map((o) => ({
+          url: o.url, x: o.x, y: o.y, w: o.w, aspect: o.aspect, opacity: o.opacity, rotation: o.rotation,
+          blend: o.blend, alwaysOn: o.alwaysOn, start: o.start, end: o.end,
+          mask: o.mask,
+          track: o.track.enabled ? o.track.keys : [],
+        })),
+      musicUrl: d.musicUrl || undefined,
+      musicBedId: d.musicUrl ? undefined : d.musicBedId,
+      musicVolume: d.musicVolume,
+      musicStyle: d.musicStyle,
+      musicPrompt: d.musicPrompt,
+      audioDucking: {
+        defaultMainVolume: 1,
+        defaultDuckVolume: 0.2,
+        brollFadeIn: 0.3,
+        brollFadeOut: 0.5,
+        mainRampBack: 0.5,
+      },
+    };
+  }, []);
+
+  const onExport = useCallback(async (aspectsArg?: AspectId[]) => {
     if (exporting) return;
-    const list = clipsRef.current;
-    if (!list.length) return;
-    const missing = list.filter((c) => !/^https:\/\//.test(c.url));
-    if (missing.length) { setExportError(uploading ? 'The footage is still uploading — give it a moment, then render again.' : 'A clip has no durable copy (its upload failed) — remove it or re-upload the file.'); return; }
+    const d = docRef.current;
+    if (!d.clips.length) return;
+    const missing = d.clips.filter((c) => !/^https:\/\//i.test(c.url));
+    if (missing.length) {
+      setExportError(uploading
+        ? 'Your footage is still uploading — give it a moment, then export again.'
+        : `${missing.length} clip${missing.length === 1 ? '' : 's'} did not finish uploading. Re-add or remove them, then export.`);
+      return;
+    }
+    const localOverlays = d.overlays.filter((o) => !/^https:\/\//i.test(o.url));
+
     setExporting(true);
     setExportError('');
-    setRenderUrl('');
-    setExportStartedAt(Date.now());
-    try {
-      const payload = {
-        clips: list.map((c) => ({ url: c.url, in: c.in, out: c.out, speed: c.speed, opacity: c.opacity, text: c.text, textSize: c.textSize, textColor: c.textColor })),
-        captions: captions.map((c) => ({ text: c.text, start: c.start + captionOffset, end: c.end + captionOffset })),
-        graphics: graphics.map((g) => ({ kind: g.kind, text: g.text, sub: g.sub, value: g.value, start: g.start, duration: g.duration, accent: g.accent, position: g.position })),
-        effects,
-        aspect,
-        colorGrade: gradeId,
-        musicUrl: musicBedId === 'custom' && customMusic ? customMusic.url : undefined,
-        musicBedId: musicBedId === 'custom' ? undefined : musicBedId,
-        musicVolume: 0.3,
-      };
-      let out = await callHook('veh-render', payload);
-      while (aliveRef.current && out?.status === 'rendering' && out.operationId) {
-        out = await callHook('veh-render', { operationId: out.operationId });
+    setExportResults([]);
+    setExportProgress(0.02);
+
+    const formats = aspectsArg && aspectsArg.length
+      ? aspectsArg
+      : exportAspects.length ? exportAspects : [d.aspect];
+    // Honest estimate: the render service runs roughly real time per format.
+    const perFormat = Math.max(35, timelineDuration(d.clips) * 1.4);
+    const started = Date.now();
+    const done: { aspect: AspectId; url: string; geometry: string }[] = [];
+    const failures: string[] = [];
+
+    for (let i = 0; i < formats.length; i += 1) {
+      const aspect = formats[i];
+      setExportStage(`Rendering ${aspect}${formats.length > 1 ? ` (${i + 1} of ${formats.length})` : ''} at ${outputDims(aspect, d.resolution).width}×${outputDims(aspect, d.resolution).height}…`);
+      const tick = setInterval(() => {
+        if (!aliveRef.current) return;
+        const elapsed = (Date.now() - started) / 1000;
+        const expected = perFormat * formats.length;
+        setExportProgress(Math.min(0.95, 0.02 + (elapsed / expected) * 0.93));
+        setExportEta(Math.max(0, expected - elapsed));
+      }, 900);
+      try {
+        let out = await callHook('veh-render', renderPayload(d, aspect));
+        // The poll call carries the aspect and geometry back so the hook can
+        // still run its true-portrait up-convert on the finishing pass.
+        while (aliveRef.current && out?.status === 'rendering' && out.operationId) {
+          out = await callHook('veh-render', { operationId: out.operationId, geometry: out.geometry, aspect });
+        }
+        if (out?.status === 'complete' && out.renderUrl) {
+          done.push({ aspect, url: String(out.renderUrl), geometry: String(out.geometry || '') });
+          if (out.note) setExportError((cur) => [cur, String(out.note)].filter(Boolean).join(' · '));
+        }
+        else failures.push(`${aspect}: ${String(out?.error || 'the render failed')}`);
+      } catch (e) {
+        failures.push(`${aspect}: ${msg(e)}`);
+      } finally {
+        clearInterval(tick);
       }
       if (!aliveRef.current) return;
-      if (out?.status === 'complete' && out.renderUrl) setRenderUrl(String(out.renderUrl));
-      else setExportError(String(out?.error || 'The render failed.'));
+      setExportResults(done.slice());
+    }
+
+    setExportProgress(1);
+    setExportEta(0);
+    setExportStage(done.length ? 'Export complete' : '');
+    setExporting(false);
+    if (failures.length) {
+      console.error('[VideoStudio] export failed:', failures.join(' · '));
+      setExportError('Export failed. Your project is saved — click Export Video to try again.');
+      pushToast({ message: 'Export failed. Your project is saved — try again.', tone: 'bad', ttlMs: 6000 });
+    }
+    if (localOverlays.length) {
+      setExportError((cur) => [cur, `${localOverlays.length} overlay image${localOverlays.length === 1 ? '' : 's'} could not be included — re-add them and export again.`].filter(Boolean).join(' · '));
+    }
+    if (!d.captionSettings.burnIn && d.captions.length) downloadSrt();
+    void saveProject();
+    // Download the first finished master straight away.
+    if (done.length) {
+      const a = document.createElement('a');
+      a.href = done[0].url;
+      a.download = `${(d.title || 'vidverge-export').replace(/[^\w.-]+/g, '-').slice(0, 48)}-${done[0].aspect.replace(':', 'x')}.mp4`;
+      a.target = '_blank';
+      a.rel = 'noreferrer';
+      a.click();
+      pushToast({ message: 'Video ready! Your download has started.', tone: 'good', ttlMs: 6000 });
+    }
+  }, [downloadSrt, exportAspects, exporting, pushToast, renderPayload, saveProject, uploading]);
+
+  // =========================================================================
+  // Handoffs
+  // =========================================================================
+
+  useEffect(() => {
+    const handoff = consumeVidvergeHandoff('video-enhancer');
+    if (!handoff) return;
+    const prompt = String(handoff.prompt || '').trim();
+    if (prompt) setBrief(prompt);
+    const attachment = handoff.attachment;
+    if (handoff.projectId != null) {
+      const db = (window as unknown as { __workspaceDb?: { from?: (t: string, o?: unknown) => any } }).__workspaceDb;
+      if (!db?.from) return;
+      void db.from('video_enhancements', { shared: true }).getById(handoff.projectId).then((response: any) => {
+        const row = response?.data?.[0] || response?.data;
+        let params = row?.input_params;
+        if (typeof params === 'string') { try { params = JSON.parse(params); } catch { params = {}; } }
+        const url = String(row?.output_url || params?.srcUrl || params?.baseVideoUrl || '');
+        if (url) void addClip(url, url, String(row?.title || 'Saved enhancement'), 'raw');
+      }).catch(() => undefined);
+      return;
+    }
+    if (attachment && String(attachment.type || '').startsWith('video/')) {
+      void addClip(attachment.url, attachment.url, attachment.name, 'raw').then(async (clip) => {
+        void captureThumb(attachment.url, 1, 320).then((t) => { if (aliveRef.current) setThumbUrl(t); });
+        void runSubjectAnalysis(clip.id, attachment.url, clip.sourceDuration);
+        try {
+          const file = await fetchVideoAsFile(attachment.url);
+          sourceFiles.current.set(clip.id, file);
+          void runPipeline(clip, file);
+        } catch { /* the clip still edits without the analysis pass */ }
+      });
+    }
+  }, [addClip, runPipeline, runSubjectAnalysis]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem('sceneforge_handoff_v1');
+      if (!raw) return;
+      window.localStorage.removeItem('sceneforge_handoff_v1');
+      const h = JSON.parse(raw) as { url?: string; title?: string; ts?: number } | null;
+      if (!h || typeof h.url !== 'string' || !/^https?:\/\//.test(h.url)) return;
+      if (!h.ts || Date.now() - h.ts > 10 * 60 * 1000) return;
+      void (async () => {
+        const clip = await addClip(h.url as string, h.url as string, h.title || 'SceneForge video', 'raw');
+        void captureThumb(h.url as string, 1, 320).then((t) => { if (aliveRef.current) setThumbUrl(t); });
+        void runSubjectAnalysis(clip.id, h.url as string, clip.sourceDuration);
+        try {
+          const file = await fetchVideoAsFile(h.url as string);
+          sourceFiles.current.set(clip.id, file);
+          void runPipeline(clip, file);
+        } catch { /* editing still works without the analysis pass */ }
+      })();
+    } catch { /* localStorage unavailable — nothing to hand off */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep a stage thumbnail roughly current for the reframe proof.
+  useEffect(() => {
+    const first = doc.clips[0];
+    if (!first || thumbUrl) return;
+    void captureThumb(first.previewUrl, Math.min(1, first.sourceDuration / 2), 320).then((t) => {
+      if (aliveRef.current && t) setThumbUrl(t);
+    });
+  }, [doc.clips, thumbUrl]);
+
+  // Retention curve stays meaningful after edits even without a model pass.
+  useEffect(() => {
+    if (retention.length || !analysisReady || !doc.words.length) return;
+    setRetention(segmentRetention(planContext()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisReady, doc.words.length, retention.length]);
+
+  // =========================================================================
+  // The pro shell — looks, presets, motion, voiceover, beat sync, agent
+  // =========================================================================
+
+  /** Push any file to durable storage and hand back its public URL. */
+  const uploadBlob = useCallback(async (file: File, folder: string): Promise<string> => {
+    const token = workspaceToken();
+    if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
+    const form = new FormData();
+    form.append('file', file, file.name);
+    form.append('workspaceId', WORKSPACE_UUID);
+    form.append('folder', folder);
+    const res = await fetch('/api/upload/file', {
+      method: 'POST',
+      headers: { 'X-Workspace-DB-Token': token },
+      body: form,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.url) throw new Error(String(data?.error || `the storage service answered HTTP ${res.status}`));
+    return String(data.url);
+  }, []);
+
+  const onLook = useCallback((id: string, strength: number) => {
+    const look = LOOKS.find((l) => l.id === id);
+    if (!look) return;
+    // One checkpoint per look, not one per intensity frame.
+    if (id !== activeLook) checkpoint();
+    setActiveLook(id);
+    setLookStrength(strength);
+    patch((d) => applyLook(d, look, strength));
+  }, [activeLook, checkpoint, patch]);
+
+  const allPresets = useMemo(() => [...EDIT_PRESETS, ...customPresets], [customPresets]);
+
+  const onProPreset = useCallback((id: string) => {
+    const preset = allPresets.find((p) => p.id === id);
+    if (!preset) return;
+    commit((d) => applyEditPreset(d, preset));
+    setPresetId(id);
+    setActiveLook(preset.lookId);
+    setLookStrength(1);
+    pushToast({ message: `${preset.label} applied across the whole edit`, tone: 'good' });
+  }, [allPresets, commit, pushToast]);
+
+  const onSavePreset = useCallback(() => {
+    const d = docRef.current;
+    const label = (window.prompt('Name this preset', 'My look') || '').trim().slice(0, 28);
+    if (!label) return;
+    const first = d.clips[0];
+    const m = first ? clipMotion(first) : null;
+    const row: EditPreset = {
+      id: `custom-${Date.now().toString(36)}`,
+      label,
+      blurb: 'Saved from this edit',
+      lookId: activeLook || 'cinematic',
+      captionStyle: d.captionSettings.styleId,
+      captionFont: d.captionSettings.fontId,
+      captionPosition: d.captionSettings.position,
+      uppercase: d.captionSettings.uppercase,
+      music: d.musicStyle,
+      zoom: m?.zoomCut.enabled ? (m.zoomCut.direction === 'out' ? 'out' : 'in') : 'off',
+      ramp: Boolean(m?.ramp.enabled),
+    };
+    const next = [row, ...customPresets].slice(0, 12);
+    setCustomPresets(next);
+    try { window.localStorage.setItem('vidverge_pro_presets', JSON.stringify(next)); } catch { /* storage unavailable */ }
+    pushToast({ message: `“${label}” saved to your presets`, tone: 'good' });
+  }, [activeLook, customPresets, pushToast]);
+
+  const onMotionPreset = useCallback((kind: MotionKind, amount: number) => {
+    if (kind !== activeMotion) checkpoint();
+    setActiveMotion(kind === 'none' ? '' : kind);
+    setMotionAmount(amount);
+    patch((d) => ({
+      ...d,
+      clips: d.clips.map((c) => {
+        const m = clipMotion(c);
+        const off = { ...m, zoomCut: { ...m.zoomCut, enabled: false }, shake: { ...m.shake, enabled: false } };
+        if (kind === 'none') return { ...c, keyframes: [], motion: off };
+        if (kind === 'zoomIn' || kind === 'zoomOut') {
+          return {
+            ...c,
+            keyframes: [],
+            motion: {
+              ...off,
+              zoomCut: {
+                ...m.zoomCut,
+                enabled: true,
+                direction: kind === 'zoomIn' ? ('in' as const) : ('out' as const),
+                intensity: amount > 0.66 ? ('high' as const) : amount > 0.33 ? ('medium' as const) : ('low' as const),
+              },
+            },
+          };
+        }
+        if (kind === 'shake') {
+          return { ...c, keyframes: [], motion: { ...off, shake: { ...m.shake, enabled: true, intensity: Math.round(amount * 100) } } };
+        }
+        return { ...c, keyframes: motionKeys(kind, clipLength(c), amount), motion: off };
+      }),
+    }));
+  }, [activeMotion, checkpoint, patch]);
+
+  const onResetColor = useCallback(() => {
+    commit((d) => ({
+      ...d,
+      grade: 'none',
+      globalEffects: [],
+      clips: d.clips.map((c) => ({
+        ...c,
+        adjust: {
+          ...c.adjust,
+          brightness: 100,
+          contrast: 100,
+          saturation: 100,
+          highlights: 0,
+          shadows: 0,
+          temperature: 0,
+          tint: 0,
+        },
+      })),
+    }));
+    setActiveLook('');
+    pushToast({ message: 'Colour reset to the original footage' });
+  }, [commit, pushToast]);
+
+  /**
+   * Text to speech through the platform's OpenAI proxy, then straight into
+   * durable storage so the render service can read it back.
+   */
+  const onVoiceover = useCallback(async (text: string, voice: string) => {
+    setVoBusy(true);
+    setVoNote('');
+    try {
+      const token = workspaceToken();
+      if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
+      const res = await fetch('/proxy/openai/v1/audio/speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
+        body: JSON.stringify({ model: 'tts-1', voice, input: text.slice(0, 3800), response_format: 'mp3' }),
+      });
+      if (!res.ok) throw new Error(`the speech service answered HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = await uploadBlob(new File([blob], `voiceover-${Date.now()}.mp3`, { type: 'audio/mpeg' }), 'video-studio-voiceover');
+      if (!aliveRef.current) return;
+      commit((cur) => ({
+        ...cur,
+        musicUrl: url,
+        musicBedId: 'none',
+        musicStyle: 'none',
+        musicPrompt: text.slice(0, 120),
+        musicVolume: Math.max(cur.musicVolume, 0.85),
+      }));
+      setVoNote('Voiceover generated and mixed in as the audio bed. Drop the music level if it sits too loud over the dialogue.');
     } catch (e) {
-      if (aliveRef.current) setExportError(msg(e));
+      setVoNote(msg(e));
+    } finally {
+      if (aliveRef.current) setVoBusy(false);
+    }
+  }, [commit, uploadBlob]);
+
+  /** Measure the tempo, then lengthen or shorten each clip onto a whole beat. */
+  const runBeatSync = useCallback(async (): Promise<string> => {
+    const first = docRef.current.clips[0];
+    if (!first) return 'Upload footage first.';
+    const file = await fileForClip(first);
+    const tempo = await detectTempo(file);
+    if (!aliveRef.current) return '';
+    setBpm(tempo.bpm);
+    if (!tempo.bpm) return tempo.note;
+    const period = 60 / tempo.bpm;
+    commit((cur) => ({
+      ...cur,
+      clips: cur.clips.map((c) => {
+        const speed = Math.max(0.25, c.adjust.speed);
+        const beats = Math.max(1, Math.round(((c.out - c.in) / speed) / period));
+        const out = Math.min(c.sourceDuration, c.in + beats * period * speed);
+        if (out - c.in <= 0.25) return c;
+        return { ...c, out, kind: (c.kind === 'raw' ? 'cut' : c.kind) as StudioClip['kind'] };
+      }),
+    }));
+    return `${Math.round(tempo.bpm)} BPM measured — every cut now lands on a beat.`;
+  }, [commit, fileForClip]);
+
+  const runSmartTrim = useCallback((): string => {
+    const ranges = (audioRefData.current?.silences || []).filter((s) => s.end - s.start >= 0.45);
+    if (!ranges.length) return 'No silent stretch long enough to cut was measured in this footage.';
+    commit((cur) => rebuildCaptions({
+      ...cur,
+      clips: cutSourceRanges(
+        cur.clips,
+        cur.transcriptSource,
+        ranges.map((r) => ({ start: r.start + 0.08, end: Math.max(r.start + 0.18, r.end - 0.08) })),
+      ),
+    }));
+    return `${ranges.length} silent stretch${ranges.length === 1 ? '' : 'es'} cut out.`;
+  }, [commit, rebuildCaptions]);
+
+  const runAutoEnhance = useCallback(async (): Promise<string> => {
+    const d = docRef.current;
+    if (!d.clips.length) return 'Upload footage first.';
+    const mood = d.clips.find((c) => c.subject)?.subject?.mood || '';
+    const lookId = mood === 'calm' ? 'matte' : mood === 'playful' ? 'vivid' : mood === 'dramatic' ? 'cinematic' : 'cinematic';
+    const needsCaptions = !d.captions.length && d.words.length > 0;
+    onLook(lookId, 0.85);
+    onMotionPreset('kenBurns', 0.5);
+    if (needsCaptions) buildCaptionTrack();
+    return `Graded with the ${lookId} look and given a slow Ken Burns drift${needsCaptions ? ', plus a caption track from the transcript' : ''}.`;
+  }, [buildCaptionTrack, onLook, onMotionPreset]);
+
+  const runAgentAction = useCallback(async (id: AgentActionId) => {
+    if (agentRunning) return;
+    setAgentRunning(id);
+    setAgentJobs((jobs) => ({ ...jobs, [id]: { state: 'running' as RunState, note: '' } }));
+    let note = '';
+    let ok = true;
+    try {
+      if (id === 'enhance') note = await runAutoEnhance();
+      else if (id === 'caption') {
+        await generateCaptions();
+        note = docRef.current.captions.length
+          ? `${docRef.current.captions.length} caption lines built from the transcript.`
+          : 'No speech was found in this footage, so there is nothing to caption.';
+      } else if (id === 'beat') note = await runBeatSync();
+      else if (id === 'trim') note = runSmartTrim();
+      else if (id === 'scene') {
+        await generateOmniClip();
+        note = 'A matched cutaway was filmed and dropped at the playhead.';
+      }
+    } catch (e) {
+      ok = false;
+      note = msg(e);
+    }
+    if (!aliveRef.current) return;
+    setAgentRunning('');
+    setAgentJobs((jobs) => ({ ...jobs, [id]: { state: (ok ? 'done' : 'failed') as RunState, note } }));
+  }, [agentRunning, generateCaptions, generateOmniClip, runAutoEnhance, runBeatSync, runSmartTrim]);
+
+  /**
+   * A typed instruction goes to whichever action it names. Anything the
+   * keywords do not recognise is a real question, so it goes to the editing
+   * model, which can answer and propose cut cards.
+   */
+  const onAgentSend = useCallback(async (text: string) => {
+    const routed = routeInstruction(text);
+    if (!routed) { await sendChat(text); return; }
+    setChat((c) => [...c, { id: newId('m'), role: 'user', content: text }]);
+    if (routed === 'preset') {
+      const match = allPresets.find((p) => text.toLowerCase().includes(p.label.toLowerCase()));
+      if (match) {
+        onProPreset(match.id);
+        setChat((c) => [...c, { id: newId('m'), role: 'assistant', content: `Applied the ${match.label} preset.` }]);
+        return;
+      }
+      setChat((c) => [...c, {
+        id: newId('m'),
+        role: 'assistant',
+        content: `Which preset? ${allPresets.map((p) => p.label).join(', ')}.`,
+      }]);
+      return;
+    }
+    setChat((c) => [...c, { id: newId('m'), role: 'assistant', content: `On it — running ${routed}.` }]);
+    await runAgentAction(routed);
+  }, [allPresets, onProPreset, runAgentAction, sendChat]);
+
+  const duplicateClip = useCallback((id: string) => {
+    const source = docRef.current.clips.find((c) => c.id === id);
+    if (!source) return;
+    const copy = { ...source, id: newId('clip'), keyframes: (source.keyframes || []).map((k) => ({ ...k })) };
+    const file = sourceFiles.current.get(source.id);
+    if (file) sourceFiles.current.set(copy.id, file);
+    commit((cur) => {
+      const list = cur.clips.slice();
+      const at = list.findIndex((c) => c.id === id);
+      list.splice(at < 0 ? list.length : at + 1, 0, copy);
+      return { ...cur, clips: list };
+    });
+    setSelectedClipIds([copy.id]);
+  }, [commit]);
+
+  /** Trim the clip's tail to the playhead; everything after it slides up. */
+  const rippleTrim = useCallback((id: string) => {
+    const d = docRef.current;
+    const index = d.clips.findIndex((c) => c.id === id);
+    const loc = locate(d.clips, playheadRef.current);
+    if (!loc || loc.index !== index) {
+      pushToast({ message: 'Put the playhead inside that clip first.', tone: 'bad' });
+      return;
+    }
+    if (loc.sourceT - d.clips[index].in < 0.2) return;
+    commit((cur) => ({
+      ...cur,
+      clips: cur.clips.map((c) => (c.id === id ? { ...c, out: loc.sourceT, kind: 'cut' as StudioClip['kind'] } : c)),
+    }));
+    pushToast({ message: 'Rippled — every later clip moved up to meet it.' });
+  }, [commit, pushToast]);
+
+  const toggleKeyframe = useCallback((id: string) => {
+    const d = docRef.current;
+    const index = d.clips.findIndex((c) => c.id === id);
+    if (index < 0) return;
+    const localT = Math.max(0, playheadRef.current - clipStart(d.clips, index));
+    commit((cur) => ({
+      ...cur,
+      clips: cur.clips.map((c) => {
+        if (c.id !== id) return c;
+        const keys = c.keyframes || [];
+        const hit = keys.findIndex((k) => Math.abs(k.t - localT) < 0.12);
+        if (hit >= 0) return { ...c, keyframes: keys.filter((_, x) => x !== hit) };
+        const base = keyframeAt(keys, localT) || { t: localT, opacity: 1, scale: 1, x: 0, y: 0 };
+        return { ...c, keyframes: [...keys, { ...base, t: localT }].sort((a, b) => a.t - b.t) };
+      }),
+    }));
+  }, [commit]);
+
+  // =========================================================================
+  // Keyboard shortcuts
+  // =========================================================================
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if (typing) return;
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if (meta) return;
+      if (e.code === 'Space') { e.preventDefault(); togglePlay(); return; }
+      if (e.key.toLowerCase() === 's') { e.preventDefault(); onSplit(); return; }
+      if (e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        selectedClipRef.current.forEach((id) => duplicateClip(id));
+        return;
+      }
+      if (e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        selectedClipRef.current.forEach((id) => toggleKeyframe(id));
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); onDeleteSelected(); return; }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); seek(playheadRef.current - (e.shiftKey ? 1 : 1 / 30)); return; }
+      if (e.key === 'ArrowRight') { e.preventDefault(); seek(playheadRef.current + (e.shiftKey ? 1 : 1 / 30)); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [duplicateClip, onDeleteSelected, onSplit, redo, seek, toggleKeyframe, togglePlay, undo]);
+
+  const runProExport = useCallback(async () => {
+    setClientResults([]);
+    if (exportSpec.format === 'mp4') {
+      setExportAspects(exportSpec.aspects);
+      await onExport(exportSpec.aspects);
+      return;
+    }
+    const video = videoRef.current;
+    const d = docRef.current;
+    const clip = d.clips[0];
+    if (!video || !clip) { setExportError('Load a clip first.'); return; }
+    setExporting(true);
+    setExportError('');
+    setExportProgress(0);
+    setExportStage(`Encoding ${exportSpec.format.toUpperCase()} in your browser…`);
+    try {
+      const options = {
+        video,
+        aspect: exportSpec.aspects[0] || d.aspect,
+        filter: clipFilterCss(clip.adjust, d.grade, clip.effects),
+        startS: clip.in,
+        endS: clip.out,
+        fps: exportSpec.fps,
+        onProgress: (p: number) => { if (aliveRef.current) setExportProgress(p); },
+      };
+      const blob = exportSpec.format === 'gif'
+        ? await encodeGif(options)
+        : await encodeWebm({ ...options, bitrate: exportSpec.bitrate });
+      if (!aliveRef.current) return;
+      setClientResults([{
+        aspect: 'local',
+        url: URL.createObjectURL(blob),
+        geometry: `${(blob.size / 1024 / 1024).toFixed(1)} MB`,
+        label: `${exportSpec.format.toUpperCase()} · built in your browser`,
+      }]);
+      setExportProgress(1);
+      setExportStage('Encode complete');
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      setExportError(/taint|securityerror|insecure|cross-origin/i.test(raw)
+        ? 'Your browser refused to read the frames because this clip is served without CORS headers. Export MP4 instead — that render runs on the server.'
+        : msg(e));
     } finally {
       if (aliveRef.current) setExporting(false);
     }
-  }, [exporting, uploading, captions, captionOffset, gradeId, musicBedId, graphics, effects, aspect, customMusic]);
+  }, [exportSpec, onExport]);
 
-  // Progress ticker (CSS-only bar — the % is an honest elapsed-time estimate).
-  useEffect(() => {
-    if (!exporting) return;
-    const timer = setInterval(() => setExportTick((n) => n + 1), 800);
-    return () => clearInterval(timer);
-  }, [exporting]);
-  const exportPct = exporting ? Math.min(92, Math.round(((Date.now() - exportStartedAt) / 150000) * 100)) : renderUrl ? 100 : 0;
-  void exportTick;
+  const onProDownload = useCallback((r: ExportResult) => {
+    const stem = (docRef.current.title || 'vidverge-export').replace(/[^\w.-]+/g, '-').slice(0, 48);
+    const a = document.createElement('a');
+    a.href = r.url;
+    a.download = r.aspect === 'local'
+      ? `${stem}.${exportSpec.format}`
+      : `${stem}-${String(r.aspect).replace(':', 'x')}.mp4`;
+    a.target = '_blank';
+    a.rel = 'noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, [exportSpec.format]);
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  const proResults: ExportResult[] = useMemo(() => [
+    ...exportResults.map((r) => ({ aspect: r.aspect, url: r.url, geometry: r.geometry, label: `MP4 · ${r.aspect}` })),
+    ...clientResults,
+  ], [clientResults, exportResults]);
 
-  const currentCaption = useMemo(() => {
-    const t = playhead - captionOffset;
-    return captions.find((c) => t >= c.start && t <= c.end) || null;
-  }, [captions, playhead, captionOffset]);
+  /** Measured silences, mapped from source seconds onto the current timeline. */
+  const timelineSilences = useMemo(() => (audioRefData.current?.silences || [])
+    .map((s) => {
+      const a = sourceToTimeline(doc.clips, doc.transcriptSource, s.start);
+      const b = sourceToTimeline(doc.clips, doc.transcriptSource, s.end);
+      return a == null || b == null || b <= a ? null : { start: a, end: b };
+    })
+    .filter(Boolean) as { start: number; end: number }[],
+  [analysisReady, doc.clips, doc.transcriptSource]);
 
-  const hasFootage = clips.length > 0;
-  // Runway only accepts public references, so the durable upload is the source
-  // — never the local blob: URL the preview plays from.
-  const runwaySource = (clips.filter((c) => /^https:\/\//i.test(c.url))[0] || { url: '' }).url;
-  const musicBed = musicBedId === 'custom'
-    ? (customMusic ? { id: 'custom', label: customMusic.label } : null)
-    : (MUSIC_BEDS.find((m) => m.id === musicBedId) || null);
-  const selectedGraphic = graphics.find((g) => g.id === selectedGraphicId) || null;
-  const canSplit = (() => {
-    const loc = locate(clips, playhead);
-    if (!loc) return false;
-    const c = clips[loc.index];
-    return !!c && loc.sourceT - c.in > 0.2 && c.out - loc.sourceT > 0.2;
-  })();
-  // The streak pulses faster while the agent is actually working — the
-  // at-a-glance difference between WORKING and WAITING.
-  const agentWorking = aiEditBusy || transcribing || brollBusy || exporting || musicGenBusy || analyzing || uploading;
 
-  // The preview stage's live pixel width — graphic type sizes scale off it so
-  // the preview matches the 1920/608-wide render stages proportionally.
-  const stageBoxRef = useRef<HTMLDivElement | null>(null);
-  const [stageW, setStageW] = useState(0);
-  useEffect(() => {
-    const el = stageBoxRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver((entries) => { for (const en of entries) setStageW(en.contentRect.width); });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [hasFootage, aspect]);
+  // =========================================================================
+  // Agent orb context
+  // =========================================================================
 
-  // Vidverge Agent — the floating orb assistant. It reads the editor's key
-  // inputs and can run the one-click tools (AI Edit, transcription, b-roll,
-  // music, export) on the customer's behalf.
   const agentContext = {
     appId: 'video-enhancer',
-    appName: 'Video Enhancer',
+    appName: 'Video Studio',
     currentInputs: {
       clipsOnTimeline: String(clips.length),
-      brollPrompt,
-      musicBed: String(musicBedId),
-      colorGrade: gradeId,
-      aspect,
+      format: doc.aspect,
+      resolution: doc.resolution,
+      captions: String(doc.captions?.length ?? 0),
+      captionLanguage: doc.captionLanguage,
+      brollOverlays: String(doc.videoOverlays?.length ?? 0),
+      chromaKey: doc.chroma?.enabled ? 'on' : 'off',
+      effectsTab: fxTab,
+      currentStep: step,
+      stylePreset: presetId || 'none',
+      pendingSuggestions: String(doc.cards.filter((c) => c.status === 'pending').length),
+      grade: doc.grade,
     },
     onFillField: (field: string, value: string) => {
-      if (field === 'brollPrompt') setBrollPrompt(value);
-      else if (field === 'aspect' && (value === '16:9' || value === '9:16')) setAspect(value);
-      else if (field === 'colorGrade') { setGradeId(value as ColorGradeId); setStyleId(null); }
-      else if (field === 'musicBed') setMusicBedId(value as MusicBedId);
+      if (field === 'format' && ASPECTS.some((a) => a.id === value)) commit((cur) => ({ ...cur, aspect: value as AspectId }));
+      else if (field === 'grade') commit((cur) => ({ ...cur, grade: value as GradeId }));
+      else if (field === 'brief') setBrief(value);
     },
     onTriggerAction: (action: string, params?: Record<string, unknown>) => {
       const p = params || {};
-      if (action === 'enhance' || action === 'aiEdit') void runAiEdit();
-      else if (action === 'transcribe' || action === 'captions') void runTranscribe();
-      else if (action === 'describe') void runDescribe();
-      else if (action === 'broll') void onBroll(typeof p.prompt === 'string' ? p.prompt : undefined);
-      else if (action === 'generateMusic' && typeof p.prompt === 'string') void onGenerateMusic(p.prompt);
-      else if (action === 'export' || action === 'render') void onExport();
+      if (action === 'plan' || action === 'enhance') void replan();
+      else if (action === 'transcribe') void runTranscribe();
+      else if (action === 'captions') buildCaptionTrack();
+      else if (action === 'removeFillers') onRemoveAllFillers();
+      else if (action === 'acceptAll') void acceptAll();
+      else if (action === 'reframe') void detectSubject();
+      else if (action === 'ask' && typeof p.message === 'string') void sendChat(p.message);
+      else if (action === 'addCaptions') void generateCaptions();
+      else if (action === 'openEffects') setFxTab(['overlays', 'motion', 'vfx', 'captions', 'music', 'export'].includes(String(p.tab)) ? (String(p.tab) as EffectsTabId) : 'overlays');
+      else if (action === 'chromaKey') onChroma({ enabled: p.enabled !== false });
+      else if (action === 'applyStyle') {
+        const preset = STYLE_PRESETS.find((s) => s.id === String(p.preset));
+        if (preset) applyStylePreset(preset);
+      } else if (action === 'goToStep') {
+        const target = STUDIO_STEPS.find((s) => s.id === String(p.step));
+        if (target) selectStep(target.id);
+      } else if (action === 'export' || action === 'render') void onExport();
     },
     promptHint: [
-      'The user uploads a video to enhance on a timeline editor. Suggest enhancement options and run them.',
-      'Fields you can fill: brollPrompt (a cinematic b-roll description), aspect (16:9 | 9:16), colorGrade (none | film | kodak | tealorange | bw), musicBed (none | inspiring | cinematic | energetic | calm | luxury).',
-      'Actions you can trigger: enhance (one-click AI Edit: transcribe, cut dead air, captions, motion graphics), transcribe (word-timed captions), describe (Gemini frame analysis), broll with {"prompt":"..."}, generateMusic with {"prompt":"..."}, export (render the final MP4).',
-      'If clipsOnTimeline is 0, ask the user to upload footage first — actions need footage on the timeline.',
+      'The user is editing uploaded footage in an all-in-one AI video studio: agentic cut plan, transcript-first editing, auto-reframe, b-roll slots, overlays, captions, text effects, transitions and MP4 export.',
+      'Fields you can fill: format (16:9 | 9:16 | 1:1 | 4:5), grade (none | cinematic | warm | cool | bw | vintage), brief (what the video is for — it sharpens the cut plan).',
+      'The editor is guided: a five-step rail runs Trim & Clips, Effects, Captions, Music, Export, ticking each step green once the work is actually done, and a sticky bottom bar names the current step with a Next button. Steps can be done in any order.',
+      'A one-tap style row above the panels sets captions, colour grade, music mood and speed ramp together: tiktok (TikTok Viral), cinematic, minimal, vhs (90s VHS), corporate (Corporate Clean).',
+      'The right panel has six tabs: Overlays, Motion, VFX, Captions, Music and Export. Uploaded clips are analyzed from their 25% and 75% frames, so B-roll ranking, the AI style suggestion and the AI soundtrack all use the detected subject, background, dominant color and mood.',
+      'Actions you can trigger: plan (re-run the cut plan), transcribe, captions (build the caption track), addCaptions (transcribe if needed, detect the language and build the track in one step), removeFillers, acceptAll (apply every pending suggestion), reframe (detect the subject), openEffects with {"tab":"overlays|motion|vfx|captions|music|export"}, goToStep with {"step":"trim|effects|captions|music|export"}, applyStyle with {"preset":"tiktok|cinematic|minimal|vhs|corporate"}, chromaKey with {"enabled":true|false}, ask with {"message":"..."} (put a request to the editing model), export.',
+      'If clipsOnTimeline is 0, ask the user to upload footage first.',
+      'Text “behind subject” depth compositing still needs a real matte, which currently means chroma key; visual subject detection itself is available for B-roll and music matching.',
     ].join('\n'),
   };
 
+  // =========================================================================
+  // Render
+  // =========================================================================
+
+  const pendingCount = doc.cards.filter((c) => c.status === 'pending').length;
+  const runwaySource = (clips.filter((c) => /^https:\/\//i.test(c.url))[0] || { url: '' }).url;
+
+  // =========================================================================
+  // The guided flow — steps, presets, suggestion, preview feedback
+  // =========================================================================
+
+  /**
+   * A step ticks itself green when the WORK is done, not when the tab was
+   * opened — and pressing Next ticks it too, because “I looked and I am happy”
+   * is a legitimate way to finish a step.
+   */
+  const stepDone = useMemo<Record<StepId, boolean>>(() => ({
+    trim: stepsTicked.trim || clips.length > 0,
+    effects: stepsTicked.effects
+      || doc.grade !== 'none'
+      || doc.globalEffects.length > 0
+      || vfxActive(doc.vfx)
+      || doc.videoOverlays.length > 0
+      || clips.some((c) => c.effects.length > 0 || motionActive(clipMotion(c))),
+    captions: stepsTicked.captions || doc.captions.length > 0,
+    music: stepsTicked.music || Boolean(doc.musicUrl) || doc.musicBedId !== 'none',
+    export: exportResults.length > 0,
+  }), [
+    clips, doc.captions.length, doc.globalEffects.length, doc.grade, doc.musicBedId,
+    doc.musicUrl, doc.vfx, doc.videoOverlays.length, exportResults.length, stepsTicked,
+  ]);
+
+  const stepIndex = Math.max(0, STUDIO_STEPS.findIndex((s) => s.id === step));
+  const currentStep = STUDIO_STEPS[stepIndex];
+
+  const selectStep = useCallback((id: StepId) => {
+    const found = STUDIO_STEPS.find((s) => s.id === id);
+    setStep(id);
+    if (found) setFxTab(found.tab as EffectsTabId);
+    if (isMobile) setSheetOpen(true);
+  }, [isMobile]);
+
+  const goNext = useCallback(() => {
+    setStepsTicked((ticked) => ({ ...ticked, [step]: true }));
+    const i = STUDIO_STEPS.findIndex((s) => s.id === step);
+    selectStep(STUDIO_STEPS[Math.min(i + 1, STUDIO_STEPS.length - 1)].id);
+  }, [selectStep, step]);
+
+  /** Keep the rail honest when someone drives the sidebar tabs directly. */
+  const onFxTab = useCallback((tab: EffectsTabId) => {
+    setFxTab(tab);
+    const match = tab === 'overlays'
+      ? STUDIO_STEPS.find((s) => s.id === 'effects')
+      : STUDIO_STEPS.find((s) => s.tab === tab);
+    if (match) setStep(match.id);
+  }, []);
+
+  const applyStylePreset = useCallback((preset: StudioPreset) => {
+    commit((cur) => applyPreset(cur, preset));
+    setPresetId(preset.id);
+    pushToast({ message: `${preset.label} style applied`, tone: 'good' });
+  }, [commit, pushToast]);
+
+  /** An empty-state card: choose the look now, drop the footage in after. */
+  const pickSampleUse = useCallback((preset: StudioPreset) => {
+    patch((cur) => applyPreset(cur, preset));
+    setSampleId(preset.id);
+    if (preset.aspect) setExportAspects([preset.aspect]);
+  }, [patch]);
+
+  const suggestion = useMemo(() => suggestedPreset(subjectProfile), [subjectProfile]);
+  const suggestionText = useMemo(() => suggestionSentence(suggestion, subjectProfile), [subjectProfile, suggestion]);
+  const showSuggest = hasFootage && !suggestDismissed;
+
+  const shareLink = useCallback(async (url: string) => {
+    const copied = await copyLink(url);
+    pushToast({
+      message: copied ? 'Link copied!' : 'Could not copy the link — use Download instead.',
+      tone: copied ? 'good' : 'bad',
+    });
+  }, [pushToast]);
+
+  /**
+   * The preview is already live: every control writes into the doc and the
+   * stage re-renders on the next frame. The pill only tells the creator that
+   * the frame in front of them has just been recomposited, so a change never
+   * looks like it was ignored.
+   */
+  const previewSignature = useMemo(() => JSON.stringify([
+    doc.grade, doc.globalEffects, doc.vfx, doc.chroma, doc.aspect,
+    doc.captionSettings, doc.musicBedId, doc.musicUrl, doc.musicVolume,
+    doc.textLayers?.length, doc.overlays?.length, doc.videoOverlays?.length,
+    (doc.clips || []).map((c) => [c.effects, c.adjust, c.crop, c.motion, c.opacity]),
+  ]), [doc]);
+  const previewUpdating = usePreviewPulse(previewSignature);
+
+  const gridStyle: CSSProperties = isMobile
+    ? { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12 }
+    : { display: 'grid', gridTemplateColumns: 'minmax(300px, 340px) minmax(0, 1fr) minmax(290px, 330px)', gap: 12, alignItems: 'start' };
+
+  const leftRailStyle: CSSProperties = isMobile
+    ? { display: 'grid', gap: 12 }
+    : { display: 'grid', gap: 12, maxHeight: 'calc(100vh - 150px)', overflowY: 'auto', paddingRight: 2 };
+
+  /**
+   * The render service gives up at ten minutes. Per-pixel work (the key, the
+   * displacement field, the glitch tear) and per-frame time remapping each
+   * push the cost up, so the creator is warned BEFORE they spend the wallet
+   * on a render that cannot finish.
+   */
+  const renderWarning = useMemo(() => {
+    if (!hasFootage) return '';
+    const heavy = (doc.chroma?.enabled ? 1 : 0)
+      + (doc.vfx?.displace?.enabled ? 1 : 0)
+      + (doc.vfx?.glitch?.enabled ? 1 : 0)
+      + (clips.some((c) => clipMotion(c).ramp?.enabled) ? 1 : 0)
+      + (doc.videoOverlays?.length ? 1 : 0);
+    const formats = Math.max(1, exportAspects.length);
+    const estimate = duration * (1.4 + heavy * 0.55) * formats;
+    if (estimate < 420) return '';
+    const mins = Math.ceil(estimate / 60);
+    return estimate > 600
+      ? `At this length with ${heavy} heavy effect${heavy === 1 ? '' : 's'} on, the render is estimated at about ${mins} minutes across ${formats} format${formats === 1 ? '' : 's'} — past the service's 10-minute ceiling. Shorten the edit, export one format at a time, or turn an effect off.`
+      : `Estimated render time is about ${mins} minutes across ${formats} format${formats === 1 ? '' : 's'}. That is close to the service's 10-minute ceiling, so give it room.`;
+  }, [clips, doc.chroma?.enabled, doc.vfx?.displace?.enabled, doc.vfx?.glitch?.enabled, doc.videoOverlays?.length, duration, exportAspects.length, hasFootage]);
+
   return (
-    <div style={{ minHeight: '100%', background: LB.bg, fontFamily: 'system-ui, -apple-system, sans-serif', padding: '16px 18px 28px', boxSizing: 'border-box' }}>
-      <style>{NLE_CSS}</style>
+    <div className="vp-root">
+      <style>{STUDIO_CSS}</style>
+      <style>{PRO_CSS}</style>
+      <link rel="stylesheet" href={STUDIO_FONTS_URL} />
+      <link rel="stylesheet" href={PRO_FONTS_URL} />
       <audio ref={audioRef} style={{ display: 'none' }} />
 
-      <div style={{ maxWidth: 1240, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <ProductSuiteHeader
-          name="Video Enhancer"
-          voice="I polish your footage, shape the pacing, and finish a clean export with you."
-          working={agentWorking}
-          actions={(
-            <>
-              <details>
-                <summary style={{ cursor: 'pointer', color: LB.textSecondary, fontSize: 11.5, fontWeight: 700, listStylePosition: 'inside' }}>
-                  Advanced <span style={{ color: LB.textMuted, fontWeight: 500 }}>— format: {aspect}</span>
-                </summary>
-                <div style={{ display: 'inline-flex', gap: 4, marginTop: 7, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 999, padding: 3 }}>
-                  {(['16:9', '9:16'] as AspectId[]).map((a) => (
-                    <button key={a} className="nle-btn" onClick={() => setAspect(a)} title={a === '9:16' ? 'Vertical — TikTok / Reels / Shorts framing' : 'Widescreen'} style={{ background: aspect === a ? LB.accent : 'transparent', color: aspect === a ? '#241503' : LB.textSecondary, border: 'none', borderRadius: 999, padding: '5px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
-                      {a === '16:9' ? '16:9' : '9:16 TikTok'}
-                    </button>
-                  ))}
-                </div>
-              </details>
-              <label className="nle-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: LB.textSecondary, borderRadius: 10, padding: '8px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
-                <UploadCloud size={14} /> {hasFootage ? 'Add footage' : 'Upload video'}
-                <input type="file" accept="video/*" style={{ display: 'none' }} onChange={(e) => { void handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
-              </label>
-              <button
-                className="nle-btn"
-                disabled={!hasFootage || exporting}
-                onClick={() => void onExport()}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: LB.accentGradient, color: '#241503', border: 'none', borderRadius: 10, padding: '9px 18px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 14px rgba(245,158,11,0.3)' }}
-              >
-                {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {exporting ? 'Rendering…' : 'Render & Export'}
-              </button>
-            </>
-          )}
-        />
+      <header className="vp-head">
+        <span className="vp-brand">
+          <span className="vp-mark"><Clapperboard size={16} color="#FFFFFF" /></span>
+          <span>
+            <b>Video Studio</b>
+            <small>
+              {hasFootage
+                ? `${clips.length} clip${clips.length === 1 ? '' : 's'} · ${fmtTimecode(duration)}`
+                : 'Vidverge pro editor'}
+            </small>
+          </span>
+        </span>
+        <span className="vp-divider" />
+        <button type="button" className="vp-ico" title="Undo (Cmd+Z)" disabled={!historyDepth.undo} onClick={undo}>
+          <Undo2 size={14} />
+        </button>
+        <button type="button" className="vp-ico" title="Redo (Shift+Cmd+Z)" disabled={!historyDepth.redo} onClick={redo}>
+          <Redo2 size={14} />
+        </button>
+        {busy ? <Loader2 size={14} className="vp-spin" color="#A78BFA" /> : null}
+        <span className="vp-headgap" />
+        <span
+          className="vp-note"
+          title={saveState === 'failed' ? 'Autosave failed — it keeps retrying in the background' : 'Autosaves every 30 seconds'}
+          style={{ whiteSpace: 'nowrap', color: saveState === 'failed' ? '#FCA5A5' : undefined }}
+        >
+          {saveState === 'saving' ? 'Saving…'
+            : saveState === 'retrying' ? 'Retrying save…'
+              : saveState === 'failed' ? 'Save failed'
+                : savedAt ? `Saved ${fmtTimecode((Date.now() - savedAt) / 1000)} ago` : 'Autosave on'}
+        </span>
+        <label className="vp-btn" title="Add footage to the timeline">
+          <UploadCloud size={14} /> {hasFootage ? 'Add' : 'Upload'}
+          <input
+            type="file"
+            accept="video/*"
+            style={{ display: 'none' }}
+            onChange={(e) => { void handleFile(e.target.files?.[0] || null); e.target.value = ''; }}
+          />
+        </label>
+        <button
+          type="button"
+          className={`vp-btn${agentOpen ? ' on' : ''}`}
+          title="Open the AI agent"
+          onClick={() => setAgentOpen((v) => !v)}
+        >
+          <Sparkles size={14} /> Agent
+        </button>
+        <button type="button" className="vp-btn primary" disabled={!hasFootage} onClick={() => setExportOpen(true)}>
+          {exporting ? <Loader2 size={14} className="vp-spin" /> : <Download size={14} />} Export
+        </button>
+      </header>
 
-        {(hasFootage || note || error) ? (
-          <details style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, background: 'rgba(255,255,255,0.03)', padding: '9px 12px' }}>
-            <summary style={{ cursor: 'pointer', color: error ? '#f87171' : LB.textSecondary, fontSize: 12, fontWeight: 700, listStylePosition: 'inside' }}>
-              Production status <span style={{ color: error ? '#f87171' : LB.textMuted, fontWeight: 500 }}>— {error ? 'Needs attention' : note || (renderUrl ? 'Video ready' : exporting ? 'Rendering the final video' : 'Waiting for you')}</span>
-            </summary>
-            <div style={{ display: 'grid', gap: 6, color: error ? '#f87171' : LB.textMuted, fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {error ? <AlertCircle size={13} style={{ flexShrink: 0 }} /> : agentWorking ? <AgentStreak working size={16} /> : null}
-                <span>{error || note}</span>
-              </div>
-              <div>{hasFootage ? '✓ Footage loaded on the timeline' : '○ Waiting for footage'}</div>
-              <div>{renderUrl ? '✓ Final video rendered' : exporting ? '• Rendering the final video' : '• Waiting for you to review the timeline and choose Render & Export'}</div>
-            </div>
-          </details>
-        ) : null}
+      {error ? (
+        <div style={{ padding: '8px 12px 0' }}>
+          <FriendlyError message={error} onDismiss={() => setError('')} />
+        </div>
+      ) : null}
 
-        {/* TOP — preview */}
-        <div ref={stageRef} style={{ background: '#0d1117', borderRadius: 12, padding: 16 }}>
+      <div className="vp-body" style={{ '--ve-tl-h': tlCollapsed || timelineHeight <= 0 ? 'auto' : `${timelineHeight}px` } as CSSProperties}>
+        <div className="vp-stagecol">
+          {agentOpen ? (
+            <ProAgent
+              jobs={agentJobs}
+              running={agentRunning}
+              hasFootage={hasFootage}
+              canUndo={historyDepth.undo > 0}
+              chatBusy={chatBusy}
+              messages={chat}
+              presets={allPresets.map((p) => ({ id: p.id, label: p.label }))}
+              onClose={() => setAgentOpen(false)}
+              onRun={(id) => { void runAgentAction(id); }}
+              onPreset={(id) => onProPreset(id)}
+              onUndo={undo}
+              onSend={(text) => { void onAgentSend(text); }}
+            >
+              <ClipManagerPanel
+                clips={clips}
+                selectedIds={selectedClipIds}
+                analyzingId={subjectBusyId}
+                onAdd={(file) => void handleFile(file)}
+                onSelect={(id) => {
+                  setSelectedClipIds([id]);
+                  const index = docRef.current.clips.findIndex((clip) => clip.id === id);
+                  if (index >= 0) seek(clipStart(docRef.current.clips, index));
+                }}
+                onDelete={deleteClip}
+                onReorder={onReorder}
+                onClearAll={() => setConfirmClearAll(true)}
+              />
+              <CutPlanPanel
+                cards={doc.cards}
+                summary={planSummary}
+                hookVerdict={hookVerdict}
+                planning={planning}
+                planNote={planNote}
+                planError={planError}
+                hasFootage={hasFootage}
+                onAccept={(id) => void acceptCard(id)}
+                onReject={rejectCard}
+                onAcceptAll={() => void acceptAll()}
+                onReplan={() => void replan()}
+                onSeek={(t) => { const mapped = sourceToTimeline(doc.clips, doc.transcriptSource, t); seek(mapped == null ? t : mapped); }}
+              />
+              <TranscriptPanel
+                words={doc.words}
+                transcribing={transcribing}
+                note={transcriptNote}
+                exactTimings={exactTimings}
+                playheadSource={sourceT}
+                hasFootage={hasFootage}
+                onTranscribe={() => void runTranscribe()}
+                onSeekSource={seekSource}
+                onRemove={onRemoveWords}
+                onRestore={onRestoreWords}
+                onRemoveAllFillers={onRemoveAllFillers}
+              />
+              <BrollPanel
+                slots={doc.brollSlots}
+                selectedId={selectedSlotId}
+                generatingLabel={generatingSlot ? 'Filming (1–3 min)…' : ''}
+                onSelect={setSelectedSlotId}
+                onPrompt={(id, prompt) => patch((cur) => ({ ...cur, brollSlots: cur.brollSlots.map((s) => (s.id === id ? { ...s, prompt } : s)) }))}
+                onGenerate={(id) => void generateForSlot(id)}
+                onReplaceFile={(id, file) => void replaceSlotWithFile(id, file)}
+                onPickStock={(id) => void openLibrary(id)}
+                onRemove={removeBrollSlot}
+                onSeek={seek}
+              />
+              <ChatPanel messages={chat} busy={chatBusy} hasFootage={hasFootage} onSend={(t) => void sendChat(t)} />
+            </ProAgent>
+          ) : null}
+
           <div
+            ref={stageWrapRef}
+            className="vp-stage"
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={(e) => { e.preventDefault(); setDragOver(false); void handleFile(e.dataTransfer.files?.[0] || null); }}
-            style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: '#000', borderRadius: 10, overflow: 'hidden', border: dragOver ? '2px dashed #f59e0b' : '1px solid rgba(255,255,255,0.08)' }}
           >
-            {hasFootage ? (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {/* The stage — 16:9 fills the frame, 9:16 is the centered TikTok canvas (matches the render). */}
-                <div ref={stageBoxRef} style={{ position: 'relative', height: '100%', aspectRatio: aspect === '9:16' ? '9 / 16' : '16 / 9', maxWidth: '100%', background: '#000', overflow: 'hidden' }}>
-                  <video
-                    ref={videoRef}
-                    playsInline
-                    onClick={togglePlay}
-                    style={{ width: '100%', height: '100%', objectFit: aspect === '9:16' ? 'cover' : 'contain', filter: previewFilter, opacity: activeClip ? activeClip.opacity : 1, cursor: 'pointer' }}
+            {!hasFootage ? (
+              <label className={`vp-drop${dragOver ? ' hot' : ''}`} style={{ cursor: 'pointer', display: 'block' }}>
+                <span style={{ display: 'inline-grid', placeItems: 'center', width: 62, height: 62, borderRadius: 14, background: 'rgba(124,58,237,0.14)', border: '1px solid rgba(124,58,237,0.42)' }}>
+                  <UploadCloud size={28} color="#A78BFA" />
+                </span>
+                <h3>Drop your footage here</h3>
+                <p>
+                  MP4, MOV, WebM or AVI up to 500&nbsp;MB. Drop more files later and each one joins the VIDEO track as a
+                  new clip.
+                </p>
+                <span className="vp-btn primary" style={{ pointerEvents: 'none' }}>
+                  <UploadCloud size={14} /> Choose a file
+                </span>
+                <input
+                  type="file"
+                  accept="video/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => { void handleFile(e.target.files?.[0] || null); e.target.value = ''; }}
+                />
+              </label>
+            ) : (
+              <>
+                <div className="vp-stagetop">
+                  {ASPECTS.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className="vp-chip"
+                      title={a.blurb}
+                      onClick={() => commit((cur) => ({ ...cur, aspect: a.id }))}
+                      style={{
+                        cursor: 'pointer',
+                        borderColor: doc.aspect === a.id ? 'rgba(124,58,237,0.75)' : undefined,
+                        color: doc.aspect === a.id ? '#C4B5FD' : undefined,
+                      }}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                  <span className="vp-headgap" />
+                  {previewUpdating ? (
+                    <span className="vp-chip"><Loader2 size={10} className="vp-spin" /> Updating</span>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="vp-chip"
+                    title="Show filters and captions while the preview plays"
+                    style={{ cursor: 'pointer', color: playWithEffects ? '#C4B5FD' : undefined }}
+                    onClick={() => setPlayWithEffects((on) => !on)}
+                  >
+                    FX {playWithEffects ? 'on' : 'off'}
+                  </button>
+                  <button
+                    type="button"
+                    className="vp-chip"
+                    title="Full screen"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => { const el = stageWrapRef.current; if (el?.requestFullscreen) void el.requestFullscreen().catch(() => undefined); }}
+                  >
+                    <Maximize size={11} />
+                  </button>
+                </div>
+
+                <div
+                  className="vp-stageinner"
+                  style={{
+                    width: aspectRatio(doc.aspect) < 1 ? 'min(100%, 46vh)' : '100%',
+                  }}
+                >
+                  <StudioStage
+                    doc={stageDoc}
+                    activeClip={activeClip}
+                    playhead={playhead}
+                    sourceT={sourceT}
+                    clipLocalT={clipLocalT}
+                    videoRef={videoRef}
+                    isPlaying={isPlaying}
+                    volume={volume}
+                    selection={{ overlayId: selectedOverlayId, textId: selectedTextId, brollId: selectedBrollId }}
+                    showFocus={showFocus}
+                    onPickOverlay={setSelectedOverlayId}
+                    onPickBroll={setSelectedBrollId}
+                    onPickText={setSelectedTextId}
+                    onMoveOverlay={(id, x, y) => patch((cur) => ({ ...cur, overlays: cur.overlays.map((o) => (o.id === id ? { ...o, x, y } : o)) }))}
+                    onMoveText={(id, x, y) => patch((cur) => ({ ...cur, textLayers: cur.textLayers.map((l) => (l.id === id ? { ...l, x, y } : l)) }))}
+                    onTogglePlay={togglePlay}
                   />
-                  {effects.vignette > 0 ? (
-                    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: `radial-gradient(ellipse at center, rgba(0,0,0,0) 52%, rgba(0,0,0,${((effects.vignette / 100) * 0.85).toFixed(3)}) 100%)` }} />
-                  ) : null}
-                  {activeClip?.text ? (
-                    <div style={{ position: 'absolute', top: '7%', left: 0, right: 0, textAlign: 'center', pointerEvents: 'none', color: activeClip.textColor, fontSize: Math.max(13, Math.round((stageW || 600) * (activeClip.textSize / 1920) * (aspect === '9:16' ? 2.4 : 1))), fontWeight: 700, textShadow: '0 2px 14px rgba(0,0,0,0.85)', padding: '0 4%' }}>
-                      {activeClip.text}
-                    </div>
-                  ) : null}
-                  {graphics.map((g) => (playhead >= g.start && playhead <= g.start + g.duration
-                    ? <GraphicOverlay key={g.id} g={g} t={playhead - g.start} sw={stageW || 600} />
-                    : null))}
-                  {currentCaption ? (
-                    <div style={{ position: 'absolute', bottom: aspect === '9:16' ? '20%' : '8%', left: 0, right: 0, display: 'flex', justifyContent: 'center', pointerEvents: 'none', padding: '0 6%' }}>
-                      <span style={{ color: LB.accent, fontSize: Math.max(12, Math.round((stageW || 600) * (aspect === '9:16' ? 0.052 : 0.024))), fontWeight: 700, textShadow: '0 2px 12px rgba(0,0,0,0.85)', background: 'rgba(0,0,0,0.35)', padding: '6px 16px', borderRadius: 10, textAlign: 'center' }}>
-                        {currentCaption.text}
-                      </span>
+                  {compareAB && activeClip ? (
+                    <div style={{ position: 'absolute', inset: 0, zIndex: 6, pointerEvents: 'none', clipPath: 'inset(0 50% 0 0)', overflow: 'hidden' }}>
+                      <video
+                        key={`ab-${activeClip.id}`}
+                        src={activeClip.previewUrl || activeClip.url}
+                        muted
+                        playsInline
+                        ref={(node) => { if (node) { try { node.currentTime = sourceT; } catch { /* not seekable yet */ } } }}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }}
+                      />
+                      <span className="vp-chip" style={{ position: 'absolute', left: 8, top: 8 }}>BEFORE</span>
                     </div>
                   ) : null}
                 </div>
-              </div>
-            ) : (
-              <label style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, cursor: 'pointer', color: LB.textSecondary }}>
-                <AgentStreak working={false} size={34} />
-                <UploadCloud size={34} color={LB.accent} />
-                <span style={{ fontSize: 14, fontWeight: 600, color: LB.textPrimary }}>Drop a video here, or click to choose</span>
-                <span style={{ fontSize: 11.5, color: LB.textMuted }}>MP4 / WebM / MOV up to 500 MB — it loads into the player and the Video track, and Gemini describes it automatically.</span>
-                <input type="file" accept="video/*" style={{ display: 'none' }} onChange={(e) => { void handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
-              </label>
+
+                <div className="vp-stagechrome pin">
+                  <div className="vp-row" style={{ marginBottom: 6 }}>
+                    <button type="button" className="vp-ico on" title="Play / pause (Space)" onClick={togglePlay}>
+                      {isPlaying ? <Pause size={14} /> : <Play size={14} style={{ marginLeft: 2 }} />}
+                    </button>
+                    <span className="vp-mono" style={{ fontSize: 11.5, fontWeight: 700 }}>
+                      {fmtTimecode(playhead, true)}
+                      <span style={{ color: '#707070' }}> / {fmtTimecode(duration, true)}</span>
+                    </span>
+                    <button type="button" className="vp-btn xs" disabled={!canSplit} onClick={onSplit} title="Split at the playhead (S)">
+                      <Scissors size={11} /> Split
+                    </button>
+                    <button
+                      type="button"
+                      className="vp-btn xs"
+                      disabled={!selectedClipIds.length}
+                      title="Add or remove a keyframe on the selected clip"
+                      onClick={() => selectedClipIds.forEach((id) => toggleKeyframe(id))}
+                    >
+                      <Diamond size={11} /> Key
+                    </button>
+                    <span className="vp-headgap" />
+                    {pendingCount ? (
+                      <span className="vp-chip">{pendingCount} suggestion{pendingCount === 1 ? '' : 's'}</span>
+                    ) : null}
+                    <Volume2 size={13} color="#A0A0A0" />
+                    <input
+                      type="range"
+                      className="vp-range"
+                      aria-label="Preview volume"
+                      min={0}
+                      max={100}
+                      value={Math.round(volume * 100)}
+                      onChange={(e) => setVolume(Number(e.target.value) / 100)}
+                      style={{ width: 86, '--vp-fill': `${Math.round(volume * 100)}%` } as CSSProperties}
+                    />
+                  </div>
+                  <div
+                    className="vp-scrub"
+                    onPointerDown={(e) => {
+                      const box = e.currentTarget.getBoundingClientRect();
+                      const go = (x: number) => seek(((x - box.left) / Math.max(1, box.width)) * duration);
+                      go(e.clientX);
+                      const move = (ev: PointerEvent) => go(ev.clientX);
+                      const up = () => {
+                        window.removeEventListener('pointermove', move);
+                        window.removeEventListener('pointerup', up);
+                      };
+                      window.addEventListener('pointermove', move);
+                      window.addEventListener('pointerup', up);
+                    }}
+                  >
+                    <span className="vp-scrubtrack">
+                      <span className="vp-scrubfill" style={{ width: `${Math.min(100, (playhead / Math.max(0.1, duration)) * 100)}%` }} />
+                    </span>
+                    <span className="vp-scrubknob" style={{ left: `${Math.min(100, (playhead / Math.max(0.1, duration)) * 100)}%` }} />
+                    {doc.videoOverlays.map((overlay) => (
+                      <span
+                        key={overlay.id}
+                        title={`B-roll at ${fmtTimecode(overlay.start)}`}
+                        style={{ position: 'absolute', left: `${Math.max(0, Math.min(100, (overlay.start / Math.max(0.1, duration)) * 100))}%`, top: 2, width: 5, height: 5, marginLeft: -2.5, borderRadius: '50%', background: '#22c55e', pointerEvents: 'none' }}
+                      />
+                    ))}
+                  </div>
+                  {note ? <p className="vp-note" style={{ marginTop: 5 }}>{note}</p> : null}
+                </div>
+              </>
             )}
           </div>
+        </div>
 
-          {/* Controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-            <button className="nle-btn" disabled={!hasFootage} onClick={togglePlay} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, background: LB.accent, color: '#241503', border: 'none', borderRadius: 999, cursor: 'pointer' }}>
-              {isPlaying ? <Pause size={16} /> : <Play size={16} style={{ marginLeft: 2 }} />}
-            </button>
-            <span style={{ color: LB.textPrimary, fontSize: 13, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
-              {fmtTimecode(playhead)} <span style={{ color: LB.textMuted }}>/ {fmtTimecode(duration)}</span>
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginLeft: 8 }}>
-              <Volume2 size={14} color={LB.textSecondary} />
-              <input type="range" min={0} max={100} value={Math.round(volume * 100)} onChange={(e) => setVolume(Number(e.target.value) / 100)} style={{ width: 110, accentColor: LB.accent }} />
-            </span>
-            <button
-              className="nle-btn"
-              disabled={!hasFootage}
-              onClick={() => { const el = stageRef.current; if (el?.requestFullscreen) void el.requestFullscreen().catch(() => undefined); }}
-              style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: LB.textSecondary, borderRadius: 8, padding: '7px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
-            >
-              <Maximize size={13} /> Fullscreen
-            </button>
+        <ProTimeline
+          clips={clips}
+          captions={doc.captions}
+          textLayers={doc.textLayers}
+          overlays={doc.overlays}
+          videoOverlays={doc.videoOverlays}
+          globalEffects={doc.globalEffects}
+          silences={timelineSilences}
+          musicLabel={doc.musicUrl ? 'AI soundtrack' : doc.musicBedId !== 'none' ? doc.musicBedId : ''}
+          playhead={playhead}
+          zoom={tlZoom}
+          collapsed={tlCollapsed}
+          selectedClipIds={selectedClipIds}
+          selectedTextId={selectedTextId}
+          selectedBrollId={selectedBrollId}
+          onZoom={setTlZoom}
+          onCollapse={setTlCollapsed}
+          onResize={onTimelineResize}
+          onSeek={seek}
+          onSelectClips={setSelectedClipIds}
+          onSelectText={setSelectedTextId}
+          onSelectBroll={setSelectedBrollId}
+          onTrim={onTrim}
+          onBeforeEdit={checkpoint}
+          onSplit={onSplit}
+          onDuplicate={duplicateClip}
+          onDelete={deleteClip}
+          onRipple={rippleTrim}
+          onTransition={onSetTransition}
+          onToggleKeyframe={toggleKeyframe}
+          onMoveText={(id, start) => patch((cur) => ({ ...cur, textLayers: cur.textLayers.map((l) => (l.id === id ? { ...l, end: start + (l.end - l.start), start } : l)) }))}
+        />
+
+        <aside className="vp-side">
+          <div className="vp-tabs" role="tablist" aria-label="Editor controls">
+            {PRO_TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={proTab === t.id}
+                className="vp-tab"
+                onClick={() => { setProTab(t.id); setFxTab(FX_FOR_TAB[t.id]); }}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
+          <div className="vp-sidescroll">
+            <ProControls
+              tab={proTab}
+              doc={doc}
+              hasFootage={hasFootage}
+              playhead={playhead}
+              duration={duration}
+              selectedClipIds={selectedClipIds}
+              selectedTextId={selectedTextId}
+              activeLook={activeLook}
+              lookStrength={lookStrength}
+              activePreset={presetId}
+              customPresets={customPresets}
+              activeMotion={activeMotion}
+              motionAmount={motionAmount}
+              compareAB={compareAB}
+              captionsBusy={captionsBusy || transcribing}
+              captionNote={captionNote}
+              musicBusy={musicBusy}
+              musicNote={musicError || musicNote}
+              voBusy={voBusy}
+              voNote={voNote}
+              bpm={bpm}
+              patch={patch}
+              commit={commit}
+              onLook={onLook}
+              onPreset={onProPreset}
+              onSavePreset={onSavePreset}
+              onMotion={onMotionPreset}
+              onCompareAB={setCompareAB}
+              onSelectText={setSelectedTextId}
+              onGenerateCaptions={() => void generateCaptions()}
+              onRebuildCaptions={buildCaptionTrack}
+              onDownloadSrt={downloadSrt}
+              onGenerateMusic={(style) => void makeMusic(subjectProfile, style, doc.musicVariation + 1)}
+              onVoiceover={(text, voice) => { void onVoiceover(text, voice); }}
+              onBeatSync={() => { void runAgentAction('beat'); }}
+              onResetColor={onResetColor}
+            />
 
-          {/* Export progress / result */}
-          {exporting || renderUrl || exportError ? (
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ cursor: 'pointer', color: exportError ? '#f87171' : LB.textSecondary, fontSize: 11.5, fontWeight: 700, listStylePosition: 'inside' }}>
-                Production status — {exporting ? 'Rendering your final video' : renderUrl ? 'Video ready' : 'Render needs attention'}
+            <AgentStrip onOpen={() => setAgentOpen(true)} pending={pendingCount} />
+
+            <details
+              className="vp-sec"
+              open={moreOpen}
+              onToggle={(e) => setMoreOpen((e.currentTarget as HTMLDetailsElement).open)}
+            >
+              <summary className="vp-sechead" style={{ cursor: 'pointer' }}>
+                <h4>All studio tools</h4>
+                <span className="vp-hint">Cutaways, reframe, overlays, cue editing, render</span>
               </summary>
-              <div style={{ marginTop: 8 }}>
-              {exporting || renderUrl ? (
-                <div style={{ height: 8, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
-                  <div className={exporting ? 'nle-progress-fill' : undefined} style={{ height: '100%', width: `${exportPct}%`, background: LB.accent, transition: 'width 0.8s ease' }} />
-                </div>
+              <div className="vp-secbody">
+                <div style={{ background: '#1A1A1A', borderRadius: 12, padding: 12, border: '1px solid #2A2A2A' }}>
+                <button
+                  type="button"
+                  className="vs-btn"
+                  onClick={() => setRunwayOpen((o) => !o)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', background: 'none', border: 'none', color: LB.textPrimary, fontSize: 13, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', flexWrap: 'wrap' }}
+                  data-testid="toggle-runway-enhance"
+                >
+                  <Sparkles size={14} color={LB.accent} />
+                  Generate footage
+                  <span style={{ fontSize: 11.5, fontWeight: 500, color: LB.textMuted }}>
+                    Swap the product inside your shot, or film a fresh clip from a prompt or a still — it only joins the timeline when you say so.
+                  </span>
+                  <span style={{ marginLeft: 'auto', color: LB.textMuted, fontSize: 12, fontWeight: 600 }}>{runwayOpen ? 'Hide' : 'Show'}</span>
+                </button>
+                {runwayOpen ? (
+                  <div style={{ marginTop: 13 }}>
+                    <RunwayStudio
+                      bare
+                      modes={['product_swap', 'text_to_video', 'image_to_video']}
+                      theme={{
+                        panel: 'rgba(255,255,255,0.05)', card: '#11161f',
+                        line: 'rgba(255,255,255,0.09)', lineStrong: 'rgba(255,255,255,0.17)',
+                        ink: LB.textPrimary, soft: LB.textSecondary, muted: LB.textMuted,
+                        accent: LB.accent, onAccent: '#241503', good: '#7FD4B4', bad: '#f87171',
+                        font: "'Inter', system-ui, sans-serif",
+                      }}
+                      prefill={{ sourceVideo: runwaySource }}
+                      adoptLabel="Add to timeline"
+                      onAdopt={(url: string) => { void addClip(url, url, 'Generated clip', 'broll'); }}
+                    />
+                  </div>
+                ) : null}
+              </div>
+
+              <EffectsSidebar
+                tab={fxTab}
+                onTab={onFxTab}
+                playhead={playhead}
+                duration={duration}
+                onSeek={seek}
+                onCheckpoint={checkpoint}
+                renderWarning={renderWarning}
+                videoOverlays={doc.videoOverlays}
+                selectedBrollId={selectedBrollId}
+                uploadingBroll={uploadingBroll}
+                onSelectBroll={setSelectedBrollId}
+                onAddBrollFiles={(files) => void addBrollFiles(files)}
+                onChangeBroll={changeBroll}
+                onDeleteBroll={deleteBroll}
+                brollModel={brollModel}
+                onBrollModel={setBrollModel}
+                omniPrompt={omniPrompt}
+                omniGenerating={omniGenerating}
+                omniProgress={omniProgress}
+                omniError={omniError}
+                omniNote={omniNote}
+                onOmniPrompt={setOmniPrompt}
+                onGenerateOmni={() => void generateOmniClip()}
+                chroma={doc.chroma}
+                onChroma={onChroma}
+                onChromaBackgroundFile={(f) => void onChromaBackgroundFile(f)}
+                clips={clips}
+                selectedClips={selectedClips}
+                onRamp={onRamp}
+                onZoomCut={onZoomCut}
+                onShake={onShake}
+                vfx={doc.vfx}
+                textLayerCount={doc.textLayers.length}
+                onVfx={onVfx}
+                captions={doc.captions}
+                captionSettings={doc.captionSettings}
+                captionLanguage={doc.captionLanguage}
+                captionNote={captionNote}
+                captionsBusy={captionsBusy || transcribing}
+                hasWords={doc.words.length > 0}
+                hasFootage={hasFootage}
+                onGenerateCaptions={() => void generateCaptions()}
+                onRebuildCaptions={buildCaptionTrack}
+                onCaptionSettings={(p: Partial<CaptionSettings>) => patch((cur) => ({ ...cur, captionSettings: { ...cur.captionSettings, ...p } }))}
+                onEditCue={onEditCue}
+                onRetimeCue={onRetimeCue}
+                onDeleteCue={onDeleteCue}
+                onSplitCue={onSplitCue}
+                onMergeCueUp={onMergeCueUp}
+                onDownloadSrt={downloadSrt}
+                musicPanel={(
+                  <AiMusicPanel
+                    profile={subjectProfile}
+                    style={doc.musicStyle}
+                    prompt={doc.musicPrompt}
+                    url={doc.musicUrl}
+                    variation={doc.musicVariation}
+                    busy={musicBusy}
+                    note={musicNote}
+                    error={musicError}
+                    onStyle={(style) => {
+                      patch((cur) => ({ ...cur, musicStyle: style, ...(style === 'none' ? { musicUrl: '', musicPrompt: '', musicBedId: 'none' } : {}) }));
+                    }}
+                    onGenerate={() => void makeMusic(subjectProfile, doc.musicStyle, 1)}
+                    onRegenerate={() => void makeMusic(subjectProfile, doc.musicStyle, doc.musicVariation + 1)}
+                  />
+                )}
+                exportPanel={(
+                  <ExportInspector
+                    aspects={exportAspects.length ? exportAspects : [doc.aspect]}
+                    resolution={doc.resolution}
+                    burnIn={doc.captionSettings?.burnIn}
+                    cueCount={doc.captions.length}
+                    exporting={exporting}
+                    progress={exportProgress}
+                    etaS={exportEta}
+                    stageNote={exportStage}
+                    results={exportResults}
+                    error={exportError}
+                    onResolution={(r: ResolutionId) => patch((cur) => ({ ...cur, resolution: r }))}
+                    onExport={() => void onExport()}
+                    onShare={(url: string) => void shareLink(url)}
+                    onDownloadSrt={downloadSrt}
+                  />
+                )}
+              />
+              {fxTab === 'motion' ? (
+                <>
+                  <ReframeInspector
+                    aspect={doc.aspect}
+                    exportAspects={exportAspects}
+                    reframe={doc.reframe}
+                    sourceT={sourceT}
+                    thumbUrl={thumbUrl}
+                    detecting={detecting}
+                    onAspect={(a) => { commit((cur) => ({ ...cur, aspect: a })); setExportAspects((list) => (list.includes(a) ? list : [a, ...list.filter((x) => x !== a)])); }}
+                    onToggleExportAspect={(a) => setExportAspects((list) => (list.includes(a) ? (list.length > 1 ? list.filter((x) => x !== a) : list) : [...list, a]))}
+                    onMode={(m: ReframeState['mode']) => commit((cur) => ({ ...cur, reframe: { ...cur.reframe, mode: m } }))}
+                    onManual={(x, y) => patch((cur) => ({ ...cur, reframe: { ...cur.reframe, manualX: x, manualY: y } }))}
+                    onDetect={() => void detectSubject()}
+                    onFocusPanel={setShowFocus}
+                  />
+                  <ClipInspector
+                    clips={clips}
+                    selected={selectedClips}
+                    playhead={playhead}
+                    canSplit={canSplit}
+                    sourceAspect={sourceAspect}
+                    onAdjust={onAdjust}
+                    onTrim={onTrim}
+                    onOpacity={(v) => applyToSelected((c) => ({ ...c, opacity: v }))}
+                    onCrop={onCrop}
+                    onCropPreset={onCropPreset}
+                    onCropLock={(locked) => applyToSelected((c) => ({ ...c, cropLocked: locked }))}
+                    onToggleEffect={onToggleClipEffect}
+                    onSplit={onSplit}
+                    onDelete={onDeleteSelected}
+                    onCheckpoint={checkpoint}
+                  />
+                </>
               ) : null}
-              {exporting ? <div style={{ color: LB.textMuted, fontSize: 11.5, marginTop: 6 }}>Rendering on the platform (Remotion, 1080p)… you can keep editing.</div> : null}
-              {renderUrl ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
-                  <span style={{ color: '#7FD4B4', fontSize: 12.5, fontWeight: 700 }}>✓ Render complete</span>
-                  <a className="nle-btn" href={renderUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: LB.accent, color: '#241503', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
-                    <Download size={13} /> Download MP4
-                  </a>
-                </div>
+              {fxTab === 'captions' ? (
+              <TextInspector
+                layers={doc.textLayers}
+                selectedId={selectedTextId}
+                playhead={playhead}
+                depthAvailable={doc.chroma?.enabled}
+                onSelect={setSelectedTextId}
+                onAdd={() => {
+                  const layer = newTextLayer(playheadRef.current);
+                  commit((cur) => ({ ...cur, textLayers: [...cur.textLayers, layer] }));
+                  setSelectedTextId(layer.id);
+                }}
+                onChange={(id: string, p: Partial<TextLayer>) => patch((cur) => ({ ...cur, textLayers: cur.textLayers.map((l) => (l.id === id ? { ...l, ...p } : l)) }))}
+                onDelete={(id: string) => { commit((cur) => ({ ...cur, textLayers: cur.textLayers.filter((l) => l.id !== id) })); setSelectedTextId(null); }}
+                onCheckpoint={checkpoint}
+              />
               ) : null}
-              {exportError ? <div style={{ color: '#f87171', fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>{exportError}</div> : null}
+              {fxTab === 'overlays' ? (
+              <OverlayInspector
+                overlays={doc.overlays}
+                selectedId={selectedOverlayId}
+                duration={duration}
+                trackingId={trackingId}
+                trackingProgress={trackProgress}
+                onSelect={setSelectedOverlayId}
+                onAddFile={(file: File) => void addOverlayFile(file)}
+                onAddWorkspaceLogo={() => addOverlayFromUrl(WORKSPACE_LOGO, 'VidVerge logo')}
+                onChange={(id: string, p: Partial<Overlay>) => patch((cur) => ({ ...cur, overlays: cur.overlays.map((o) => (o.id === id ? { ...o, ...p } : o)) }))}
+                onDelete={(id: string) => { commit((cur) => ({ ...cur, overlays: cur.overlays.filter((o) => o.id !== id) })); setSelectedOverlayId(null); }}
+                onTrack={(id: string) => void trackOverlay(id)}
+                onCheckpoint={checkpoint}
+              />
+              ) : null}
+              {fxTab === 'vfx' ? (
+              <LookInspector
+                grade={doc.grade}
+                globalEffects={doc.globalEffects}
+                musicBedId={doc.musicBedId}
+                musicBeds={MUSIC_BEDS.map((m) => ({ id: m.id, label: m.label }))}
+                onGrade={(g: GradeId) => patch((cur) => ({ ...cur, grade: g }))}
+                onToggleEffect={(id: VisualEffectId) => patch((cur) => ({
+                  ...cur,
+                  globalEffects: cur.globalEffects.includes(id) ? cur.globalEffects.filter((x) => x !== id) : [...cur.globalEffects, id],
+                }))}
+                onMusic={(id: string) => patch((cur) => ({ ...cur, musicBedId: id, musicUrl: '', musicStyle: 'none' }))}
+                onCheckpoint={checkpoint}
+              />
+              ) : null}
+              <StickyExportBar
+                clipCount={clips.length}
+                duration={duration}
+                resolution={doc.resolution}
+                exporting={exporting}
+                onPreview={() => { seek(0); if (!playingRef.current) togglePlay(); }}
+                onExport={() => setExportOpen(true)}
+              />
               </div>
             </details>
-          ) : null}
-        </div>
-
-        {/* MIDDLE — tools + properties */}
-        <div style={{ display: 'grid', gap: 14 }}>
-          <AiToolsPanel
-            hasFootage={hasFootage}
-            analysis={analysis}
-            analyzing={analyzing}
-            aiEditBusy={aiEditBusy}
-            transcribing={transcribing}
-            brollBusy={brollBusy}
-            brollPrompt={brollPrompt}
-            onBrollPrompt={setBrollPrompt}
-            brollModel={brollModel}
-            brollModelMode={brollModelMode}
-            brollAutoName={engineDisplayName(brollAutoId)}
-            brollAutoReason={brollRoute.reason}
-            onBrollAuto={() => setBrollModelMode('auto')}
-            onBrollModel={(id) => { setBrollModel(id); setBrollModelMode('manual'); }}
-            styleId={styleId}
-            onAiEdit={() => void runAiEdit()}
-            onTranscribe={() => void runTranscribe()}
-            onDescribe={() => void runDescribe()}
-            onBroll={() => void onBroll()}
-            onCaptions={onCaptionsFromTranscript}
-            onStyle={onStyle}
-            onAddGraphic={onAddGraphic}
-            appliedSuggestions={appliedSuggestions}
-            onApplySuggestion={applySuggestion}
-          />
-          <details style={{ background: '#0d1117', borderRadius: 12, padding: 14 }}>
-            <summary style={{ cursor: 'pointer', color: LB.textPrimary, fontSize: 13.5, fontWeight: 700, listStylePosition: 'inside' }}>
-              Advanced <span style={{ color: LB.textMuted, fontSize: 11.5, fontWeight: 500 }}>— clip properties, effects, music and colour grade</span>
-            </summary>
-            <div style={{ marginTop: 12 }}>
-              <PropertiesPanel
-                clip={selectedClip}
-                graphic={selectedGraphic}
-                effects={effects}
-                musicBedId={musicBedId}
-                customMusicLabel={customMusic ? customMusic.label : ''}
-                musicGenBusy={musicGenBusy}
-                gradeId={gradeId}
-                canSplit={canSplit}
-                onSplit={onSplitAtPlayhead}
-                onDeleteClip={onDeleteClip}
-                onTrim={onTrim}
-                onSpeed={onSpeed}
-                onOpacity={onOpacity}
-                onText={onText}
-                onGraphicChange={onGraphicChange}
-                onGraphicDelete={onGraphicDelete}
-                onEffects={(patch) => setEffects((e) => ({ ...e, ...patch }))}
-                onMusic={(id) => setMusicBedId(id)}
-                onGenerateMusic={(p) => void onGenerateMusic(p)}
-                onGrade={(g) => { setGradeId(g); setStyleId(null); }}
-              />
-            </div>
-          </details>
-        </div>
-
-        {/* RUNWAY ENHANCE — generation that sits beside the editor rather than
-            inside it: the loaded footage is offered as the swap source, and a
-            finished clip only joins the timeline when the customer says so. */}
-        <div style={{ background: '#0d1117', borderRadius: 12, padding: 14 }}>
-          <button
-            type="button"
-            className="nle-btn"
-            onClick={() => setRunwayOpen((open) => !open)}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', background: 'none', border: 'none', color: LB.textPrimary, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', flexWrap: 'wrap' }}
-            data-testid="toggle-runway-enhance"
-          >
-            <Sparkles size={15} color={LB.accent} />
-            Runway Enhance
-            <span style={{ fontSize: 11.5, fontWeight: 500, color: LB.textMuted }}>
-              Swap the product inside your footage, or generate a fresh clip from a prompt or a still.
-            </span>
-            <span style={{ marginLeft: 'auto', color: LB.textMuted, fontSize: 12, fontWeight: 600 }}>{runwayOpen ? 'Hide' : 'Show'}</span>
-          </button>
-          {runwayOpen ? (
-            <div style={{ marginTop: 14 }}>
-              <RunwayStudio
-                bare
-                modes={['product_swap', 'text_to_video', 'image_to_video']}
-                theme={{
-                  panel: 'rgba(255,255,255,0.05)',
-                  card: '#11161f',
-                  line: 'rgba(255,255,255,0.09)',
-                  lineStrong: 'rgba(255,255,255,0.17)',
-                  ink: LB.textPrimary,
-                  soft: LB.textSecondary,
-                  muted: LB.textMuted,
-                  accent: LB.accent,
-                  onAccent: '#241503',
-                  good: '#7FD4B4',
-                  bad: '#f87171',
-                  font: 'system-ui, -apple-system, sans-serif',
-                }}
-                prefill={{ sourceVideo: runwaySource }}
-                adoptLabel="Add to timeline"
-                onAdopt={(url) => { void addClipFromUrl(url, url, 'Runway clip', 'broll'); }}
-              />
-              {hasFootage && !runwaySource ? (
-                <div style={{ color: LB.textMuted, fontSize: 11.5, marginTop: 10, lineHeight: 1.5 }}>
-                  Your footage is still uploading — the swap source appears here once the durable copy lands.
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-
-        {/* BOTTOM — timeline */}
-        <NleTimeline
-          clips={clips}
-          captions={captions}
-          captionOffset={captionOffset}
-          graphics={graphics}
-          selectedGraphicId={selectedGraphicId}
-          musicBed={musicBed}
-          duration={duration}
-          playhead={playhead}
-          selectedClipId={selectedClipId}
-          onSelectClip={(id) => { setSelectedClipId(id); if (id) setSelectedGraphicId(null); }}
-          onSelectGraphic={(id) => { setSelectedGraphicId(id); if (id) setSelectedClipId(null); }}
-          onMoveGraphic={onMoveGraphic}
-          onSeek={seek}
-          onReorder={onReorder}
-          onTrim={onTrim}
-          onCaptionOffset={setCaptionOffset}
-        />
+          </div>
+        </aside>
       </div>
+
+      {exportOpen ? (
+        <ProExport
+          spec={exportSpec}
+          onSpec={(p) => setExportSpec((s) => ({ ...s, ...p }))}
+          hasFootage={hasFootage}
+          durationS={duration}
+          busy={exporting}
+          progress={exportProgress}
+          stage={exportStage}
+          etaS={exportEta}
+          error={exportError}
+          warning={renderWarning}
+          results={proResults}
+          onClose={() => setExportOpen(false)}
+          onExport={() => { void runProExport(); }}
+          onDownload={onProDownload}
+          onShare={(url) => void shareLink(url)}
+        />
+      ) : null}
+
+      {confirmClearAll ? (
+        <div role="dialog" aria-modal="true" aria-label="Clear all clips" onClick={() => setConfirmClearAll(false)} style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.72)', padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(390px, 92vw)', background: '#1A1A1F', border: '1px solid rgba(255,255,255,0.13)', borderRadius: 14, padding: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+            <div style={{ color: VE.text, fontSize: 17, fontWeight: 800 }}>Remove every clip?</div>
+            <div style={{ color: VE.textMuted, fontSize: 13, lineHeight: 1.55, marginTop: 7 }}>This takes out all your clips, cutaways and B-roll slots. You can still press Cmd+Z afterwards to bring them back.</div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+              <button type="button" className="vs-btn ve-tap" onClick={() => setConfirmClearAll(false)} style={{ padding: '0 18px', minHeight: 44, borderRadius: 8, border: '1px solid #2A2A2A', background: 'transparent', color: VE.textSecondary, fontSize: 14, fontWeight: 650, cursor: 'pointer' }}>Keep them</button>
+              <button type="button" className="vs-btn ve-tap" onClick={clearAllClips} style={{ padding: '0 18px', minHeight: 44, borderRadius: 8, border: '1px solid rgba(248,113,113,0.45)', background: 'rgba(248,113,113,0.16)', color: '#fecaca', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>Yes, clear all</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Library picker for a B-roll slot */}
+      {libraryFor ? (
+        <div
+          onClick={() => setLibraryFor(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(4,7,13,0.78)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(820px, 94vw)', maxHeight: '82vh', overflowY: 'auto', background: '#0d1117', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, padding: 18 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}>
+              <span style={{ color: LB.textPrimary, fontSize: 14, fontWeight: 700 }}>Pick a clip from your library</span>
+              {subjectProfile ? <span style={{ color: '#c4b5fd', fontSize: 10.5, background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.35)', borderRadius: 999, padding: '3px 8px' }}>Ranked for {subjectProfile.subjectType}</span> : null}
+              <button type="button" className="vs-btn" onClick={() => setLibraryFor(null)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: LB.textMuted, cursor: 'pointer' }}><X size={15} /></button>
+            </div>
+            {libraryBusy ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: LB.textSecondary, fontSize: 12.5 }}>
+                <Loader2 size={14} className="vs-spin" color={LB.accent} /> Reading the workspace clip library…
+              </div>
+            ) : library.length ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+                {rankedLibrary.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    className="vs-btn"
+                    onClick={() => void useLibraryClip(v.url)}
+                    style={{ textAlign: 'left', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: 8, cursor: 'pointer' }}
+                  >
+                    <video src={v.url} muted preload="metadata" style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 7, background: '#000' }} />
+                    <div style={{ color: LB.textSecondary, fontSize: 11, marginTop: 6, lineHeight: 1.45, maxHeight: 44, overflow: 'hidden' }}>
+                      {v.prompt || v.provider}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ color: LB.textMuted, fontSize: 12.5, lineHeight: 1.6 }}>
+                Your workspace clip library is empty so far. Generate a cutaway from a prompt, or drop in your own clip.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+
       <AgentChatProvider appContext={agentContext}>
         <AgentChatButton />
         <AgentChatPanel />
@@ -1166,56 +3495,56 @@ function VideoEnhancerNle() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Crash containment
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Crash containment + mode shell
+// ===========================================================================
 
-class VeBoundary extends Component<{ children?: ReactNode }, { error: Error | null }> {
-  state: { error: Error | null } = { error: null };
+class VeBoundary extends Component<{ children?: ReactNode }, { error: Error | null; nonce: number }> {
+  state: { error: Error | null; nonce: number } = { error: null, nonce: 0 };
   static getDerivedStateFromError(error: Error) { return { error }; }
-  componentDidCatch(error: Error, info: unknown) { console.error('[VideoEnhancer] crashed:', error, info); }
+  componentDidCatch(error: Error, info: unknown) { console.error('[VideoStudio] crashed:', error, info); }
+  /** Bumping the key re-mounts the children from scratch instead of re-rendering the crashed tree. */
+  reset = () => { this.setState((s) => ({ error: null, nonce: s.nonce + 1 })); };
   render() {
     if (this.state.error) {
       return (
-        <div style={{ minHeight: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: LB.bg, fontFamily: 'system-ui, sans-serif' }}>
-          <div style={{ maxWidth: 440, textAlign: 'center', background: LB.bgCard, border: LB.border, borderRadius: 16, padding: '30px 26px' }}>
+        <div style={{ minHeight: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: VE.bg, fontFamily: VE.font }}>
+          <div style={{ maxWidth: 440, textAlign: 'center', background: VE.card, border: '1px solid #2A2A2A', borderRadius: 12, padding: '30px 26px' }}>
             <AlertCircle size={26} color="#f87171" style={{ margin: '0 auto 10px' }} />
-            <div style={{ color: LB.textPrimary, fontSize: 15.5, fontWeight: 600, marginBottom: 8 }}>The editor hit a snag</div>
-            <div style={{ color: LB.textSecondary, fontSize: 12.5, lineHeight: 1.6, marginBottom: 16 }}>{this.state.error.message}</div>
-            <button onClick={() => this.setState({ error: null })} style={{ background: LB.accent, color: '#241503', border: 'none', borderRadius: 10, padding: '10px 22px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-              Reload the editor
+            <div style={{ color: VE.text, fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Something went wrong</div>
+            <div style={{ color: VE.textSecondary, fontSize: 14, lineHeight: 1.6, marginBottom: 18 }}>
+              Your project is saved. Reopen the editor and carry on from where you were.
+            </div>
+            <button onClick={this.reset} style={{ ...vePrimary, margin: '0 auto' }}>
+              Reopen the editor
             </button>
           </div>
         </div>
       );
     }
-    return this.props.children;
+    return <Fragment key={this.state.nonce}>{this.props.children}</Fragment>;
   }
 }
 
-type EnhancerMode = 'enhance' | 'product';
+type StudioMode = 'studio' | 'product';
 
-const MODE_TABS: { id: EnhancerMode; label: string; icon: typeof Sparkles; blurb: string; testId: string }[] = [
-  // Enhance — the original timeline NLE for footage you already have.
-  { id: 'enhance', label: 'Enhance', icon: Sparkles, blurb: 'Polish footage you already have on the timeline editor', testId: 've-mode-enhance' },
-  // Product Video — the full Product Studio suite merged in: Brand Reel,
-  // Ad Director, the video galleries and the studio-tools drawer.
+const MODE_TABS: { id: StudioMode; label: string; icon: typeof Sparkles; blurb: string; testId: string }[] = [
+  { id: 'studio', label: 'Studio', icon: Sparkles, blurb: 'The all-in-one editor: cut plan, transcript, reframe, captions, overlays, export', testId: 've-mode-enhance' },
   { id: 'product', label: 'Product Video', icon: Rocket, blurb: 'Paste a product URL for a branded video, direct an ad, or open the studio tools', testId: 've-mode-product' },
 ];
 
 export default function App() {
-  // The Enhancer now leads with two modes: the original Enhance NLE and the
-  // merged Product Video suite. BOTH stay mounted (hidden with display, never
-  // unmounted) so an in-flight render, upload or half-typed URL on either side
-  // survives a switch; the hidden tree's floating agent orb is hidden with it.
-  const [mode, setMode] = useState<EnhancerMode>('enhance');
+  // Both modes stay mounted (hidden with display, never unmounted) so an
+  // in-flight render, upload or half-typed URL on either side survives a
+  // switch.
+  const [mode, setMode] = useState<StudioMode>('studio');
   const activeBlurb = MODE_TABS.find((t) => t.id === mode)?.blurb || '';
   return (
     <VeBoundary>
-      <div style={{ height: '100%', minHeight: 0, background: LB.bg, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flexShrink: 0, borderBottom: LB.border, background: 'rgba(8,12,20,0.92)' }}>
-          <div style={{ maxWidth: 1240, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 18px' }}>
-            <div role="tablist" aria-label="Video Enhancer mode" style={{ display: 'inline-flex', gap: 4, padding: 4, borderRadius: 12, border: LB.border, background: LB.bgCard }}>
+      <div style={{ height: '100%', minHeight: 0, background: VE.bg, display: 'flex', flexDirection: 'column', fontFamily: VE.font }}>
+        <div style={{ flexShrink: 0, borderBottom: '1px solid #2A2A2A', background: 'rgba(15,15,15,0.94)' }}>
+          <div className="ve-scroll-x" style={{ maxWidth: 1760, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, padding: '8px 14px' }}>
+            <div role="tablist" aria-label="Video Studio mode" style={{ display: 'inline-flex', gap: 4, padding: 4, borderRadius: 12, border: '1px solid #2A2A2A', background: '#1A1A1A', flexShrink: 0 }}>
               {MODE_TABS.map((t) => {
                 const Icon = t.icon;
                 const active = mode === t.id;
@@ -1227,8 +3556,8 @@ export default function App() {
                     aria-selected={active}
                     title={t.blurb}
                     onClick={() => setMode(t.id)}
-                    className="nle-btn"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 16px', borderRadius: 9, border: 'none', background: active ? LB.accentGradient : 'transparent', color: active ? '#241503' : LB.textSecondary, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}
+                    className="vs-btn"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '0 16px', minHeight: 40, whiteSpace: 'nowrap', borderRadius: 8, border: 'none', background: active ? VE.accent : 'transparent', color: active ? '#FFFFFF' : VE.textSecondary, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}
                     data-testid={t.testId}
                   >
                     <Icon size={14} /> {t.label}
@@ -1236,13 +3565,11 @@ export default function App() {
                 );
               })}
             </div>
-            <span style={{ color: LB.textMuted, fontSize: 11.5, fontWeight: 500, minWidth: 0 }}>{activeBlurb}</span>
+            <span style={{ color: VE.textMuted, fontSize: 12, fontWeight: 500, minWidth: 0 }}>{activeBlurb}</span>
           </div>
         </div>
-        {/* Both modes stay mounted; only the active one is shown. The .nle-btn
-            class comes from the always-mounted Enhance tree's <style> block. */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: mode === 'enhance' ? 'block' : 'none' }}>
-          <VideoEnhancerNle />
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: mode === 'studio' ? 'flex' : 'none', flexDirection: 'column' }}>
+          <VideoStudio />
         </div>
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: mode === 'product' ? 'block' : 'none' }}>
           <ProductStudioApp />

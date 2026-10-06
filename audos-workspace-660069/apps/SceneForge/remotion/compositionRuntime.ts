@@ -10,8 +10,9 @@
 // vice versa — preview → final render consistency is a product guarantee.
 
 import type { TimelineSegment } from './AssemblyComp';
+import { planOf } from '../lib/directorPlan';
 import type { MotionTreatment, PipPosition, SceneOverlayElement } from '../lib/directorPlan';
-import type { WordTimestamp } from '../lib/supabase';
+import type { Project, WordTimestamp } from '../lib/supabase';
 
 export const FPS = 30;
 
@@ -218,11 +219,44 @@ export function speechWindows(words: WordTimestamp[] | null | undefined): [numbe
   return out.slice(0, 500);
 }
 
-export function musicVolumeAt(windows: [number, number][], tSec: number, duck = 0.12, bed = 0.3): number {
+export const MUSIC_DUCK_VOLUME = 0.12;
+export const MUSIC_BED_VOLUME = 0.3;
+
+export function musicVolumeAt(windows: [number, number][], tSec: number, duck = MUSIC_DUCK_VOLUME, bed = MUSIC_BED_VOLUME): number {
   if (!windows.length) return duck;
   const inSpeech = (t: number) => windows.some((w) => t >= w[0] - 0.15 && t <= w[1] + 0.3);
   let mix = 0;
   for (let i = -2; i <= 2; i += 1) { if (inSpeech(tSec + i * 0.12)) mix += 1; }
   mix /= 5;
   return Math.max(0, bed + (duck - bed) * mix);
+}
+
+export interface MusicBedProps {
+  musicUrl: string;
+  /** Bed level in the gaps between narration. */
+  musicBed: number;
+  /** Level while the presenter speaks. */
+  musicDuck: number;
+  /** Merged speech windows the ducking rides, in seconds. */
+  speech: [number, number][];
+}
+
+/**
+ * The music-bed props the ONE assembly render is submitted with. The score is
+ * mounted INSIDE that composition - same bed level, same duck level, same
+ * speech windows the draft preview plays - so the rendered MP4 already
+ * carries its music instead of needing a second re-encode pass over the
+ * finished film. Returns {} when the project has no bed, so the result can be
+ * spread into the render props without adding empty fields.
+ */
+export function musicBedProps(project: Project | null | undefined): MusicBedProps | Record<string, never> {
+  const url = String(project?.music_url || '');
+  if (!/^https?:\/\//i.test(url)) return {};
+  const planned = Number(planOf(project)?.music?.volume);
+  return {
+    musicUrl: url,
+    musicBed: Number.isFinite(planned) && planned > 0 ? planned : MUSIC_BED_VOLUME,
+    musicDuck: MUSIC_DUCK_VOLUME,
+    speech: speechWindows(project?.word_timestamps),
+  };
 }

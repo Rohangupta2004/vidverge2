@@ -90,20 +90,32 @@ async function generateNarration(script: string, voiceId?: string): Promise<stri
     if (!data?.audioUrl) throw new Error('Narration generation returned no audio file.');
     return [String(data.audioUrl)];
   }
-  if (chunks.length > 100 || chunks.reduce((n, s) => n + s.length, 0) > 20000) {
-    throw new Error('This script is too long for one narration pass. Shorten it below 20,000 characters.');
+  // ElevenLabs takes at most 100 segments / 20,000 characters per request, so
+  // a long script is recorded in as many requests as it needs — never refused.
+  const batches: string[][] = [];
+  for (const chunk of chunks) {
+    const last = batches[batches.length - 1];
+    if (last && last.length < 100 && last.reduce((n, s) => n + s.length, 0) + chunk.length <= 20000) last.push(chunk);
+    else batches.push([chunk]);
   }
-  const data = await audioPost(`/api/workspaces/${WORKSPACE_ID}/audio/voiceover/segments`, {
-    segments: chunks.map((text) => ({ text })),
-    voiceId: voiceId || undefined,
-    fps: 30,
-  });
-  const urls = (Array.isArray(data?.segments) ? data.segments : []).map((s: any) => String(s?.audioUrl || '')).filter(Boolean);
-  if (urls.length !== chunks.length) throw new Error('Narration generation returned an incomplete set of audio segments.');
+  const urls: string[] = [];
+  for (const batch of batches) {
+    const data = await audioPost(`/api/workspaces/${WORKSPACE_ID}/audio/voiceover/segments`, {
+      segments: batch.map((text) => ({ text })),
+      voiceId: voiceId || undefined,
+      fps: 30,
+    });
+    const got = (Array.isArray(data?.segments) ? data.segments : []).map((s: any) => String(s?.audioUrl || '')).filter(Boolean);
+    if (got.length !== batch.length) throw new Error('Narration generation returned an incomplete set of audio segments.');
+    urls.push(...got);
+  }
   return urls;
 }
 
 async function generateMusic(preset: MusicPreset, durationS: number): Promise<string> {
+  // 3–600 seconds is the provider's per-request length, not a film length:
+  // applyFinish loops the bed (`-stream_loop -1`) and trims it to the film's
+  // exact duration, so a longer film still has music to its last frame.
   const lengthMs = Math.min(600000, Math.max(3000, Math.ceil(durationS * 1000)));
   const data = await audioPost(`/api/workspaces/${WORKSPACE_ID}/audio/music/preset`, { preset, lengthMs, provider: 'elevenlabs' });
   if (!data?.audioUrl) throw new Error('Music generation returned no audio file.');

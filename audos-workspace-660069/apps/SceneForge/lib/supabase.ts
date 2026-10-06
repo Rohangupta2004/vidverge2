@@ -18,9 +18,14 @@ export interface AssemblyJob {
   finished_at?: string;
   output_url?: string;
   error?: string;
+  /** Durable Cloud Run render operation. The project column mirrors this for reload recovery. */
+  operation_id?: string;
   /** The DirectorPlan draft version this render was submitted with — an output
    * of an older draft is shown but never promoted over a newer edit. */
   draft_version?: number;
+  /** The music bed this render baked into the film, so Step 7 can tell a cut
+   * that already carries the score from one rendered before the bed existed. */
+  music_url?: string | null;
 }
 export const ASSEMBLY_RUNNING_STATUSES: AssemblyStatus[] = ['preparing', 'assembling', 'checking'];
 export function assemblyJobRunning(job?: AssemblyJob | null): boolean {
@@ -50,6 +55,8 @@ export interface Project {
   qc_report?: { summary?: string; gaps?: string[]; overlaps?: string[]; suggestions?: Array<{ scene_id?: string; scene_index: number; weak: boolean; suggestion: string }> } | null;
   /** Live final-assembly job state — see AssemblyJob. Browser-writable (owner session); also passes through save_project. */
   assembly_job?: AssemblyJob | null;
+  /** Live server-pipeline job state, written by the sceneforge-v2 server function; the browser only reads it. */
+  pipeline_job?: { status: string; stage?: string; progress?: number; message?: string; error?: string; updated_at?: string; idempotency_key?: string } | null;
   /** The AI Editorial Director's authoritative plan for the current generation (lib/directorPlan.DirectorPlan). */
   director_plan?: Record<string, unknown> | null;
   /** Id of the current plan generation — scenes/assets are stamped with it so stale work never leaks into a new render. */
@@ -58,6 +65,11 @@ export interface Project {
   last_good_version?: Record<string, unknown> | null;
   /** Result of the last pre-render timeline validation (lib/timelineValidation). */
   timeline_report?: Record<string, unknown> | null;
+  /** Studio workbench state and finishing settings (lib/studioConfig.StudioConfig):
+   * provider, brand accent, lower thirds, transitions, title/CTA cards,
+   * uploaded audio track, character reference and the auto-saved script
+   * draft. Restored whenever the project is reopened. */
+  studio_config?: Record<string, unknown> | null;
   /** Film-level output QA for the assembled MP4 (lib/filmQa). */
   final_qa_report?: Record<string, unknown> | null;
 }
@@ -100,6 +112,14 @@ export interface Scene {
   motion_treatment?: Record<string, unknown> | null;
   /** The plan generation this scene's media belongs to. */
   generation_id?: string | null;
+  /** Gemini Vision's read of this scene's first frame (lib/sceneVision.SceneVisionContext):
+   * summary, objects, mood, setting, palette, B-roll search terms and the
+   * suggested lower-third copy. Null until the scene has a visual. */
+  vision_context?: Record<string, unknown> | null;
+  /** Audio-transparent B-roll picture-in-picture for this scene (lib/broll.BrollClip).
+   * Composited MUTED over the scene by the assembly render, so the film's
+   * narration and music are never interrupted. */
+  broll?: Record<string, unknown> | null;
 }
 export interface Asset { id: string; project_id: string; scene_id?: string; asset_type: 'scene_image' | 'motion_bg' | 'user_upload'; element_name: string; storage_path: string; public_url?: string; prompt?: string; source: 'generated' | 'upload'; width?: number; height?: number }
 export interface ForgeSettings {

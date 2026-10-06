@@ -21,17 +21,24 @@ import { Film, FilmScene, T, db } from './api';
 import {
   AssemblyProgress, activeScene, allScenesDone, assembleReadyFilm,
   autoPostProduce, autoProduce, changeMusicDirection, changeNarrationVoice,
-  createAndSegmentFilm, generateScene, isFrameExtractionStalled,
-  msSinceFilmUpdate, prepareFilmAudioStage, prepareScene,
+  changeVoiceSource, createAndSegmentFilm, createManualScriptFilm, generateScene,
+  isFrameExtractionStalled, msSinceFilmUpdate, prepareFilmAudioStage, prepareScene,
   recoverStalledFrameExtraction, regenerateNarration, regenerateScenePrompt,
   regenerateSfx, resumeFilm, retryAudioLayer, retryScene, runAudioLayerStep,
   runFinalAssembly, skipAudioLayer, skipScene, useCharacterReferenceFallback,
 } from './pipeline/orchestrator';
 import { audioReady } from './pipeline/audio';
+import {
+  DEFAULT_OPENAI_VOICE, elevenLabsOffered, loadOpenAiVoicePref, loadVoiceSourcePref,
+  saveOpenAiVoicePref, saveVoiceSourcePref, subscribeElevenLabs,
+  syncElevenLabsAvailability,
+} from './pipeline/voiceSource';
+import type { VoiceSourceId } from './pipeline/voiceSource';
 import { LB_SHIMMER_CSS } from '../../components/LightBeam';
 import ProductSuiteHeader from '../../components/ProductSuiteHeader';
 import Library, { LegacyFilm } from './Library';
 import { CreateScreen } from './CreateFlow';
+import type { CreateMode } from './CreateFlow';
 import RenderRoom from './RenderRoom';
 import { FinalScreen } from './ReviewFinish';
 import AgentPanel from './AgentPanel';
@@ -41,6 +48,9 @@ import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
 import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
 import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
 import { videoEngine } from '../../lib/videoEngines';
+import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
+import type { VidvergeAttachment } from '../../lib/vidvergeHandoff';
+import { saveVideoSelection } from '../../lib/videoIntegrations';
 
 type Screen = 'library' | 'create' | 'board' | 'final' | 'legacy' | 'tester';
 
@@ -92,6 +102,13 @@ const APP_CSS = `
   }
 `;
 
+/** The studio canvas. A flat fill read cheap next to the rest of the suite, so
+ * the shell sits on a subtle navy-to-violet gradient instead. */
+const CANVAS_GRADIENT = 'linear-gradient(160deg, #0d0d1a, #1a1033)';
+
+/** The amber LightBeam CTA, as a gradient rather than one flat swatch. */
+const CTA_GRADIENT = 'linear-gradient(90deg, #f59e0b, #d97706)';
+
 function ScriptToVideoApp() {
   const [screen, setScreen] = useState<Screen>('library');
   const [films, setFilms] = useState<Film[]>([]);
@@ -101,11 +118,21 @@ function ScriptToVideoApp() {
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [quickText, setQuickText] = useState('');
+  const [handoffAttachment, setHandoffAttachment] = useState<VidvergeAttachment | null>(null);
   const [film, setFilm] = useState<Film | null>(null);
   const [scenes, setScenes] = useState<FilmScene[]>([]);
   const [auto, setAuto] = useState(false);
   const [autoPost, setAutoPost] = useState(true);
   const [captions, setCaptions] = useState(false);
+  // VOICE SOURCE — narration is optional, and the choice is remembered for the
+  // whole browser session so it is picked once rather than per film. With no
+  // pick yet it is NO voiceover: the one setting that cannot wait on a voice
+  // provider, which is what stops this step stalling a film. Opening a film
+  // that already has an audio plan shows that film's own source instead
+  // (see adopt() below and resolveVoiceSource in pipeline/audio.ts).
+  const [voiceSource, setVoiceSource] = useState<VoiceSourceId>(() => loadVoiceSourcePref() || 'none');
+  const [openaiVoice, setOpenaiVoice] = useState<string>(() => loadOpenAiVoicePref() || DEFAULT_OPENAI_VOICE);
+  const [elevenOffered, setElevenOffered] = useState<boolean>(() => elevenLabsOffered());
   const [assembly, setAssembly] = useState<AssemblyProgress | null>(null);
   const [legacyOpen, setLegacyOpen] = useState<LegacyFilm | null>(null);
   // The completed scene currently being redone (fresh prompt + re-render), so
@@ -164,6 +191,43 @@ function ScriptToVideoApp() {
   }, []);
 
   useEffect(() => { loadLibrary(); }, [loadLibrary]);
+
+  // Is ElevenLabs reachable at all? The answer only greys its radio card out;
+  // the built-in AI voice and No Voiceover never depend on it.
+  useEffect(() => {
+    void syncElevenLabsAvailability();
+    return subscribeElevenLabs(() => setElevenOffered(elevenLabsOffered()));
+  }, []);
+
+  // The session preference is the ONE source of truth for the voice source:
+  // the pipeline reads it when it builds an audio plan, so the resolved
+  // default is written down straight away rather than left implicit — the
+  // selector and the plan can then never disagree about what was chosen.
+  useEffect(() => {
+    saveVoiceSourcePref(voiceSource);
+    saveOpenAiVoicePref(openaiVoice);
+  }, []);
+
+  useEffect(() => {
+    const handoff = consumeVidvergeHandoff('script-to-video');
+    if (!handoff) return;
+    if (handoff.projectId != null) {
+      void db.getFilm(Number(handoff.projectId)).then((row) => { if (row) void openFilm(row); });
+      return;
+    }
+    const attachment = handoff.attachment || null;
+    const referenceLine = attachment && !attachment.type.startsWith('image/') ? `\n\nReference asset (${attachment.name}): ${attachment.url}` : '';
+    setQuickText(`${String(handoff.prompt || '').trim()}${referenceLine}`.trim());
+    setHandoffAttachment(attachment);
+    if (handoff.videoIntegration && handoff.videoModel) {
+      saveVideoSelection(handoff.videoIntegration as any, handoff.videoModel);
+      try {
+        window.sessionStorage.setItem('s2v:videoModel', handoff.videoModel);
+        window.sessionStorage.setItem('s2v:modelMode', 'manual');
+      } catch { /* preference only */ }
+    }
+    setScreen('create');
+  }, []);
 
   /** Set auto-generate for a film and re-arm the PROMPT_READY trigger. */
   function armAuto(filmId: number, on = readAutoPref(filmId)) {
@@ -253,6 +317,13 @@ function ScriptToVideoApp() {
     engineScenes.current = list;
     setFilm({ ...f });
     setScenes(list.map((s) => ({ ...s })));
+    // A film that already has an audio plan carries its own voice-source
+    // decision: the selector shows THAT, not whatever was last picked here.
+    // An older plan predates the choice, so it is ElevenLabs by definition —
+    // reopening one must not silently drop narration it already recorded.
+    const stored: VoiceSourceId | null = f.audio ? (f.audio.voice_source || 'elevenlabs') : null;
+    if (stored) { setVoiceSource(stored); saveVoiceSourcePref(stored); }
+    if (f.audio?.openai_voice) { setOpenaiVoice(f.audio.openai_voice); saveOpenAiVoicePref(f.audio.openai_voice); }
   }
 
   /** Run one engine operation with the shared guards (single flight, error banner). */
@@ -290,12 +361,16 @@ function ScriptToVideoApp() {
 
   // ------- flow handlers -------
 
-  async function handleCreate(params: { script: string; aspect: any; screenshotUrl: string | null; note: string; videoModel?: string }) {
+  async function handleCreate(params: { mode?: CreateMode; script: string; aspect: any; screenshotUrl: string | null; characterRefUrl?: string | null; note: string; videoModel?: string }) {
     if (running.current) return;
     running.current = true;
     setBusy(true); setError('');
     try {
-      const res = await createAndSegmentFilm({ script: params.script, aspect: params.aspect, referenceImageUrl: params.screenshotUrl, note: params.note, videoModel: params.videoModel }, hooks);
+      // Manual Script Mode skips scene detection and the directing pass
+      // entirely: the pasted script already says what every clip is.
+      const res = params.mode === 'manual'
+        ? await createManualScriptFilm({ script: params.script, aspect: params.aspect, characterRefUrl: params.characterRefUrl || null, referenceImageUrl: params.screenshotUrl, note: params.note, videoModel: params.videoModel }, hooks)
+        : await createAndSegmentFilm({ script: params.script, aspect: params.aspect, referenceImageUrl: params.screenshotUrl, characterRefUrl: params.characterRefUrl || null, note: params.note, videoModel: params.videoModel }, hooks);
       const freshScenes = await db.listScenes(res.film.id);
       adopt(res.film, freshScenes);
       advancedFor.current = null; postKickedFor.current = null;
@@ -425,7 +500,7 @@ function ScriptToVideoApp() {
     void run(() => retryAudioLayer(f, engineScenes.current, hooks, layer), { block: true });
   };
 
-  const handleSkipLayer = (layer: 'music' | 'sfx') => {
+  const handleSkipLayer = (layer: 'narration' | 'music' | 'sfx') => {
     const f = engineFilm.current;
     if (!f) return;
     void run(() => skipAudioLayer(f, engineScenes.current, hooks, layer), { block: true });
@@ -441,6 +516,19 @@ function ScriptToVideoApp() {
     const f = engineFilm.current;
     if (!f) return;
     void run(() => changeMusicDirection(f, engineScenes.current, hooks, preset), { block: true });
+  };
+
+  /** [Voice Source] — No Voiceover / ElevenLabs / built-in AI voice. The pick
+   * is remembered for the session and only re-shapes the narration layer; it
+   * never regenerates a clip and never records on its own. */
+  const handleChangeVoiceSource = (source: VoiceSourceId, voice?: string) => {
+    const nextVoice = voice || openaiVoice;
+    setVoiceSource(source);
+    saveVoiceSourcePref(source);
+    if (voice) { setOpenaiVoice(voice); saveOpenAiVoicePref(voice); }
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(() => changeVoiceSource(f, engineScenes.current, hooks, source, nextVoice));
   };
 
   async function handleDirect(scene: FilmScene, instruction: string): Promise<string> {
@@ -470,15 +558,34 @@ function ScriptToVideoApp() {
     armAuto(f.id);
     try {
       const list = await db.listScenes(f.id);
+      // Browser-side FFmpeg has no background job to resume after a reload. A
+      // row left in FFMPEG_ASSEMBLY with no final URL is therefore interrupted,
+      // not actively rendering. Reset it before adopt() so the Final screen
+      // does not permanently disable Retry Assembly behind status=assembling.
+      const interruptedAssembly = f.status === 'assembling'
+        && f.machine_state === 'FFMPEG_ASSEMBLY'
+        && !f.final_video_url;
+      if (interruptedAssembly) {
+        const recovery: Partial<Film> = {
+          status: 'producing',
+          machine_state: audioReady(f.audio) ? 'AUDIO_READY' : 'ALL_SCENES_COMPLETED',
+          stage_note: 'The previous assembly was interrupted — resuming from the saved scenes and audio.',
+          error: null,
+        };
+        await db.updateFilm(f.id, recovery);
+        Object.assign(f, recovery);
+      }
       adopt(f, list);
       const scenesDone = allScenesDone(list);
       if (f.status === 'ready' && f.final_video_url) { setScreen('final'); advancedFor.current = f.id; }
       else if (scenesDone) {
         // Scenes are complete — land directly in post-production, and resume
-        // the audio pipeline automatically when Auto-complete is on.
+        // an interrupted final assembly or the audio pipeline automatically.
         setScreen('final');
         advancedFor.current = f.id;
-        if (autoPostRef.current && !audioReady(f.audio) && !f.error && !running.current) {
+        if (interruptedAssembly && audioReady(f.audio) && !running.current) {
+          void run(() => runFinalAssembly(engineFilm.current!, engineScenes.current, hooks, { captions }), { block: true });
+        } else if (autoPostRef.current && !audioReady(f.audio) && !f.error && !running.current) {
           postKickedFor.current = f.id;
           void run(() => autoPostProduce(engineFilm.current!, engineScenes.current, hooks));
         }
@@ -495,6 +602,29 @@ function ScriptToVideoApp() {
         }
       }
     } catch (e: any) { setError(String(e?.message || e)); }
+  }
+
+  /** Archive / unarchive a film from the Library (soft hide, keeps the row). */
+  async function handleArchiveFilm(f: Film, archived: boolean) {
+    setFilms((prev) => prev.map((x) => (x.id === f.id ? { ...x, is_archived: archived } : x)));
+    try {
+      await db.setFilmArchived(f.id, archived);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+      await loadLibrary();
+    }
+  }
+
+  /** Permanently delete a film from the Library (confirmed in Library UI). */
+  async function handleDeleteFilm(f: Film) {
+    const prev = films;
+    setFilms((list) => list.filter((x) => x.id !== f.id));
+    try {
+      await db.deleteFilm(f.id);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+      setFilms(prev);
+    }
   }
 
   // ------- render -------
@@ -528,7 +658,9 @@ function ScriptToVideoApp() {
     },
     promptHint: [
       'The user writes a script and this app turns it into a film, one verified AI clip at a time.',
+      'The create screen has TWO input modes. AI Mode (the default) hands the brief to the director, which reads the whole story and splits it into clips. MANUAL SCRIPT MODE is for a script the user has ALREADY broken into scenes ("Scene 1 — Title | 8 sec", then Visual:, Dialogue — Name:, Camera:): nothing re-reads or re-plans it, every scene is filmed exactly as written, and the button reads "Generate All Scenes". Point the user there when they say their script is already formatted or scene-by-scene. Either mode accepts a character reference image, which is sent with every clip alongside the previous clip’s final frame so one character carries through the film.',
       'This app also has an AGENT STUDIO: one prompt, one clip, on any Runway model (Gen 4.5 by default), with a download button. It creates no film project. Send the user there when they want a single shot rather than a whole film, or want to compare models.',
+      'VOICEOVER IS OPTIONAL and never blocks the pipeline. On the final Audio & Assembly screen the VOICEOVER card leads with a Voice source choice: "No Voiceover" (the default — the clips keep their own sound), "ElevenLabs" (one premium voice, offered only when the platform voice catalog answers) and "Built-in AI Voice" (the platform’s own text-to-speech with six voices: alloy, echo, fable, onyx, nova, shimmer). If narration ever fails, the same card offers "Continue Without Voiceover" — music, SFX, scene assembly and the MP4 download all work on every setting. Never tell a user they must connect ElevenLabs to finish a film.',
       'Fields you can fill: script (the full video script — filling it opens the create screen prefilled with your text).',
       'Actions you can trigger: generate with {"script":"...","aspect":"16:9"|"9:16"} (starts scene planning and production — include the script in the params), studio (opens the Agent Studio so the user can generate one clip from one prompt), assemble (final assembly with audio layers, only when scenes are done), nativeCut (plain assembly without narration/music).',
       'When the user asks you to write or improve a script, write it yourself, then fill it with FILL_FIELD:script:… and ask if they want you to start generation.',
@@ -536,7 +668,7 @@ function ScriptToVideoApp() {
   };
 
   return (
-    <div className="s2v-app" style={{ position: 'relative', width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: T.canvas, fontFamily: T.sans, overflow: 'hidden' }}>
+    <div className="s2v-app" style={{ position: 'relative', width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: CANVAS_GRADIENT, fontFamily: T.sans, overflow: 'hidden' }}>
       <style>{APP_CSS}</style>
       <div style={{ padding: '12px 20px', borderBottom: `1px solid ${T.raised}`, flexShrink: 0 }}>
         <ProductSuiteHeader
@@ -584,10 +716,12 @@ function ScriptToVideoApp() {
           onOpenLegacy={(l) => { setLegacyOpen(l); setScreen('legacy'); }}
           onQuickCreate={(t) => { setQuickText(t); setScreen('create'); }}
           onOpenStudio={() => { setScreen('tester'); setAuto(false); autoRef.current = false; }}
+          onArchive={handleArchiveFilm}
+          onDelete={handleDeleteFilm}
         />
       ) : null}
 
-      {screen === 'create' ? <CreateScreen initialText={quickText} busy={busy} onSubmit={handleCreate} /> : null}
+      {screen === 'create' ? <CreateScreen initialText={quickText} initialShotUrl={handoffAttachment?.type.startsWith('image/') ? handoffAttachment.url : undefined} initialShotName={handoffAttachment?.name} busy={busy} onSubmit={handleCreate} /> : null}
 
       {screen === 'tester' ? <AgentStudio /> : null}
 
@@ -631,6 +765,10 @@ function ScriptToVideoApp() {
           onChangeVoice={handleChangeVoice}
           onChangeMusic={handleChangeMusic}
           onNativeCut={handleNativeCut}
+          voiceSource={voiceSource}
+          openaiVoice={openaiVoice}
+          elevenLabsOffered={elevenOffered}
+          onChangeVoiceSource={handleChangeVoiceSource}
         />
       ) : null}
 
@@ -676,7 +814,7 @@ function LegacyViewer({ legacy: item }: { legacy: LegacyFilm }) {
           <div style={{ marginTop: 16 }}>
             <video src={finalUrl} controls style={{ maxWidth: '100%', maxHeight: 440, borderRadius: 12, background: '#000' }} />
             <div style={{ marginTop: 12 }}>
-              <a className="s2v-lift" href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.live, color: '#1A1205', borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 2px 10px rgba(245,158,11,0.25)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
+              <a className="s2v-lift" href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: CTA_GRADIENT, color: '#1A1205', borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 2px 14px rgba(245,158,11,0.32)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
                 <Download size={14} /> Download MP4
               </a>
             </div>
@@ -700,7 +838,7 @@ class S2VBoundary extends Component<{ children?: ReactNode }, { error: Error | n
   render() {
     if (this.state.error) {
       return (
-        <div style={{ width: '100%', height: '100%', minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: T.canvas, fontFamily: T.sans }}>
+        <div style={{ width: '100%', height: '100%', minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: CANVAS_GRADIENT, fontFamily: T.sans }}>
           <div style={{ maxWidth: 460, textAlign: 'center', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 16, padding: '32px 28px', boxShadow: '0 24px 60px rgba(0,0,0,0.4)' }}>
             <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(226,114,111,0.1)', border: '1px solid rgba(226,114,111,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
               <AlertCircle size={24} color={T.fault} />
@@ -709,7 +847,7 @@ class S2VBoundary extends Component<{ children?: ReactNode }, { error: Error | n
             <div style={{ color: T.muted, fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>
               Your film's progress is saved after every step — reopen it from the library and it picks up where it left off.
             </div>
-            <button onClick={() => this.setState({ error: null })} style={{ background: T.live, color: '#1A1205', border: 'none', borderRadius: 10, padding: '11px 24px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
+            <button onClick={() => this.setState({ error: null })} style={{ background: CTA_GRADIENT, color: '#1A1205', border: 'none', borderRadius: 10, padding: '11px 24px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
               Back to your films
             </button>
           </div>

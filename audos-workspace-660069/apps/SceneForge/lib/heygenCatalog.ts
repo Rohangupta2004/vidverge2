@@ -95,3 +95,27 @@ export function suggestedVoices(avatar: any | undefined, voices: VoiceView[]): {
   }
   return null;
 }
+
+// ——— Curated India voice seeds ———
+// Real HeyGen voice IDs for Hindi and Indian English. They are merged into the
+// LIVE voice catalog (deduped by voice id) so the dedicated "India" group in
+// the picker always offers these presenter voices even when an account's live
+// voice list omits them. A seed is dropped the moment the same id arrives from
+// the live API, so nothing is ever shown twice.
+export const INDIA_VOICE_SEEDS: Array<{ voice_id: string; name: string; language: string; gender: string; locale: string }> = [
+  { voice_id: 'in-IN-AaravNeural', name: 'Aarav', language: 'Hindi', gender: 'Male', locale: 'hi-IN' },
+  { voice_id: 'in-IN-AashiNeural', name: 'Aashi', language: 'Hindi', gender: 'Female', locale: 'hi-IN' },
+  { voice_id: 'hi-IN-MadhurNeural', name: 'Madhur', language: 'Hindi', gender: 'Male', locale: 'hi-IN' },
+  { voice_id: 'hi-IN-SwaraNeural', name: 'Swara', language: 'Hindi', gender: 'Female', locale: 'hi-IN' },
+  { voice_id: 'en-IN-NeerjaNeural', name: 'Neerja', language: 'Indian English', gender: 'Female', locale: 'en-IN' },
+  { voice_id: 'en-IN-PrabhatNeural', name: 'Prabhat', language: 'Indian English', gender: 'Male', locale: 'en-IN' },
+];
+
+// Append any seed voice the live catalog did not already return, matched by
+// voice id. Pure addition — the live catalog is never mutated or reordered
+// here; sortVoices still decides the final ordering and flags each as Indian.
+export function withIndiaSeedVoices(voices: any[]): any[] {
+  const present = new Set((voices || []).map((voice) => String(voice?.voice_id ?? voice?.id ?? '')));
+  const missing = INDIA_VOICE_SEEDS.filter((seed) => !present.has(seed.voice_id));
+  return missing.length ? [...(voices || []), ...missing] : (voices || []);
+}

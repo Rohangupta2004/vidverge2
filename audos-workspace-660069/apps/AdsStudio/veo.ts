@@ -6,21 +6,37 @@
  *   poll:    GET  /api/veo/status/:operationId  → { status, videoUrl }
  *
  * Model: gemini-omni-flash-preview — the only video model the platform
- * accepts (the retired veo-3.x ids answer 400). The avatar reference image
- * travels as imageData (a public https URL the proxy downloads) so the same
- * presenter opens every clip; textual continuity notes ride inside the prompt.
+ * accepts (the retired veo-3.x ids answer 400).
+ *
+ * CHARACTER CONSISTENCY (the Script-to-Video mechanism). Two images travel
+ * with every clip and resolveClipReferences below splits them across the
+ * fields the chosen engine actually accepts:
+ *   - the LOCKED presenter reference — the same image on every clip of a run,
+ *     sent as referenceImages on engines that take them (Omni Flash);
+ *   - the previous clip's final frame — sent as imageData, so clip N+1 starts
+ *     from where clip N ended.
+ * Textual continuity notes ride inside the prompt alongside them.
  *
  * Also holds the browser-side frame utilities the agentic loop needs:
  * last-frame extraction (continuity context for Opus) and duration probing.
  */
 
-import { uploadDataUrl, wsToken } from './api';
-import { generateWithRunway } from '../../lib/runwayAdapter';
-import { isRunwayModel } from '../../lib/videoEngines';
+import { uploadDataUrl } from './api';
+import {
+  engineLabelOf, generateWithOmniFlash, isModelRejection,
+} from '../../lib/omniFallback';
+import { pollGroupA, submitGroupA } from '../../lib/videoEngineClient';
+import { APP_IDS, OMNI_FLASH_MODEL } from '../../lib/appIds';
+import { groupAModel, isRunwayModel } from '../../lib/videoEngines';
+import { generateVideoClip, integrationForEngineId, type VideoIntegrationId } from '../../lib/videoIntegrations';
 
 /** The default model an Ads Studio clip renders on — exported so the pipeline
- * can RECORD the actual model used on each generated clip. */
-export const VEO_MODEL = 'gemini-omni-flash-preview';
+ * can RECORD the actual model used on each generated clip.
+ *
+ * `gemini-omni-flash-preview` is the only Omni Flash spelling the proxy's model
+ * enum accepts; a versioned id answers 400 invalid_enum_value. */
+// TODO: upgrade to 1.1 when platform key is confirmed
+export const VEO_MODEL = OMNI_FLASH_MODEL;
 
 // The proxy rejects prompts over 1000 characters ("String must contain at
 // most 1000 character(s)"), so every prompt is capped BEFORE submission.
@@ -36,76 +52,78 @@ export function capVeoText(text: string, max = VEO_PROMPT_MAX): string {
   return (space > 0 ? cut.slice(0, space) : cut).trim();
 }
 
-export async function submitVeo(params: {
+/** The two continuity images one clip can be generated against. */
+export interface ClipReferences {
+  /** The LOCKED presenter reference — the SAME image on every clip of a run
+   * (the uploaded avatar, or the portrait cast once for this ad). */
+  characterImageUrl?: string | null;
+  /** The previous clip's final frame, seeding this clip so the actor, wardrobe
+   * and set carry over instead of being invented again. */
+  seedImageUrl?: string | null;
+}
+
+const publicImage = (url?: string | null): string | null =>
+  (typeof url === 'string' && /^https:\/\//.test(url) ? url : null);
+
+/**
+ * Split the locked presenter and the chained frame across the fields the
+ * chosen engine accepts (combining rules live in lib/videoEngines):
+ * - Omni Flash takes referenceImages AND a seed, so the presenter rides as a
+ *   reference on every clip while the previous final frame seeds this one.
+ * - Every other engine takes ONE image: the chain frame when there is one,
+ *   the locked presenter otherwise.
+ */
+export function resolveClipReferences(model: string, refs: ClipReferences): {
+  imageData: string | null;
+  referenceImages: { imageData: string; referenceType: 'asset' }[];
+} {
+  const character = publicImage(refs.characterImageUrl);
+  const seed = publicImage(refs.seedImageUrl);
+  const spec = groupAModel(model || VEO_MODEL);
+  const carriesBoth = Boolean(spec && spec.supportsReferenceImages && !spec.refsExclusiveWithSeed);
+  return {
+    imageData: seed || character,
+    referenceImages: carriesBoth && character ? [{ imageData: character, referenceType: 'asset' }] : [],
+  };
+}
+
+export async function submitVeo(params: ClipReferences & {
   prompt: string;
   negative?: string;
   aspect: '9:16' | '16:9' | '1:1';
   durationS: number;
+  /** Legacy alias for characterImageUrl. */
   referenceImageUrl?: string | null;
   /** Group A model id. Runway ids never reach here — renderAdClip routes
    * those to the Runway proxy instead. */
   model?: string;
-}): Promise<string> {
+  creditKey?: string;
+}): Promise<{ operationId: string; creditKey?: string }> {
   // The video model renders 4–8s clips; a 10s script clip renders at the 8s cap.
   const duration = Math.min(8, Math.max(4, Math.round(params.durationS || 6)));
-  const body: Record<string, unknown> = {
-    model: params.model || VEO_MODEL,
+  const model = params.model || VEO_MODEL;
+  const refs = resolveClipReferences(model, {
+    characterImageUrl: params.characterImageUrl ?? params.referenceImageUrl,
+    seedImageUrl: params.seedImageUrl,
+  });
+  const kick = await submitGroupA({
+    appId: APP_IDS.adsStudio,
+    model,
     prompt: capVeoText(params.prompt),
+    negativePrompt: params.negative ? capVeoText(params.negative, 500) : undefined,
     aspectRatio: params.aspect,
     duration,
     generateAudio: true,
-    // The default safety level false-positives on seeded reference frames.
-    safetyFilterLevel: 'block_only_high',
-  };
-  if (params.negative) body.negativePrompt = capVeoText(params.negative, 500);
-  if (params.referenceImageUrl && /^https:\/\//.test(params.referenceImageUrl)) body.imageData = params.referenceImageUrl;
-  let res: Response;
-  try {
-    res = await fetch('/api/veo/generate/video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': wsToken() },
-      body: JSON.stringify(body),
-    });
-  } catch (e: any) {
-    throw new Error(`Could not reach the video service: ${String(e?.message || e)}`);
-  }
-  const data = await res.json().catch(() => null);
-  const operationId = data && (data.operationId || data.operation_id);
-  // The proxy can answer 200 OK with a placeholder id prefixed veo_video_error_
-  // (or status "failed") when the provider submission itself failed.
-  const failed = String(data?.status || '').toLowerCase() === 'failed';
-  if (res.ok && typeof operationId === 'string' && operationId && !failed && !operationId.startsWith('veo_video_error_')) {
-    return operationId;
-  }
-  throw new Error(String(data?.errorMessage || data?.error || data?.message || `Veo submit failed (HTTP ${res.status})`));
-}
-
-interface VeoStatus { status: 'processing' | 'completed' | 'failed'; videoUrl?: string; error?: string }
-
-async function checkVeo(operationId: string): Promise<VeoStatus> {
-  const res = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`);
-  const data = await res.json().catch(() => null);
-  if (res.status === 404) return { status: 'failed', error: 'The video service has no record of this render (404). Regenerate the clip.' };
-  if (!res.ok) return { status: 'processing', error: String(data?.error || `status HTTP ${res.status}`) };
-  const status = String(data?.status || '').toLowerCase();
-  if (status === 'completed' && data?.videoUrl) return { status: 'completed', videoUrl: String(data.videoUrl) };
-  if (status === 'failed' || status === 'error') return { status: 'failed', error: String(data?.errorMessage || data?.error || 'The render failed at the provider.') };
-  return { status: 'processing' };
+    imageData: refs.imageData || undefined,
+    referenceImages: refs.referenceImages.length ? refs.referenceImages : undefined,
+    creditKey: params.creditKey,
+  });
+  return { operationId: kick.operationId, creditKey: kick.creditKey };
 }
 
 /** Poll a submitted Veo operation to completion; resolves with the clip URL. */
-export async function pollVeo(operationId: string, timeoutMs = 8 * 60 * 1000): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  let misses = 0;
-  while (Date.now() < deadline) {
-    const st = await checkVeo(operationId);
-    if (st.status === 'completed' && st.videoUrl) return st.videoUrl;
-    if (st.status === 'failed') throw new Error(st.error || 'The render failed.');
-    if (st.error) { misses += 1; if (misses >= 6) throw new Error(`The video service stopped answering: ${st.error}`); }
-    else misses = 0;
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-  throw new Error('The render took too long (8 minutes). Regenerate the clip to retry.');
+export async function pollVeo(operationId: string, timeoutMs = 8 * 60 * 1000, creditKey?: string): Promise<string> {
+  return pollGroupA(operationId, { timeoutMs, creditKey, appId: APP_IDS.adsStudio });
 }
 
 /**
@@ -116,31 +134,71 @@ export async function pollVeo(operationId: string, timeoutMs = 8 * 60 * 1000): P
  * /api/veo/generate/video rejects them outright (invalid_enum_value), and the
  * Runway proxy speaks a different body — promptText, pixel-pair ratio, and an
  * Idempotency-Key per submit. Everything else keeps the proven Veo path.
+ *
+ * NO ENGINE IS A DEAD END. Every entry in the picker is selectable now, so an
+ * engine the platform does not accept today (most of the Runway roster, and
+ * Kling while its key is pending) is caught here and re-filmed on Omni Flash;
+ * `fallbackFrom` carries the engine the customer chose so the surface can say
+ * what happened. A failure that is NOT a model rejection — an empty wallet, a
+ * cancellation, a provider outage — is raised as itself.
  */
-export async function renderAdClip(params: {
+export async function renderAdClip(params: ClipReferences & {
   model: string;
+  /** Native Audos integration — routes through lib/videoIntegrations when set. */
+  integration?: VideoIntegrationId;
   prompt: string;
   negative?: string;
   aspect: '9:16' | '16:9' | '1:1';
   durationS: number;
+  /** Legacy alias for characterImageUrl. */
   referenceImageUrl?: string | null;
-}): Promise<{ videoUrl: string; modelUsed: string }> {
-  if (isRunwayModel(params.model)) {
-    const seed = params.referenceImageUrl && /^https:\/\//.test(params.referenceImageUrl)
-      ? params.referenceImageUrl
-      : null;
-    const out = await generateWithRunway({
-      model: params.model,
-      prompt: capVeoText(params.prompt),
-      image: seed,
+  creditKey?: string;
+}): Promise<{ videoUrl: string; modelUsed: string; fallbackFrom?: string }> {
+  const requested = params.model || VEO_MODEL;
+  const integration = params.integration || integrationForEngineId(requested);
+
+  const viaOmniFlash = async () => {
+    const out = await generateWithOmniFlash({
+      appId: APP_IDS.adsStudio,
+      prompt: params.prompt,
+      negativePrompt: params.negative,
+      aspect: params.aspect,
+      durationSeconds: params.durationS,
+      seedImageUrl: params.seedImageUrl,
+      referenceImageUrl: params.characterImageUrl ?? params.referenceImageUrl,
+    });
+    return { videoUrl: out.videoUrl, modelUsed: out.model, fallbackFrom: engineLabelOf(requested) };
+  };
+
+  if (integration === 'heygen-video') {
+    throw new Error('HeyGen films avatar videos — pick a scene provider (Image & Video, Veo, Kling, Higgsfield, or Runway) for ad clips.');
+  }
+
+  const refs = resolveClipReferences(requested, {
+    characterImageUrl: params.characterImageUrl ?? params.referenceImageUrl,
+    seedImageUrl: params.seedImageUrl,
+  });
+
+  try {
+    const videoUrl = await generateVideoClip({
+      integration,
+      model: requested,
+      prompt: params.prompt,
       aspectRatio: params.aspect,
       duration: params.durationS,
+      imageData: refs.imageData,
+      referenceImages: refs.referenceImages.length ? refs.referenceImages : null,
+      appId: 'ads-studio',
     });
-    return { videoUrl: out.mediaUrls[0], modelUsed: params.model };
+    return { videoUrl, modelUsed: requested };
+  } catch (e) {
+    const mayOmniFallback = integration === 'image-and-video-generation'
+      || integration === 'google-veo3'
+      || integration === 'runway-recipes'
+      || isRunwayModel(requested);
+    if (!mayOmniFallback || requested === VEO_MODEL || !isModelRejection(e)) throw e;
+    try { return await viaOmniFlash(); } catch { throw e; }
   }
-  const model = params.model || VEO_MODEL;
-  const operationId = await submitVeo({ ...params, model });
-  return { videoUrl: await pollVeo(operationId), modelUsed: model };
 }
 
 // ---------------------------------------------------------------------------
