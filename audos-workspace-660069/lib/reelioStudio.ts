@@ -1002,8 +1002,8 @@ export async function expandFieldText(options: ExpandFieldOptions): Promise<stri
     'Never describe words, captions, logos or lettering appearing on screen — video models cannot spell.';
   const user = [
     `Field: ${options.field}`,
-    options.context ? `Context: ${clampText(options.context, 500)}` : '',
-    `Text to expand: ${clampText(text, 600)}`,
+    options.context ? `Context: ${clampText(options.context, 5000)}` : '',
+    `Text to expand: ${clampText(text, 5000)}`,
   ]
     .filter(Boolean)
     .join('\n');

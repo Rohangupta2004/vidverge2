@@ -10,10 +10,11 @@
  *   Assembling → "ASSEMBLING VIDEO… 72%" with real FFmpeg progress
  *   Complete   → "✓ FINAL VIDEO READY" + [Preview] [Download] [Edit]
  */
-import { AlertTriangle, Check, CircleDot, Download, Layers, Loader2, Mic, Pencil, Play, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Check, CircleDot, Download, Layers, Mic, Pencil, Play, RefreshCw } from 'lucide-react';
 import { Film, FilmScene, T } from './api';
 import { audioReady, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
 import { AssemblyProgress } from './pipeline/orchestrator';
+import VergeLoader from '../../components/VergeLoader';
 
 const DONE = new Set(['completed', 'skipped']);
 
@@ -21,7 +22,7 @@ function Chip({ state, label }: { state: 'done' | 'active' | 'failed' | 'todo'; 
   const color = state === 'done' ? T.done : state === 'active' ? T.live : state === 'failed' ? T.fault : T.dim;
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, border: `1px solid ${state === 'todo' ? T.dim : color}`, borderRadius: 999, padding: '3px 9px', whiteSpace: 'nowrap' }}>
-      {state === 'done' ? <Check size={11} /> : state === 'active' ? <Loader2 size={11} className="animate-spin" /> : state === 'failed' ? <AlertTriangle size={11} /> : <CircleDot size={10} />}
+      {state === 'done' ? <Check size={11} /> : state === 'active' ? <VergeLoader size={26} label={label} /> : state === 'failed' ? <AlertTriangle size={11} /> : <CircleDot size={10} />}
       {label}
     </span>
   );
@@ -29,12 +30,12 @@ function Chip({ state, label }: { state: 'done' | 'active' | 'failed' | 'todo'; 
 
 const barBtn = (kind: 'accent' | 'disabled' | 'ghost' | 'fault') => ({
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-  background: kind === 'accent' ? T.live : kind === 'fault' ? 'rgba(226,114,111,0.12)' : T.raised,
+  background: kind === 'accent' ? T.live : kind === 'fault' ? 'rgba(153,27,27,0.12)' : T.raised,
   color: kind === 'accent' ? '#1A1205' : kind === 'fault' ? T.fault : kind === 'ghost' ? T.bone : T.dim,
-  border: kind === 'ghost' ? `1px solid ${T.dim}` : kind === 'fault' ? '1px solid rgba(226,114,111,0.4)' : 'none',
+  border: kind === 'ghost' ? `1px solid ${T.dim}` : kind === 'fault' ? '1px solid rgba(153,27,27,0.32)' : 'none',
   borderRadius: 10, padding: '11px 20px', fontSize: 13, fontWeight: 800, letterSpacing: 0.4,
   cursor: kind === 'disabled' ? 'default' : 'pointer', whiteSpace: 'nowrap' as const,
-  boxShadow: kind === 'accent' ? '0 2px 12px rgba(245,158,11,0.3)' : 'none',
+  boxShadow: kind === 'accent' ? '0 2px 12px rgba(200,146,10,0.3)' : 'none',
 } as const);
 
 const miniBtn = {
@@ -83,7 +84,7 @@ export default function AssemblyBar(props: {
   const pct = assembly ? assembly.percent : 0;
 
   return (
-    <div style={{ flexShrink: 0, borderTop: `1px solid ${T.raised}`, background: '#0a0e1a', padding: '9px 14px 10px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', boxShadow: '0 -8px 24px rgba(0,0,0,0.35)' }}>
+    <div style={{ flexShrink: 0, borderTop: `1px solid ${T.raised}`, background: '#FFFFFF', padding: '9px 14px 10px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', boxShadow: '0 -8px 24px rgba(120,80,0,0.12)' }}>
       {/* —— Real layer states —— */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', minWidth: 0, flex: '1 1 240px' }}>
         <Chip state={allDone ? 'done' : sceneFailed ? 'failed' : 'active'} label={allDone ? `${completedN} Scenes` : `Scenes ${completedN}/${total}`} />
@@ -119,7 +120,7 @@ export default function AssemblyBar(props: {
               <div style={{ height: '100%', width: `${pct}%`, background: T.live, transition: 'width 0.5s ease' }} />
             </div>
             <button disabled style={barBtn('disabled')}>
-              <Loader2 size={14} className="animate-spin" /> ASSEMBLING VIDEO… {pct}%
+              <VergeLoader size={34} label="Assembling your video" /> ASSEMBLING VIDEO… {pct}%
             </button>
           </div>
         ) : !allDone ? (
@@ -136,7 +137,7 @@ export default function AssemblyBar(props: {
           </button>
         ) : audioRunning || busy ? (
           <button disabled style={barBtn('disabled')}>
-            <Loader2 size={14} className="animate-spin" /> FINAL ASSEMBLY — PREPARING ASSETS…
+            <VergeLoader size={34} label="Preparing assets" /> FINAL ASSEMBLY — PREPARING ASSETS…
           </button>
         ) : (
           <button className="s2v-lift" style={barBtn('accent')} onClick={props.onPrepareAudio} title="Runs the post-production steps: voiceover (optional) → music → SFX. Video scenes are reused, never regenerated.">

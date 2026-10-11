@@ -390,6 +390,17 @@ export interface Film {
   /** Video model id this film's clips render on ('omni-flash' | 'seedance-2.0'
    * | 'kling-v2-master'). Null = omni-flash (pre-picker films). */
   video_model: string | null;
+  /** STYLE LOCK — true = the film's look is frozen after scene 1 and the
+   * extracted fingerprint is prepended to every later prompt, so clip 7
+   * cannot drift into a different palette or lens language than clip 1. */
+  style_lock: boolean | null;
+  /** The style fingerprint itself (palette, lighting, lens language, mood),
+   * extracted once scene 1 completes. Null until then. */
+  style_lock_description: string | null;
+  /** Stored references resolved from the script's @name mentions. They ride
+   * along with EVERY scene of the film, so a character summoned with
+   * @maya looks like the same person in every clip. */
+  at_references?: AtReference[] | null;
   /** True when the user has archived this film from the Library — hidden from
    * the default list but never deleted. Null/false = active. */
   is_archived?: boolean | null;
@@ -450,6 +461,60 @@ export function normalizeScene(row: FilmScene): FilmScene {
   return status === row.status ? row : { ...row, status };
 }
 
+/**
+ * STORED REFERENCE — one picture the customer saves once and summons from any
+ * script by typing @name. A character, a style plate or a location: the
+ * pipeline resolves every @name mention in the script against this list and
+ * injects the matches into every scene of the film.
+ */
+export interface StoredReference {
+  id: number;
+  /** The slug the customer calls with @name (lowercased, no spaces). */
+  name: string;
+  /** Human label shown in the reference manager. */
+  display_name: string;
+  /** Durable public URL the generation proxies can fetch. */
+  url: string;
+  type: 'character' | 'style' | 'location';
+  /** Optional appearance note injected into the resolved scenes' prompts. */
+  description?: string;
+  created_at: string;
+}
+
+/** A resolved stored reference as it is persisted on the film row. */
+export interface AtReference {
+  name: string;
+  url: string;
+  type: StoredReference['type'];
+  description?: string;
+}
+
+/** The @name a stored reference answers to, derived from its label. */
+export function referenceSlug(label: string): string {
+  return String(label || '').trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+/**
+ * Every @name mention in a script, resolved against the stored references.
+ * Matching is case-insensitive on the slug, the result is deduped, and the
+ * order follows the script so the first character mentioned has first claim
+ * on a model that carries only one reference image.
+ */
+export function resolveAtMentions(script: string, refs: StoredReference[]): StoredReference[] {
+  const mentions = String(script || '').match(/(@[a-zA-Z][\w-]*)/g) || [];
+  const known = Array.isArray(refs) ? refs : [];
+  const out: StoredReference[] = [];
+  for (const mention of mentions) {
+    const slug = mention.slice(1).toLowerCase();
+    const match = known.find((r) => String(r?.name || '').toLowerCase() === slug);
+    if (match && !out.some((r) => r.id === match.id)) out.push(match);
+  }
+  return out;
+}
+
 export interface AssetRow {
   id: number;
   film_id: number | null;
@@ -464,6 +529,20 @@ export interface AssetRow {
 // ---------------------------------------------------------------------------
 // WorkspaceDB access (browser SDK — session-scoped rows)
 // ---------------------------------------------------------------------------
+
+/** The job id is only ever used to resume polling, but some providers
+ * (Seedance 2.0, a few Runway/OpenRouter models) answer with ids thousands of
+ * characters long, and the data API refuses a value longer than the column
+ * holds ("value too long") — which failed the ENTIRE scene write and lost a
+ * render that was already paid for. No provider's real id comes close to this
+ * cap, so trimming it costs nothing and keeps the write alive. */
+export const MAX_OPERATION_ID_CHARS = 2000;
+
+export function capOperationId<T extends Partial<FilmScene>>(row: T): T {
+  const id = row.veo_operation_id;
+  if (typeof id !== 'string' || id.length <= MAX_OPERATION_ID_CHARS) return row;
+  return { ...row, veo_operation_id: id.slice(0, MAX_OPERATION_ID_CHARS) } as T;
+}
 
 export const db = {
   async listFilms(): Promise<Film[]> {
@@ -521,10 +600,10 @@ export const db = {
     return rows.map(normalizeScene);
   },
   async insertScene(row: Partial<FilmScene>): Promise<void> {
-    await wdb().from('s2v_film_scenes').insert(row);
+    await wdb().from('s2v_film_scenes').insert(capOperationId(row));
   },
   async updateScene(id: number, patch: Partial<FilmScene>): Promise<void> {
-    await wdb().from('s2v_film_scenes').update(id, patch);
+    await wdb().from('s2v_film_scenes').update(id, capOperationId(patch));
   },
   async deleteScene(id: number): Promise<void> {
     await wdb().from('s2v_film_scenes').delete(id);
@@ -538,6 +617,23 @@ export const db = {
   },
   async addAsset(row: Partial<AssetRow>): Promise<void> {
     try { await wdb().from('s2v_asset_registry').insert(row); } catch { /* registry is best-effort */ }
+  },
+  /** The customer's saved @name references (newest first). */
+  async listReferences(): Promise<StoredReference[]> {
+    const { data } = await wdb().from('s2v_references').orderBy('created_at', 'desc').limit(50).get();
+    return Array.isArray(data) ? data : [];
+  },
+  async addReference(row: Partial<StoredReference>): Promise<StoredReference> {
+    const res = await wdb().from('s2v_references').insert(row);
+    const created = res?.data?.[0] || res?.data || res;
+    if (created?.id) return created as StoredReference;
+    // Some SDK builds return only { success } — find the row that just landed.
+    const match = (await this.listReferences()).find((r) => r.name === row.name);
+    if (match) return match;
+    throw new Error('The reference was uploaded but could not be saved — try adding it again.');
+  },
+  async deleteReference(id: number): Promise<void> {
+    await wdb().from('s2v_references').delete(id);
   },
 };
 
@@ -633,22 +729,22 @@ export function frameSize(aspect: Aspect): { W: number; H: number } {
 }
 
 // ---------------------------------------------------------------------------
-// Design tokens — LightBeam (components/LightBeam.tsx): deep-navy canvas,
-// translucent cards, amber accent. Shared with the other studio apps so the
-// whole shell reads as one product.
+// Design tokens — LightBeam (components/LightBeam.tsx): dark-cosmic canvas,
+// amber-bordered cards, amber-to-cyan accent. Shared with the other studio
+// apps so the whole shell reads as one product.
 // ---------------------------------------------------------------------------
 
 export const T = {
-  canvas: LB.bg,                      // '#080c14'
-  raised: 'rgba(255,255,255,0.06)',   // card / divider surface on the LightBeam canvas
-  card: LB.bgCard,                    // 'rgba(255,255,255,0.04)' — LightBeam card bg
-  line: 'rgba(255,255,255,0.08)',     // LightBeam card border
-  bone: '#EDEBE8',
-  muted: '#8A93A6',
-  dim: '#4C5568',
+  canvas: LB.bg,                      // '#050508'
+  raised: LB.bgCardHover,             // '#111120' — card / divider surface
+  card: LB.bgCard,                    // '#0d0d14' — LightBeam card bg
+  line: 'rgba(180,120,0,0.14)',       // LightBeam card border
+  bone: '#1A1000',
+  muted: '#3D2800',
+  dim: '#7A6030',
   live: LB.accent,                    // '#f59e0b'
-  done: '#7FD4B4',
-  fault: '#E2726F',
+  done: '#166534',
+  fault: '#991B1B',
   mono: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
   sans: "'Inter', system-ui, sans-serif",
 } as const;

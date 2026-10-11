@@ -118,18 +118,18 @@ function AssetCard({ asset }: { asset: MotionAsset }) {
         borderRadius: 14,
         overflow: 'hidden',
         border: `1px solid ${asset.locked ? T.accentBorder : T.border}`,
-        background: 'rgba(255,255,255,0.03)',
+        background: 'rgba(180,120,0,0.05)',
       }}
       data-testid={`asset-card-${asset.id}`}
     >
-      <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 10', background: '#0b1220' }}>
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 10', background: '#FFF3D6' }}>
         {asset.type === 'reference_video' ? (
           <video src={asset.url} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
         ) : (
           <img src={asset.url} alt={asset.filename} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
         )}
         {!asset.analyzed ? (
-          <span style={{ position: 'absolute', left: 8, top: 8, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 600, color: '#fff', background: 'rgba(0,0,0,0.6)' }}>
+          <span style={{ position: 'absolute', left: 8, top: 8, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 600, color: '#fff', background: 'rgba(26,16,0,0.6)' }}>
             <Loader2 size={11} className="rc-spin" /> Reading…
           </span>
         ) : null}
@@ -159,7 +159,7 @@ function AssetCard({ asset }: { asset: MotionAsset }) {
             value={asset.type}
             onChange={(e) => setAssetType(asset.id, e.target.value as AssetType)}
             aria-label="Asset type"
-            style={{ flex: 1, minWidth: 0, padding: '5px 6px', borderRadius: 7, border: `1px solid ${T.border}`, background: '#101014', color: T.sub, fontSize: 11, fontFamily: FONT, cursor: 'pointer' }}
+            style={{ flex: 1, minWidth: 0, padding: '5px 6px', borderRadius: 7, border: `1px solid ${T.border}`, background: '#FFFFFF', color: T.sub, fontSize: 11, fontFamily: FONT, cursor: 'pointer' }}
             data-testid={`asset-type-${asset.id}`}
           >
             {ASSET_TYPES.map((t) => (
@@ -200,9 +200,9 @@ function iconBadge(active: boolean): CSSProperties {
     width: 26,
     height: 26,
     borderRadius: 8,
-    border: `1px solid ${active ? T.accentBorder : 'rgba(255,255,255,0.16)'}`,
-    background: active ? T.accentSoft : 'rgba(0,0,0,0.55)',
-    color: active ? T.accentFg : '#fff',
+    border: `1px solid ${active ? T.accentBorder : 'rgba(180,120,0,0.36)'}`,
+    background: active ? T.accentSoft : 'rgba(180,120,0,0.1)',
+    color: active ? T.accentFg : T.sub,
     cursor: 'pointer',
   };
 }
@@ -212,7 +212,7 @@ const reorderBtn: CSSProperties = {
   padding: '4px 0',
   borderRadius: 7,
   border: `1px solid ${T.border}`,
-  background: 'rgba(255,255,255,0.04)',
+  background: 'rgba(180,120,0,0.06)',
   color: T.sub,
   fontSize: 12,
   cursor: 'pointer',
@@ -296,7 +296,7 @@ export default function MotionUiStudio({ onExit }: { onExit: () => void }) {
                 padding: '28px 20px',
                 borderRadius: 14,
                 border: `1.5px dashed ${dragOver ? T.accentFg : T.borderStrong}`,
-                background: dragOver ? T.accentSoft : 'rgba(255,255,255,0.02)',
+                background: dragOver ? T.accentSoft : 'rgba(180,120,0,0.05)',
                 cursor: 'pointer',
                 textAlign: 'center',
               }}
@@ -327,7 +327,7 @@ export default function MotionUiStudio({ onExit }: { onExit: () => void }) {
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 120, borderRadius: 14, border: `1.5px dashed ${T.borderStrong}`, background: 'rgba(255,255,255,0.02)', color: T.accentFg, cursor: 'pointer', fontFamily: FONT, fontSize: 12.5, fontWeight: 600 }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 120, borderRadius: 14, border: `1.5px dashed ${T.borderStrong}`, background: 'rgba(180,120,0,0.05)', color: T.accentFg, cursor: 'pointer', fontFamily: FONT, fontSize: 12.5, fontWeight: 600 }}
                   data-testid="motionui-add-another"
                 >
                   <ImagePlus size={20} /> Add another asset
@@ -349,7 +349,7 @@ export default function MotionUiStudio({ onExit }: { onExit: () => void }) {
                       type="button"
                       onClick={() => setPreset(p.id)}
                       data-testid={`motionui-preset-${p.id}`}
-                      style={{ textAlign: 'left', padding: '10px 12px', borderRadius: 12, cursor: 'pointer', fontFamily: FONT, color: T.text, border: sel ? `1px solid ${T.accentFg}` : `1px solid ${T.border}`, background: sel ? T.accentSoft : 'rgba(255,255,255,0.02)' }}
+                      style={{ textAlign: 'left', padding: '10px 12px', borderRadius: 12, cursor: 'pointer', fontFamily: FONT, color: T.text, border: sel ? `1px solid ${T.accentFg}` : `1px solid ${T.border}`, background: sel ? T.accentSoft : 'rgba(180,120,0,0.05)' }}
                     >
                       <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700 }}>{p.name}</span>
                       <span style={{ display: 'block', marginTop: 3, fontSize: 10.5, lineHeight: 1.45, color: T.muted }}>{p.blurb}</span>
@@ -571,7 +571,7 @@ export default function MotionUiStudio({ onExit }: { onExit: () => void }) {
               }}
               placeholder="e.g. Make the intro faster, add a headline on the dashboard…"
               data-testid="motionui-edit-input"
-              style={{ flex: 1, minWidth: 220, padding: '11px 13px', borderRadius: 11, border: `1px solid ${T.border}`, background: 'rgba(255,255,255,0.04)', color: T.text, fontSize: 14, fontFamily: FONT }}
+              style={{ flex: 1, minWidth: 220, padding: '11px 13px', borderRadius: 11, border: `1px solid ${T.border}`, background: '#FFFFFF', color: T.text, fontSize: 14, fontFamily: FONT }}
             />
             <PrimaryButton
               onClick={() => {
@@ -594,7 +594,7 @@ export default function MotionUiStudio({ onExit }: { onExit: () => void }) {
                 type="button"
                 onClick={() => void applyAiEdit(sug)}
                 disabled={s.editing}
-                style={{ padding: '5px 10px', borderRadius: 999, border: `1px solid ${T.border}`, background: 'rgba(255,255,255,0.03)', color: T.sub, fontSize: 11.5, fontFamily: FONT, cursor: s.editing ? 'wait' : 'pointer' }}
+                style={{ padding: '5px 10px', borderRadius: 999, border: `1px solid ${T.border}`, background: 'rgba(180,120,0,0.05)', color: T.sub, fontSize: 11.5, fontFamily: FONT, cursor: s.editing ? 'wait' : 'pointer' }}
               >
                 {sug}
               </button>

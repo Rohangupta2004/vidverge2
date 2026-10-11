@@ -41,8 +41,15 @@ const CAMERA_HEADING = /^\s*Camera\s*:\s*(.*)$/i;
 /** Both "Dialogue — Maya:" and a bare "Dialogue:" open a dialogue block. */
 const DIALOGUE_HEADING = /^\s*Dialogue\s*(?:[\u2014\u2013-]\s*([^:]*?))?\s*:\s*(.*)$/i;
 const DURATION = /(\d+)\s*(?:s|sec|secs|second|seconds)\b/i;
+/** The meta field after the "|" is where a length lives, so a bare number
+ * there ("Scene 1 — Title | 12") means seconds even with the unit left off.
+ * A number in the TITLE never does — "Scene 3 — Flight 815" is not an
+ * 815-second scene — which is why this is only tried on the meta field. */
+const BARE_DURATION = /^\s*(\d+)\s*$/;
 
-/** The clip length used when a scene header carries no "| N sec". */
+/** The clip length used when a scene header carries no "| N sec" at all.
+ * A DEFAULT, never a cap: any length the script does state is honoured up to
+ * the chosen provider's real maximum. */
 export const MANUAL_DEFAULT_SECONDS = 6;
 
 /** A spoken line as written: drop the blockquote marker and the wrapping
@@ -68,7 +75,7 @@ interface SceneDraft {
 function startScene(headerRest: string): SceneDraft {
   const [titlePart, ...meta] = String(headerRest || '').split('|');
   const metaText = meta.join('|');
-  const duration = DURATION.exec(metaText) || DURATION.exec(headerRest);
+  const duration = DURATION.exec(metaText) || DURATION.exec(headerRest) || BARE_DURATION.exec(metaText);
   const seconds = duration ? Number(duration[1]) : NaN;
   return {
     title: titlePart.trim(),
@@ -204,7 +211,7 @@ export function buildManualScenePrompt(params: {
   maxChars?: number;
 }): string {
   const { scene } = params;
-  const maxChars = Math.max(200, params.maxChars || 1000);
+  const maxChars = Math.max(200, params.maxChars || 10000);
   const body: string[] = [];
 
   if (scene.visual) body.push(scene.visual);
@@ -219,7 +226,7 @@ export function buildManualScenePrompt(params: {
   if (params.revisionNote) body.push(`Direction: ${params.revisionNote}`);
 
   const style = String(params.globalStyle || '').trim();
-  const tail = style ? `Overall style: ${capText(style, 220)}` : '';
+  const tail = style ? `Overall style: ${capText(style, 2000)}` : '';
   const room = tail ? Math.max(160, maxChars - tail.length - 1) : maxChars;
   const text = capText(body.join('\n'), room);
   return tail ? `${text}\n${tail}` : text;

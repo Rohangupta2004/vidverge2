@@ -1,13 +1,15 @@
 /**
  * Saved Videos — the unified gallery. Every finished video the visitor owns,
- * from BOTH pipelines, in one list:
+ * from all producing pipelines, in one list:
  *
  *   - styled runs (Clip Style, Cinematic Trailer, Text-to-Video, Documentary,
  *     Product Showcase) from the creation wizard
  *   - Product Launch HyperFrames films
+ *   - Product Launch Video Engine films
+ *   - MotionLaunch films
  *
  * The saved-videos server function is the source of truth: its `list` op scans
- * both producing tables for finished videos and upserts anything the gallery
+ * every producing table for finished videos and upserts anything the gallery
  * has not seen, so nothing has to be saved by hand and a render that landed
  * while the tab was shut still shows up. Rows live in the workspace database,
  * so the list persists across sessions and devices.
@@ -38,7 +40,7 @@ const S = {
 
 export interface SavedVideo {
   id: number;
-  source: 'clipstyle' | 'product_launch';
+  source: 'clipstyle' | 'product_launch' | 'launch_engine' | 'motionlaunch';
   source_id: number;
   title: string | null;
   style: string | null;
@@ -110,7 +112,7 @@ const actionBtn: React.CSSProperties = {
 
 export default function SavedVideos({ onAddSound }: {
   /** Open the sound + captions studio on a finished video. */
-  onAddSound?: (target: { title: string; videoUrl: string; sourceId: number; source: 'clipstyle' | 'product_launch' }) => void;
+  onAddSound?: (target: { title: string; videoUrl: string; sourceId: number; source: SavedVideo['source'] }) => void;
 }) {
   const [videos, setVideos] = useState<SavedVideo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -165,7 +167,7 @@ export default function SavedVideos({ onAddSound }: {
             <Film size={22} color="var(--space-text-brand)" /> Saved Videos
           </h1>
           <p style={{ margin: '5px 0 0', fontSize: 13, color: S.sub }}>
-            Every finished video, from both flows, saved automatically and kept between visits.
+            Every finished video, from every creation flow, saved automatically and kept between visits.
           </p>
         </div>
         <button type="button" onClick={() => void load()} aria-label="Refresh" className="ps-btn" style={{ display: 'inline-flex', alignItems: 'center', padding: 9, borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.sub, cursor: 'pointer' }} data-testid="button-saved-refresh">
@@ -216,11 +218,11 @@ export default function SavedVideos({ onAddSound }: {
                 ) : (
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, var(--space-brand-primary-700), var(--space-brand-primary-500))' }} />
                 )}
-                <span style={{ position: 'absolute', top: 10, left: 10, padding: '3px 10px', borderRadius: 999, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#fff', background: 'rgba(4,8,18,0.72)', border: `1px solid ${S.borderStrong}` }} data-testid={`saved-style-${v.id}`}>
+                <span style={{ position: 'absolute', top: 10, left: 10, padding: '3px 10px', borderRadius: 999, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#fff', background: 'rgba(26,16,0,0.72)', border: `1px solid ${S.borderStrong}` }} data-testid={`saved-style-${v.id}`}>
                   {v.style_label || 'Product video'}
                 </span>
                 {runtimeLabel(v) ? (
-                  <span style={{ position: 'absolute', bottom: 10, right: 10, padding: '2px 8px', borderRadius: 7, fontSize: 10.5, fontWeight: 800, color: '#fff', background: 'rgba(4,8,18,0.72)', fontVariantNumeric: 'tabular-nums' }}>
+                  <span style={{ position: 'absolute', bottom: 10, right: 10, padding: '2px 8px', borderRadius: 7, fontSize: 10.5, fontWeight: 800, color: '#fff', background: 'rgba(26,16,0,0.72)', fontVariantNumeric: 'tabular-nums' }}>
                     {runtimeLabel(v)}
                   </span>
                 ) : null}

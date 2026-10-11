@@ -9,11 +9,12 @@ import { Loader2 } from 'lucide-react';
 
 export const ACCENT = 'var(--space-brand-primary-500, #F59E0B)';
 export const ACCENT_SOFT = 'var(--space-brand-primary-100, rgba(245,158,11,0.14))';
-export const TEXT = 'var(--space-text-primary, #F1F5F9)';
-export const MUTED = 'var(--space-text-muted, #94A3B8)';
-export const BORDER = 'var(--space-border-default, rgba(148,163,184,0.14))';
-export const PANEL_BG = 'var(--space-surface-panel, #101623)';
-export const CARD_BG = 'var(--space-surface-card, #0E131F)';
+export const CYAN = 'var(--space-brand-highlight-500, #22D3EE)';
+export const TEXT = 'var(--space-text-primary, #FFFAF1)';
+export const MUTED = 'var(--space-text-muted, #BBA899)';
+export const BORDER = 'var(--space-border-default, rgba(245,158,11,0.18))';
+export const PANEL_BG = 'var(--space-surface-panel, #111120)';
+export const CARD_BG = 'var(--space-surface-card, #0D0D14)';
 
 export const PANEL: React.CSSProperties = {
   background: PANEL_BG,
@@ -43,13 +44,16 @@ export function PrimaryButton(props: {
         padding: '14px 26px',
         borderRadius: 12,
         border: 'none',
-        background: disabled ? 'rgba(148,163,184,0.18)' : ACCENT,
-        color: disabled ? MUTED : 'var(--space-text-on-primary, #180F02)',
+        background: disabled
+          ? 'rgba(180,120,0,0.12)'
+          : 'linear-gradient(135deg, ' + ACCENT + ' 0%, ' + CYAN + ' 100%)',
+        color: disabled ? MUTED : 'var(--space-text-on-primary, #FFFFFF)',
         fontSize: 15,
         fontWeight: 700,
         letterSpacing: '-0.01em',
+        boxShadow: disabled ? 'none' : '0 0 24px rgba(200,146,10,0.25)',
         cursor: disabled ? 'not-allowed' : 'pointer',
-        transition: 'transform 120ms ease, opacity 120ms ease',
+        transition: 'transform 120ms ease, opacity 120ms ease, box-shadow 200ms ease',
       }}
     >
       {props.busy ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : null}
@@ -131,7 +135,7 @@ export const INPUT_STYLE: React.CSSProperties = {
   padding: '13px 15px',
   borderRadius: 12,
   border: '1px solid ' + BORDER,
-  background: 'var(--space-surface-muted, #0D1220)',
+  background: 'var(--space-surface-muted, #0A0A12)',
   color: TEXT,
   fontSize: 15,
   fontFamily: 'inherit',
@@ -146,9 +150,9 @@ export function ErrorNote(props: { children: React.ReactNode }) {
         marginTop: 16,
         padding: '13px 16px',
         borderRadius: 12,
-        border: '1px solid rgba(248,113,113,0.35)',
-        background: 'rgba(248,113,113,0.10)',
-        color: 'var(--space-semantic-danger, #F87171)',
+        border: '1px solid rgba(153,27,27,0.3)',
+        background: 'rgba(153,27,27,0.08)',
+        color: 'var(--space-semantic-danger, #EF4444)',
         fontSize: 13.5,
         lineHeight: 1.55,
       }}
@@ -196,8 +200,8 @@ export function StepRail(props: { steps: RailStep[]; activeIndex: number }) {
                   justifyContent: 'center',
                   fontSize: 11,
                   fontWeight: 800,
-                  background: active || done ? ACCENT : 'rgba(148,163,184,0.2)',
-                  color: active || done ? 'var(--space-text-on-primary, #180F02)' : MUTED,
+                  background: active || done ? ACCENT : 'rgba(180,120,0,0.14)',
+                  color: active || done ? 'var(--space-text-on-primary, #FFFFFF)' : MUTED,
                 }}
               >
                 {index + 1}

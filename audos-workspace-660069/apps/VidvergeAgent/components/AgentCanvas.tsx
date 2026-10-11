@@ -11,7 +11,7 @@ interface AgentCanvasProps {
 export default function AgentCanvas({ agentState, statusLabel, calm = false }: AgentCanvasProps) {
   return (
     <section className="relative w-full">
-      <div className="pointer-events-none absolute inset-x-0 -top-16 h-64 bg-[radial-gradient(ellipse_55%_100%_at_50%_0%,rgba(245,166,35,0.09),transparent_70%)]" />
+      <div className="pointer-events-none absolute inset-x-0 -top-16 h-64 bg-[radial-gradient(ellipse_55%_100%_at_50%_0%,rgba(200,146,10,0.09),transparent_70%)]" />
 
       <div className="relative h-[clamp(210px,34vh,330px)] w-full">
         <MotionWave state={agentState} calm={calm} />

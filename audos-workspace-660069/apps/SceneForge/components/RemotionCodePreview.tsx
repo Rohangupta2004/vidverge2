@@ -91,16 +91,16 @@ function CodeFailure({ error, code }: { error: string; code: string }) {
       <span>Remotion preview could not run: {error}</span>
     </div>
     <p className="mt-2 text-xs text-[var(--space-text-secondary)]">The generated source is shown below so you can inspect or copy the failing code before rendering.</p>
-    <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-[var(--space-border-default)] bg-[#070A12] p-3 font-mono text-xs leading-relaxed text-[var(--space-text-secondary)]"><code>{code}</code></pre>
+    <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-[var(--space-border-default)] bg-[#FFFAEB] p-3 font-mono text-xs leading-relaxed text-[var(--space-text-secondary)]"><code>{code}</code></pre>
   </div>;
 }
 
 function RuntimeFailure({ error, onError }: { error: Error; onError: (message: string) => void }) {
   const message = messageOf(error);
   useEffect(() => onError(message), [message, onError]);
-  return <Remotion.AbsoluteFill style={{ background: '#070A12', alignItems: 'center', justifyContent: 'center', padding: 64, color: '#F8FAFC', fontFamily: 'Inter, sans-serif', textAlign: 'center' }}>
+  return <Remotion.AbsoluteFill style={{ background: '#FFFDF4', alignItems: 'center', justifyContent: 'center', padding: 64, color: '#1A1000', fontFamily: 'Inter, sans-serif', textAlign: 'center' }}>
     <div style={{ fontSize: 42, fontWeight: 700 }}>Preview render failed</div>
-    <div style={{ marginTop: 18, fontSize: 26, color: '#f87171' }}>{message}</div>
+    <div style={{ marginTop: 18, fontSize: 26, color: '#991B1B' }}>{message}</div>
   </Remotion.AbsoluteFill>;
 }
 
@@ -150,7 +150,7 @@ export default function RemotionCodePreview({ scene, project, onClose }: {
   const failure = compiled.error || runtimeError;
   const Component = compiled.component as React.ComponentType<any> | undefined;
 
-  return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+  return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(26,16,0,0.35)] p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
     <div role="dialog" aria-modal="true" aria-label={`Scene ${scene.scene_index} Remotion preview`} className="max-h-[92vh] w-full max-w-5xl overflow-auto rounded-2xl border border-[var(--space-border-strong)] bg-[var(--space-surface-panel-strong)] shadow-2xl">
       <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel-strong)] px-5 py-4">
         <div className="min-w-0 flex-1">

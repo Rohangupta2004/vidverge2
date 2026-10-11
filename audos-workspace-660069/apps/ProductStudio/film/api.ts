@@ -709,19 +709,19 @@ export function stageIndex(status: FilmStatus | null): number {
  * hook) and are excluded from the main ad's storyboard and composition. */
 export const VARIATION_IDX_BASE = 100;
 
-// Design tokens — matches the Product Studio dark-editor surfaces.
+// Design tokens — matches the Product Studio light warm-gold surfaces.
 export const T = {
-  canvas: '#121214',
-  raised: '#1B1B1F',
-  line: '#2A2A30',
-  lineStrong: '#3A3A42',
-  bone: '#F4F2EE',
-  muted: '#8D8B94',
-  dim: '#55535C',
-  coral: '#FF6B4A',
-  gold: '#E8A33C',
-  done: '#7FD4B4',
-  fault: '#E2726F',
+  canvas: '#FFFDF4',
+  raised: '#FFFFFF',
+  line: 'rgba(180,120,0,0.14)',
+  lineStrong: 'rgba(180,120,0,0.36)',
+  bone: '#1A1000',
+  muted: '#7A6030',
+  dim: '#A08B5F',
+  coral: '#C8920A',
+  gold: '#B45309',
+  done: '#166534',
+  fault: '#991B1B',
   mono: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
   sans: "'Inter', system-ui, sans-serif",
 } as const;

@@ -8,7 +8,7 @@
  * provider the platform has not configured is shown greyed with the reason
  * rather than as a button that fails on submit.
  *
- * Styling matches the rest of Model Lab — same dark palette, same violet
+ * Styling matches the rest of Model Lab — same dark palette, same amber
  * accent, same card and button idiom — so the new tabs read as one app.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -22,15 +22,15 @@ import {
 } from './mediaModels';
 
 const C = {
-  bg: '#0d0d0d',
-  surface: '#1a1a1a',
-  card: '#222222',
-  border: '#333333',
-  accent: '#8b5cf6',
-  text: '#ffffff',
-  text2: '#aaaaaa',
-  success: '#22c55e',
-  error: '#ef4444',
+  bg: '#FFFDF4',
+  surface: '#FFFAEB',
+  card: '#FFFFFF',
+  border: 'rgba(180,120,0,0.14)',
+  accent: '#C8920A',
+  text: '#1A1000',
+  text2: '#7A6030',
+  success: '#166534',
+  error: '#991B1B',
 };
 const FONT = 'system-ui, sans-serif';
 const MONO = "'Fira Code', 'Courier New', monospace";
@@ -90,7 +90,7 @@ function FeatureChip({ text }: { text: string }) {
       style={{
         fontSize: 10.5,
         color: C.text2,
-        background: '#181818',
+        background: '#FFFAEB',
         border: `1px solid ${C.border}`,
         borderRadius: 6,
         padding: '2px 7px',
@@ -157,9 +157,9 @@ function ModelCard({
         {video ? (card as VideoModelCard).durations : 'Text to image'}
       </div>
       {disabled && disabledReason ? (
-        <div style={{ fontSize: 11, color: '#fbbf24', lineHeight: 1.45 }}>⚠️ {disabledReason}</div>
+        <div style={{ fontSize: 11, color: '#B45309', lineHeight: 1.45 }}>⚠️ {disabledReason}</div>
       ) : card.caveat ? (
-        <div style={{ fontSize: 11, color: '#fbbf24', lineHeight: 1.45 }}>⚠️ {card.caveat}</div>
+        <div style={{ fontSize: 11, color: '#B45309', lineHeight: 1.45 }}>⚠️ {card.caveat}</div>
       ) : null}
     </button>
   );
@@ -373,7 +373,7 @@ export default function MediaStudio({ tab }: { tab: MediaTab }) {
               <span style={{ fontSize: 13.5, fontWeight: 800, color: C.text }}>{group.label}</span>
               <span style={{ fontSize: 11, color: C.text2, fontFamily: MONO }}>{group.note}</span>
               {groupStatus && !groupStatus.available ? (
-                <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700 }}>Unavailable · {groupStatus.error}</span>
+                <span style={{ fontSize: 11, color: '#B45309', fontWeight: 700 }}>Unavailable · {groupStatus.error}</span>
               ) : null}
             </div>
             <div className="ms-grid">
@@ -409,7 +409,7 @@ export default function MediaStudio({ tab }: { tab: MediaTab }) {
               borderRadius: 8,
               border: `1px solid ${writerOpen ? C.accent : `${C.accent}88`}`,
               background: writerOpen ? `${C.accent}2a` : `${C.accent}14`,
-              color: '#c4b5fd',
+              color: '#B4720A',
               fontSize: 12.5,
               fontWeight: 800,
             }}
@@ -443,7 +443,7 @@ export default function MediaStudio({ tab }: { tab: MediaTab }) {
               onChange={(e) => setIdea(e.target.value)}
               data-testid="input-ai-write-idea"
               style={{
-                width: '100%', boxSizing: 'border-box', background: '#141414',
+                width: '100%', boxSizing: 'border-box', background: '#FFFAEB',
                 border: `1px solid ${C.border}`, borderRadius: 6, color: C.text,
                 fontSize: 13, lineHeight: 1.6, padding: 10, resize: 'vertical', fontFamily: FONT,
               }}
@@ -476,7 +476,7 @@ export default function MediaStudio({ tab }: { tab: MediaTab }) {
 
             {writerDraft ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ background: '#141414', border: `1px solid ${C.border}`, borderRadius: 6, padding: 11, color: C.text, fontSize: 12.5, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                <div style={{ background: '#FFFAEB', border: `1px solid ${C.border}`, borderRadius: 6, padding: 11, color: C.text, fontSize: 12.5, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                   {writerDraft}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -593,7 +593,7 @@ export default function MediaStudio({ tab }: { tab: MediaTab }) {
             style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               padding: '11px 26px', borderRadius: 8, border: 'none',
-              background: busy ? '#5b3fa3' : C.accent, color: '#ffffff',
+              background: busy ? '#B4720A' : C.accent, color: '#ffffff',
               fontSize: 13.5, fontWeight: 800,
               opacity: !busy && prompt.trim().length < 10 ? 0.5 : 1,
               cursor: busy ? 'wait' : prompt.trim().length < 10 ? 'not-allowed' : 'pointer',
@@ -648,7 +648,7 @@ export default function MediaStudio({ tab }: { tab: MediaTab }) {
             </a>
           </div>
           {result.note ? (
-            <div style={{ marginBottom: 10, fontSize: 12, color: '#fbbf24', lineHeight: 1.5 }}>⚠️ {result.note}</div>
+            <div style={{ marginBottom: 10, fontSize: 12, color: '#B45309', lineHeight: 1.5 }}>⚠️ {result.note}</div>
           ) : null}
           <div style={{ borderRadius: 8, overflow: 'hidden', border: `1px solid ${C.border}`, background: '#000' }}>
             {result.kind === 'video' ? (

@@ -66,13 +66,13 @@ export default function CreateBar({ apps, selectedAppId, onSelectApp, onSubmit, 
     <div className="relative w-full">
       {attachment && (
         <div className="mb-3 flex justify-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-[var(--vv-border)] bg-[var(--vv-surface)] px-3 py-1.5 text-[12px] text-white/70">
+          <span className="inline-flex items-center gap-2 rounded-full border border-[var(--vv-border)] bg-[var(--vv-surface)] px-3 py-1.5 text-[12px] text-[#3D2800]">
             <Paperclip size={12} className="text-[var(--vv-gold)]" />
             <span className="max-w-[220px] truncate">{attachment.name}</span>
             <button
               type="button"
               onClick={() => setAttachment(null)}
-              className="text-white/40 transition-colors hover:text-white"
+              className="text-[#7A6030] transition-colors hover:text-[#1A1000]"
               aria-label="Remove attachment"
             >
               <X size={12} />
@@ -85,17 +85,18 @@ export default function CreateBar({ apps, selectedAppId, onSelectApp, onSubmit, 
 
       <form
         onSubmit={handleSubmit}
-        className="flex items-center gap-2 rounded-[28px] border border-[var(--vv-border)] px-2 py-2 backdrop-blur-xl transition-colors focus-within:border-[color-mix(in_srgb,var(--vv-gold)_34%,transparent)]"
+        className="flex items-center gap-2 rounded-[28px] border border-[var(--vv-border)] px-2 py-2 backdrop-blur-xl transition-colors focus-within:border-[var(--vv-border-hover)]"
         style={{
-          background: 'rgba(17,17,24,0.78)',
-          boxShadow: '0 24px 60px -28px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.04)',
+          background: 'rgba(255,255,255,0.9)',
+          boxShadow:
+            '0 24px 60px -28px rgba(120,80,0,0.12), 0 0 28px -14px rgba(200,146,10,0.5), inset 0 1px 0 rgba(180,120,0,0.06)',
         }}
       >
         <input ref={fileRef} type="file" className="hidden" onChange={handleFile} />
         <button
           type="button"
           onClick={() => fileRef.current && fileRef.current.click()}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/45 transition-colors hover:bg-white/5 hover:text-white/80"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#7A6030] transition-colors hover:bg-[rgba(180,120,0,0.06)] hover:text-[#1A1000]"
           aria-label="Attach a file"
           title="Attach a reference, script or clip"
         >
@@ -106,7 +107,7 @@ export default function CreateBar({ apps, selectedAppId, onSelectApp, onSubmit, 
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="What do you want to create?"
-          className="min-w-0 flex-1 bg-transparent px-1 text-[15px] text-white outline-none placeholder:text-white/35"
+          className="min-w-0 flex-1 bg-transparent px-1 text-[15px] text-[#1A1000] outline-none placeholder:text-[#A08B5F]"
           aria-label="Describe what you want to create"
         />
 
@@ -114,7 +115,7 @@ export default function CreateBar({ apps, selectedAppId, onSelectApp, onSubmit, 
           <button
             type="button"
             onClick={() => setOpen((prev) => !prev)}
-            className="flex h-9 items-center gap-1.5 rounded-full border border-[var(--vv-border)] px-3 text-[12px] text-white/65 transition-colors hover:border-[color-mix(in_srgb,var(--vv-gold)_30%,transparent)] hover:text-white"
+            className="flex h-9 items-center gap-1.5 rounded-full border border-[var(--vv-border)] px-3 text-[12px] text-[#3D2800] transition-colors hover:border-[color-mix(in_srgb,var(--vv-gold)_30%,transparent)] hover:text-[#1A1000]"
             aria-haspopup="listbox"
             aria-expanded={open}
           >
@@ -126,7 +127,7 @@ export default function CreateBar({ apps, selectedAppId, onSelectApp, onSubmit, 
             <div
               role="listbox"
               className="absolute bottom-full right-0 z-20 mb-3 w-[268px] overflow-hidden rounded-2xl border border-[var(--vv-border)] p-1.5"
-              style={{ background: 'rgba(14,14,20,0.97)', boxShadow: '0 30px 70px -30px rgba(0,0,0,0.95)' }}
+              style={{ background: 'rgba(255,255,255,0.97)', boxShadow: '0 30px 70px -30px rgba(120,80,0,0.16)' }}
             >
               {apps.map((app) => {
                 const active = app.id === selected.id;
@@ -140,10 +141,10 @@ export default function CreateBar({ apps, selectedAppId, onSelectApp, onSubmit, 
                       onSelectApp(app.id);
                       setOpen(false);
                     }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-white/5"
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-[rgba(180,120,0,0.06)]"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] text-white/90">{app.name}</span>
+                      <span className="block truncate text-[13px] text-[#1A1000]">{app.name}</span>
                       <span className="block truncate text-[11px] text-[var(--vv-text-dim)]">{app.tagline}</span>
                     </span>
                     {active && <Check size={14} className="shrink-0 text-[var(--vv-gold)]" />}
@@ -156,10 +157,10 @@ export default function CreateBar({ apps, selectedAppId, onSelectApp, onSubmit, 
 
         <button
           type="submit"
-          className="flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[13px] font-medium text-[#1a1203] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           style={{
-            background: 'linear-gradient(135deg, var(--vv-gold-light, #FFD9A0), var(--vv-gold, #F5A623))',
-            boxShadow: '0 0 24px -6px var(--vv-gold-glow, rgba(245,166,35,0.4))',
+            background: 'linear-gradient(135deg, var(--vv-gold, #C8920A), var(--vv-accent, #B4720A))',
+            boxShadow: '0 0 24px -4px var(--vv-gold-glow, rgba(200,146,10,0.45))',
           }}
           disabled={!value.trim() || submitting}
         >

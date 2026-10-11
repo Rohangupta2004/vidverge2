@@ -17,7 +17,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, Globe, Pencil, Plus, Search, Sparkles, X } from 'lucide-react';
 import { Profile, analyzeBrand } from '../store';
 import { DEFAULT_ACCENT, INK_DEEP, LINE, LINE_HI, MONO, TEXT, TEXT_DIM, TEXT_MUTED, normalizeHex, readableOn, rgba } from '../theme';
-import { BrandMark, Button, Field, LogStream, Notice, Panel, Pill, SectionTitle, useAccent } from '../ui';
+import { BrandMark, Button, Field, LogStream, Notice, Panel, Pill, SectionTitle, Spinner, useAccent } from '../ui';
 
 interface Props {
   brand: Profile | null;
@@ -159,6 +159,7 @@ export default function BrandScreen({
             </div>
 
             {error ? <div style={{ marginTop: 18 }}><Notice tone="bad">{error}</Notice></div> : null}
+            {busy ? <div style={{ marginTop: 22, display: 'flex', justifyContent: 'center' }}><Spinner size={120} caption="Reading your site" /></div> : null}
             {log.length > 0 ? <div style={{ marginTop: 18 }}><LogStream lines={log} busy={busy} /></div> : null}
 
             <div style={{ marginTop: 26, fontSize: 11.8, color: TEXT_MUTED, fontFamily: MONO, letterSpacing: 0.4 }}>
@@ -181,6 +182,7 @@ export default function BrandScreen({
           </SectionTitle>
 
           {error ? <Notice tone="bad">{error}</Notice> : null}
+          {busy ? <div style={{ marginBottom: 15, display: 'flex', justifyContent: 'center' }}><Spinner size={120} caption="Re-reading your site" /></div> : null}
           {log.length > 0 ? <div style={{ marginBottom: 15 }}><LogStream lines={log} busy={busy} /></div> : null}
 
           <Panel style={{ padding: 24, marginBottom: 16 }}>
@@ -234,7 +236,7 @@ export default function BrandScreen({
                     style={{
                       width: 38, height: 38, borderRadius: 11, cursor: 'pointer',
                       background: hex,
-                      border: `2px solid ${selected ? '#ffffff' : 'transparent'}`,
+                      border: `2px solid ${selected ? '#1A1000' : 'transparent'}`,
                       boxShadow: selected ? `0 0 0 3px ${rgba(hex, 0.45)}` : 'none',
                       color: readableOn(hex), fontSize: 11, fontWeight: 800,
                     }}

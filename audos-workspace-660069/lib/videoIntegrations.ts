@@ -16,6 +16,7 @@ import {
   runwayModel,
   runwayVideoRatio,
   clampRunwayDuration,
+  engineHealthWarning,
 } from './videoEngines';
 import {
   EngineError,
@@ -99,20 +100,31 @@ export function integrationMeta(id: string | null | undefined): VideoIntegration
   return VIDEO_INTEGRATIONS.find((entry) => entry.id === id) || null;
 }
 
+/**
+ * Put the last verified outcome in front of the price. A model the platform is
+ * currently refusing still appears in every picker — these outages flip back
+ * — but the customer sees why it may not run before they spend a slot on it,
+ * instead of finding out from a 400 after the submit.
+ */
+function withHealth(modelId: string, hint: string): string {
+  const warning = engineHealthWarning(modelId);
+  return warning ? `⚠ ${warning}${hint ? ` · ${hint}` : ''}` : hint;
+}
+
 export function modelsForIntegration(integration: VideoIntegrationId): IntegrationModelOption[] {
   switch (integration) {
     case 'image-and-video-generation':
-      return GROUP_A_MODELS.map((m) => ({ id: m.id, label: m.name, hint: m.costHint }));
+      return GROUP_A_MODELS.map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) }));
     case 'google-veo3':
       return [
         { id: GOOGLE_VEO_CONVENIENCE_MODEL, label: 'Veo 3.1 (managed default)', hint: 'POST /api/generate/video' },
-        ...GROUP_A_MODELS.filter((m) => m.provider === 'Google' || m.id.startsWith('veo-')).map((m) => ({ id: m.id, label: m.name, hint: m.costHint })),
-        ...GROUP_A_MODELS.filter((m) => m.id.startsWith('sora')).map((m) => ({ id: m.id, label: m.name, hint: m.costHint })),
+        ...GROUP_A_MODELS.filter((m) => m.provider === 'Google' || m.id.startsWith('veo-')).map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) })),
+        ...GROUP_A_MODELS.filter((m) => m.id.startsWith('sora')).map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) })),
       ];
     case 'kling-video':
-      return KLING_MODELS.map((m) => ({ id: m.id, label: m.name, hint: m.blurb.slice(0, 80) }));
+      return KLING_MODELS.map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.blurb.slice(0, 80)) }));
     case 'higgsfield-media':
-      return HIGGSFIELD_VIDEO_MODELS.map((m) => ({ id: m.id, label: m.name, hint: m.blurb.slice(0, 80) }));
+      return HIGGSFIELD_VIDEO_MODELS.map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.blurb.slice(0, 80)) }));
     case 'runway-recipes':
       return RUNWAY_MODELS.filter((m) => m.type === 'video').map((m) => ({
         id: m.id,

@@ -379,10 +379,10 @@ export default function AvatarTab() {
                         style={{
                           border: `2px solid ${selected ? T.accent : 'transparent'}`,
                           background: T.inset,
-                          boxShadow: selected ? '0 6px 18px rgba(124,58,237,0.35)' : 'none',
+                          boxShadow: selected ? '0 6px 18px rgba(200,146,10,0.35)' : 'none',
                         }}
                       >
-                        <span className="block aspect-[3/4] w-full overflow-hidden" style={{ background: 'rgba(148,163,184,0.1)' }}>
+                        <span className="block aspect-[3/4] w-full overflow-hidden" style={{ background: 'rgba(180,120,0,0.08)' }}>
                           {avatar.previewImage ? (
                             <img src={avatar.previewImage} alt={avatar.name} loading="lazy" className="h-full w-full object-cover" />
                           ) : (
@@ -406,7 +406,7 @@ export default function AvatarTab() {
                         aria-label={avatar.indian ? 'Remove from Indian avatars' : 'Add to Indian avatars'}
                         title={avatar.indian ? 'Remove the Indian badge' : 'Flag this as an Indian avatar'}
                         className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full"
-                        style={{ background: 'rgba(8,10,18,0.72)' }}
+                        style={{ background: 'rgba(255,253,244,0.82)' }}
                       >
                         <Flag className="h-3 w-3" style={{ color: avatar.indian ? T.accentBright : T.textMuted }} />
                       </button>

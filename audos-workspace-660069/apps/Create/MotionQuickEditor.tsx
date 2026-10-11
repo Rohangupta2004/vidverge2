@@ -104,19 +104,19 @@ function Bar({
         height: TRACK_H - 10,
         borderRadius: 7,
         background: selected ? color : `${color}cc`,
-        border: selected ? '2px solid #fff' : '1px solid rgba(255,255,255,0.25)',
+        border: selected ? '2px solid #B4720A' : '1px solid rgba(180,120,0,0.35)',
         cursor: 'grab',
         overflow: 'hidden',
         display: 'flex',
         alignItems: 'center',
-        boxShadow: selected ? '0 6px 18px -8px rgba(0,0,0,0.9)' : 'none',
+        boxShadow: selected ? '0 6px 18px -8px rgba(120,80,0,0.3)' : 'none',
       }}
       title={label}
     >
       {onTrim ? (
         <span
           onPointerDown={onPointerDown('start')}
-          style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 8, cursor: 'ew-resize', background: 'rgba(0,0,0,0.28)' }}
+          style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 8, cursor: 'ew-resize', background: 'rgba(26,16,0,0.28)' }}
         />
       ) : null}
       <span
@@ -137,7 +137,7 @@ function Bar({
       {onTrim ? (
         <span
           onPointerDown={onPointerDown('end')}
-          style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 8, cursor: 'ew-resize', background: 'rgba(0,0,0,0.28)' }}
+          style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 8, cursor: 'ew-resize', background: 'rgba(26,16,0,0.28)' }}
         />
       ) : null}
     </div>
@@ -172,7 +172,7 @@ function Track({
       </span>
       <div
         ref={measure}
-        style={{ position: 'relative', flex: 1, height: TRACK_H, borderRadius: 9, background: 'rgba(255,255,255,0.04)', border: `1px solid ${T.border}` }}
+        style={{ position: 'relative', flex: 1, height: TRACK_H, borderRadius: 9, background: 'rgba(180,120,0,0.06)', border: `1px solid ${T.border}` }}
       >
         {width > 0 ? children(width) : null}
       </div>
@@ -190,7 +190,7 @@ function miniSelect(value: string, onChange: (v: string) => void, options: { val
         padding: '6px 8px',
         borderRadius: 8,
         border: `1px solid ${T.borderStrong}`,
-        background: '#101014',
+        background: '#FFFFFF',
         color: T.text,
         fontSize: 12,
         fontFamily: FONT,
@@ -213,7 +213,7 @@ const iconBtn: CSSProperties = {
   padding: '7px 11px',
   borderRadius: 9,
   border: `1px solid ${T.border}`,
-  background: 'rgba(255,255,255,0.04)',
+  background: 'rgba(180,120,0,0.06)',
   color: T.sub,
   fontSize: 12,
   fontWeight: 600,
@@ -262,7 +262,7 @@ export default function MotionQuickEditor({
             onChange={(e) => setNewText(e.target.value)}
             placeholder="Add a headline…"
             data-testid="qe-add-text-input"
-            style={{ padding: '7px 10px', borderRadius: 9, border: `1px solid ${T.border}`, background: 'rgba(255,255,255,0.04)', color: T.text, fontSize: 12.5, fontFamily: FONT, width: 150 }}
+            style={{ padding: '7px 10px', borderRadius: 9, border: `1px solid ${T.border}`, background: 'rgba(180,120,0,0.06)', color: T.text, fontSize: 12.5, fontFamily: FONT, width: 150 }}
           />
           <button
             type="button"
@@ -303,7 +303,7 @@ export default function MotionQuickEditor({
             top: 0,
             bottom: 0,
             width: 2,
-            background: 'rgba(255,255,255,0.5)',
+            background: 'rgba(26,16,0,0.45)',
             pointerEvents: 'none',
             zIndex: 5,
           }}
@@ -344,7 +344,7 @@ export default function MotionQuickEditor({
                 key={c.id}
                 left={(c.start / duration) * width}
                 width={((c.end - c.start) / duration) * width}
-                color="#f59e0b"
+                color="#B45309"
                 label={c.content}
                 selected={selText === c.id}
                 duration={duration}
@@ -395,7 +395,7 @@ export default function MotionQuickEditor({
 
       {/* Selected layer inspector */}
       {layer ? (
-        <div style={{ marginTop: 14, padding: 12, borderRadius: 12, border: `1px solid ${T.border}`, background: 'rgba(255,255,255,0.02)' }}>
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 12, border: `1px solid ${T.border}`, background: 'rgba(180,120,0,0.05)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>{layerLabel(layer)}</span>
             <span style={{ fontSize: 11, color: T.muted }}>{layer.start.toFixed(1)}–{layer.end.toFixed(1)}s</span>
@@ -411,7 +411,7 @@ export default function MotionQuickEditor({
             </button>
             <button
               type="button"
-              style={{ ...iconBtn, color: T.danger, borderColor: 'rgba(239,68,68,0.3)' }}
+              style={{ ...iconBtn, color: T.danger, borderColor: 'rgba(153,27,27,0.3)' }}
               onClick={() => {
                 deleteLayer(layer.id);
                 setSelLayer(null);
@@ -438,12 +438,12 @@ export default function MotionQuickEditor({
 
       {/* Selected text inspector */}
       {cue ? (
-        <div style={{ marginTop: 14, padding: 12, borderRadius: 12, border: `1px solid ${T.border}`, background: 'rgba(255,255,255,0.02)' }}>
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 12, border: `1px solid ${T.border}`, background: 'rgba(180,120,0,0.05)' }}>
           <input
             value={cue.content}
             onChange={(e) => updateTextCue(cue.id, { content: e.target.value })}
             data-testid="qe-edit-text"
-            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 11px', borderRadius: 9, border: `1px solid ${T.border}`, background: 'rgba(255,255,255,0.04)', color: T.text, fontSize: 14, fontFamily: FONT, marginBottom: 10 }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 11px', borderRadius: 9, border: `1px solid ${T.border}`, background: 'rgba(180,120,0,0.06)', color: T.text, fontSize: 14, fontFamily: FONT, marginBottom: 10 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             {miniSelect(cue.anchor, (v) => updateTextCue(cue.id, { anchor: v as TextCue['anchor'] }), [
@@ -472,7 +472,7 @@ export default function MotionQuickEditor({
             <span style={{ flex: 1 }} />
             <button
               type="button"
-              style={{ ...iconBtn, color: T.danger, borderColor: 'rgba(239,68,68,0.3)' }}
+              style={{ ...iconBtn, color: T.danger, borderColor: 'rgba(153,27,27,0.3)' }}
               onClick={() => {
                 deleteTextCue(cue.id);
                 setSelText(null);

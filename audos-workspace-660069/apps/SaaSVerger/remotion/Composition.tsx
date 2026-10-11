@@ -39,7 +39,7 @@ export default function Composition({ identity, script, audioUrl }: SaaSVergerCo
     from += duration;
     return beat;
   });
-  return <AbsoluteFill style={{ background: `linear-gradient(135deg, ${identity.bgColor}, #1a1030)` }}><AbsoluteFill style={{ background: `radial-gradient(circle at 20% 5%, ${identity.primaryColor}44, transparent 42%)` }} />{beats.map((beat, index) => <Sequence key={index} from={beat.from} durationInFrames={beat.duration}>{beat.act.screenKey === 'cta' ? <CTA identity={identity} /> : <ProductBeat act={beat.act} identity={identity} />}</Sequence>)}{audioUrl ? <Audio src={audioUrl} /> : null}</AbsoluteFill>;
+  return <AbsoluteFill style={{ background: `linear-gradient(135deg, ${identity.bgColor}, #302410)` }}><AbsoluteFill style={{ background: `radial-gradient(circle at 20% 5%, ${identity.primaryColor}44, transparent 42%)` }} />{beats.map((beat, index) => <Sequence key={index} from={beat.from} durationInFrames={beat.duration}>{beat.act.screenKey === 'cta' ? <CTA identity={identity} /> : <ProductBeat act={beat.act} identity={identity} />}</Sequence>)}{audioUrl ? <Audio src={audioUrl} /> : null}</AbsoluteFill>;
 }
 
 export const calculateDemoVideoDuration = ({ script }: SaaSVergerCompositionProps) => Math.max(1, Math.round(script.totalSeconds * 30));

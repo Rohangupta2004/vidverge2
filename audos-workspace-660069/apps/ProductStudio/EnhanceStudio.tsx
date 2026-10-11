@@ -381,7 +381,7 @@ export default function EnhanceStudio({ videoUrl, title, accent, onBack }: {
           <span style={{ display: 'block', fontSize: 11.5, color: S.muted }}>Auto cuts · captions · trim · colour · export — on your generated video</span>
         </div>
         {enhancedUrl ? (
-          <a href={enhancedUrl} download target="_blank" rel="noreferrer" className="ps-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: 'none', background: S.success, color: '#04241B', fontSize: 12.5, fontWeight: 800, textDecoration: 'none' }} data-testid="button-download-enhanced">
+          <a href={enhancedUrl} download target="_blank" rel="noreferrer" className="ps-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: 'none', background: S.success, color: '#FFFFFF', fontSize: 12.5, fontWeight: 800, textDecoration: 'none' }} data-testid="button-download-enhanced">
             <Download size={13} /> Download enhanced MP4
           </a>
         ) : null}
@@ -438,7 +438,7 @@ export default function EnhanceStudio({ videoUrl, title, accent, onBack }: {
                 {cuts.map((c, i) => (
                   <span key={i} title={'Cut ' + formatTime(c.start) + ' → ' + formatTime(c.end)} style={{ position: 'absolute', top: 0, bottom: 0, left: (c.start / timelineDur) * 100 + '%', width: Math.max(0.6, ((c.end - c.start) / timelineDur) * 100) + '%', background: 'color-mix(in srgb, var(--space-semantic-danger-500) 70%, transparent)' }} />
                 ))}
-                <span style={{ position: 'absolute', top: 0, bottom: 0, width: 2, background: '#fff', opacity: 0.9, left: (timelineDur ? (playheadT / timelineDur) * 100 : 0) + '%' }} />
+                <span style={{ position: 'absolute', top: 0, bottom: 0, width: 2, background: '#1A1000', opacity: 0.9, left: (timelineDur ? (playheadT / timelineDur) * 100 : 0) + '%' }} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, color: S.muted, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
                 <span>0:00</span>
@@ -579,7 +579,7 @@ export default function EnhanceStudio({ videoUrl, title, accent, onBack }: {
               onClick={() => void runExport()}
               disabled={exporting || busy}
               className="ps-btn"
-              style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 14px', borderRadius: 11, border: 'none', background: exporting ? S.panelStrong : S.success, color: exporting ? S.muted : '#04241B', cursor: exporting || busy ? 'not-allowed' : 'pointer', fontSize: 13.5, fontWeight: 800 }}
+              style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 14px', borderRadius: 11, border: 'none', background: exporting ? S.panelStrong : S.success, color: exporting ? S.muted : '#FFFFFF', cursor: exporting || busy ? 'not-allowed' : 'pointer', fontSize: 13.5, fontWeight: 800 }}
               data-testid="button-export-enhanced"
             >
               {exporting ? <Loader2 size={15} className="rc-spin" /> : <Download size={15} />}

@@ -72,7 +72,7 @@ export default function ProExport(props: ExportProps) {
   return (
     <Modal
       title="Export video"
-      icon={<Film size={16} color="#A78BFA" />}
+      icon={<Film size={16} color="#C8920A" />}
       onClose={props.onClose}
       footer={(
         <>
@@ -103,8 +103,8 @@ export default function ProExport(props: ExportProps) {
               onClick={() => props.onSpec({ format: f.id })}
               disabled={props.busy}
             >
-              <b style={{ fontSize: 12.5, display: 'block', color: '#E2E2E2' }}>{f.label}</b>
-              <small style={{ fontSize: 10, color: '#6A6A6A', lineHeight: 1.4 }}>{f.blurb}</small>
+              <b style={{ fontSize: 12.5, display: 'block', color: '#1A1000' }}>{f.label}</b>
+              <small style={{ fontSize: 10, color: '#7A6030', lineHeight: 1.4 }}>{f.blurb}</small>
             </button>
           ))}
         </div>
@@ -161,7 +161,7 @@ export default function ProExport(props: ExportProps) {
       </Section>
 
       <details>
-        <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#777' }}>
+        <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#7A6030' }}>
           Advanced
         </summary>
         <div style={{ paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -213,7 +213,7 @@ export default function ProExport(props: ExportProps) {
         <Section title="Download ready" hint={`${props.results.length} file${props.results.length === 1 ? '' : 's'}`}>
           {props.results.map((r) => (
             <div key={`${r.aspect}-${r.url}`} className="vp-row">
-              <Check size={13} color="#34D399" />
+              <Check size={13} color="#166534" />
               <span style={{ fontSize: 12, fontWeight: 650 }}>{r.label}</span>
               <span className="vp-note vp-mono">{r.geometry}</span>
               <span className="vp-spread" />

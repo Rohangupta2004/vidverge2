@@ -62,10 +62,10 @@ const WAVE_CSS = `
 .vva-wave[data-state='error'] { --vv-travel: 6.5s; --vv-breath: 5.5s; }
 .vva-wave[data-state='error'] .vva-trail-alt {
   opacity: 0.7;
-  animation: vva-amber-pulse 3.2s ease-in-out infinite;
+  animation: vva-error-pulse 3.2s ease-in-out infinite;
 }
-.vva-wave[data-state='error'] .vva-spark-core { stroke: var(--vv-error, #f97316); }
-.vva-wave[data-state='error'] .vva-spark-glow { stroke: var(--vv-error, #f97316); opacity: 0.28; }
+.vva-wave[data-state='error'] .vva-spark-core { stroke: var(--vv-error, #991B1B); }
+.vva-wave[data-state='error'] .vva-spark-glow { stroke: var(--vv-error, #991B1B); opacity: 0.28; }
 
 .vva-wave.vva-calm { --vv-travel: 11s; --vv-breath: 14s; --vv-shimmer: 12s; }
 .vva-wave.vva-calm .vva-spark-glow { opacity: 0.22; }
@@ -88,7 +88,7 @@ const WAVE_CSS = `
   55% { stroke-dashoffset: 0; opacity: 1; }
   100% { stroke-dashoffset: 0; opacity: 0; }
 }
-@keyframes vva-amber-pulse {
+@keyframes vva-error-pulse {
   0%, 100% { opacity: 0.32; }
   50% { opacity: 0.78; }
 }
@@ -136,11 +136,11 @@ export default function MotionWave({ state = 'idle', calm = false, className = '
       <svg viewBox="0 0 1200 240" preserveAspectRatio="none" aria-hidden="true">
         <defs>
           <linearGradient id={`${uid}-trail`} x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="var(--vv-gold, #F5A623)" stopOpacity="0" />
-            <stop offset="20%" stopColor="var(--vv-gold, #F5A623)" stopOpacity="0.65" />
-            <stop offset="52%" stopColor="var(--vv-gold-light, #FFD9A0)" stopOpacity="1" />
-            <stop offset="82%" stopColor="var(--vv-gold, #F5A623)" stopOpacity="0.6" />
-            <stop offset="100%" stopColor="var(--vv-gold, #F5A623)" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--vv-gold, #C8920A)" stopOpacity="0" />
+            <stop offset="20%" stopColor="var(--vv-gold, #C8920A)" stopOpacity="0.65" />
+            <stop offset="52%" stopColor="var(--vv-accent-light, #E0A33A)" stopOpacity="1" />
+            <stop offset="82%" stopColor="var(--vv-gold-light, #E8B737)" stopOpacity="0.6" />
+            <stop offset="100%" stopColor="var(--vv-gold, #C8920A)" stopOpacity="0" />
           </linearGradient>
           <filter id={`${uid}-glow`} x="-15%" y="-150%" width="130%" height="400%">
             <feGaussianBlur stdDeviation="7" />
@@ -169,7 +169,7 @@ export default function MotionWave({ state = 'idle', calm = false, className = '
           className="vva-trail-alt"
           d={WAVE_D}
           transform="translate(0 7)"
-          stroke="var(--vv-error, #f97316)"
+          stroke="var(--vv-error, #991B1B)"
           strokeWidth={1.4}
           vectorEffect="non-scaling-stroke"
         />
@@ -178,7 +178,7 @@ export default function MotionWave({ state = 'idle', calm = false, className = '
           className="vva-spark vva-spark-glow"
           d={WAVE_D}
           pathLength={1000}
-          stroke="var(--vv-gold, #F5A623)"
+          stroke="var(--vv-gold, #C8920A)"
           strokeWidth={4}
           filter={`url(#${uid}-glow)`}
           vectorEffect="non-scaling-stroke"
@@ -187,7 +187,7 @@ export default function MotionWave({ state = 'idle', calm = false, className = '
           className="vva-spark vva-spark-core"
           d={WAVE_D}
           pathLength={1000}
-          stroke="var(--vv-gold-light, #FFE3B0)"
+          stroke="var(--vv-accent-light, #E0A33A)"
           strokeWidth={1.9}
           filter={`url(#${uid}-soft)`}
           vectorEffect="non-scaling-stroke"
@@ -198,7 +198,7 @@ export default function MotionWave({ state = 'idle', calm = false, className = '
           className="vva-sweep"
           d={WAVE_D}
           pathLength={1000}
-          stroke="var(--vv-gold-light, #FFE3B0)"
+          stroke="var(--vv-accent-light, #E0A33A)"
           strokeWidth={2.2}
           filter={`url(#${uid}-soft)`}
           vectorEffect="non-scaling-stroke"

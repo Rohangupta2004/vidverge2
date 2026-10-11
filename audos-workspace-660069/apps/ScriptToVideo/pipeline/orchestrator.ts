@@ -28,18 +28,19 @@
  */
 
 import {
-  Aspect, Film, FilmCharacter, FilmScene, MachineState, ParsedScene, PlanScene,
-  ReferenceAsset, ReferenceType, SceneDialogue, VideoClipSpec, db,
-  generateBackdropImage, newSceneKey, sceneFingerprint,
+  Aspect, AtReference, Film, FilmCharacter, FilmScene, MAX_OPERATION_ID_CHARS,
+  MachineState, ParsedScene, PlanScene, ReferenceAsset, ReferenceType,
+  SceneDialogue, VideoClipSpec, db, generateBackdropImage, newSceneKey,
+  resolveAtMentions, sceneFingerprint,
 } from '../api';
 import {
   buildManualScenePrompt, manualSceneNegative, manualSceneSegment, parseManualScript,
 } from '../manualScript';
 import {
-  characterPortraitBrief, extractVisualAttributes, prepareScenePrompt,
-  segmentScript, validateScene,
+  characterPortraitBrief, extractStyleFingerprint, extractVisualAttributes,
+  prepareScenePrompt, segmentScript, validateScene,
 } from './opus';
-import { VideoModelService, capText, resolveVideoModel, snapDuration } from './videoModelService';
+import { VideoModelService, capText, resolveDuration, resolveVideoModel } from './videoModelService';
 import type { VideoModelConfig } from './videoModelService';
 import { fallbackChain, isBadRequest, rephraseVideoPrompt } from './resilience';
 import { extractFinalFrame, probeVideoDuration } from './frames';
@@ -227,7 +228,10 @@ function applyDualReference(params: {
     assets.unshift({ role: 'first_frame', url: charRef });
     return { assets, prompt: params.prompt, referenceType: 'character_reference' };
   }
-  if (model.maxReferenceImages > 0) {
+  // A model whose single image slot IS the seed frame (Seedance) has no room
+  // left once a continuation frame is riding in it — identity travels in
+  // words for those clips, exactly as it does on Runway.
+  if (model.maxReferenceImages > 0 && model.seedFrame !== 'character_ref_only') {
     assets.push({ role: 'reference', url: charRef });
     return { assets, prompt: params.prompt, referenceType: params.referenceType };
   }
@@ -236,6 +240,88 @@ function applyDualReference(params: {
     prompt: appendPromptNote(params.prompt, characterReferenceNote(params.film, params.characterId), model.promptMaxChars),
     referenceType: params.referenceType,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Stored @name references + style lock — the two things every scene of a film
+// carries, whatever else changes clip to clip
+// ---------------------------------------------------------------------------
+
+/** The stored references this script summoned with @name, resolved once when
+ * the film is created and then persisted on the film row. A reference lookup
+ * must never stop a film from being made, so a failure resolves to none. */
+async function resolveFilmAtReferences(script: string): Promise<AtReference[]> {
+  try {
+    const stored = await db.listReferences();
+    return resolveAtMentions(script, stored).map((r) => ({
+      name: r.name,
+      url: r.url,
+      type: r.type,
+      ...(r.description ? { description: r.description } : {}),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** Attach the film's @name references to a scene's request as reference
+ * images, up to whatever the chosen model actually carries. The character
+ * reference already in `assets` keeps its claim on that budget — on Seedance
+ * (one image) that means the character wins and the stored references travel
+ * as the written note below instead. */
+function withAtReferences(film: Film, assets: ReferenceAsset[]): ReferenceAsset[] {
+  const stored = Array.isArray(film.at_references) ? film.at_references : [];
+  if (!stored.length) return assets;
+  const model = resolveVideoModel(film.video_model);
+  // Seedance has ONE image slot and it is the seed frame, so a stored
+  // reference travels as a picture there only while that slot is free (an
+  // opening scene with no character reference) — never as a thumbnail the
+  // request would not actually carry.
+  const singleSeedSlot = model.seedFrame === 'character_ref_only';
+  const out = [...assets];
+  for (const ref of stored) {
+    const url = String(ref?.url || '');
+    if (!/^https:\/\//.test(url) || out.some((a) => a.url === url)) continue;
+    if (singleSeedSlot) {
+      if (out.some((a) => a.role === 'first_frame')) break;
+      out.unshift({ role: 'first_frame', url });
+      break;
+    }
+    if (out.filter((a) => a.role === 'reference').length >= model.maxReferenceImages) break;
+    out.push({ role: 'reference', url });
+  }
+  return out;
+}
+
+/** The stored references' appearance notes in words, so a model carrying
+ * fewer pictures than the script summoned still gets their identity. */
+function appendAtReferenceNote(film: Film, prompt: string): string {
+  const described = (Array.isArray(film.at_references) ? film.at_references : [])
+    .filter((r) => String(r?.description || '').trim());
+  if (!described.length) return prompt;
+  const note = `Stored references (match them exactly): ${described.map((r) => `${r.name} — ${capText(String(r.description), 1000)}`).join('; ')}`;
+  return appendPromptNote(prompt, capText(note, 5000), resolveVideoModel(film.video_model).promptMaxChars);
+}
+
+/**
+ * STYLE LOCK — scene 1's visual fingerprint, prepended verbatim to every
+ * later prompt so clip 7 cannot drift into a different palette, light or lens
+ * than clip 1. The combined text is capped to the model's own limit AFTER
+ * prepending (the scene body is trimmed from the end), so the lock itself is
+ * never the part that gets cut.
+ */
+function applyStyleLock(film: Film, scene: FilmScene, prompt: string): string {
+  const lock = String(film.style_lock_description || '').trim();
+  if (film.style_lock !== true || !lock || scene.idx === 0) return prompt;
+  const head = `STYLE LOCK (maintain exactly):\n${lock}\n\n`;
+  const room = Math.max(200, resolveVideoModel(film.video_model).promptMaxChars - head.length);
+  return `${head}${capText(prompt, room)}`;
+}
+
+/** Everything a prepared prompt carries beyond the scene itself: the stored
+ * reference notes, then the film's locked style. */
+function finishScenePrompt(film: Film, scene: FilmScene, prompt: string): string {
+  return applyStyleLock(film, scene, appendAtReferenceNote(film, prompt));
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +337,12 @@ export async function createAndSegmentFilm(params: {
   note?: string;
   /** Video model registry id (see VIDEO_MODELS); null/undefined = default. */
   videoModel?: string | null;
+  /** Style Lock (default ON): freeze the look after scene 1. */
+  styleLock?: boolean | null;
 }, hooks: RunHooks = {}): Promise<{ film: Film; scenes: FilmScene[] }> {
+  // Anything the script summoned with @name is resolved BEFORE the row is
+  // written, so every scene of this film carries the same references.
+  const atReferences = await resolveFilmAtReferences(params.script);
   const film = await db.createFilm({
     title: null,
     script: params.script,
@@ -262,8 +353,12 @@ export async function createAndSegmentFilm(params: {
     product_screenshot_url: params.referenceImageUrl || null,
     character_ref_url: params.characterRefUrl || null,
     video_model: resolveVideoModel(params.videoModel).id,
+    style_lock: params.styleLock !== false,
+    style_lock_description: null,
+    at_references: atReferences,
   });
   try {
+    if (atReferences.length) say(hooks, `${atReferences.length} stored reference${atReferences.length === 1 ? '' : 's'} resolved from your script (${atReferences.map((r) => `@${r.name}`).join(', ')}) — they travel with every scene.`);
     await setState(film, hooks, 'ANALYZING_SCRIPT', 'The director is reading the entire script and mapping the story…');
     const plan = await segmentScript({
       script: params.script,
@@ -436,10 +531,10 @@ export async function prepareScene(
     await patchScene(scene, hooks, {
       status: 'ready',
       error: null,
-      prompt: dual.prompt,
+      prompt: finishScenePrompt(film, scene, dual.prompt),
       continuation,
       reference_type: dual.referenceType,
-      reference_assets: dual.assets,
+      reference_assets: withAtReferences(film, dual.assets),
       spec,
       clip_fingerprint: sceneFingerprint({ type: scene.type, spec }, (film.aspect_ratio || '16:9') as Aspect),
     });
@@ -508,10 +603,10 @@ async function prepareManualScene(
     await patchScene(scene, hooks, {
       status: 'ready',
       error: null,
-      prompt: dual.prompt,
+      prompt: finishScenePrompt(film, scene, dual.prompt),
       continuation,
       reference_type: dual.referenceType,
-      reference_assets: dual.assets,
+      reference_assets: withAtReferences(film, dual.assets),
       spec: nextSpec,
       clip_fingerprint: sceneFingerprint({ type: scene.type, spec: nextSpec }, (film.aspect_ratio || '16:9') as Aspect),
     });
@@ -554,6 +649,8 @@ export async function createManualScriptFilm(params: {
   referenceImageUrl?: string | null;
   note?: string | null;
   videoModel?: string | null;
+  /** Style Lock (default ON): freeze the look after scene 1. */
+  styleLock?: boolean | null;
 }, hooks: RunHooks = {}): Promise<{ film: Film; scenes: FilmScene[] }> {
   const parsed = parseManualScript(params.script);
   if (!parsed.scenes.length) {
@@ -563,6 +660,9 @@ export async function createManualScriptFilm(params: {
   // overall style block and reaches every clip that way.
   const globalStyle = [parsed.globalStyle, String(params.note || '').trim()].filter(Boolean).join(' ');
   const model = resolveVideoModel(params.videoModel);
+  // The @name mentions are read from the pasted script exactly as they are in
+  // AI Mode — the parser leaves them in the visual text.
+  const atReferences = await resolveFilmAtReferences(params.script);
   const film = await db.createFilm({
     title: parsed.scenes[0].title || 'Manual script film',
     script: params.script,
@@ -573,12 +673,20 @@ export async function createManualScriptFilm(params: {
     product_screenshot_url: params.referenceImageUrl || null,
     character_ref_url: params.characterRefUrl || null,
     video_model: model.id,
+    style_lock: params.styleLock !== false,
+    style_lock_description: null,
+    at_references: atReferences,
   });
   try {
+    if (atReferences.length) say(hooks, `${atReferences.length} stored reference${atReferences.length === 1 ? '' : 's'} resolved from your script (${atReferences.map((r) => `@${r.name}`).join(', ')}) — they travel with every scene.`);
     const planScenes: PlanScene[] = [];
     for (const parsedScene of parsed.scenes) {
       const idx = parsedScene.index - 1;
-      const duration = snapDuration(parsedScene.durationSec, model);
+      // MANUAL SCRIPT MODE films the length the script asks for. The only
+      // thing allowed to change it is the provider's own floor/ceiling, so a
+      // "| 7 sec" scene is seven seconds long — it is no longer rounded down
+      // onto a fixed 4/6/8/10 ladder.
+      const duration = resolveDuration(parsedScene.durationSec, model);
       const segment = manualSceneSegment(parsedScene);
       const dialogue = manualSceneDialogue(parsedScene);
       const sceneKey = newSceneKey();
@@ -645,7 +753,20 @@ export async function createManualScriptFilm(params: {
 // Stage 3 — generate ONE scene (explicitly triggered), then extract the frame
 // ---------------------------------------------------------------------------
 
-export async function generateScene(film: Film, scenes: FilmScene[], scene: FilmScene, hooks: RunHooks): Promise<void> {
+export async function generateScene(
+  film: Film,
+  scenes: FilmScene[],
+  scene: FilmScene,
+  hooks: RunHooks,
+  opts: {
+    /** Multi-generate only: this scene may render alongside others. */
+    allowConcurrent?: boolean;
+    /** false = do not prepare the following scene's prompt when this clip
+     * lands (a batch run prepares nothing, so parallel renders cannot race
+     * each other rewriting the same waiting scene). */
+    prepareNext?: boolean;
+  } = {},
+): Promise<void> {
   // A scene counts as prepared when it actually HAS a prompt — the prompt
   // field itself is the authority. The old guard also required the status
   // flag to read 'ready', and when that flag lagged behind the written prompt
@@ -653,7 +774,7 @@ export async function generateScene(film: Film, scenes: FilmScene[], scene: Film
   // generation) on scenes whose prompt was plainly visible on the card.
   const preparedPrompt = typeof scene.prompt === 'string' ? scene.prompt.trim() : '';
   if (!preparedPrompt) throw new Error(`Scene ${scene.idx + 1} has no prepared prompt yet — prepare it first.`);
-  if (scenes.some((s) => s.status === 'generating')) throw new Error('Another scene is already generating — clips render one at a time.');
+  if (!opts.allowConcurrent && scenes.some((s) => s.status === 'generating')) throw new Error('Another scene is already generating — clips render one at a time.');
 
   await patchFilm(film, hooks, { status: 'producing', error: null });
   await setState(film, hooks, 'GENERATING_VIDEO', `Scene ${scene.idx + 1}: generating the clip…`);
@@ -674,6 +795,10 @@ export async function generateScene(film: Film, scenes: FilmScene[], scene: Film
     // shot never changes and the scene is never billed twice.
     const attempts: { prompt: string; model: VideoModelConfig }[] = [{ prompt: preparedPrompt, model: chosenModel }];
     let job: { jobId: string; model: string } | null = null;
+    /** The config the job actually went out on — the provider fallback may
+     * have moved it — so the poll loop uses THAT model's interval and
+     * timeout rather than Omni Flash's. */
+    let jobModel: VideoModelConfig = chosenModel;
     let submitError: any = null;
     let rephrased = '';
     for (let step = 0; step < attempts.length && !job; step += 1) {
@@ -688,6 +813,7 @@ export async function generateScene(film: Film, scenes: FilmScene[], scene: Film
           model: attempt.model,
           creditKey,
         });
+        jobModel = attempt.model;
         // The board shows the prompt that actually rendered.
         if (step > 0 && attempt.prompt !== preparedPrompt) await patchScene(scene, hooks, { prompt: attempt.prompt });
       } catch (e: any) {
@@ -707,14 +833,19 @@ export async function generateScene(film: Film, scenes: FilmScene[], scene: Film
       }
     }
     if (!job) throw submitError || new Error(`Scene ${scene.idx + 1} could not be submitted to any video provider.`);
-    await patchScene(scene, hooks, { veo_operation_id: job.jobId });
+    // The job id is capped before it is written: some providers (Seedance
+    // 2.0, a few Runway/OpenRouter models) answer with ids long enough that
+    // the data API refused the value ("value too long") and failed the whole
+    // scene write — losing the id of a render already paid for.
+    await patchScene(scene, hooks, { veo_operation_id: job.jobId.slice(0, MAX_OPERATION_ID_CHARS) });
     const videoUrl = await VideoModelService.getVideoResult(job.jobId, {
       onProgress: (p) => say(hooks, `Scene ${scene.idx + 1}: rendering… ${Math.round(p)}%`),
       creditKey,
+      model: jobModel,
     });
     await setState(film, hooks, 'VIDEO_COMPLETED', `Scene ${scene.idx + 1}: clip landed.`);
     await patchScene(scene, hooks, { asset_url: videoUrl, veo_operation_id: null });
-    await finalizeScene(film, scenes, scene, hooks, videoUrl);
+    await finalizeScene(film, scenes, scene, hooks, videoUrl, { prepareNext: opts.prepareNext });
   } catch (e: any) {
     await patchScene(scene, hooks, { status: 'failed', error: String(e?.message || e), veo_operation_id: null });
     await setState(film, hooks, 'PROMPT_READY', `Scene ${scene.idx + 1} failed — completed scenes are untouched. Retry, regenerate the prompt, fall back to the character reference, or skip it.`);
@@ -735,7 +866,7 @@ async function finalizeScene(
   scene: FilmScene,
   hooks: RunHooks,
   videoUrl: string,
-  opts: { frameTimeoutMs?: number } = {},
+  opts: { frameTimeoutMs?: number; prepareNext?: boolean } = {},
 ): Promise<void> {
   const aspect = (film.aspect_ratio || '16:9') as Aspect;
   const frameBudget = opts.frameTimeoutMs ?? FRAME_EXTRACTION_TIMEOUT_MS;
@@ -787,11 +918,29 @@ async function finalizeScene(
     await db.addAsset({ film_id: film.id, kind: 'keyframe', name: `Scene ${scene.idx + 1} final frame`, description: `Continuity reference — ${String(scene.script_segment).slice(0, 120)}`, url: finalFrameUrl });
   }
 
+  // STYLE LOCK — scene 1 is the clip that decides what this film looks like.
+  // Its fingerprint is read ONCE, the moment that clip is in the can, and
+  // every later prompt then carries it. A failure here is cosmetic: the film
+  // simply continues without a lock.
+  if (scene.idx === 0 && film.style_lock === true && !film.style_lock_description && scene.prompt) {
+    try {
+      say(hooks, 'Style lock: reading scene 1’s look so every later clip matches it…');
+      const fingerprint = await withTimeout(
+        extractStyleFingerprint({ film, prompt: String(scene.prompt) }),
+        DIRECTOR_TIMEOUT_MS,
+        'Reading the film’s visual style',
+      );
+      if (fingerprint) await patchFilm(film, hooks, { style_lock_description: fingerprint });
+    } catch (e: any) {
+      say(hooks, `The style lock could not be read (${String(e?.message || e).slice(0, 120)}) — the film continues without it.`);
+    }
+  }
+
   // Decide the NEXT scene's reference and prepare its prompt — preparation
   // only. Generation always waits for an explicit trigger. A preparation
   // failure never touches THIS scene: its clip just landed and stays completed.
   const next = orderedScenes(scenes).find((s) => s.idx > scene.idx && !DONE.has(String(s.status)) && s.status !== 'generating');
-  if (next) {
+  if (next && opts.prepareNext !== false) {
     try {
       // No keyframe means there is nothing to continue FROM, so the next scene
       // is prepared as an independent shot rather than one that claims a seed
@@ -945,6 +1094,87 @@ export async function autoProduce(film: Film, scenes: FilmScene[], hooks: RunHoo
         say(hooks, `Scene ${next.idx + 1} failed — continuing with the remaining scenes. The error is kept on its card.`);
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MULTI-GENERATE — every prepared scene at once (deliberately NOT the
+// sequential loop above, which stays exactly as it is for normal use)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fire generation for EVERY scene that already has a prepared prompt.
+ *
+ * The sequential loop is still how a film is normally made: one clip at a
+ * time, each seeded from the last one's final frame. This is for a board full
+ * of scenes that are already prepared and independent, where waiting for each
+ * render in turn is the only thing left slowing the film down. Each scene
+ * keeps its own prompt, references and credit key, so one that fails fails
+ * alone, and no scene is billed twice.
+ *
+ * Nothing is prepared and no post-production is advanced here — the caller
+ * decides what happens when the batch lands.
+ */
+export async function generateAllReadyScenes(
+  film: Film,
+  scenes: FilmScene[],
+  hooks: RunHooks,
+): Promise<void> {
+  const ready = orderedScenes(scenes).filter((s) => s.status === 'ready' && String(s.prompt || '').trim());
+  if (!ready.length) throw new Error('No scene has a prepared prompt waiting — prepare a scene first.');
+
+  await patchFilm(film, hooks, { status: 'producing', error: null });
+  await setState(film, hooks, 'GENERATING_VIDEO', `Generating ${ready.length} prepared scene${ready.length === 1 ? '' : 's'} at once…`);
+  const results = await Promise.allSettled(
+    ready.map((scene) => generateScene(film, scenes, scene, hooks, { allowConcurrent: true, prepareNext: false })),
+  );
+
+  const failed: FilmScene[] = [];
+  for (let i = 0; i < results.length; i += 1) {
+    const result = results[i];
+    if (result.status !== 'rejected') continue;
+    const scene = ready[i];
+    failed.push(scene);
+    const reason = String((result.reason as any)?.message || result.reason);
+    // generateScene marks its own render failures; a throw from before the
+    // render started would otherwise leave the scene mid-flight.
+    if (scene.status !== 'failed') await patchScene(scene, hooks, { status: 'failed', error: reason });
+  }
+
+  const rendered = results.length - failed.length;
+  await setState(
+    film, hooks,
+    allScenesDone(scenes) ? 'ALL_SCENES_COMPLETED' : 'PROMPT_READY',
+    failed.length
+      ? `${rendered} of ${results.length} scenes rendered — scene${failed.length === 1 ? '' : 's'} ${failed.map((s) => s.idx + 1).join(', ')} failed and can be retried on their own.`
+      : `All ${rendered} prepared scene${rendered === 1 ? '' : 's'} rendered.`,
+  );
+}
+
+/** [Style Lock] — toggled from the board mid-production. Turning it ON after
+ * scene 1 has already landed reads the fingerprint straight away so the very
+ * next prompt carries it; turning it OFF keeps the fingerprint on the row (so
+ * turning it back on costs nothing) and simply stops injecting it. Prompts
+ * already written are not rewritten — regenerate a scene's prompt for that. */
+export async function setStyleLock(film: Film, scenes: FilmScene[], hooks: RunHooks, on: boolean): Promise<void> {
+  await patchFilm(film, hooks, { style_lock: on });
+  if (!on) { say(hooks, 'Style lock off — later clips are prompted on their own look.'); return; }
+  const first = orderedScenes(scenes).find((s) => s.idx === 0) || null;
+  if (film.style_lock_description) { say(hooks, 'Style lock on — every later clip carries scene 1’s look.'); return; }
+  if (!first || first.status !== 'completed' || !first.prompt) {
+    say(hooks, 'Style lock on — the look is read from scene 1 as soon as it lands.');
+    return;
+  }
+  try {
+    say(hooks, 'Style lock: reading scene 1’s look…');
+    const fingerprint = await withTimeout(
+      extractStyleFingerprint({ film, prompt: String(first.prompt) }),
+      DIRECTOR_TIMEOUT_MS,
+      'Reading the film’s visual style',
+    );
+    if (fingerprint) await patchFilm(film, hooks, { style_lock_description: fingerprint });
+  } catch (e: any) {
+    say(hooks, `The style lock could not be read (${String(e?.message || e).slice(0, 120)}) — it is read again after the next clip.`);
   }
 }
 
@@ -1490,6 +1720,7 @@ export async function resumeFilm(film: Film, scenes: FilmScene[], hooks: RunHook
         say(hooks, `Scene ${scene.idx + 1}: picking the render back up…`);
         const videoUrl = await VideoModelService.getVideoResult(scene.veo_operation_id, {
           creditKey: `stv:film:${film.id}:scene:${scene.id}`,
+          model: resolveVideoModel(film.video_model),
         });
         await patchScene(scene, hooks, { asset_url: videoUrl, veo_operation_id: null });
         await finalizeScene(film, scenes, scene, hooks, videoUrl);

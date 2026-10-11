@@ -472,7 +472,7 @@ export async function renderCardPlate(
   const pad = Math.round(panelW * 0.08);
   const backdrop = ctx.createLinearGradient(left, top, left + panelW, top + panelH);
   backdrop.addColorStop(0, 'rgba(10,14,24,0.92)');
-  backdrop.addColorStop(1, 'rgba(22,16,40,0.92)');
+  backdrop.addColorStop(1, 'rgba(40,31,16,0.92)');
   ctx.fillStyle = backdrop;
   roundRect(ctx, left, top, panelW, panelH, Math.round(panelW * 0.06));
   ctx.fillStyle = kit.primary;
@@ -480,13 +480,57 @@ export async function renderCardPlate(
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
 
-  const title = String(variables.title || variables.headline || variables.quote || '');
+  const title = String(variables.title || variables.headline || variables.quote || variables.label || '');
   const body = String(variables.body || variables.subtitle || variables.detail || variables.attribution || '');
   const value = String(variables.value || variables.stat || '');
   const label = String(variables.label || '');
   const cta = String(variables.cta || variables.button || '');
+  /** The filled entries of a numbered field family (step1\u2026, left1\u2026). */
+  const filled = (keys: string[]) => keys.map((key) => String(variables[key] || '').trim()).filter(Boolean);
 
-  if (template === 'stat-counter') {
+  if (template === 'step-sequence') {
+    // A step sequence's content lives in step1\u2026step5, so the generic
+    // title/body branch below would draw the headline and nothing under it.
+    const titleSize = Math.round(panelW * 0.085);
+    ctx.fillStyle = kit.textColor;
+    ctx.font = `800 ${titleSize}px ${kit.font}, Inter, system-ui, sans-serif`;
+    wrapText(ctx, title, panelW - pad * 2).slice(0, 2).forEach((line, index) => {
+      ctx.fillText(line, left + pad, top + pad + index * Math.round(titleSize * 1.2));
+    });
+    const stepSize = Math.round(panelW * 0.055);
+    const indent = Math.round(stepSize * 1.7);
+    let y = top + pad + Math.round(titleSize * 1.7);
+    filled(['step1', 'step2', 'step3', 'step4', 'step5']).forEach((step, index) => {
+      ctx.fillStyle = kit.accent;
+      ctx.font = `900 ${stepSize}px ${kit.font}, Inter, system-ui, sans-serif`;
+      ctx.fillText(`${index + 1}`, left + pad, y);
+      ctx.fillStyle = 'rgba(241,245,249,0.88)';
+      ctx.font = `600 ${stepSize}px ${kit.font}, Inter, system-ui, sans-serif`;
+      ctx.fillText(step, left + pad + indent, y, panelW - pad * 2 - indent);
+      y += Math.round(stepSize * 1.65);
+    });
+  } else if (template === 'comparison-table') {
+    // Two columns, drawn side by side \u2014 a comparison collapsed into one text
+    // block is not a comparison.
+    const colW = Math.round((panelW - pad * 3) / 2);
+    const headSize = Math.round(panelW * 0.06);
+    const rowSize = Math.round(panelW * 0.05);
+    const columns: { head: string; rows: string[] }[] = [
+      { head: String(variables.leftTitle || ''), rows: filled(['left1', 'left2', 'left3', 'left4']) },
+      { head: String(variables.rightTitle || ''), rows: filled(['right1', 'right2', 'right3', 'right4']) },
+    ];
+    columns.forEach((column, index) => {
+      const x = left + pad + index * (colW + pad);
+      ctx.fillStyle = index ? kit.accent : kit.textColor;
+      ctx.font = `800 ${headSize}px ${kit.font}, Inter, system-ui, sans-serif`;
+      ctx.fillText(column.head, x, top + pad, colW);
+      ctx.fillStyle = 'rgba(241,245,249,0.85)';
+      ctx.font = `500 ${rowSize}px ${kit.font}, Inter, system-ui, sans-serif`;
+      column.rows.forEach((entry, row) => {
+        ctx.fillText(entry, x, top + pad + Math.round(headSize * 1.8) + row * Math.round(rowSize * 1.55), colW);
+      });
+    });
+  } else if (template === 'stat-counter') {
     const valueSize = Math.round(panelW * 0.3);
     ctx.fillStyle = kit.accent;
     ctx.font = `900 ${valueSize}px ${kit.font}, Inter, system-ui, sans-serif`;

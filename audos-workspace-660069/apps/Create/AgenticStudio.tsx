@@ -107,15 +107,15 @@ const STATUS_META: Record<
   ShotState['status'],
   { label: string; color: string; background: string; spin?: boolean }
 > = {
-  pending: { label: 'queued', color: T.muted, background: 'rgba(148,163,184,0.12)' },
+  pending: { label: 'queued', color: T.muted, background: 'rgba(122,96,48,0.12)' },
   deciding: { label: 'routing', color: T.accentFg, background: T.accentSoft, spin: true },
   submitting: { label: 'starting', color: T.accentFg, background: T.accentSoft, spin: true },
   rendering: { label: 'rendering', color: T.accentFg, background: T.accentSoft, spin: true },
   analyzing: { label: 'analysing', color: T.accentFg, background: T.accentSoft, spin: true },
-  regenerating: { label: 'regenerating', color: '#fbbf24', background: 'rgba(251,191,36,0.14)', spin: true },
-  done: { label: 'done', color: T.success, background: 'rgba(74,222,128,0.14)' },
-  failed: { label: 'failed', color: T.danger, background: 'rgba(239,68,68,0.14)' },
-  skipped: { label: 'skipped', color: T.muted, background: 'rgba(148,163,184,0.12)' },
+  regenerating: { label: 'regenerating', color: '#B45309', background: 'rgba(180,83,9,0.12)', spin: true },
+  done: { label: 'done', color: T.success, background: 'rgba(22,101,52,0.12)' },
+  failed: { label: 'failed', color: T.danger, background: 'rgba(153,27,27,0.1)' },
+  skipped: { label: 'skipped', color: T.muted, background: 'rgba(122,96,48,0.12)' },
 };
 
 const ENGINE_LABEL: Record<string, string> = {
@@ -151,7 +151,7 @@ function ShotCard({
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        borderColor: shot.status === 'failed' ? 'rgba(239,68,68,0.36)' : drifted ? 'rgba(251,191,36,0.34)' : T.border,
+        borderColor: shot.status === 'failed' ? 'rgba(153,27,27,0.36)' : drifted ? 'rgba(180,83,9,0.34)' : T.border,
       }}
       data-testid={`card-shot-${shot.index}`}
       data-status={shot.status}
@@ -162,7 +162,7 @@ function ShotCard({
           aspectRatio: aspect === '9:16' ? '9 / 12' : '16 / 9',
           minHeight: 124,
           overflow: 'hidden',
-          background: '#030812',
+          background: '#1A1000',
         }}
       >
         {shot.clipUrl ? (
@@ -193,7 +193,7 @@ function ShotCard({
               alignItems: 'center',
               justifyContent: 'center',
               color: shot.status === 'failed' ? T.danger : T.muted,
-              background: shot.status === 'failed' ? 'rgba(239,68,68,0.06)' : undefined,
+              background: shot.status === 'failed' ? 'rgba(153,27,27,0.06)' : undefined,
             }}
           >
             {shot.status === 'failed' ? <AlertTriangle size={22} /> : <Film size={21} style={{ opacity: 0.4 }} />}
@@ -207,7 +207,7 @@ function ShotCard({
             padding: '4px 8px',
             borderRadius: 8,
             color: '#fff',
-            background: 'rgba(0,0,0,0.7)',
+            background: 'rgba(26,16,0,0.7)',
             backdropFilter: 'blur(5px)',
             fontSize: 11,
             fontWeight: 700,
@@ -223,8 +223,8 @@ function ShotCard({
               right: 9,
               padding: '4px 8px',
               borderRadius: 8,
-              color: '#dbeafe',
-              background: 'rgba(37,99,235,0.55)',
+              color: '#FFFFFF',
+              background: 'rgba(180,120,0,0.75)',
               backdropFilter: 'blur(5px)',
               fontSize: 10.5,
               fontWeight: 700,
@@ -277,9 +277,9 @@ function ShotCard({
               borderRadius: 8,
               fontSize: 11.5,
               fontWeight: 600,
-              color: '#fbbf24',
-              background: 'rgba(251,191,36,0.10)',
-              border: '1px solid rgba(251,191,36,0.28)',
+              color: '#B45309',
+              background: 'rgba(180,83,9,0.1)',
+              border: '1px solid rgba(180,83,9,0.28)',
             }}
             data-testid={`notice-regenerating-${shot.index}`}
           >
@@ -331,7 +331,7 @@ function ShotCard({
               margin: 0,
               fontSize: 11,
               lineHeight: 1.5,
-              color: shot.continuityVerdict.passed ? T.success : '#fbbf24',
+              color: shot.continuityVerdict.passed ? T.success : '#B45309',
             }}
             data-testid={`text-continuity-${shot.index}`}
           >
@@ -345,8 +345,8 @@ function ShotCard({
             style={{
               padding: '8px 9px',
               borderRadius: 8,
-              color: '#fca5a5',
-              background: 'rgba(239,68,68,0.09)',
+              color: '#991B1B',
+              background: 'rgba(153,27,27,0.08)',
               fontSize: 11,
               lineHeight: 1.45,
               wordBreak: 'break-word',
@@ -597,7 +597,7 @@ function UploadTile({
           overflow: 'hidden',
           color: url ? T.accentFg : T.muted,
           border: `1px solid ${url ? T.accentBorder : T.border}`,
-          background: url ? T.accentSoft : 'rgba(255,255,255,0.03)',
+          background: url ? T.accentSoft : 'rgba(180,120,0,0.05)',
         }}
       >
         {url ? <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : icon}
@@ -820,7 +820,7 @@ function PlanView() {
                     fontSize: 11.5,
                     fontWeight: 700,
                     color: '#fff',
-                    background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+                    background: 'linear-gradient(135deg, #E8B737, #C8920A)',
                   }}
                 >
                   {shot.index}
@@ -836,7 +836,7 @@ function PlanView() {
                     padding: '6px 10px',
                     borderRadius: 9,
                     border: `1px solid ${T.border}`,
-                    background: 'rgba(255,255,255,0.035)',
+                    background: '#FFFFFF',
                     color: T.text,
                     fontSize: 12.5,
                     fontWeight: 700,
@@ -1087,8 +1087,8 @@ function BoardView() {
             gap: 16,
             flexWrap: 'wrap',
             marginBottom: 20,
-            borderColor: 'rgba(251,191,36,0.32)',
-            background: 'rgba(251,191,36,0.055)',
+            borderColor: 'rgba(180,83,9,0.32)',
+            background: 'rgba(180,83,9,0.06)',
           }}
           data-testid="card-repair"
         >

@@ -242,13 +242,13 @@ export function visualKindOf(value?: string | null): VisualKind {
 
 /**
  * Timeline color language, shared by the blueprint strip and the scene cards:
- * HeyGen = blue, motion graphic = green, AI video = purple, image = orange,
+ * HeyGen = blue, motion graphic = green, AI video = gold, image = orange,
  * text = teal. Concrete hexes on purpose — these also appear inside captured
  * clips where CSS variables do not exist.
  */
 export const KIND_COLORS: Record<'heygen' | VisualKind, string> = {
   heygen: '#3B82F6',
-  ai_video: '#a855f7',
+  ai_video: '#fbbf24',
   image: '#f59e0b',
   motion_graphic: '#22c55e',
   text_overlay: '#2dd4bf',

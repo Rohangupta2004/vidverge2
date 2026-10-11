@@ -12,13 +12,14 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, Check, Circle, Loader2, Mic, Music, Pause, Play, RefreshCw,
+  AlertTriangle, Check, Circle, Mic, Music, Pause, Play, RefreshCw,
   SkipForward, Volume2,
 } from 'lucide-react';
 import { Film, FilmScene, T, VoiceSourceId, fmtClock } from './api';
 import { MUSIC_PRESETS, MusicPreset, VoiceOption } from './pipeline/finish';
 import { audioScenes, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
 import { OPENAI_VOICES, VOICE_SOURCES, openAiVoiceLabel } from './pipeline/voiceSource';
+import VergeLoader from '../../components/VergeLoader';
 
 type LayerState = 'done' | 'active' | 'failed' | 'todo' | 'skipped';
 
@@ -26,7 +27,7 @@ function Dot({ state }: { state: LayerState }) {
   const color = state === 'done' ? T.done : state === 'active' ? T.live : state === 'failed' ? T.fault : T.dim;
   return (
     <span style={{ color, display: 'inline-flex', flexShrink: 0 }}>
-      {state === 'done' ? <Check size={12} /> : state === 'active' ? <Loader2 size={12} className="animate-spin" /> : state === 'failed' ? <AlertTriangle size={12} /> : state === 'skipped' ? <SkipForward size={12} /> : <Circle size={11} />}
+      {state === 'done' ? <Check size={12} /> : state === 'active' ? <VergeLoader size={28} label="In progress" /> : state === 'failed' ? <AlertTriangle size={12} /> : state === 'skipped' ? <SkipForward size={12} /> : <Circle size={11} />}
     </span>
   );
 }
@@ -45,11 +46,11 @@ const actBtn = (accent = false) => ({
 
 const playBtn = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30,
-  background: '#101014', color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 999, cursor: 'pointer', flexShrink: 0,
+  background: '#FFFAEB', color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 999, cursor: 'pointer', flexShrink: 0,
 } as const;
 
 const selStyle = {
-  background: '#151519', color: T.bone, border: `1px solid ${T.dim}`,
+  background: '#FFFFFF', color: T.bone, border: `1px solid ${T.dim}`,
   borderRadius: 8, padding: '6px 8px', fontSize: 11.5, maxWidth: '100%',
 } as const;
 
@@ -128,7 +129,7 @@ function VoiceSourcePicker(props: {
               onClick={() => props.onChange(option.id)}
               style={{
                 display: 'flex', alignItems: 'flex-start', gap: 7, width: '100%', textAlign: 'left',
-                background: active ? 'rgba(245,158,11,0.14)' : '#101014',
+                background: active ? 'rgba(200,146,10,0.14)' : '#FFFAEB',
                 border: `1px solid ${active ? T.live : T.dim}`,
                 borderRadius: 9, padding: '7px 9px',
                 cursor: props.disabled || off ? 'default' : 'pointer',

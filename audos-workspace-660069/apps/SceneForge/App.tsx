@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Circle, Clapperboard, Film, FolderOpen, ImagePlus, Loader2, MessageSquareText, Plus, RefreshCw, Send, Settings, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Circle, Clapperboard, Film, FolderOpen, ImagePlus, MessageSquareText, Plus, RefreshCw, Send, Settings, X } from 'lucide-react';
 import TopicInput from './components/TopicInput';
+import VergeLoader from '../../components/VergeLoader';
 import ScriptReview from './components/ScriptReview';
 import HeyGenModule from './components/HeyGenModule';
 import StylePicker from './components/StylePicker';
@@ -20,7 +21,7 @@ import { generateSceneVideo, sceneVideoPrompt, setSceneVideoEngine } from './lib
 import { generatePortraitCalloutImage, generatePortraitImageCardPng, generatePortraitMotionOverlayFrames, generateSceneMotionClip, sceneMotionSpec } from './lib/motionCapture';
 // Directed production: Opus Motion Director → GSAP capture → visual QA with
 // auto-fix (see lib/motionPipeline). One call per motion scene.
-import { produceMotionScene } from './lib/motionPipeline';
+import { ensureFilmVariety, produceMotionScene } from './lib/motionPipeline';
 import { findReusableAsset } from './lib/assetReuse';
 import { isMotionFingerprint, specFromOverlay } from './lib/motionSpec';
 import { getStyle } from './styles/registry';
@@ -41,10 +42,12 @@ import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
 import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
 import { videoEngine } from '../../lib/videoEngines';
 import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
+import AppShell from '../../components/ui/AppShell';
 import { integrationForEngineId, type VideoIntegrationId } from '../../lib/videoIntegrations';
 import type { VidvergeAttachment } from '../../lib/vidvergeHandoff';
 import { VIDVERGE_HANDOFF_KEY } from '../../lib/vidvergeHandoff';
 import AvatarStudio from './components/AvatarStudio';
+import DirectorStudio from './components/DirectorStudio';
 import HeyGenConsole from './components/heygen/HeyGenConsole';
 import MotionEditor, { type MotionEditorSource } from './components/MotionEditor';
 import { fetchVideoStatus } from './lib/heygenStudio';
@@ -57,7 +60,8 @@ import { DEFAULT_SCENE_PROVIDER, describeProviderFailure, estimateGeneration, es
 import { DEFAULT_STUDIO_CONFIG, applyAutoGraphics, postProductionProps, saveStudioConfig, studioConfigOf, type StudioConfig } from './lib/studioConfig';
 import { runSceneVision } from './lib/sceneVision';
 import { setSceneBroll, type BrollClip } from './lib/broll';
-import { fetchElevenVoices, type ElevenVoice } from './lib/elevenLabs';
+import { sortElevenVoices, type ElevenVoice } from './lib/elevenLabs';
+import { pipelineFor } from './lib/voicePipeline';
 import { lipsyncScenes, narrateScenes, sceneSpeechWindows, scenesNeedingLipsync, scenesNeedingVoice, stampTimelineAudio } from './lib/sceneAudio';
 
 type View = 'library' | 'project' | 'settings';
@@ -70,7 +74,12 @@ type View = 'library' | 'project' | 'settings';
 // 'suite' is the full HeyGen suite (components/heygen): one locked character
 // and brand carried across brief, storyboard, motion graphics and every
 // post-production pass. 'studio' stays the fast single-script render.
-type Surface = 'studio' | 'pipeline' | 'suite';
+// 'director' is the EXPLANATORY face: a HeyGen narrator reads the script, an
+// LLM visual director decides what graphic explains each line, and Remotion
+// draws those graphics from code with the narrator composited in the corner.
+// It is subject-agnostic by construction — education, history, science,
+// finance, biology, documentary.
+type Surface = 'studio' | 'pipeline' | 'suite' | 'director';
 const SURFACE_KEY = 'sceneforge_surface_v1';
 
 function friendlyErrorText(value: unknown): string {
@@ -515,14 +524,25 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
     return () => { cancelled = true; };
   }, []);
 
-  // The ElevenLabs catalog is a free read, loaded once so the Audio tab
-  // opens on the whole list rather than a spinner.
+  // The ElevenLabs catalog is loaded once from the workspace-authenticated
+  // route so the Audio tab receives every available voice, including clones.
   useEffect(() => {
     let cancelled = false;
-    fetchElevenVoices()
-      .then((catalog) => { if (!cancelled) setElevenVoices(catalog.voices); })
-      .catch((e: any) => { if (!cancelled) setElevenVoicesError(String(e?.message || 'The ElevenLabs voice catalog could not be loaded.')); })
-      .finally(() => { if (!cancelled) setElevenVoicesLoading(false); });
+    void (async () => {
+      try {
+        const ws = (window as any).__workspaceDb;
+        const response = await fetch(`/api/workspaces/${ws.workspaceId}/audio/voices`, {
+          headers: { 'X-Workspace-DB-Token': ws.token },
+        });
+        const data: { voices?: { id: string; name: string; category: string; labels?: Record<string, string> }[]; error?: string } = await response.json();
+        if (!response.ok) throw new Error(data.error || `The ElevenLabs voice catalog answered ${response.status}.`);
+        if (!cancelled && Array.isArray(data.voices)) setElevenVoices(sortElevenVoices(data.voices));
+      } catch (e: any) {
+        if (!cancelled) setElevenVoicesError(String(e?.message || 'The ElevenLabs voice catalog could not be loaded.'));
+      } finally {
+        if (!cancelled) setElevenVoicesLoading(false);
+      }
+    })();
     return () => { cancelled = true; };
   }, []);
 
@@ -765,8 +785,11 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
   async function generateAvatar(options: any) {
     if (!project) return; setBusy(true); setError('');
     try {
-      pipelineLog('assets', 'audio-video-start', { projectId: project.id, provider: 'heygen', avatarId: options.avatar_id, voiceId: options.voice_id });
-      await noteStage(project.id, 'Rendering the HeyGen avatar master…');
+      const narrating = pipelineFor(options.voice_engine) === 'elevenlabs_heygen';
+      pipelineLog('assets', 'audio-video-start', { projectId: project.id, provider: 'heygen', avatarId: options.avatar_id, voicePipeline: pipelineFor(options.voice_engine), elevenVoiceId: options.eleven_voice_id || '(resolved)', heygenVoiceId: options.voice_id });
+      await noteStage(project.id, narrating
+        ? 'Narrating the script with ElevenLabs, then lip-syncing the HeyGen presenter to it…'
+        : 'Rendering the HeyGen avatar master…');
       const result = await heygen.generate(project, options);
       const next: Partial<Project> = { heygen_video_id: result.videoId, heygen_video_url: result.videoUrl, avatar_duration_sec: result.duration, word_timestamps: result.words, aspect_ratio: options.aspect_ratio, status: 'style_choice', heygen_chunks: [{ video_id: result.videoId, video_url: result.videoUrl, duration_sec: result.duration }] };
       // Merge into the CURRENT project: this callback ran for minutes, and a
@@ -894,7 +917,19 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
       // already have their media (a fresh clip, a still, or a pure text
       // overlay) are skipped outright — existing work is reused, never paid
       // for twice.
-      const persisted = await listScenes(project.id);
+      const fetched = await listScenes(project.id);
+      // FILM-LEVEL VARIETY. Every motion scene is directed up front — the same
+      // one call per scene that production would make anyway — and the dominant
+      // visuals are then compared ACROSS the film, so the one-dominant-visual
+      // rule produces rhythm instead of ten identically composed beats
+      // (lib/motionPipeline.ensureFilmVariety, lib/visualBudget).
+      const persisted = await ensureFilmVariety(project, fetched, (message) => {
+        setNote(message);
+        pipelineLog('assets', 'film-variety', { projectId: project.id, message });
+      }).catch((e: any) => {
+        pipelineLog('assets', 'film-variety-skipped', { projectId: project.id, message: String(e?.message || e) });
+        return fetched;
+      });
       setScenes(persisted);
       // The project's existing asset library, loaded once for the whole batch:
       // a scene that can reuse a matching generated/uploaded picture (same
@@ -1752,7 +1787,7 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
 
   // The space surface token stays the base colour; the gradient rides on top of
   // it as a background IMAGE, so the shell theme still drives the palette.
-  return <div className="sceneforge-app relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]" style={{ backgroundImage: 'linear-gradient(160deg, #0d0d1a, #1a1033)' }}>
+  return <div className="sceneforge-app relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]" style={{ backgroundImage: 'linear-gradient(160deg, #FFFDF4, #FFF3D6)' }}>
     <style>{`
       @keyframes sf-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
       @keyframes sf-pulse { 0%, 100% { opacity: .42; } 50% { opacity: .82; } }
@@ -1782,26 +1817,26 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
     `}</style>
     {workbenchMode ? null : <header className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-5"><button onClick={() => { setView('library'); setProject(null); void refreshLibrary(); }} className="flex items-center gap-2.5 rounded-xl px-1.5 py-1 font-bold tracking-tight transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]">SceneForge</button><span className="hidden text-sm text-[var(--space-text-muted)] sm:block">Avatar-first explainers, directed scene by scene</span><div className="ml-auto flex gap-2"><button onClick={onExitToStudio} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Clapperboard className="h-4 w-4" />Avatar Studio</button>{project ? <button onClick={() => setAssetStudioOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><ImagePlus className="h-4 w-4" />Asset Studio</button> : null}<button onClick={() => setVergerOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><MessageSquareText className="h-4 w-4" />Verger</button><button aria-label="Settings" onClick={() => setView('settings')} className="rounded-xl border border-[var(--space-border-default)] p-2 transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Settings className="h-4 w-4" /></button></div></header>}
     {!workbenchMode && error ? <div role="alert" className="sf-fade-up flex flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_14%,transparent)] px-4 py-3 text-sm leading-relaxed sm:px-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_14%,transparent)]"><AlertTriangle className="h-4 w-4 text-[var(--space-semantic-danger)]" /></span><span className="min-w-[min(100%,240px)] flex-1 text-[var(--space-text-secondary)]"><strong className="block text-[var(--space-text-primary)]">This step needs attention</strong>{friendlyErrorText(error)}</span><button onClick={() => window.location.reload()} className="flex items-center gap-1.5 rounded-xl bg-[var(--space-brand-primary-600)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3.5 w-3.5" />Retry</button><button aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded-lg p-1.5 text-[var(--space-semantic-danger)] hover:bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_18%,transparent)]"><X className="h-4 w-4" /></button></div> : null}
-    {!workbenchMode && project && vergerSteps.length ? <details className="shrink-0 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2.5"><summary className="cursor-pointer text-xs font-semibold text-[var(--space-text-secondary)]">Production status — <span className="font-normal text-[var(--space-text-muted)]">{project.stage_note || note || (busy ? 'Working on the current stage' : 'Waiting for you')}</span></summary><div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">{vergerSteps.map((step) => <span key={step.label} className="flex items-center gap-2 text-xs">{step.state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--space-semantic-success)]" /> : step.state === 'active' ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--space-text-brand)]" /> : <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)]" />}<span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span></span>)}</div></details> : null}
-    {refreshingVideoLink ? <div className="flex shrink-0 items-center gap-2 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2 text-xs text-[var(--space-text-muted)]"><Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--space-text-brand)]" />Refreshing video link…</div> : null}
+    {!workbenchMode && project && vergerSteps.length ? <details className="shrink-0 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2.5"><summary className="cursor-pointer text-xs font-semibold text-[var(--space-text-secondary)]">Production status — <span className="font-normal text-[var(--space-text-muted)]">{project.stage_note || note || (busy ? 'Working on the current stage' : 'Waiting for you')}</span></summary><div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">{vergerSteps.map((step) => <span key={step.label} className="flex items-center gap-2 text-xs">{step.state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--space-semantic-success)]" /> : step.state === 'active' ? <VergeLoader size={30} label={`${step.label} in progress`} /> : <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)]" />}<span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span></span>)}</div></details> : null}
+    {refreshingVideoLink ? <div className="flex shrink-0 items-center gap-2 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2 text-xs text-[var(--space-text-muted)]"><VergeLoader size={30} label="Refreshing video link" />Refreshing video link…</div> : null}
     <main className={workbenchMode ? 'min-h-0 flex-1 overflow-hidden' : 'flex-1 overflow-y-auto'}>{content()}</main>
     {sceneImageError ? <div role="alert" className="sf-fade-up absolute bottom-4 left-4 right-4 z-30 flex max-w-sm flex-wrap items-start gap-3 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_40%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,var(--space-surface-card))] p-4 text-sm text-[var(--space-text-primary)] shadow-2xl sm:left-auto sm:right-5"><AlertTriangle className="h-4 w-4 shrink-0 text-[var(--space-semantic-danger)]" /><span className="min-w-0 flex-1">{friendlyErrorText(sceneImageError)}</span><button onClick={() => window.location.reload()} className="flex items-center gap-1 rounded-lg bg-[var(--space-brand-primary-600)] px-2.5 py-1.5 text-xs font-semibold text-white"><RefreshCw className="h-3 w-3" />Retry</button><button aria-label="Dismiss image generation error" onClick={() => setSceneImageError('')} className="rounded-lg p-1"><X className="h-4 w-4" /></button></div> : null}
     {vergerOpen ? <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-xl flex-col border-l border-[var(--space-border-default)] bg-[var(--space-surface-card)] shadow-2xl">
       <div className="flex items-center justify-between border-b border-[var(--space-border-default)] px-6 py-4"><div><h2 className="text-lg font-bold tracking-tight">Verger</h2><p className="mt-0.5 text-xs text-[var(--space-text-muted)]">Your project director — it knows this project, its scenes and its timeline</p></div><button aria-label="Close Verger" onClick={() => setVergerOpen(false)} className="rounded-lg p-1.5 transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_7%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><X className="h-5 w-5" /></button></div>
       {project && vergerSteps.length ? <div className="border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-6 py-3">
         <p className="text-[10px] font-bold uppercase tracking-[.18em] text-[var(--space-text-muted)]">Pipeline status</p>
-        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">{vergerSteps.map((step) => <span key={step.label} className="flex items-center gap-2 text-xs">{step.state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--space-semantic-success)]" /> : step.state === 'active' ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--space-text-brand)]" /> : <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)]" />}<span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span></span>)}</div>
+        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">{vergerSteps.map((step) => <span key={step.label} className="flex items-center gap-2 text-xs">{step.state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--space-semantic-success)]" /> : step.state === 'active' ? <VergeLoader size={30} label={`${step.label} in progress`} /> : <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)]" />}<span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span></span>)}</div>
       </div> : null}
       <div className="flex-1 space-y-3 overflow-y-auto px-6 py-4">
         {!vergerMessages.length ? <div className="rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-4 text-sm leading-relaxed text-[var(--space-text-secondary)]">Try “make scene 3 a pie chart”, “redo the script intro”, “make the first 10 seconds more engaging”, or “switch everything to documentary”. Active scene edits are queued, never overwritten.</div> : null}
         {vergerMessages.map((message, index) => message.role === 'user'
           ? <div key={index} className="ml-10 rounded-2xl rounded-br-md bg-[var(--space-brand-primary-600)] px-4 py-2.5 text-sm leading-relaxed text-white">{message.text}</div>
           : <div key={index} className="mr-10 rounded-2xl rounded-bl-md border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-4 py-2.5 text-sm leading-relaxed text-[var(--space-text-secondary)]">{message.text}</div>)}
-        {busy && vergerMessages[vergerMessages.length - 1]?.role === 'user' ? <div className="mr-10 flex items-center gap-2 rounded-2xl rounded-bl-md border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-4 py-2.5 text-sm text-[var(--space-text-muted)]"><Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--space-text-brand)]" />Routing your request…</div> : null}
+        {busy && vergerMessages[vergerMessages.length - 1]?.role === 'user' ? <div className="mr-10 flex items-center gap-2 rounded-2xl rounded-bl-md border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-4 py-2.5 text-sm text-[var(--space-text-muted)]"><VergeLoader size={44} caption="Routing your request" /></div> : null}
       </div>
       <div className="border-t border-[var(--space-border-default)] px-6 py-4">
         <textarea value={vergerText} onChange={(e) => setVergerText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void askVerger(); } }} rows={3} placeholder="Tell Verger what to change…" className="w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-3 text-[var(--space-text-primary)] transition-colors placeholder:text-[var(--space-text-muted)] focus:border-[var(--space-brand-primary-500)] focus:outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--space-brand-primary-500)_25%,transparent)]" />
-        <button disabled={busy || !project || !vergerText.trim()} onClick={() => void askVerger()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_4px_16px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)] disabled:opacity-40 disabled:shadow-none">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Send to Verger</button>
+        <button disabled={busy || !project || !vergerText.trim()} onClick={() => void askVerger()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_4px_16px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)] disabled:opacity-40 disabled:shadow-none">{busy ? <VergeLoader size={32} tone="ink" label="Sending to Verger" /> : <Send className="h-4 w-4" />}Send to Verger</button>
       </div>
     </aside> : null}
     {assetStudioOpen && project ? <AssetStudio project={project} scenes={scenes} onAdopted={(sceneId, url) => setScenes((all) => all.map((scene) => scene.id === sceneId ? { ...scene, render_url: url, status: 'ready' as const } : scene))} onClose={() => setAssetStudioOpen(false)} /> : null}
@@ -1812,31 +1847,34 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
   </div>;
 }
 
-function Working({ text }: { text: string }) { return <div className="flex h-full min-h-[420px] items-center justify-center px-4"><div className="sf-fade-up w-full max-w-sm rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-6 text-center shadow-xl"><Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--space-text-brand)]" /><p className="mt-4 font-semibold text-[var(--space-text-primary)]">{text}…</p><p className="mt-1 text-sm text-[var(--space-text-muted)]">Your progress is saved as each stage lands.</p><div className="mt-5 grid gap-2"><span className="sf-skeleton h-2.5 rounded-full bg-[var(--space-surface-muted)]" /><span className="sf-skeleton mx-auto h-2.5 w-3/4 rounded-full bg-[var(--space-surface-muted)]" /></div></div></div>; }
-function Library({ projects, loading, onOpen, onNew }: { projects: Project[]; loading: boolean; onOpen: (id: string) => void; onNew: () => void }) { return <div className="mx-auto max-w-6xl px-6 py-10"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Your studio</p><h1 className="mt-2 text-3xl font-bold tracking-tight">SceneForge projects</h1></div><button onClick={onNew} className="flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_6px_18px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Plus className="h-4 w-4" />New project</button></div>{loading ? <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-36 animate-pulse rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)]" />)}</div> : <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project.id)} className="group rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 text-left transition-all hover:-translate-y-0.5 hover:border-[var(--space-border-strong)] hover:shadow-[0_10px_30px_rgba(0,0,0,0.3)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><FolderOpen className="h-5 w-5 text-[var(--space-text-brand)] transition-transform group-hover:scale-110" /><div className="mt-4 line-clamp-2 font-semibold leading-snug">{project.topic}</div><div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--space-text-muted)]">{project.status.replace(/_/g, ' ')} · {project.aspect_ratio}</div></button>)}{!projects.length ? <div className="col-span-full flex flex-col items-center rounded-2xl border border-dashed border-[var(--space-border-default)] px-8 py-14 text-center"><span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--space-brand-primary-500)_12%,transparent)]"><Film className="h-6 w-6 text-[var(--space-text-brand)]" /></span><p className="mt-4 text-lg font-semibold text-[var(--space-text-primary)]">Direct your first explainer</p><p className="mt-1.5 max-w-sm text-sm leading-relaxed text-[var(--space-text-muted)]">Give SceneForge a topic — it researches the script, renders your avatar, and builds every supporting scene.</p><button onClick={onNew} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-2.5 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)]"><Plus className="h-4 w-4" />Start a project</button></div> : null}</div>}</div>; }
+function Working({ text }: { text: string }) { return <div className="flex h-full min-h-[420px] items-center justify-center px-4"><div className="sf-fade-up w-full max-w-sm rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-6 text-center shadow-xl"><VergeLoader size={120} caption={text} /><p className="mt-4 text-sm text-[var(--space-text-muted)]">Your progress is saved as each stage lands.</p></div></div>; }
+function Library({ projects, loading, onOpen, onNew }: { projects: Project[]; loading: boolean; onOpen: (id: string) => void; onNew: () => void }) { return <div className="mx-auto max-w-6xl px-6 py-10"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Your studio</p><h1 className="mt-2 text-3xl font-bold tracking-tight">SceneForge projects</h1></div><button onClick={onNew} className="flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_6px_18px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Plus className="h-4 w-4" />New project</button></div>{loading ? <div className="mt-7 flex justify-center py-10"><VergeLoader size={120} caption="Loading your projects" /></div> : <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project.id)} className="group rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 text-left transition-all hover:-translate-y-0.5 hover:border-[var(--space-border-strong)] hover:shadow-[0_10px_30px_rgba(120,80,0,0.14)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><FolderOpen className="h-5 w-5 text-[var(--space-text-brand)] transition-transform group-hover:scale-110" /><div className="mt-4 line-clamp-2 font-semibold leading-snug">{project.topic}</div><div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--space-text-muted)]">{project.status.replace(/_/g, ' ')} · {project.aspect_ratio}</div></button>)}{!projects.length ? <div className="col-span-full flex flex-col items-center rounded-2xl border border-dashed border-[var(--space-border-default)] px-8 py-14 text-center"><span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--space-brand-primary-500)_12%,transparent)]"><Film className="h-6 w-6 text-[var(--space-text-brand)]" /></span><p className="mt-4 text-lg font-semibold text-[var(--space-text-primary)]">Direct your first explainer</p><p className="mt-1.5 max-w-sm text-sm leading-relaxed text-[var(--space-text-muted)]">Give SceneForge a topic — it researches the script, renders your avatar, and builds every supporting scene.</p><button onClick={onNew} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-2.5 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)]"><Plus className="h-4 w-4" />Start a project</button></div> : null}</div>}</div>; }
 
-// A brief routed here from the Vidverge Agent targets the full pipeline, so
-// the handoff is PEEKED at (never consumed) before the opening surface is
-// chosen — ForgePipeline is the only thing that may consume it.
-function pipelineHandoffWaiting(): boolean {
+// A Vidverge Agent handoff is PEEKED at (never consumed) before the opening
+// surface is chosen. ForgePipeline consumes normal SceneForge projects;
+// DirectorStudio consumes handoffs explicitly marked for the Director.
+function handoffSurface(): 'pipeline' | 'director' | null {
   try {
     const raw = window.localStorage.getItem(VIDVERGE_HANDOFF_KEY);
-    if (!raw) return false;
+    if (!raw) return null;
     const handoff = JSON.parse(raw);
-    return Boolean(handoff && handoff.appId === 'sceneforge' && Date.now() - Number(handoff.ts || 0) < 30 * 60 * 1000);
-  } catch { return false; }
+    if (!handoff || handoff.appId !== 'sceneforge' || Date.now() - Number(handoff.ts || 0) >= 30 * 60 * 1000) return null;
+    return handoff.surface === 'director' ? 'director' : 'pipeline';
+  } catch { return null; }
 }
 
 function initialSurface(): Surface {
-  if (pipelineHandoffWaiting()) return 'pipeline';
+  const requested = handoffSurface();
+  if (requested) return requested;
   try {
     const stored = window.localStorage.getItem(SURFACE_KEY);
-    return stored === 'pipeline' || stored === 'suite' ? stored : 'studio';
+    return stored === 'pipeline' || stored === 'suite' || stored === 'director' ? stored : 'studio';
   } catch { return 'studio'; }
 }
 
 export default function App() {
   const [surface, setSurface] = useState<Surface>(initialSurface);
+  const [directorOpenToken, setDirectorOpenToken] = useState(0);
   // The post-production editor is a THIRD face of SceneForge, opened on a
   // finished avatar master. It is held as state rather than a route so the
   // studio behind it keeps its own render state while the editor is open.
@@ -1845,6 +1883,21 @@ export default function App() {
     setSurface(next);
     try { window.localStorage.setItem(SURFACE_KEY, next); } catch { /* private mode — the choice just does not persist */ }
   };
+
+  // Recent Jobs can target a nested SceneForge surface while this app window
+  // is already mounted. Remount Director so it consumes the new film handoff.
+  useEffect(() => {
+    const handleOpen = (event: Event) => {
+      const appId = String((event as CustomEvent)?.detail?.appId || '');
+      if (appId !== 'sceneforge') return;
+      const requested = handoffSurface();
+      if (!requested) return;
+      if (requested === 'director') setDirectorOpenToken((value) => value + 1);
+      show(requested);
+    };
+    window.addEventListener('openApp', handleOpen);
+    return () => window.removeEventListener('openApp', handleOpen);
+  }, []);
 
   // HeyGen serves signed URLs that expire while a long edit is in progress;
   // the editor asks for a fresh one by video id instead of failing.
@@ -1856,11 +1909,28 @@ export default function App() {
     return status.videoUrl;
   };
 
-  if (editorSource) {
-    return <MotionEditor source={editorSource} onClose={() => setEditorSource(null)} onRefreshLink={refreshEditorLink} />;
-  }
-  if (surface === 'suite') return <HeyGenConsole onBackToQuickRender={() => show('studio')} />;
-  return surface === 'studio'
-    ? <AvatarStudio onOpenPipeline={() => show('pipeline')} onOpenSuite={() => show('suite')} onOpenEditor={setEditorSource} />
-    : <ForgePipeline onExitToStudio={() => show('studio')} />;
+  // Every face of SceneForge sits on the same dark-cosmic ground and beam
+  // layer; each one brings its own header and scroll panes.
+  return (
+    <AppShell
+      title="SceneForge"
+      header={false}
+      watermark={false}
+      scroll={false}
+      maxWidth="full"
+      padding={0}
+    >
+      {editorSource ? (
+        <MotionEditor source={editorSource} onClose={() => setEditorSource(null)} onRefreshLink={refreshEditorLink} />
+      ) : surface === 'suite' ? (
+        <HeyGenConsole onBackToQuickRender={() => show('studio')} />
+      ) : surface === 'director' ? (
+        <DirectorStudio key={directorOpenToken} onBack={() => show('studio')} />
+      ) : surface === 'studio' ? (
+        <AvatarStudio onOpenPipeline={() => show('pipeline')} onOpenSuite={() => show('suite')} onOpenDirector={() => show('director')} onOpenEditor={setEditorSource} />
+      ) : (
+        <ForgePipeline onExitToStudio={() => show('studio')} />
+      )}
+    </AppShell>
+  );
 }

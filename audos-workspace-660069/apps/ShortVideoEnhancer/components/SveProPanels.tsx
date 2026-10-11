@@ -69,14 +69,14 @@ export interface ShortPreset {
 }
 
 export const SHORT_PRESETS: ShortPreset[] = [
-  { id: 'reels-pro', label: 'Reels Pro', blurb: 'Vivid grade, bold centre captions, push-in', filter: 'Vivid', captionPreset: 'bold', accent: '#A855F7', uppercase: true, posY: 0.68, wordsPerCue: 3, motion: 'pushIn', motionAmount: 0.6, musicLevel: 30, loop: true },
+  { id: 'reels-pro', label: 'Reels Pro', blurb: 'Vivid grade, bold centre captions, push-in', filter: 'Vivid', captionPreset: 'bold', accent: '#FBBF24', uppercase: true, posY: 0.68, wordsPerCue: 3, motion: 'pushIn', motionAmount: 0.6, musicLevel: 30, loop: true },
   { id: 'vlog-classic', label: 'Vlog Classic', blurb: 'Warm and natural, captions low and calm', filter: 'Warm', captionPreset: 'outline', accent: '#F59E0B', uppercase: false, posY: 0.8, wordsPerCue: 4, motion: 'none', motionAmount: 0.4, musicLevel: 18, loop: false },
   { id: 'cinematic-ad', label: 'Cinematic Ad', blurb: 'Teal-and-amber grade with a slow pull-out', filter: 'Cinematic', captionPreset: 'gradient', accent: '#38BDF8', uppercase: false, posY: 0.78, wordsPerCue: 4, motion: 'pullOut', motionAmount: 0.5, musicLevel: 34, loop: false },
   { id: 'social-story', label: 'Social Story', blurb: 'Neon pop, boxed captions dead centre', filter: 'Neon', captionPreset: 'boxed', accent: '#22D3EE', uppercase: true, posY: 0.56, wordsPerCue: 2, motion: 'kenBurns', motionAmount: 0.6, musicLevel: 28, loop: true },
   { id: 'product-showcase', label: 'Product Showcase', blurb: 'Clean matte grade, restrained type, slow push', filter: 'Matte', captionPreset: 'outline', accent: '#FFFFFF', uppercase: false, posY: 0.82, wordsPerCue: 4, motion: 'pushIn', motionAmount: 0.35, musicLevel: 22, loop: false },
   { id: 'minimal-clean', label: 'Minimal Clean', blurb: 'No grade, no motion — just the footage', filter: 'None', captionPreset: 'outline', accent: '#FFFFFF', uppercase: false, posY: 0.82, wordsPerCue: 4, motion: 'none', motionAmount: 0.3, musicLevel: 0, loop: false },
   { id: 'hype-edit', label: 'Hype Edit', blurb: 'Max saturation, two-word captions, pulse on the beat', filter: 'Vivid', captionPreset: 'bold', accent: '#F43F5E', uppercase: true, posY: 0.62, wordsPerCue: 2, motion: 'pulse', motionAmount: 0.8, musicLevel: 40, loop: true },
-  { id: 'aesthetic-slow', label: 'Aesthetic Slow', blurb: 'Lo-fi grade, soft gradient captions, slow drift', filter: 'Lo-Fi', captionPreset: 'gradient', accent: '#C4B5FD', uppercase: false, posY: 0.76, wordsPerCue: 3, motion: 'parallax', motionAmount: 0.45, musicLevel: 32, loop: true },
+  { id: 'aesthetic-slow', label: 'Aesthetic Slow', blurb: 'Lo-fi grade, soft gradient captions, slow drift', filter: 'Lo-Fi', captionPreset: 'gradient', accent: '#FCD34D', uppercase: false, posY: 0.76, wordsPerCue: 3, motion: 'parallax', motionAmount: 0.45, musicLevel: 32, loop: true },
 ];
 
 // ===========================================================================
@@ -252,8 +252,8 @@ export default function SveProPanels(props: SvePanelProps) {
                   title={p.hint}
                   onClick={() => set((d) => ({ ...d, caption: { ...d.caption, preset: p.id } }), 'cap-preset')}
                 >
-                  <b style={{ fontSize: 11, display: 'block', color: '#D7D7D7' }}>{p.label}</b>
-                  <small style={{ fontSize: 9.5, color: '#6A6A6A' }}>{p.hint}</small>
+                  <b style={{ fontSize: 11, display: 'block', color: '#3D2800' }}>{p.label}</b>
+                  <small style={{ fontSize: 9.5, color: '#7A6030' }}>{p.hint}</small>
                 </button>
               ))}
             </div>
@@ -490,8 +490,8 @@ export default function SveProPanels(props: SvePanelProps) {
                       : 'Add a lower third at the playhead'}
                 onClick={() => props.onAddCard(kind)}
               >
-                <b style={{ fontSize: 11, display: 'block', color: '#D7D7D7', textTransform: 'capitalize' }}>{kind}</b>
-                <small style={{ fontSize: 9.5, color: '#6A6A6A' }}>
+                <b style={{ fontSize: 11, display: 'block', color: '#3D2800', textTransform: 'capitalize' }}>{kind}</b>
+                <small style={{ fontSize: 9.5, color: '#7A6030' }}>
                   {kind === 'hook' ? 'Opens the video' : kind === 'cta' ? 'Closes the video' : 'Lower third'}
                 </small>
               </button>
@@ -566,8 +566,8 @@ export default function SveProPanels(props: SvePanelProps) {
                 disabled={!props.hasSource}
                 onClick={() => props.onMotion(m.id, doc.motionAmount)}
               >
-                <b style={{ fontSize: 10.5, display: 'block', color: '#D7D7D7' }}>{m.label}</b>
-                <small style={{ fontSize: 9.5, color: '#6A6A6A' }}>{m.blurb}</small>
+                <b style={{ fontSize: 10.5, display: 'block', color: '#3D2800' }}>{m.label}</b>
+                <small style={{ fontSize: 9.5, color: '#7A6030' }}>{m.blurb}</small>
               </button>
             ))}
           </div>
@@ -743,7 +743,7 @@ export default function SveProPanels(props: SvePanelProps) {
                 title={!props.hasSource ? 'Upload a clip first' : `Compose a ${s.label} bed — ${s.prompt}`}
                 onClick={() => props.onGenerateMusic(s.prompt)}
               >
-                <b style={{ fontSize: 11, display: 'block', color: '#D7D7D7' }}>
+                <b style={{ fontSize: 11, display: 'block', color: '#3D2800' }}>
                   <Music2 size={10} style={{ marginRight: 4 }} />{s.label}
                 </b>
               </button>
@@ -854,12 +854,12 @@ export default function SveProPanels(props: SvePanelProps) {
       >
         {props.checklist.map((item) => (
           <div key={item.id} className="vp-row">
-            <span style={{ color: item.done ? '#34D399' : '#606060', display: 'inline-flex' }}>
+            <span style={{ color: item.done ? '#166534' : '#7A6030', display: 'inline-flex' }}>
               {item.done ? <Check size={13} /> : <Zap size={13} />}
             </span>
             <span style={{ minWidth: 0, flex: 1 }}>
-              <b style={{ fontSize: 11.5, fontWeight: 650, color: item.done ? '#8A8A8A' : '#DADADA' }}>{item.label}</b>
-              <small style={{ display: 'block', fontSize: 10.5, color: '#6A6A6A', lineHeight: 1.45 }}>{item.hint}</small>
+              <b style={{ fontSize: 11.5, fontWeight: 650, color: item.done ? '#7A6030' : '#1A1000' }}>{item.label}</b>
+              <small style={{ display: 'block', fontSize: 10.5, color: '#7A6030', lineHeight: 1.45 }}>{item.hint}</small>
             </span>
             {!item.done && item.fix ? (
               <button type="button" className="vp-btn xs" title={`Fix this now — ${item.hint}`} onClick={item.fix}>Fix</button>

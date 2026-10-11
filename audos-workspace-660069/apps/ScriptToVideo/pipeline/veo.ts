@@ -25,11 +25,11 @@ import { generationHeaders, postGeneration } from '../../../lib/videoEngineClien
 
 const VEO_MODEL = OMNI_FLASH_MODEL;
 
-// The platform Veo proxy rejects prompts longer than 1000 characters with
-// 400 "Invalid request parameters — String must contain at most 1000
-// character(s)", so every prompt is capped BEFORE submission. Cuts land on a
-// sentence or word boundary so a truncated prompt still reads complete.
-const VEO_PROMPT_MAX = 1000;
+// The platform Veo proxy accepts 10–10,000 characters and forwards the prompt
+// to the provider unchanged, so every prompt is capped at that ceiling BEFORE
+// submission. Cuts land on a sentence or word boundary so a truncated prompt
+// still reads complete.
+const VEO_PROMPT_MAX = 10000;
 export function capVeoText(text: string, max = VEO_PROMPT_MAX): string {
   const t = String(text || '').trim();
   if (t.length <= max) return t;
@@ -49,7 +49,10 @@ export async function submitVeo(params: {
   durationS: number;
   seedImageUrl?: string | null;
 }): Promise<VeoSubmission> {
-  const duration = Math.min(8, Math.max(4, Math.round(params.durationS || 8)));
+  // The proxy's documented range is an integer 4–25, normalized server-side
+  // to the nearest length the chosen model really supports — so the caller's
+  // number goes through instead of being clipped to an 8-second ceiling here.
+  const duration = Math.min(25, Math.max(4, Math.round(params.durationS || 8)));
   const body: Record<string, unknown> = {
     model: VEO_MODEL,
     prompt: capVeoText(params.prompt),
@@ -73,11 +76,14 @@ export async function submitVeo(params: {
   // The proxy can answer 200 OK with a placeholder id prefixed veo_video_error_
   // (or status: "failed") when the provider submission itself failed — treating
   // that as success would leave the scene polling a 404 forever.
-  const failed = String(data?.status || '').toLowerCase() === 'failed';
-  if (res.ok && typeof operationId === 'string' && operationId && !failed && !operationId.startsWith('veo_video_error_')) {
+  // success:true + operationId (status 'processing') is an accepted async job to
+  // poll; its `message` ("Video generation started…") is progress text, not an error.
+  const failed = data?.success === false || String(data?.status || '').toLowerCase() === 'failed';
+  if (res.ok && typeof operationId === 'string' && operationId && !failed && !operationId.startsWith('veo_video_error_') && !operationId.startsWith('openrouter_error_')) {
     return { operationId, model: VEO_MODEL };
   }
-  throw new Error(String(data?.errorMessage || data?.error || data?.message || `Veo submit failed (HTTP ${res.status})`) || 'Veo did not accept the shot.');
+  const reason = data?.errorMessage || data?.error || (data?.success === false || !res.ok ? data?.message : '');
+  throw new Error(String(reason || `Veo submit failed (HTTP ${res.status})`));
 }
 
 export interface VeoStatus { status: 'processing' | 'completed' | 'failed'; videoUrl?: string; progress?: number; error?: string }

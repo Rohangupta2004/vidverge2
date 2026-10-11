@@ -83,12 +83,12 @@ export function outputDims(aspect: AspectId, res: ResolutionId): { width: number
 export type TrackId = 'raw' | 'cut' | 'broll' | 'overlay' | 'caption' | 'fx';
 
 export const TRACK_COLORS: Record<TrackId, string> = {
-  raw: '#6b7280',      // grey — untouched footage
-  cut: '#3b82f6',      // blue — cut / trimmed
-  broll: '#22c55e',    // green — b-roll
-  overlay: '#a855f7',  // purple — overlays and text
-  caption: '#eab308',  // yellow — captions
-  fx: '#f97316',       // orange — effects and transitions
+  raw: '#57534E',      // grey — untouched footage
+  cut: '#1D4ED8',      // blue — cut / trimmed
+  broll: '#166534',    // green — b-roll
+  overlay: '#C8920A',  // amber — overlays and text
+  caption: '#A16207',  // yellow — captions
+  fx: '#C2410C',       // orange — effects and transitions
 };
 
 export const TRACK_ROWS: { id: TrackId; label: string; hint: string }[] = [
@@ -623,7 +623,7 @@ export function captionsFromWords(
   return groupWordsIntoCues(timed, maxWords).map((g) => ({ id: newId('cue'), ...g }));
 }
 
-export type CaptionStyleId = 'minimal' | 'bold' | 'gradient' | 'karaoke' | 'tiktok' | 'neon' | 'cinematic' | 'handwritten';
+export type CaptionStyleId = 'minimal' | 'bold' | 'gradient' | 'karaoke' | 'tiktok' | 'neon' | 'cinematic' | 'handwritten' | 'creator' | 'newsroom' | 'comic' | 'luxury' | 'gaming' | 'desi';
 export type CaptionPosition = 'top' | 'center' | 'bottom';
 /** How a caption line arrives: a soft fade, an overshoot pop, or word-by-word. */
 export type CaptionAnimationId = 'preset' | 'fade' | 'dissolve' | 'pop' | 'bounce' | 'karaoke';
@@ -681,10 +681,11 @@ export const CAPTION_FONTS: { id: string; label: string; css: string }[] = [
   { id: 'playfair', label: 'Playfair · Serif', css: "'Playfair Display', Georgia, serif" },
   { id: 'caveat', label: 'Caveat · Handwritten', css: "'Caveat', 'Segoe Script', cursive" },
   { id: 'mono', label: 'JetBrains Mono', css: "'JetBrains Mono', ui-monospace, monospace" },
+  { id: 'notoDevanagari', label: 'Noto Sans Devanagari · Hindi', css: "'Noto Sans Devanagari', 'Nirmala UI', Mangal, sans-serif" },
 ];
 
 export const STUDIO_FONTS_URL =
-  'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=Roboto:wght@400;700;900&family=Anton&family=Bebas+Neue&family=Montserrat:wght@500;700;800;900&family=Oswald:wght@400;600;700&family=Playfair+Display:ital,wght@0,500;0,700;1,500;1,700&family=Caveat:wght@500;700&family=JetBrains+Mono:wght@500;700&display=swap';
+  'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=Roboto:wght@400;700;900&family=Anton&family=Bebas+Neue&family=Montserrat:wght@500;700;800;900&family=Oswald:wght@400;600;700&family=Playfair+Display:ital,wght@0,500;0,700;1,500;1,700&family=Caveat:wght@500;700&family=JetBrains+Mono:wght@500;700&family=Noto+Sans+Devanagari:wght@500;600;700;800;900&display=swap';
 
 export function fontCss(id: string): string {
   return (CAPTION_FONTS.find((f) => f.id === id) || CAPTION_FONTS[0]).css;
@@ -1234,9 +1235,9 @@ export function estimateRetention(opts: {
 }
 
 export function retentionColor(pct: number): string {
-  if (pct >= 70) return '#4ade80';
-  if (pct >= 45) return '#fbbf24';
-  return '#f87171';
+  if (pct >= 70) return '#166534';
+  if (pct >= 45) return '#B45309';
+  return '#991B1B';
 }
 
 // ---------------------------------------------------------------------------

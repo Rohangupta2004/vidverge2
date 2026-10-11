@@ -156,7 +156,7 @@ export default function ProductAd({ onExit }: { onExit: () => void }) {
               productName: status.product_name || productName || 'Product',
               featureLines: status.feature_lines || features.split(/[\n;,|]+/).map((line) => line.trim()).filter(Boolean),
               cta: status.cta || cta || 'Learn more',
-              brandColor: status.brand_color || '#2563eb',
+              brandColor: status.brand_color || '#C8920A',
               workspaceUuid,
               jobId,
               onStage: (stage) => {
@@ -399,7 +399,7 @@ export default function ProductAd({ onExit }: { onExit: () => void }) {
                       onClick={() => setProductImageUrls((current) => current.filter((item) => item !== url))}
                       aria-label={`Remove product reference ${index + 1}`}
                       className="rc-iconbtn rc-ring"
-                      style={{ position: 'absolute', right: 4, top: 4, width: 24, height: 24, borderRadius: 999, border: 0, background: 'rgba(0,0,0,0.72)', color: '#fff', cursor: 'pointer' }}
+                      style={{ position: 'absolute', right: 4, top: 4, width: 24, height: 24, borderRadius: 999, border: 0, background: 'rgba(26,16,0,0.72)', color: '#fff', cursor: 'pointer' }}
                     >
                       <X size={12} />
                     </button>

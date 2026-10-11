@@ -258,8 +258,8 @@ export default function CharacterStep({
                     {c.image_url ? (
                       <img src={c.image_url} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                     ) : (
-                      <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, rgba(124,58,237,0.3), #0a0a0f)' }}>
-                        <User size={20} color="rgba(255,255,255,0.6)" />
+                      <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, rgba(200,146,10,0.3), #FFF3D6)' }}>
+                        <User size={20} color="#7A6030" />
                       </span>
                     )}
                   </span>
@@ -278,7 +278,7 @@ export default function CharacterStep({
           <PrimaryButton
             onClick={() => setAiOpen((v) => !v)}
             testId="button-generate-with-ai"
-            style={aiOpen ? undefined : { background: 'linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%)' }}
+            style={aiOpen ? undefined : { background: 'linear-gradient(180deg, #E8B737 0%, #C8920A 100%)' }}
           >
             <Sparkles size={15} /> Generate with AI
           </PrimaryButton>
@@ -410,7 +410,7 @@ export default function CharacterStep({
                               height: 20,
                               borderRadius: 999,
                               color: '#fff',
-                              background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)',
+                              background: 'linear-gradient(135deg, #E8B737, #C8920A)',
                             }}
                           >
                             <Check size={12} />

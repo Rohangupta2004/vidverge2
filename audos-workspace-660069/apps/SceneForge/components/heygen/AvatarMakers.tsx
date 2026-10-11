@@ -54,7 +54,7 @@ export default function AvatarMakers({ maker, onCreated }: { maker: MakerOrigin;
     }
   }
 
-  const fileInputClass = 'st-field file:mr-3 file:rounded-lg file:border-0 file:bg-[color-mix(in_srgb,#8b5cf6_22%,transparent)] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white';
+  const fileInputClass = 'st-field file:mr-3 file:rounded-lg file:border-0 file:bg-[color-mix(in_srgb,#C8920A_22%,transparent)] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-[#1A1000]';
 
   return <div className="space-y-3">
     {maker === 'photo' ? <>

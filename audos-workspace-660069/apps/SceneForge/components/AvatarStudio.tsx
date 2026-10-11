@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, Clapperboard, Download, Flag, History, Image as ImageIcon, KeyRound, Loader2, Mic, Monitor, Palette, Play, RefreshCw, Search, Smartphone, Sparkles, Trash2, Video, Volume2, Wand2, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Clapperboard, Download, FileAudio, Flag, History, Image as ImageIcon, KeyRound, Mic, Monitor, Palette, Play, RefreshCw, Search, Smartphone, Sparkles, Trash2, Upload, Video, Volume2, Wand2, X } from 'lucide-react';
 import { sortAvatars, sortVoices, type AvatarView, type VoiceView } from '../lib/heygenCatalog';
+import VergeLoader from '../../../components/VergeLoader';
 import {
   HeyGenError,
   clearHistory,
@@ -23,6 +24,7 @@ import {
   type HistoryEntry,
 } from '../lib/heygenStudio';
 import { registerAudioAsset } from '../lib/heygenApi';
+import { uploadFile } from '../lib/proxy';
 import {
   CLONE_AUDIO_ACCEPT,
   MAX_CLONE_SAMPLES,
@@ -37,15 +39,53 @@ import {
   type ElevenVoice,
   type VoiceSettings,
 } from '../lib/elevenLabs';
-import ElevenVoicePicker from './ElevenVoicePicker';
+import ElevenVoicePicker, { narrationLanguageOf, type VoiceFilterLanguage } from './ElevenVoicePicker';
+import { SF_FIELD_CSS } from '../styles/fieldStyles';
+import { setVoicePipeline, voicePipeline } from '../lib/voicePipeline';
 import type { MotionEditorSource } from './MotionEditor';
 
-const MAX_SCRIPT = 1500;
+const MAX_SCRIPT = 4000;
 // HeyGen quotes 60–120 seconds for a short avatar render, so the bar is eased
 // against that expectation instead of jumping 0 → 100 when the poll lands.
 const EXPECTED_RENDER_SEC = 85;
+// Past this a render is LATE, not broken: HeyGen still has it and the id is
+// persisted, so the panel says so plainly instead of either falling silent or
+// abandoning a render that has already been paid for.
+const SLOW_RENDER_SEC = 240;
 const PENDING_KEY = 'sceneforge_studio_pending_v1';
 const PENDING_MAX_AGE_MS = 60 * 60 * 1000;
+
+// ——— The customer's own narration ———
+//
+// A recording the customer already has, used INSTEAD of any text-to-speech.
+// It is uploaded to workspace storage and HeyGen is handed the resulting
+// public URL as the voice source, which is the SAME audio-driven render the
+// ElevenLabs engine uses (`POST v2/video/generate` with
+// `voice: { type: 'audio' }`) — so this is lip-sync in HeyGen's own terms and
+// needs no separate endpoint. HeyGen fetches the track from its own servers,
+// so the file has to live at a public address; a `blob:` url made in this tab
+// could never work.
+// 50 MB is the platform's real ceiling for `/api/upload/file` (the documented
+// multipart limit of the file-storage integration), so that is the limit the
+// picker enforces rather than a lower guess — a long-form WAV narration is
+// exactly the file this engine exists for.
+const NARRATION_MAX_BYTES = 50 * 1024 * 1024;
+const NARRATION_ACCEPT = '.mp3,.wav,.m4a,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/wave,audio/vnd.wave,audio/mp4,audio/m4a,audio/x-m4a';
+// Browsers disagree about the MIME type they report for these containers (an
+// m4a arrives as audio/mp4, audio/x-m4a, or with no type at all), so the
+// extension is the authority and the MIME type is only a second chance.
+const NARRATION_EXTENSIONS = new Set(['mp3', 'wav', 'm4a']);
+const NARRATION_MIME_TYPES = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/vnd.wave', 'audio/mp4', 'audio/m4a', 'audio/x-m4a']);
+
+interface UploadedNarration {
+  /** The permanent public URL HeyGen fetches the voice track from. */
+  url: string;
+  name: string;
+  sizeBytes: number;
+  contentType: string;
+  /** Measured in the browser; 0 when the metadata would not load. */
+  durationMs: number;
+}
 
 type Phase = 'idle' | 'submitting' | 'rendering' | 'done';
 type AvatarTab = 'all' | 'indian';
@@ -53,9 +93,15 @@ type AvatarTab = 'all' | 'indian';
 // Where the spoken words come from. 'elevenlabs' narrates the script FIRST
 // and hands HeyGen a finished track to lip-sync to, so HeyGen's own TTS is
 // never invoked; 'heygen' is the original one-step path, kept because a look
-// that is missing from HeyGen's v2 catalog cannot take a ready-made track.
-type VoiceEngine = 'elevenlabs' | 'heygen';
-const VOICE_ENGINE_KEY = 'sceneforge_studio_voice_engine_v1';
+// that is missing from HeyGen's v2 catalog cannot take a ready-made track;
+// 'upload' is the customer's OWN recording, which skips synthesis altogether
+// and lip-syncs the avatar to the voice they already have.
+// 'elevenlabs' and 'heygen' are the workspace-wide choice (lib/voicePipeline),
+// not a setting private to this screen: switching back to HeyGen voices here
+// to hear the difference should debug the full pipeline and the workbench too.
+// 'upload' is deliberately NOT stored there — it describes one render's audio,
+// not a text-to-speech engine the rest of SceneForge could render with.
+type VoiceEngine = 'elevenlabs' | 'heygen' | 'upload';
 
 /** The stages the pipeline reports while a render is in flight. */
 type Stage = '' | 'voice' | 'handoff' | 'render';
@@ -100,16 +146,26 @@ function relativeDate(iso: string): string {
   return new Date(then).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
+// An uploaded narration can run for minutes, where a raw '187.3s' is harder to
+// read than the clock form the customer's own audio player shows them.
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Number(ms) || 0) / 1000;
+  if (!seconds) return '';
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
+
 function StepBadge({ n, done }: { n: number; done: boolean }) {
   return <span className={done
-    ? 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] text-xs font-bold text-white'
+    ? 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#E8B737,#C8920A)] text-xs font-bold text-white'
     : 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--space-border-strong)] bg-[var(--space-surface-panel)] text-xs font-bold text-[var(--space-text-muted)]'}>
     {done ? <Check className="h-4 w-4" /> : n}
   </span>;
 }
 
 function Step(props: { n: number; done: boolean; title: string; hint?: string; action?: any; children: any }) {
-  return <section className="st-rise rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 shadow-[0_1px_0_color-mix(in_srgb,#ffffff_5%,transparent)_inset]">
+  return <section className="st-rise rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 shadow-[0_1px_0_color-mix(in_srgb,#B4780A_8%,transparent)_inset]">
     <div className="flex flex-wrap items-center gap-3">
       <StepBadge n={props.n} done={props.done} />
       <div className="min-w-0 flex-1">
@@ -129,8 +185,8 @@ function Segmented<T extends string>(props: { value: T; options: { value: T; lab
       const active = option.value === props.value;
       return <button key={option.value} type="button" onClick={() => props.onChange(option.value)}
         className={active
-          ? 'flex items-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] px-3 py-1.5 text-xs font-semibold text-white shadow-[0_2px_10px_color-mix(in_srgb,#6366f1_45%,transparent)]'
-          : 'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#ffffff_6%,transparent)]'}>
+          ? 'flex items-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-3 py-1.5 text-xs font-semibold text-white shadow-[0_2px_10px_color-mix(in_srgb,#C8920A_45%,transparent)]'
+          : 'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]'}>
         {Icon ? <Icon className="h-3.5 w-3.5" /> : null}{option.label}
       </button>;
     })}
@@ -143,7 +199,7 @@ function Notice(props: { tone: 'error' | 'info' | 'key'; title?: string; childre
     ? 'st-rise flex flex-wrap items-start gap-3 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_38%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] p-4 text-sm'
     : 'st-rise flex flex-wrap items-start gap-3 rounded-xl border border-dashed border-[var(--space-border-strong)] bg-[var(--space-surface-panel)] p-4 text-sm'}>
     {error ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--space-semantic-danger)]" />
-      : props.tone === 'key' ? <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-[#a78bfa]" />
+      : props.tone === 'key' ? <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-[#C8920A]" />
         : <Search className="mt-0.5 h-4 w-4 shrink-0 text-[var(--space-text-muted)]" />}
     <div className="min-w-[min(100%,220px)] flex-1 leading-relaxed text-[var(--space-text-secondary)]">
       {props.title ? <strong className="block text-[var(--space-text-primary)]">{props.title}</strong> : null}
@@ -154,15 +210,12 @@ function Notice(props: { tone: 'error' | 'info' | 'key'; title?: string; childre
 }
 
 function AvatarSkeletons() {
-  return <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-    {Array.from({ length: 8 }).map((_, index) => <div key={index} className="rounded-xl border border-[var(--space-border-default)] p-2">
-      <div className="st-shimmer aspect-[3/4] rounded-lg bg-[var(--space-surface-muted)]" />
-      <div className="st-shimmer mt-2 h-3 w-2/3 rounded bg-[var(--space-surface-muted)]" />
-    </div>)}
+  return <div className="flex justify-center py-10">
+    <VergeLoader size={120} caption="Loading avatars" />
   </div>;
 }
 
-export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor }: { onOpenPipeline?: () => void; onOpenSuite?: () => void; onOpenEditor?: (source: MotionEditorSource) => void }) {
+export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirector, onOpenEditor }: { onOpenPipeline?: () => void; onOpenSuite?: () => void; onOpenDirector?: () => void; onOpenEditor?: (source: MotionEditorSource) => void }) {
   const [avatars, setAvatars] = useState<any[]>([]);
   const [avatarsLoading, setAvatarsLoading] = useState(true);
   const [avatarsError, setAvatarsError] = useState('');
@@ -176,6 +229,12 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
   const [avatarQuery, setAvatarQuery] = useState('');
   const [avatarLimit, setAvatarLimit] = useState(24);
   const [avatarId, setAvatarId] = useState('');
+  // A HeyGen avatar_id typed in by hand. Personal and instant avatars do not
+  // always appear in `v3/avatars/looks`, so an account that owns one could
+  // otherwise never reach it from this screen. HeyGen itself stays the
+  // authority on whether the id is real — it rejects an unknown one by name.
+  const [customAvatarId, setCustomAvatarId] = useState('');
+  const customAvatarTimer = useRef(0);
 
   const [voiceId, setVoiceId] = useState('');
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -184,15 +243,25 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
   const voiceFilter = useRef<HTMLInputElement | null>(null);
 
   // ——— ElevenLabs, the default voice engine ———
-  const [voiceEngine, setVoiceEngine] = useState<VoiceEngine>(() => {
-    try { return window.localStorage.getItem(VOICE_ENGINE_KEY) === 'heygen' ? 'heygen' : 'elevenlabs'; } catch { return 'elevenlabs'; }
-  });
+  const [voiceEngine, setVoiceEngine] = useState<VoiceEngine>(() => (voicePipeline() === 'heygen_tts' ? 'heygen' : 'elevenlabs'));
+  const chooseVoiceEngine = useCallback((value: VoiceEngine) => {
+    setVoiceEngine(value);
+    // Uploading your own narration is one render's audio source, not a
+    // text-to-speech engine, so it leaves the workspace-wide pipeline alone:
+    // switching back lands on whichever engine the rest of SceneForge uses.
+    if (value === 'upload') return;
+    setVoicePipeline(value === 'heygen' ? 'heygen_tts' : 'elevenlabs_heygen');
+  }, []);
   const [elevenVoices, setElevenVoices] = useState<ElevenVoice[]>([]);
   const [elevenLoading, setElevenLoading] = useState(true);
   const [elevenError, setElevenError] = useState('');
   const [elevenCloned, setElevenCloned] = useState(false);
   const [elevenVoiceId, setElevenVoiceId] = useState('');
   const [settings, setSettings] = useState<VoiceSettings>(PRESENTER_VOICE_SETTINGS);
+  // The voice picker's language view is also the narration language: it decides
+  // which ElevenLabs model reads the script, so a Hindi film is spoken on the
+  // multilingual model rather than mangled by the English one.
+  const [voiceLanguage, setVoiceLanguage] = useState<VoiceFilterLanguage>('all');
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneName, setCloneName] = useState('');
   const [cloneSamples, setCloneSamples] = useState<File[]>([]);
@@ -209,6 +278,13 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
   // retry after a HeyGen failure re-submits the render without paying for a
   // second voiceover.
   const [voiceover, setVoiceover] = useState<{ url: string; playbackUrl: string; script: string; voiceId: string; durationMs: number } | null>(null);
+  // The customer's own narration. It is uploaded the moment it is chosen
+  // rather than at Generate, so the public URL HeyGen needs is already in hand
+  // and the preview below plays the exact file the avatar will be synced to.
+  const [narration, setNarration] = useState<UploadedNarration | null>(null);
+  const [narrationBusy, setNarrationBusy] = useState(false);
+  const [narrationError, setNarrationError] = useState('');
+  const narrationInput = useRef<HTMLInputElement | null>(null);
   const [stage, setStage] = useState<Stage>('');
   const apiVersion = useRef<HeyGenApiVersion | undefined>(undefined);
 
@@ -282,6 +358,9 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
   const voiceLibrary = useMemo<VoiceView[]>(() => sortVoices(voices), [voices]);
   const indianAvatars = useMemo(() => avatarLibrary.filter((view) => isIndianAvatar(view, pins)), [avatarLibrary, pins]);
   const selectedAvatar = useMemo(() => avatarLibrary.find((view) => view.id === avatarId), [avatarLibrary, avatarId]);
+  // The id in play was typed rather than picked, and is not a look in the
+  // catalog — so every surface names it instead of reading as "not chosen".
+  const typedAvatarId = Boolean(avatarId) && !selectedAvatar;
   const selectedVoice = useMemo(() => voiceLibrary.find((view) => view.id === voiceId), [voiceLibrary, voiceId]);
 
   // The studio opens on an Indian-English voice when the account has one.
@@ -469,6 +548,24 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
     setVoiceOpen(false);
   }, []);
 
+  // Picking from the grid and pasting an id are two routes to ONE value, so
+  // each clears the other: two presenters looking chosen while only one is
+  // rendered is the confusing state worth designing out.
+  const chooseAvatar = useCallback((id: string) => {
+    window.clearTimeout(customAvatarTimer.current);
+    setAvatarId(id);
+    setCustomAvatarId('');
+  }, []);
+  const typeCustomAvatar = useCallback((value: string) => {
+    setCustomAvatarId(value);
+    // The audio-compatibility pre-flight keys off `avatarId`, so committing on
+    // every keystroke would flash a red "this look cannot take an audio track"
+    // notice at every half-typed id. The value lands once typing settles.
+    window.clearTimeout(customAvatarTimer.current);
+    customAvatarTimer.current = window.setTimeout(() => setAvatarId(value.trim()), 450);
+  }, []);
+  useEffect(() => () => window.clearTimeout(customAvatarTimer.current), []);
+
   // ——— Render lifecycle ———
   useEffect(() => { currentVideoId.current = videoId; }, [videoId]);
 
@@ -575,7 +672,9 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
   // before they spend a render, not by a rejection afterwards.
   const [audioCompatible, setAudioCompatible] = useState<boolean | null>(null);
   useEffect(() => {
-    if (voiceEngine !== 'elevenlabs' || !avatarId) { setAudioCompatible(null); return; }
+    // Both audio-driven engines — a narrated track and an uploaded one — go
+    // through the same v2 endpoint, so both need this compatibility check.
+    if (voiceEngine === 'heygen' || !avatarId) { setAudioCompatible(null); return; }
     let cancelled = false;
     setAudioCompatible(null);
     avatarSupportsAudioVoice(avatarId)
@@ -584,18 +683,23 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
     return () => { cancelled = true; };
   }, [voiceEngine, avatarId]);
 
-  const chosenVoiceId = voiceEngine === 'elevenlabs' ? elevenVoiceId : voiceId;
-  const ready = Boolean(avatarId && chosenVoiceId && script.trim()) && script.length <= MAX_SCRIPT;
+  const usingUpload = voiceEngine === 'upload';
+  const chosenVoiceId = usingUpload ? '' : voiceEngine === 'elevenlabs' ? elevenVoiceId : voiceId;
+  // An uploaded narration already contains the words, so it needs neither a
+  // voice from a catalog nor a script: the file itself is the performance.
+  const ready = usingUpload
+    ? Boolean(avatarId && narration && !narrationBusy)
+    : Boolean(avatarId && chosenVoiceId && script.trim()) && script.length <= MAX_SCRIPT;
   const busy = phase === 'submitting' || phase === 'rendering';
   const progress = phase === 'done' ? 100 : Math.min(95, Math.round(100 * (1 - Math.exp(-elapsed / (EXPECTED_RENDER_SEC / 2.4)))));
 
   // The voiceover already on hand for exactly this script and voice.
   const freshVoiceover = voiceover && voiceover.script === script.trim() && voiceover.voiceId === elevenVoiceId ? voiceover : null;
 
-  const stageOrder: Stage[] = voiceEngine === 'elevenlabs' ? ['voice', 'handoff', 'render'] : ['render'];
+  const stageOrder: Stage[] = voiceEngine === 'elevenlabs' ? ['voice', 'handoff', 'render'] : usingUpload ? ['handoff', 'render'] : ['render'];
   const STAGE_LABELS: Record<string, string> = {
     voice: 'Recording the ElevenLabs voiceover',
-    handoff: 'Handing the voice track to HeyGen',
+    handoff: usingUpload ? 'Handing your narration to HeyGen' : 'Handing the voice track to HeyGen',
     render: 'HeyGen lip-syncs the avatar',
   };
   const pipelineSteps = stageOrder.map((key) => {
@@ -606,12 +710,68 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
   const stageLabel = stage && STAGE_LABELS[stage] ? `${STAGE_LABELS[stage]}\u2026` : phase === 'submitting' ? 'Submitting to HeyGen\u2026' : 'Generating\u2026';
 
   /**
+   * Take the customer's own recording and put it somewhere HeyGen can read it.
+   *
+   * The upload happens here, on selection, rather than at Generate: it is what
+   * turns local bytes into the public URL the render needs, and doing it now
+   * means the preview plays the EXACT file HeyGen will be handed — and that a
+   * storage failure is reported while the customer is still choosing, not
+   * halfway through a render they have already committed to.
+   */
+  async function selectNarration(file: File | null) {
+    if (!file || narrationBusy) return;
+    const extension = String(file.name || '').split('.').pop()?.toLowerCase() || '';
+    const mime = String(file.type || '').split(';')[0].toLowerCase();
+    if (!NARRATION_EXTENSIONS.has(extension) && !NARRATION_MIME_TYPES.has(mime)) {
+      setNarrationError('Upload an MP3, WAV or M4A file. Those are the formats HeyGen can read as a voice track.');
+      return;
+    }
+    if (file.size > NARRATION_MAX_BYTES) {
+      setNarrationError(`${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB. Keep your narration under 50 MB.`);
+      return;
+    }
+    setNarrationBusy(true);
+    setNarrationError('');
+    setRenderError('');
+    // The length is read from the LOCAL file first: it needs no network, and
+    // the storage URL is cross-origin to this page, so measuring only that
+    // leaves a perfectly good file showing no duration at all.
+    const localUrl = URL.createObjectURL(file);
+    try {
+      let durationMs = await measureAudioDuration(localUrl, 0);
+      const stored = await uploadFile(file, 'sceneforge-narration');
+      if (!durationMs) durationMs = await measureAudioDuration(stored.url, 0);
+      setNarration({
+        url: stored.url,
+        name: file.name,
+        sizeBytes: file.size,
+        contentType: stored.contentType || file.type || 'audio/mpeg',
+        durationMs,
+      });
+    } catch (e: any) {
+      setNarration(null);
+      setNarrationError(String(e?.message || 'Your narration could not be uploaded. Check your connection and try again.'));
+    } finally {
+      URL.revokeObjectURL(localUrl);
+      setNarrationBusy(false);
+    }
+  }
+
+  function clearNarration() {
+    setNarration(null);
+    setNarrationError('');
+    if (narrationInput.current) narrationInput.current.value = '';
+  }
+
+  /**
    * The whole pipeline, in order.
    *
    * On the ElevenLabs engine the script is NARRATED FIRST and HeyGen is then
    * handed the finished track to lip-sync to, so HeyGen's text-to-speech is
    * never invoked and the voice the customer auditioned is the one on the
-   * finished MP4. On the HeyGen engine it is the original single call.
+   * finished MP4. An uploaded narration skips the synthesis step entirely and
+   * hands HeyGen the customer's own file. On the HeyGen engine it is the
+   * original single call.
    */
   async function generate() {
     if (!ready || busy) return;
@@ -620,21 +780,32 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
     setVideoUrl('');
     setThumbnailUrl('');
     setElapsed(0);
-    setStage(usingEleven ? 'voice' : 'render');
+    setStage(usingEleven ? 'voice' : usingUpload ? 'handoff' : 'render');
     setPhase('submitting');
     renderMeta.current = {
       avatarName: selectedAvatar?.name || avatarId,
-      voiceName: usingEleven ? `${shortVoiceName(selectedEleven?.name || elevenVoiceId)} (ElevenLabs)` : (selectedVoice?.name || voiceId),
+      voiceName: usingUpload
+        ? `Your narration (${narration?.name || 'uploaded audio'})`
+        : usingEleven ? `${shortVoiceName(selectedEleven?.name || elevenVoiceId)} (ElevenLabs)` : (selectedVoice?.name || voiceId),
       script: script.trim(),
       aspectRatio,
     };
     try {
       let audioUrl = '';
       let audioAssetId = '';
+      if (usingUpload) {
+        if (!narration?.url) { fail('Upload your narration audio before generating.'); return; }
+        audioUrl = narration.url;
+        setStage('handoff');
+        // Best effort, exactly as on the ElevenLabs path: an account with an
+        // asset registry gets a real audio_asset_id, everyone else sends the
+        // public URL. Both bypass HeyGen's own text-to-speech completely.
+        audioAssetId = await registerAudioAsset(narration.url, narration.contentType || 'audio/mpeg');
+      }
       if (usingEleven) {
         let track = freshVoiceover;
         if (!track) {
-          const spoken = await speak(script.trim(), elevenVoiceId, settings);
+          const spoken = await speak(script.trim(), elevenVoiceId, settings, { language: narrationLanguageOf(voiceLanguage) });
           const durationMs = await measureAudioDuration(spoken.playbackUrl || spoken.url, spoken.estimatedDurationMs);
           track = { url: spoken.url, playbackUrl: spoken.playbackUrl, script: script.trim(), voiceId: elevenVoiceId, durationMs };
           setVoiceover(track);
@@ -648,7 +819,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
       }
       const created = await createAvatarVideo({
         avatarId,
-        voiceId: usingEleven ? '' : voiceId,
+        voiceId: usingEleven || usingUpload ? '' : voiceId,
         script,
         speed,
         resolution,
@@ -656,7 +827,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
         backgroundMode,
         backgroundColor,
         backgroundImageUrl,
-        ...(usingEleven ? { audioUrl, audioAssetId } : {}),
+        ...(usingEleven || usingUpload ? { audioUrl, audioAssetId } : {}),
       });
       apiVersion.current = created.apiVersion;
       startedAt.current = Date.now();
@@ -708,7 +879,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
       avatarId,
       avatarName: entry.avatarName || selectedAvatar?.name || '',
       voiceId: chosenVoiceId,
-      voiceName: entry.voiceName || (voiceEngine === 'elevenlabs' ? shortVoiceName(selectedEleven?.name || '') : selectedVoice?.name || ''),
+      voiceName: entry.voiceName || (usingUpload ? `Your narration${narration?.name ? ` (${narration.name})` : ''}` : voiceEngine === 'elevenlabs' ? shortVoiceName(selectedEleven?.name || '') : selectedVoice?.name || ''),
       title: (entry.script || 'Avatar video').slice(0, 60),
       brief: entry.script || '',
     });
@@ -716,7 +887,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
 
   const portrait = aspectRatio === '9:16';
 
-  return <div className="sfstudio relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]" style={{ backgroundImage: 'radial-gradient(1100px 520px at 12% -8%, rgba(99,102,241,.20), transparent 62%), radial-gradient(900px 480px at 92% 4%, rgba(139,92,246,.17), transparent 58%), linear-gradient(165deg,#0f172a,#0b1022 52%,#140e2b)' }}>
+  return <div className="sfstudio relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]" style={{ backgroundImage: 'radial-gradient(1100px 520px at 12% -8%, rgba(200,146,10,.20), transparent 62%), radial-gradient(900px 480px at 92% 4%, rgba(200,146,10,.17), transparent 58%), linear-gradient(165deg,#FFFDF4,#FFFFFF 52%,#FFF3D6)' }}>
     <style>{`
       @keyframes st-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
       @keyframes st-shimmer { 0%, 100% { opacity: .40; } 50% { opacity: .85; } }
@@ -724,27 +895,28 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
       .sfstudio .st-shimmer { animation: st-shimmer 1.4s ease-in-out infinite; }
       .sfstudio button, .sfstudio a { transition: transform .16s cubic-bezier(.22,.9,.3,1), background-color .16s ease, border-color .16s ease, box-shadow .2s ease, opacity .16s ease; }
       .sfstudio button:active:not(:disabled) { transform: scale(.97); }
-      .sfstudio .st-field { width: 100%; border-radius: .75rem; border: 1px solid var(--space-border-default); background: var(--space-surface-panel); padding: .6rem .75rem; font-size: .875rem; color: var(--space-text-primary); outline: none; transition: border-color .18s ease, box-shadow .18s ease; }
-      .sfstudio .st-field::placeholder { color: var(--space-text-muted); }
-      .sfstudio .st-field:focus { border-color: #8b5cf6; box-shadow: 0 0 0 4px rgba(139,92,246,.18); }
+      ${SF_FIELD_CSS}
       .sfstudio .st-scroll::-webkit-scrollbar { width: 8px; }
       .sfstudio .st-scroll::-webkit-scrollbar-thumb { background: var(--space-border-strong); border-radius: 999px; }
-      .sfstudio input[type='range'] { accent-color: #8b5cf6; }
+      .sfstudio input[type='range'] { accent-color: #C8920A; }
       @media (prefers-reduced-motion: reduce) { .sfstudio *, .sfstudio *::before, .sfstudio *::after { animation: none !important; transition-duration: .01ms !important; } }
     `}</style>
 
-    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,#ffffff_8%,transparent)] bg-[color-mix(in_srgb,#0b1022_72%,transparent)] px-4 py-3 backdrop-blur sm:px-6">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] shadow-[0_4px_16px_rgba(99,102,241,.45)]"><Clapperboard className="h-4 w-4 text-white" /></span>
+    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[color-mix(in_srgb,#FFFFFF_82%,transparent)] px-4 py-3 backdrop-blur sm:px-6">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#E8B737,#C8920A)] shadow-[0_4px_16px_rgba(200,146,10,.45)]"><Clapperboard className="h-4 w-4 text-white" /></span>
       <div className="min-w-0">
         <h1 className="truncate text-base font-bold tracking-tight">SceneForge Avatar Studio</h1>
         <p className="hidden text-xs text-[var(--space-text-muted)] sm:block">Live HeyGen avatars and voices — pick, write, generate, download.</p>
       </div>
       <div className="ml-auto flex items-center gap-2">
         <button type="button" onClick={() => setHistoryOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-xs font-medium text-[var(--space-text-secondary)] hover:border-[var(--space-border-strong)]">
-          <History className="h-4 w-4" /><span className="hidden sm:inline">Recent</span>{history.length ? <span className="rounded-full bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] px-1.5 text-[10px] font-bold text-white">{history.length}</span> : null}
+          <History className="h-4 w-4" /><span className="hidden sm:inline">Recent</span>{history.length ? <span className="rounded-full bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-1.5 text-[10px] font-bold text-white">{history.length}</span> : null}
         </button>
-        {onOpenSuite ? <button type="button" onClick={onOpenSuite} title="Lock one character and brand across a whole multi-scene film" className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-white shadow-[0_2px_10px_color-mix(in_srgb,#6366f1_45%,transparent)]" style={{ backgroundImage: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
+        {onOpenSuite ? <button type="button" onClick={onOpenSuite} title="Lock one character and brand across a whole multi-scene film" className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-white shadow-[0_2px_10px_color-mix(in_srgb,#C8920A_45%,transparent)]" style={{ backgroundImage: 'linear-gradient(135deg,#E8B737,#C8920A)' }}>
           <Sparkles className="h-4 w-4" /><span className="hidden sm:inline">HeyGen Suite</span>
+        </button> : null}
+        {onOpenDirector ? <button type="button" onClick={onOpenDirector} title="Explain anything: the narrator speaks, an AI visual director decides what the screen shows, Remotion draws it" className="flex items-center gap-2 rounded-xl border border-[color-mix(in_srgb,#B4720A_55%,transparent)] bg-[color-mix(in_srgb,#B4720A_12%,transparent)] px-3 py-2 text-xs font-semibold text-[var(--space-text-primary)] hover:border-[#B4720A]">
+          <Wand2 className="h-4 w-4" /><span className="hidden sm:inline">Director</span>
         </button> : null}
         {onOpenPipeline ? <button type="button" onClick={onOpenPipeline} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-xs font-medium text-[var(--space-text-secondary)] hover:border-[var(--space-border-strong)]">
           <Video className="h-4 w-4" /><span className="hidden sm:inline">Full pipeline</span>
@@ -765,12 +937,12 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
                 <Segmented value={tab} onChange={(value) => setTab(value)} options={[{ value: 'indian', label: `\u{1F1EE}\u{1F1F3} Indian avatars${indianAvatars.length ? ` (${indianAvatars.length})` : ''}` }, { value: 'all', label: `All${avatarLibrary.length ? ` (${avatarLibrary.length})` : ''}` }]} />
                 <div className="relative min-w-[160px] flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--space-text-muted)]" />
-                  <input value={avatarQuery} onChange={(event) => setAvatarQuery(event.target.value)} placeholder="Search by name or style" className="st-field pl-9" />
+                  <input value={avatarQuery} onChange={(event) => setAvatarQuery(event.target.value)} placeholder="Search presenters by name, gender or style" className="st-field st-field--icon" />
                 </div>
               </div>
 
               {avatarsLoading && !visibleAvatars.length ? <AvatarSkeletons />
-                : avatarsError && !avatarLibrary.length ? <Notice tone="error" title="The avatar catalog did not load" action={<button type="button" onClick={() => window.location.reload()} className="flex items-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3.5 w-3.5" />Retry</button>}>{avatarsError}</Notice>
+                : avatarsError && !avatarLibrary.length ? <Notice tone="error" title="The avatar catalog did not load" action={<button type="button" onClick={() => window.location.reload()} className="flex items-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3.5 w-3.5" />Retry</button>}>{avatarsError}</Notice>
                   : !visibleAvatars.length ? <Notice tone="info" title={tab === 'indian' ? 'No Indian avatars matched yet' : 'No avatars match this search'} action={tab === 'indian' ? <button type="button" onClick={() => setTab('all')} className="rounded-lg border border-[var(--space-border-strong)] px-3 py-2 text-xs font-semibold text-[var(--space-text-primary)]">Show all avatars</button> : null}>
                     {tab === 'indian'
                       ? 'HeyGen does not tag avatars by country, so this tab matches on each look\u2019s own name, language and accent. Open All avatars and use the flag button on a card to add it here.'
@@ -786,79 +958,127 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
                           // the All tab where it is surrounded by everything
                           // else on the account.
                           return <div key={view.id} className={selected
-                            ? 'group relative rounded-xl border-2 border-[#8b5cf6] bg-[color-mix(in_srgb,#8b5cf6_12%,transparent)] p-2 shadow-[0_8px_26px_rgba(139,92,246,.28)]'
+                            ? 'group relative rounded-xl border-2 border-[#C8920A] bg-[color-mix(in_srgb,#C8920A_12%,transparent)] p-2 shadow-[0_8px_26px_rgba(200,146,10,.28)]'
                             : view.indian || pinned
-                              ? 'group relative rounded-xl border border-[color-mix(in_srgb,#f59e0b_52%,transparent)] bg-[color-mix(in_srgb,#f59e0b_7%,transparent)] p-2 hover:border-[#6366f1]'
-                              : 'group relative rounded-xl border border-[var(--space-border-default)] p-2 hover:border-[#6366f1] hover:bg-[color-mix(in_srgb,#6366f1_8%,transparent)]'}>
-                            <button type="button" onClick={() => setAvatarId(view.id)} aria-pressed={selected} className="block w-full text-left">
+                              ? 'group relative rounded-xl border border-[color-mix(in_srgb,#C8920A_52%,transparent)] bg-[color-mix(in_srgb,#C8920A_7%,transparent)] p-2 hover:border-[#C8920A]'
+                              : 'group relative rounded-xl border border-[var(--space-border-default)] p-2 hover:border-[#C8920A] hover:bg-[color-mix(in_srgb,#C8920A_8%,transparent)]'}>
+                            <button type="button" onClick={() => chooseAvatar(view.id)} aria-pressed={selected} className="block w-full text-left">
                               {view.image
                                 ? <img src={view.image} alt={view.name} loading={index < 8 ? 'eager' : 'lazy'} decoding="async" className="aspect-[3/4] w-full rounded-lg bg-[var(--space-surface-muted)] object-cover" />
                                 : <div className="flex aspect-[3/4] w-full items-center justify-center rounded-lg bg-[var(--space-surface-muted)] text-[10px] text-[var(--space-text-muted)]">No preview</div>}
                               <span className="mt-2 flex items-center gap-1">
                                 <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[var(--space-text-primary)]">{view.name}</span>
                                 {view.indian || pinned ? <span title={pinned ? 'You pinned this look to the Indian avatars tab.' : 'Matched as Indian on this look\u2019s own name, language or accent.'}
-                                  className="shrink-0 rounded-full bg-[color-mix(in_srgb,#f59e0b_26%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#fcd34d]">IN</span> : null}
+                                  className="shrink-0 rounded-full bg-[color-mix(in_srgb,#C8920A_26%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#C8920A]">IN</span> : null}
                               </span>
                               <span className="mt-0.5 block truncate text-[10px] uppercase tracking-wide text-[var(--space-text-muted)]">{[view.gender, view.styleLabel].filter(Boolean).join(' · ') || 'HeyGen look'}</span>
                             </button>
-                            {selected ? <span className="pointer-events-none absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] shadow"><Check className="h-3.5 w-3.5 text-white" /></span> : null}
+                            {selected ? <span className="pointer-events-none absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[linear-gradient(135deg,#E8B737,#C8920A)] shadow"><Check className="h-3.5 w-3.5 text-white" /></span> : null}
                             <button type="button" onClick={() => pin(view.id)} title={pinned ? 'Remove from the Indian avatars tab' : 'Add to the Indian avatars tab'} aria-label={pinned ? 'Remove from the Indian avatars tab' : 'Add to the Indian avatars tab'}
                               className={pinned
-                                ? 'absolute left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,#f59e0b_85%,transparent)] text-[#1a1203]'
+                                ? 'absolute left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,#C8920A_85%,transparent)] text-[#1A1000]'
                                 : 'absolute left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,#0b1022_72%,transparent)] text-[var(--space-text-muted)] opacity-0 hover:text-white focus:opacity-100 group-hover:opacity-100'}>
                               <Flag className="h-3 w-3" />
                             </button>
                           </div>;
                         })}
                       </div>
-                      {visibleAvatars.length > avatarLimit ? <button type="button" onClick={() => setAvatarLimit((old) => old + 48)} className="mt-3 w-full rounded-xl border border-dashed border-[var(--space-border-strong)] py-3 text-sm font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#ffffff_5%,transparent)]">Show more ({visibleAvatars.length - avatarLimit} remaining)</button> : null}
+                      {visibleAvatars.length > avatarLimit ? <button type="button" onClick={() => setAvatarLimit((old) => old + 48)} className="mt-3 w-full rounded-xl border border-dashed border-[var(--space-border-strong)] py-3 text-sm font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]">Show more ({visibleAvatars.length - avatarLimit} remaining)</button> : null}
                     </>}
+
+              <details className="mt-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-[var(--space-text-secondary)]">Use a HeyGen avatar ID instead</summary>
+                <p className="mt-2 text-[11px] leading-relaxed text-[var(--space-text-muted)]">
+                  Paste an avatar_id from your own HeyGen account. Personal and instant avatars do not always appear in the grid above, and this is how to reach one. Leave it empty to use the presenter you picked.
+                </p>
+                <input value={customAvatarId} onChange={(event) => typeCustomAvatar(event.target.value)} placeholder="Paste a HeyGen avatar_id" spellCheck={false} autoComplete="off" aria-label="HeyGen avatar ID" className="st-field mt-2" />
+                {typedAvatarId ? <p className="mt-2 text-[11px] leading-relaxed text-[#C8920A]">
+                  This id is not in the catalog above, so there is no preview to show for it. HeyGen checks the id when you generate and says so if it does not exist on your account.
+                </p> : null}
+              </details>
             </>}
           </Step>
 
-          <Step n={2} done={Boolean(chosenVoiceId)} title="Pick the voice"
-            hint={voiceEngine === 'elevenlabs'
+          <Step n={2} done={usingUpload ? Boolean(narration) : Boolean(chosenVoiceId)} title="Pick the voice"
+            hint={usingUpload
+              ? (narration ? `Using your narration: ${narration.name}` : 'Upload the recording you want the avatar to lip-sync to')
+              : voiceEngine === 'elevenlabs'
               ? (elevenVoices.length
                 ? `${elevenVoices.length} ElevenLabs voices${elevenVoices.some((voice) => voice.category === 'cloned') ? ', including your own clones' : ''} · ${indianElevenVoices.length} Indian, listed first`
                 : 'Loading the ElevenLabs voice catalog')
               : (voiceLibrary.length ? `${voiceLibrary.length} live HeyGen voices · Indian voices listed first` : 'Loading your HeyGen voices')}>
             <div className="mb-3 space-y-2">
               <Segmented value={voiceEngine}
-                onChange={(value) => { setVoiceEngine(value); try { window.localStorage.setItem(VOICE_ENGINE_KEY, value); } catch { /* private mode — the choice just does not persist */ } }}
-                options={[{ value: 'elevenlabs' as VoiceEngine, label: 'ElevenLabs', icon: Mic }, { value: 'heygen' as VoiceEngine, label: 'HeyGen voices', icon: Volume2 }]} />
+                onChange={chooseVoiceEngine}
+                options={[{ value: 'elevenlabs' as VoiceEngine, label: 'ElevenLabs', icon: Mic }, { value: 'heygen' as VoiceEngine, label: 'HeyGen voices', icon: Volume2 }, { value: 'upload' as VoiceEngine, label: 'Your narration', icon: Upload }]} />
               <p className="text-[11px] leading-relaxed text-[var(--space-text-muted)]">
-                {voiceEngine === 'elevenlabs'
+                {usingUpload
+                  ? 'Upload your own recording and HeyGen lip-syncs the avatar to it. Nothing is synthesised: the voice on the finished video is the voice in your file, and the script below is not spoken.'
+                  : voiceEngine === 'elevenlabs'
                   ? 'ElevenLabs narrates your script first, then HeyGen lip-syncs the avatar to that exact track \u2014 so HeyGen\u2019s own text-to-speech is never used and the voice you audition below is the voice on the finished video.'
                   : 'HeyGen reads the script in its own voice as it renders. One step fewer, but you cannot hear the delivery before paying for the render.'}
               </p>
-              {voiceEngine === 'elevenlabs' && audioCompatible === false ? <Notice tone="error" title="This presenter cannot take a ready-made voice track"
-                action={<button type="button" onClick={() => { setVoiceEngine('heygen'); try { window.localStorage.setItem(VOICE_ENGINE_KEY, 'heygen'); } catch { /* ignore */ } }}
+              {voiceEngine !== 'heygen' && audioCompatible === false ? <Notice tone="error" title="This presenter cannot take a ready-made voice track"
+                action={<button type="button" onClick={() => chooseVoiceEngine('heygen')}
                   className="rounded-lg border border-[var(--space-border-strong)] px-3 py-2 text-xs font-semibold text-[var(--space-text-primary)]">Use HeyGen voices</button>}>
                 {selectedAvatar?.name || 'This look'} is missing from the HeyGen catalog that accepts audio-driven lip-sync. Pick a different presenter, or switch this render to HeyGen voices.
               </Notice> : null}
             </div>
-            {voiceEngine === 'elevenlabs' ? <div className="space-y-3">
+            {usingUpload ? <div className="space-y-3">
+              <div className="rounded-xl border border-dashed border-[color-mix(in_srgb,#C8920A_42%,transparent)] bg-[color-mix(in_srgb,#C8920A_7%,var(--space-surface-panel))] p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-[var(--space-text-primary)]">Upload your narration</h3>
+                    <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-[var(--space-text-muted)]">MP3, WAV or M4A, up to 50 MB. Your file is stored at a permanent address so HeyGen can fetch it, then the presenter is lip-synced to it.</p>
+                  </div>
+                  <label className={narrationBusy
+                    ? 'flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-[var(--space-border-strong)] px-3 py-2 text-xs font-semibold text-[var(--space-text-muted)] opacity-60'
+                    : 'flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--space-border-strong)] px-3 py-2 text-xs font-semibold text-[var(--space-text-secondary)] hover:text-[var(--space-text-primary)]'}>
+                    <input ref={narrationInput} type="file" accept={NARRATION_ACCEPT} disabled={narrationBusy} className="sr-only"
+                      onChange={(event) => { const file = event.target.files?.[0] || null; event.target.value = ''; void selectNarration(file); }} />
+                    {narrationBusy ? <VergeLoader size={28} label="Uploading your narration" /> : <Upload className="h-3.5 w-3.5" />}
+                    {narrationBusy ? 'Uploading\u2026' : narration ? 'Replace audio' : 'Choose audio'}
+                  </label>
+                </div>
+
+                {narration ? <div className="mt-3 rounded-lg border border-[color-mix(in_srgb,#166534_35%,transparent)] bg-[color-mix(in_srgb,#166534_10%,transparent)] p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <FileAudio className="h-4 w-4 shrink-0 text-[#166534]" />
+                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#166534]">{narration.name}</span>
+                    <span className="shrink-0 text-[10px] text-[var(--space-text-muted)]">{(narration.sizeBytes / 1024 / 1024).toFixed(1)} MB{narration.durationMs ? ` \u00b7 ${formatDuration(narration.durationMs)}` : ''}</span>
+                    <button type="button" onClick={clearNarration} aria-label={`Remove ${narration.name}`} title="Remove this narration"
+                      className="shrink-0 rounded-lg p-1 text-[var(--space-text-muted)] hover:text-[var(--space-semantic-danger)]"><X className="h-3.5 w-3.5" /></button>
+                  </div>
+                  <audio src={narration.url} controls preload="metadata" className="mt-2 w-full" />
+                  <p className="mt-1 text-[10px] leading-relaxed text-[var(--space-text-muted)]">This is the exact track HeyGen lip-syncs to, so the finished video runs as long as this audio.</p>
+                </div> : narrationBusy
+                  ? <p className="mt-3 flex items-center gap-2 text-[11px] text-[var(--space-text-secondary)]"><VergeLoader size={28} label="Uploading your narration" />{'Uploading your narration\u2026'}</p>
+                  : <p className="mt-3 text-[11px] text-[var(--space-text-muted)]">No narration chosen yet. Pick an audio file to continue.</p>}
+              </div>
+              {narrationError ? <Notice tone="error" title="That audio could not be used">{narrationError}</Notice> : null}
+            </div> : voiceEngine === 'elevenlabs' ? <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <button type="button" aria-expanded={cloneOpen} onClick={() => { setCloneOpen((open) => !open); setCloneError(''); }} disabled={cloneRecording}
-                  className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#8b5cf6_42%,transparent)] bg-[color-mix(in_srgb,#8b5cf6_10%,transparent)] px-3 py-2 text-xs font-semibold text-[#c4b5fd] hover:bg-[color-mix(in_srgb,#8b5cf6_18%,transparent)] disabled:opacity-50">
+                  className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#C8920A_42%,transparent)] bg-[color-mix(in_srgb,#C8920A_10%,transparent)] px-3 py-2 text-xs font-semibold text-[#C8920A] hover:bg-[color-mix(in_srgb,#C8920A_18%,transparent)] disabled:opacity-50">
                   <Mic className="h-3.5 w-3.5" />Clone your own voice
                 </button>
               </div>
 
-              {cloneOpen ? <div className="st-rise rounded-xl border border-[color-mix(in_srgb,#8b5cf6_38%,transparent)] bg-[color-mix(in_srgb,#8b5cf6_8%,var(--space-surface-panel))] p-4">
+              {cloneOpen ? <div className="st-rise rounded-xl border border-[color-mix(in_srgb,#C8920A_38%,transparent)] bg-[color-mix(in_srgb,#C8920A_8%,var(--space-surface-panel))] p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-[var(--space-text-primary)]">Clone your own voice</h3>
                     <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-[var(--space-text-muted)]">Use 1\u20135 clean speech samples, ideally 1\u20133 minutes total. MP3, WAV, WebM, OGG, M4A, AAC and FLAC are supported; each file can be up to 10 MB and all files together up to 25 MB.</p>
                   </div>
-                  <span className="rounded-full bg-[color-mix(in_srgb,#f59e0b_18%,transparent)] px-2.5 py-1 text-[10px] font-bold text-[#fcd34d]">$1.00 per voice</span>
+                  <span className="rounded-full bg-[color-mix(in_srgb,#C8920A_18%,transparent)] px-2.5 py-1 text-[10px] font-bold text-[#C8920A]">$1.00 per voice</span>
                 </div>
-                <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,#f59e0b_28%,transparent)] bg-[color-mix(in_srgb,#f59e0b_8%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[var(--space-text-secondary)]">
+                <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,#C8920A_28%,transparent)] bg-[color-mix(in_srgb,#C8920A_8%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[var(--space-text-secondary)]">
                   Voice cloning costs $1.00 from this workspace\u2019s wallet. If creation fails, the charge is refunded automatically.
                 </p>
                 <label className="mt-3 block">
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">Voice name</span>
-                  <input value={cloneName} onChange={(event) => { setCloneName(event.target.value); setCloneError(''); }} maxLength={80} placeholder="e.g. My studio voice" className="st-field mt-1" />
+                  <input value={cloneName} onChange={(event) => { setCloneName(event.target.value); setCloneError(''); }} maxLength={80} placeholder="e.g. My studio voice \u2014 so you can tell it apart later"
+                    aria-invalid={cloneError ? true : undefined} className={cloneError ? 'st-field st-field--error mt-1' : 'st-field mt-1'} />
                   <span className="mt-1 block text-right text-[10px] text-[var(--space-text-muted)]">{cloneName.trim().length} / 80</span>
                 </label>
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -884,16 +1104,17 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <span className="text-[10px] text-[var(--space-text-muted)]">{cloneSamples.length} / {MAX_CLONE_SAMPLES} samples · {(cloneTotalBytes / 1024 / 1024).toFixed(1)} / 25 MB</span>
                   <button type="button" onClick={() => void createClone()} disabled={cloneBusy || cloneRecording}
-                    className="flex items-center gap-2 rounded-lg bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] px-4 py-2 text-xs font-bold text-white shadow-[0_4px_14px_rgba(99,102,241,.3)] disabled:opacity-50">
-                    {cloneBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}{cloneBusy ? 'Cloning voice\u2026' : 'Clone voice · $1.00'}
+                    className="flex items-center gap-2 rounded-lg bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-4 py-2 text-xs font-bold text-white shadow-[0_4px_14px_rgba(200,146,10,.3)] disabled:opacity-50">
+                    {cloneBusy ? <VergeLoader size={28} label="Cloning your voice" /> : <Sparkles className="h-3.5 w-3.5" />}{cloneBusy ? 'Cloning voice\u2026' : 'Clone voice · $1.00'}
                   </button>
                 </div>
               </div> : null}
 
               {cloneError ? <Notice tone="error" title="Voice cloning needs attention">{cloneError}</Notice> : null}
-              {cloneSuccess ? <div role="status" className="rounded-xl border border-[color-mix(in_srgb,#34d399_35%,transparent)] bg-[color-mix(in_srgb,#34d399_10%,transparent)] px-4 py-3 text-xs font-medium text-[#6ee7b7]">{cloneSuccess}</div> : null}
+              {cloneSuccess ? <div role="status" className="rounded-xl border border-[color-mix(in_srgb,#166534_35%,transparent)] bg-[color-mix(in_srgb,#166534_10%,transparent)] px-4 py-3 text-xs font-medium text-[#166534]">{cloneSuccess}</div> : null}
 
               <ElevenVoicePicker voices={elevenVoices} value={elevenVoiceId} onChange={setElevenVoiceId} settings={settings} loading={elevenLoading} error={elevenError}
+                language={voiceLanguage} onLanguageChange={setVoiceLanguage}
                 renderActions={(voice) => elevenCloned && voice.category === 'cloned' ? (confirmDeleteVoiceId === voice.id
                   ? <span className="flex shrink-0 items-center gap-1">
                     <button type="button" onClick={() => void removeClonedVoice(voice.id)} disabled={Boolean(deleteVoiceId)} className="rounded-md bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_20%,transparent)] px-2 py-1 text-[10px] font-bold text-[var(--space-semantic-danger)] disabled:opacity-50">{deleteVoiceId === voice.id ? 'Deleting\u2026' : 'Confirm delete'}</button>
@@ -928,22 +1149,22 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
                 <button type="button" onClick={() => setSettings(PRESENTER_VOICE_SETTINGS)} className="mt-2 rounded-lg border border-[var(--space-border-default)] px-3 py-1.5 text-[11px] font-semibold text-[var(--space-text-secondary)]">Reset to the presenter preset</button>
               </details>
 
-              {freshVoiceover ? <div className="rounded-xl border border-[color-mix(in_srgb,#34d399_35%,transparent)] bg-[color-mix(in_srgb,#34d399_10%,transparent)] p-3">
-                <p className="text-xs font-semibold text-[#6ee7b7]">Voiceover ready — {(freshVoiceover.durationMs / 1000).toFixed(1)}s</p>
+              {freshVoiceover ? <div className="rounded-xl border border-[color-mix(in_srgb,#166534_35%,transparent)] bg-[color-mix(in_srgb,#166534_10%,transparent)] p-3">
+                <p className="text-xs font-semibold text-[#166534]">Voiceover ready — {(freshVoiceover.durationMs / 1000).toFixed(1)}s</p>
                 <audio src={freshVoiceover.playbackUrl || freshVoiceover.url} controls className="mt-2 w-full" />
                 <p className="mt-1 text-[10px] leading-relaxed text-[var(--space-text-muted)]">This is the exact track HeyGen lip-syncs to. Re-rendering only pays for another voiceover if you change the script or the voice.</p>
               </div> : null}
             </div> : needsKey ? null : voicesLoading && !voiceLibrary.length
-              ? <div className="st-shimmer h-12 rounded-xl bg-[var(--space-surface-muted)]" />
+              ? <div className="flex justify-center py-3"><VergeLoader size={80} caption="Loading voices" /></div>
               : voicesError && !voiceLibrary.length
                 ? <Notice tone="error" title="The voice catalog did not load">{voicesError}</Notice>
                 : <div ref={voiceBox} className="relative">
-                  <button type="button" onClick={() => setVoiceOpen((open) => !open)} aria-expanded={voiceOpen} className="flex w-full items-center gap-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-4 py-3 text-left hover:border-[#6366f1]">
+                  <button type="button" onClick={() => setVoiceOpen((open) => !open)} aria-expanded={voiceOpen} className="flex w-full items-center gap-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-4 py-3 text-left hover:border-[#C8920A]">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-[var(--space-text-primary)]">{selectedVoice?.name || 'Choose a voice'}</span>
                       <span className="block truncate text-xs text-[var(--space-text-muted)]">{selectedVoice ? [selectedVoice.language, selectedVoice.gender, voiceAccent(selectedVoice.raw)].filter(Boolean).join(' · ') : 'Search by language, accent or name'}</span>
                     </span>
-                    {selectedVoice?.indian ? <span className="shrink-0 rounded-full bg-[color-mix(in_srgb,#8b5cf6_22%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[#c4b5fd]">India</span> : null}
+                    {selectedVoice?.indian ? <span className="shrink-0 rounded-full bg-[color-mix(in_srgb,#C8920A_22%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[#C8920A]">India</span> : null}
                     <ChevronDown className={voiceOpen ? 'h-4 w-4 shrink-0 rotate-180 text-[var(--space-text-muted)]' : 'h-4 w-4 shrink-0 text-[var(--space-text-muted)]'} />
                   </button>
                   {voiceOpen ? <div className="st-rise absolute z-30 mt-2 w-full overflow-hidden rounded-xl border border-[var(--space-border-strong)] bg-[var(--space-surface-card)] shadow-2xl">
@@ -967,14 +1188,14 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
                         // finger, and the click that commits the voice lands on nothing.
                         return <button key={view.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseVoice(view.id)}
                           className={selected
-                            ? 'flex w-full items-center gap-3 rounded-lg bg-[color-mix(in_srgb,#8b5cf6_16%,transparent)] px-3 py-2 text-left'
-                            : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-[color-mix(in_srgb,#ffffff_6%,transparent)]'}>
+                            ? 'flex w-full items-center gap-3 rounded-lg bg-[color-mix(in_srgb,#C8920A_16%,transparent)] px-3 py-2 text-left'
+                            : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]'}>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-medium text-[var(--space-text-primary)]">{view.name}</span>
                             <span className="block truncate text-[11px] text-[var(--space-text-muted)]">{[view.language, view.gender, voiceAccent(view.raw)].filter(Boolean).join(' · ')}{unsupported ? ' · v2 only' : ''}</span>
                           </span>
-                          {view.indian ? <span className="shrink-0 rounded-full bg-[color-mix(in_srgb,#8b5cf6_22%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[#c4b5fd]">India</span> : null}
-                          {selected ? <Check className="h-4 w-4 shrink-0 text-[#a78bfa]" /> : null}
+                          {view.indian ? <span className="shrink-0 rounded-full bg-[color-mix(in_srgb,#C8920A_22%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[#C8920A]">India</span> : null}
+                          {selected ? <Check className="h-4 w-4 shrink-0 text-[#C8920A]" /> : null}
                         </button>;
                       }) : <p className="px-3 py-6 text-center text-sm text-[var(--space-text-muted)]">No voice matches that search.</p>}
                     </div>
@@ -982,13 +1203,16 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
                 </div>}
           </Step>
 
-          <Step n={3} done={Boolean(script.trim())} title="Write the script" hint="Exactly these words are spoken on camera."
+          <Step n={3} done={usingUpload ? true : Boolean(script.trim())} title={usingUpload ? 'Script (optional)' : 'Write the script'}
+            hint={usingUpload
+              ? 'Your uploaded narration carries the words, so nothing here is spoken. Anything you write is kept as the label for this render and as the opening brief if you take it into the motion editor.'
+              : 'Exactly these words are spoken on camera.'}
             action={<button type="button" onClick={() => void polish()} disabled={!script.trim() || polishing}
-              className="flex items-center gap-1.5 rounded-xl border border-[color-mix(in_srgb,#8b5cf6_45%,transparent)] bg-[color-mix(in_srgb,#8b5cf6_14%,transparent)] px-3 py-2 text-xs font-semibold text-[#c4b5fd] disabled:opacity-40">
-              {polishing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}Improve script
+              className="flex items-center gap-1.5 rounded-xl border border-[color-mix(in_srgb,#C8920A_45%,transparent)] bg-[color-mix(in_srgb,#C8920A_14%,transparent)] px-3 py-2 text-xs font-semibold text-[#C8920A] disabled:opacity-40">
+              {polishing ? <VergeLoader size={28} label="Improving your script" /> : <Sparkles className="h-3.5 w-3.5" />}Improve script
             </button>}>
             <textarea value={script} onChange={(event) => { setScript(event.target.value.slice(0, MAX_SCRIPT + 200)); setScriptNote(''); }} rows={7}
-              placeholder="Write your script here... The avatar will speak this text."
+              placeholder={usingUpload ? 'Optional. Your narration audio is what gets spoken; this is only a label for the render.' : 'Write your script here... The avatar will speak this text.'}
               className="st-field resize-y leading-relaxed" />
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
               <span className={script.length > MAX_SCRIPT ? 'font-semibold text-[var(--space-semantic-danger)]' : 'text-[var(--space-text-muted)]'}>{script.length} / {MAX_SCRIPT} chars{script.length > MAX_SCRIPT ? ' — trim before generating' : ''}</span>
@@ -1014,7 +1238,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
                   <input type="color" value={backgroundColor} onChange={(event) => setBackgroundColor(event.target.value)} aria-label="Background colour" className="h-10 w-16 cursor-pointer rounded-lg border border-[var(--space-border-default)] bg-transparent" />
                   <div className="flex flex-wrap gap-2">
                     {['#0f172a', '#1e1b4b', '#111827', '#f8fafc', '#065f46', '#7c2d12'].map((swatch) => <button key={swatch} type="button" onClick={() => setBackgroundColor(swatch)} aria-label={`Use ${swatch}`}
-                      className={backgroundColor.toLowerCase() === swatch ? 'h-8 w-8 rounded-lg border-2 border-[#8b5cf6]' : 'h-8 w-8 rounded-lg border border-[var(--space-border-strong)]'} style={{ background: swatch }} />)}
+                      className={backgroundColor.toLowerCase() === swatch ? 'h-8 w-8 rounded-lg border-2 border-[#C8920A]' : 'h-8 w-8 rounded-lg border border-[var(--space-border-strong)]'} style={{ background: swatch }} />)}
                   </div>
                   <span className="text-xs text-[var(--space-text-muted)]">{backgroundColor}</span>
                 </div> : null}
@@ -1023,9 +1247,11 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
               </div>
               <div className="sm:col-span-2">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">Speaking speed · {speed.toFixed(2)}x</p>
-                <input type="range" min={0.8} max={1.5} step={0.05} value={speed} onChange={(event) => setSpeed(Number(event.target.value))} disabled={voiceEngine === 'elevenlabs'} className="w-full disabled:opacity-40" />
+                <input type="range" min={0.8} max={1.5} step={0.05} value={speed} onChange={(event) => setSpeed(Number(event.target.value))} disabled={voiceEngine !== 'heygen'} className="w-full disabled:opacity-40" />
                 <div className="mt-1 flex justify-between text-[10px] uppercase tracking-wide text-[var(--space-text-muted)]"><span>0.8x relaxed</span><span>1.0x natural</span><span>1.5x brisk</span></div>
-                {voiceEngine === 'elevenlabs' ? <p className="mt-2 text-[11px] leading-relaxed text-[var(--space-text-muted)]">
+                {usingUpload ? <p className="mt-2 text-[11px] leading-relaxed text-[var(--space-text-muted)]">
+                  Your narration sets its own pace, so this slider does nothing on this engine. Re-record or re-time the audio to change the delivery.
+                </p> : voiceEngine === 'elevenlabs' ? <p className="mt-2 text-[11px] leading-relaxed text-[var(--space-text-muted)]">
                   Speed is set by the ElevenLabs track, not by HeyGen, so this slider does nothing on this engine — shape the delivery with Stability and Style in step 2 instead.
                 </p> : null}
               </div>
@@ -1045,61 +1271,71 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
                     ? <img src={selectedAvatar.image} alt={selectedAvatar.name} className="h-full w-full object-cover opacity-60" />
                     : <div className="flex h-full w-full items-center justify-center text-xs text-[var(--space-text-muted)]">Preview appears here</div>}
                 {busy ? <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[color-mix(in_srgb,#0b1022_72%,transparent)] backdrop-blur-sm">
-                  <Loader2 className="h-7 w-7 animate-spin text-[#a78bfa]" />
-                  <span className="px-3 text-center text-[11px] font-medium text-[var(--space-text-secondary)]">{stageLabel}</span>
+                  <VergeLoader size={120} caption={stageLabel} />
                 </div> : null}
               </div>
             </div>
 
-            {refreshingLink ? <p className="mt-2 flex items-center justify-center gap-2 text-xs text-[var(--space-text-muted)]"><Loader2 className="h-3.5 w-3.5 animate-spin text-[#a78bfa]" />Refreshing video link…</p> : null}
+            {refreshingLink ? <p className="mt-2 flex items-center justify-center gap-2 text-xs text-[var(--space-text-muted)]"><VergeLoader size={28} label="Refreshing video link" />Refreshing video link…</p> : null}
+
+            <p className={usingUpload
+              ? 'mt-3 inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,#166534_38%,transparent)] bg-[color-mix(in_srgb,#166534_12%,transparent)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#166534]'
+              : 'mt-3 inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,#C8920A_38%,transparent)] bg-[color-mix(in_srgb,#C8920A_12%,transparent)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#C8920A]'}>
+              {usingUpload ? <><FileAudio className="h-3 w-3" />Using your narration</> : <><Volume2 className="h-3 w-3" />Using AI voice</>}
+            </p>
 
             <dl className="mt-4 space-y-1.5 text-xs">
-              <div className="flex gap-2"><dt className="w-20 shrink-0 text-[var(--space-text-muted)]">Avatar</dt><dd className="min-w-0 flex-1 truncate text-[var(--space-text-secondary)]">{selectedAvatar?.name || 'Not chosen'}</dd></div>
-              <div className="flex gap-2"><dt className="w-20 shrink-0 text-[var(--space-text-muted)]">Voice</dt><dd className="min-w-0 flex-1 truncate text-[var(--space-text-secondary)]">{voiceEngine === 'elevenlabs' ? (selectedEleven ? `${shortVoiceName(selectedEleven.name)} · ElevenLabs` : 'Not chosen') : (selectedVoice?.name ? `${selectedVoice.name} · HeyGen` : 'Not chosen')}</dd></div>
+              <div className="flex gap-2"><dt className="w-20 shrink-0 text-[var(--space-text-muted)]">Avatar</dt><dd className="min-w-0 flex-1 truncate text-[var(--space-text-secondary)]">{selectedAvatar?.name || (typedAvatarId ? `${avatarId} · pasted ID` : 'Not chosen')}</dd></div>
+              <div className="flex gap-2"><dt className="w-20 shrink-0 text-[var(--space-text-muted)]">Voice</dt><dd className="min-w-0 flex-1 truncate text-[var(--space-text-secondary)]">{usingUpload ? (narration ? `${narration.name} · yours` : 'No narration uploaded') : voiceEngine === 'elevenlabs' ? (selectedEleven ? `${shortVoiceName(selectedEleven.name)} · ElevenLabs` : 'Not chosen') : (selectedVoice?.name ? `${selectedVoice.name} · HeyGen` : 'Not chosen')}</dd></div>
               <div className="flex gap-2"><dt className="w-20 shrink-0 text-[var(--space-text-muted)]">Output</dt><dd className="min-w-0 flex-1 truncate text-[var(--space-text-secondary)]">{resolution} · {aspectRatio} · MP4</dd></div>
             </dl>
 
             {busy ? <div className="mt-4">
               <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--space-surface-muted)]">
-                <div className="h-full rounded-full bg-[linear-gradient(90deg,#6366f1,#8b5cf6)] transition-[width] duration-700 ease-out" style={{ width: `${Math.max(6, progress)}%` }} />
+                <div className="h-full rounded-full bg-[linear-gradient(90deg,#E8B737,#C8920A)] transition-[width] duration-700 ease-out" style={{ width: `${Math.max(6, progress)}%` }} />
               </div>
               <ol className="mt-3 space-y-1">
                 {pipelineSteps.map((step) => <li key={step.key} className="flex items-center gap-2 text-[11px]">
-                  {step.state === 'done' ? <Check className="h-3 w-3 shrink-0 text-[#34d399]" />
-                    : step.state === 'active' ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[#a78bfa]" />
+                  {step.state === 'done' ? <Check className="h-3 w-3 shrink-0 text-[#166534]" />
+                    : step.state === 'active' ? <VergeLoader size={26} label={step.label} />
                       : <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--space-border-strong)]" />}
                   <span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span>
                 </li>)}
               </ol>
               <p className="mt-2 text-xs text-[var(--space-text-secondary)]">{stageLabel} (60–120s in total) · {elapsed}s elapsed</p>
               <p className="mt-1 text-[11px] text-[var(--space-text-muted)]">You can leave this open — the render is picked back up if the page reloads.</p>
+              {stage === 'render' && elapsed > SLOW_RENDER_SEC ? <p className="mt-2 rounded-lg border border-[color-mix(in_srgb,#C8920A_32%,transparent)] bg-[color-mix(in_srgb,#C8920A_10%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[#C8920A]">
+                This is taking longer than expected. HeyGen still has the render and SceneForge is still watching it, so nothing is lost — you can check back later, and reopening the studio picks the render back up and shows it here when it lands.
+              </p> : null}
             </div> : null}
 
             {renderError ? <div className="mt-4"><Notice tone="error" title="HeyGen could not finish this video">{renderError}</Notice></div> : null}
 
             {phase === 'done' && videoUrl ? <div className="mt-4 space-y-2">
-              <button type="button" onClick={() => void save(videoUrl, videoId)} disabled={downloading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] px-4 py-3 text-sm font-semibold text-white shadow-[0_6px_20px_rgba(99,102,241,.4)] disabled:opacity-60">
-                {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}Download MP4
+              <button type="button" onClick={() => void save(videoUrl, videoId)} disabled={downloading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-4 py-3 text-sm font-semibold text-white shadow-[0_6px_20px_rgba(200,146,10,.4)] disabled:opacity-60">
+                {downloading ? <VergeLoader size={32} label="Downloading" /> : <Download className="h-4 w-4" />}Download MP4
               </button>
               {onOpenEditor ? <button type="button" onClick={() => openEditor({ videoId, videoUrl, thumbnailUrl, aspectRatio, script: renderMeta.current.script || script })}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color-mix(in_srgb,#8b5cf6_45%,transparent)] bg-[color-mix(in_srgb,#8b5cf6_14%,transparent)] px-4 py-3 text-sm font-semibold text-[#c4b5fd] hover:bg-[color-mix(in_srgb,#8b5cf6_22%,transparent)]">
-                <Wand2 className="h-4 w-4" />Add motion graphics
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color-mix(in_srgb,#C8920A_45%,transparent)] bg-[color-mix(in_srgb,#C8920A_14%,transparent)] px-4 py-3 text-sm font-semibold text-[#C8920A] hover:bg-[color-mix(in_srgb,#C8920A_22%,transparent)]">
+                <Wand2 className="h-4 w-4" />AI post-production
               </button> : null}
-              <button type="button" onClick={() => { setPhase('idle'); setVideoUrl(''); setVideoId(''); setElapsed(0); }} className="w-full rounded-xl border border-[var(--space-border-strong)] px-4 py-2.5 text-sm font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#ffffff_5%,transparent)]">Make another video</button>
+              <button type="button" onClick={() => { setPhase('idle'); setVideoUrl(''); setVideoId(''); setElapsed(0); }} className="w-full rounded-xl border border-[var(--space-border-strong)] px-4 py-2.5 text-sm font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]">Make another video</button>
             </div> : <button type="button" onClick={() => void generate()} disabled={!ready || busy}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] px-4 py-3.5 text-sm font-bold text-white shadow-[0_6px_20px_rgba(99,102,241,.4)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Generate video
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-4 py-3.5 text-sm font-bold text-white shadow-[0_6px_20px_rgba(200,146,10,.4)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none">
+              {busy ? <VergeLoader size={32} label="Rendering your avatar video" /> : <Play className="h-4 w-4" />}{usingUpload ? 'Lip-sync my narration' : 'Generate video'}
             </button>}
 
             {!ready && !busy && phase !== 'done' ? <p className="mt-2 text-center text-[11px] text-[var(--space-text-muted)]">
-              {!avatarId ? 'Pick an avatar to continue' : !chosenVoiceId ? 'Pick a voice to continue' : !script.trim() ? 'Write a script to continue' : 'Trim the script under the character limit'}
+              {!avatarId ? 'Pick an avatar to continue'
+                : usingUpload ? (narrationBusy ? 'Waiting for your narration to finish uploading' : 'Upload your narration to continue')
+                  : !chosenVoiceId ? 'Pick a voice to continue' : !script.trim() ? 'Write a script to continue' : 'Trim the script under the character limit'}
             </p> : null}
           </div>
 
           {history.length ? <div className="st-rise rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-bold uppercase tracking-[.16em] text-[var(--space-text-muted)]">Recent videos</h2>
-              <button type="button" onClick={() => setHistory(clearHistory())} aria-label="Clear recent videos" className="rounded-lg p-1.5 text-[var(--space-text-muted)] hover:bg-[color-mix(in_srgb,#ffffff_6%,transparent)]"><Trash2 className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => setHistory(clearHistory())} aria-label="Clear recent videos" className="rounded-lg p-1.5 text-[var(--space-text-muted)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
             <ul className="mt-3 space-y-2">
               {history.map((entry) => <li key={entry.videoId} className="flex gap-3 rounded-xl border border-[var(--space-border-default)] p-2">
@@ -1110,7 +1346,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
                   <p className="line-clamp-2 text-xs leading-snug text-[var(--space-text-secondary)]">{entry.script || 'Untitled script'}</p>
                   <p className="mt-1 text-[10px] uppercase tracking-wide text-[var(--space-text-muted)]">{[entry.avatarName, entry.aspectRatio, relativeDate(entry.createdAt)].filter(Boolean).join(' · ')}</p>
                 </div>
-                <button type="button" onClick={() => void save(entry.videoUrl, entry.videoId)} aria-label="Download this video" className="self-center rounded-lg border border-[var(--space-border-strong)] p-2 text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#ffffff_6%,transparent)]"><Download className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => void save(entry.videoUrl, entry.videoId)} aria-label="Download this video" className="self-center rounded-lg border border-[var(--space-border-strong)] p-2 text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]"><Download className="h-3.5 w-3.5" /></button>
               </li>)}
             </ul>
           </div> : null}
@@ -1118,14 +1354,14 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
       </div>
     </div>
 
-    {historyOpen ? <div className="absolute inset-0 z-40 flex justify-end bg-[color-mix(in_srgb,#040713_64%,transparent)]" onClick={() => setHistoryOpen(false)}>
+    {historyOpen ? <div className="absolute inset-0 z-40 flex justify-end bg-[color-mix(in_srgb,#1A1000_35%,transparent)]" onClick={() => setHistoryOpen(false)}>
       <aside className="st-rise flex h-full w-full max-w-md flex-col border-l border-[var(--space-border-strong)] bg-[var(--space-surface-card)]" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-[var(--space-border-default)] px-5 py-4">
           <div>
             <h2 className="text-base font-bold tracking-tight">Recent videos</h2>
             <p className="text-xs text-[var(--space-text-muted)]">The last {history.length || 'few'} renders from this browser.</p>
           </div>
-          <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Close recent videos" className="rounded-lg p-1.5 hover:bg-[color-mix(in_srgb,#ffffff_7%,transparent)]"><X className="h-5 w-5" /></button>
+          <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Close recent videos" className="rounded-lg p-1.5 hover:bg-[color-mix(in_srgb,#B4780A_10%,transparent)]"><X className="h-5 w-5" /></button>
         </div>
         <div className="st-scroll flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {history.length ? history.map((entry) => <div key={entry.videoId} className="rounded-xl border border-[var(--space-border-default)] p-3">
@@ -1134,12 +1370,12 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenEditor
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <span className="text-[10px] uppercase tracking-wide text-[var(--space-text-muted)]">{[entry.avatarName, entry.voiceName, entry.aspectRatio, relativeDate(entry.createdAt)].filter(Boolean).join(' · ')}</span>
               <span className="flex items-center gap-1.5">
-                {onOpenEditor ? <button type="button" onClick={() => { setHistoryOpen(false); openEditor(entry); }} className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#8b5cf6_45%,transparent)] px-2.5 py-1.5 text-xs font-medium text-[#c4b5fd]"><Wand2 className="h-3.5 w-3.5" />Edit</button> : null}
+                {onOpenEditor ? <button type="button" onClick={() => { setHistoryOpen(false); openEditor(entry); }} className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#C8920A_45%,transparent)] px-2.5 py-1.5 text-xs font-medium text-[#C8920A]"><Wand2 className="h-3.5 w-3.5" />Post-produce</button> : null}
                 <button type="button" onClick={() => void save(entry.videoUrl, entry.videoId)} className="flex items-center gap-1.5 rounded-lg border border-[var(--space-border-strong)] px-2.5 py-1.5 text-xs font-medium text-[var(--space-text-secondary)]"><Download className="h-3.5 w-3.5" />MP4</button>
               </span>
             </div>
           </div>) : <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-[var(--space-border-strong)] px-6 py-12 text-center">
-            <Wand2 className="h-6 w-6 text-[#a78bfa]" />
+            <Wand2 className="h-6 w-6 text-[#C8920A]" />
             <p className="text-sm font-semibold">Nothing here yet</p>
             <p className="text-xs text-[var(--space-text-muted)]">Generate your first avatar video and it lands here with a one-tap MP4 download.</p>
           </div>}

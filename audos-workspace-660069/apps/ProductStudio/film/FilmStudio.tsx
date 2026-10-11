@@ -40,10 +40,10 @@ const CSS = `
   .pf-root * { box-sizing: border-box; }
   .pf-root button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease; }
   .pf-root button:focus-visible, .pf-root a:focus-visible { outline: 2px solid ${T.coral}; outline-offset: 2px; border-radius: 10px; }
-  .pf-primary:hover:not(:disabled) { background: #FF7E61 !important; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(255,107,74,0.35); }
+  .pf-primary:hover:not(:disabled) { background: #E8B737 !important; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(200,146,10,0.3); }
   .pf-ghost:hover:not(:disabled) { border-color: ${T.lineStrong} !important; color: ${T.bone} !important; }
   .pf-card { transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease; }
-  .pf-card:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+  .pf-card:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(120,80,0,0.12); }
   .pf-scroll::-webkit-scrollbar { width: 8px; }
   .pf-scroll::-webkit-scrollbar-thumb { background: ${T.line}; border-radius: 999px; }
   .pf-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -104,39 +104,39 @@ function trailDecision(film: Film, step: number): string {
 }
 
 const statusChip: Record<string, { label: string; color: string; bg: string }> = {
-  draft: { label: 'QUEUED', color: T.muted, bg: 'rgba(141,139,148,0.12)' },
-  understanding: { label: 'RESEARCHING', color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  strategizing: { label: 'STRATEGY', color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  scripting: { label: 'SCRIPTING', color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  voicing: { label: 'RECORDING VOICE', color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  storyboarding: { label: 'STORYBOARDING', color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  producing: { label: 'GENERATING', color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  quality: { label: 'QUALITY CHECK', color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  composing: { label: 'COMPOSING', color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  ready: { label: 'READY', color: T.done, bg: 'rgba(127,212,180,0.14)' },
-  error: { label: 'NEEDS ATTENTION', color: T.fault, bg: 'rgba(226,114,111,0.14)' },
+  draft: { label: 'QUEUED', color: T.muted, bg: 'rgba(122,96,48,0.12)' },
+  understanding: { label: 'RESEARCHING', color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  strategizing: { label: 'STRATEGY', color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  scripting: { label: 'SCRIPTING', color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  voicing: { label: 'RECORDING VOICE', color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  storyboarding: { label: 'STORYBOARDING', color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  producing: { label: 'GENERATING', color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  quality: { label: 'QUALITY CHECK', color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  composing: { label: 'COMPOSING', color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  ready: { label: 'READY', color: T.done, bg: 'rgba(22,101,52,0.12)' },
+  error: { label: 'NEEDS ATTENTION', color: T.fault, bg: 'rgba(153,27,27,0.1)' },
 };
 
 // One entry per scene state — the pill always shows the ACTUAL pipeline state:
 // PLANNING → GENERATING → VALIDATING → QA CHECKING → READY, with RETRYING
 // between failed attempts and FAILED (legacy 'error') after the last one.
 const sceneChip: Record<string, { color: string; bg: string }> = {
-  pending: { color: T.muted, bg: 'rgba(141,139,148,0.12)' },
-  generating: { color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  validating: { color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  qa_checking: { color: T.gold, bg: 'rgba(232,163,60,0.14)' },
-  retrying: { color: T.coral, bg: 'rgba(255,107,74,0.14)' },
-  ready: { color: T.done, bg: 'rgba(127,212,180,0.14)' },
-  failed: { color: T.fault, bg: 'rgba(226,114,111,0.14)' },
-  error: { color: T.fault, bg: 'rgba(226,114,111,0.14)' },
+  pending: { color: T.muted, bg: 'rgba(122,96,48,0.12)' },
+  generating: { color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  validating: { color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  qa_checking: { color: T.gold, bg: 'rgba(180,83,9,0.12)' },
+  retrying: { color: T.coral, bg: 'rgba(200,146,10,0.16)' },
+  ready: { color: T.done, bg: 'rgba(22,101,52,0.12)' },
+  failed: { color: T.fault, bg: 'rgba(153,27,27,0.1)' },
+  error: { color: T.fault, bg: 'rgba(153,27,27,0.1)' },
 };
 
 const typeBadgeColor: Record<string, string> = {
-  PRODUCT_UI: '#5EA8FF', UI_ANIMATION: '#5EA8FF', PRODUCT_MOCKUP: '#5EA8FF',
-  AI_VIDEO: '#B48CFF', B_ROLL: '#B48CFF', IMAGE: '#E8A33C',
-  TEXT: '#7FD4B4',
-  MOTION_GRAPHIC: '#63D2C1', EDUCATIONAL_DIAGRAM: '#63D2C1', COMPARISON: '#63D2C1',
-  PROCESS: '#63D2C1', TIMELINE: '#63D2C1', BEFORE_AFTER: '#63D2C1', SPLIT_SCREEN: '#63D2C1',
+  PRODUCT_UI: '#1D4ED8', UI_ANIMATION: '#1D4ED8', PRODUCT_MOCKUP: '#1D4ED8',
+  AI_VIDEO: '#8A6400', B_ROLL: '#8A6400', IMAGE: '#B4720A',
+  TEXT: '#166534',
+  MOTION_GRAPHIC: '#0F766E', EDUCATIONAL_DIAGRAM: '#0F766E', COMPARISON: '#0F766E',
+  PROCESS: '#0F766E', TIMELINE: '#0F766E', BEFORE_AFTER: '#0F766E', SPLIT_SCREEN: '#0F766E',
 };
 
 function fmtS(v: unknown): string {
@@ -422,7 +422,7 @@ export default function FilmStudio() {
         {/* hero create card */}
         <div style={{ background: T.raised, border: `1px solid ${T.line}`, borderRadius: 18, padding: 'clamp(18px, 3vw, 28px)', marginBottom: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 12, background: 'rgba(255,107,74,0.12)', border: '1px solid rgba(255,107,74,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 38, height: 38, borderRadius: 12, background: 'rgba(200,146,10,0.12)', border: '1px solid rgba(200,146,10,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Megaphone size={17} color={T.coral} />
             </div>
             <div>
@@ -439,7 +439,7 @@ export default function FilmStudio() {
                   <label style={{ color: T.muted, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', display: 'block', marginBottom: 7 }}>Aspect</label>
                   <div style={{ display: 'inline-flex', gap: 4, padding: 4, borderRadius: 10, border: `1px solid ${T.line}` }}>
                     {(['16:9', '9:16'] as Aspect[]).map((a) => (
-                      <button key={a} type="button" onClick={() => setAspect(a)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: aspect === a ? T.coral : 'transparent', color: aspect === a ? '#1A0E08' : T.muted }}>{a}</button>
+                      <button key={a} type="button" onClick={() => setAspect(a)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: aspect === a ? T.coral : 'transparent', color: aspect === a ? '#FFFFFF' : T.muted }}>{a}</button>
                     ))}
                   </div>
                 </div>
@@ -497,7 +497,7 @@ export default function FilmStudio() {
                     type="button"
                     onClick={() => setStyle(s.id)}
                     aria-pressed={active}
-                    style={{ textAlign: 'left', background: active ? 'rgba(255,107,74,0.08)' : T.canvas, border: `1.5px solid ${active ? T.coral : T.line}`, borderRadius: 13, padding: '13px 15px', cursor: 'pointer' }}
+                    style={{ textAlign: 'left', background: active ? 'rgba(200,146,10,0.1)' : T.canvas, border: `1.5px solid ${active ? T.coral : T.line}`, borderRadius: 13, padding: '13px 15px', cursor: 'pointer' }}
                     data-testid={`button-style-${s.id}`}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -527,7 +527,7 @@ export default function FilmStudio() {
                   ? (live.available ? `${runwayInputLabel(live)} — ${live.blurb}` : live.unavailableReason || '')
                   : (m.availabilityNote || '');
                 return (
-                  <button key={m.id} type="button" disabled={unavailable} onClick={() => pickEngine(m.id)} title={title} style={{ background: active ? T.coral : T.canvas, color: active ? '#1A0E08' : T.muted, border: `1px solid ${active ? T.coral : T.line}`, borderRadius: 9, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: unavailable ? 'not-allowed' : 'pointer', opacity: unavailable ? 0.45 : 1 }} data-testid={`button-film-engine-${m.id}`}>
+                  <button key={m.id} type="button" disabled={unavailable} onClick={() => pickEngine(m.id)} title={title} style={{ background: active ? T.coral : T.canvas, color: active ? '#FFFFFF' : T.muted, border: `1px solid ${active ? T.coral : T.line}`, borderRadius: 9, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: unavailable ? 'not-allowed' : 'pointer', opacity: unavailable ? 0.45 : 1 }} data-testid={`button-film-engine-${m.id}`}>
                     {m.label}{unavailable ? ' — unavailable' : ''}
                   </button>
                 );
@@ -557,7 +557,7 @@ export default function FilmStudio() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: T.fault, fontSize: 12, marginTop: 12 }}><AlertTriangle size={13} /> {formError}</div>
           ) : null}
           <div style={{ marginTop: 16 }}>
-            <button type="button" className="pf-primary" disabled={uploading} onClick={() => void generate()} style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: T.coral, color: '#1A0E08', border: 'none', borderRadius: 11, padding: '12px 26px', fontSize: 13.5, fontWeight: 800, cursor: 'pointer', boxShadow: '0 2px 10px rgba(255,107,74,0.25)' }} data-testid="button-generate-film">
+            <button type="button" className="pf-primary" disabled={uploading} onClick={() => void generate()} style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: T.coral, color: '#FFFFFF', border: 'none', borderRadius: 11, padding: '12px 26px', fontSize: 13.5, fontWeight: 800, cursor: 'pointer', boxShadow: '0 2px 10px rgba(200,146,10,0.3)' }} data-testid="button-generate-film">
               <Sparkles size={15} /> Direct My Ad
             </button>
           </div>
@@ -572,13 +572,13 @@ export default function FilmStudio() {
         {films.length === 0 && !loadError ? (
           <div style={{ background: T.raised, border: `1px solid ${T.line}`, borderRadius: 16, padding: '34px 22px', textAlign: 'center' }} data-testid="empty-ad-director">
             <div aria-hidden="true" style={{ position: 'relative', width: 112, height: 72, margin: '0 auto 16px' }}>
-              <span style={{ position: 'absolute', inset: '8px 18px', borderRadius: 11, background: 'rgba(232,163,60,.16)', transform: 'rotate(-7deg)', border: `1px solid ${T.line}` }} />
-              <span style={{ position: 'absolute', inset: '4px 10px', borderRadius: 11, background: 'rgba(255,107,74,.14)', transform: 'rotate(4deg)', border: `1px solid ${T.line}` }} />
+              <span style={{ position: 'absolute', inset: '8px 18px', borderRadius: 11, background: 'rgba(180,83,9,.14)', transform: 'rotate(-7deg)', border: `1px solid ${T.line}` }} />
+              <span style={{ position: 'absolute', inset: '4px 10px', borderRadius: 11, background: 'rgba(200,146,10,.14)', transform: 'rotate(4deg)', border: `1px solid ${T.line}` }} />
               <span style={{ position: 'absolute', inset: 0, borderRadius: 12, background: T.canvas, border: `1px solid ${T.lineStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Clapperboard size={27} color={T.gold} /></span>
             </div>
             <div style={{ color: T.bone, fontSize: 17, fontWeight: 800 }}>Your first ad starts with one real product</div>
             <div style={{ color: T.muted, fontSize: 12.5, lineHeight: 1.6, maxWidth: 520, margin: '6px auto 16px' }}>Paste a page or add screenshots above. I’ll show you my research, angle, script, scene decisions, and every finished frame as the ad comes together.</div>
-            <button type="button" className="pf-primary" onClick={() => document.querySelector<HTMLInputElement>('[data-testid="input-film-url"]')?.focus()} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: T.coral, color: '#1A0E08', border: 'none', borderRadius: 10, padding: '10px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}><Globe size={13} /> Add your product</button>
+            <button type="button" className="pf-primary" onClick={() => document.querySelector<HTMLInputElement>('[data-testid="input-film-url"]')?.focus()} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: T.coral, color: '#FFFFFF', border: 'none', borderRadius: 10, padding: '10px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}><Globe size={13} /> Add your product</button>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 14 }}>
@@ -648,8 +648,8 @@ export default function FilmStudio() {
             {film.video_style === 'story_driven' ? 'STORY-DRIVEN' : 'PRODUCT-FOCUSED'} · SWITCH
           </button>
         ) : null}
-        <button type="button" className="pf-ghost" onClick={() => void toggleAutoFlag('auto_generate')} title="Auto Generate: ON = the run continues through scenes, QA and composition. OFF = the director pauses after the storyboard." style={{ background: autoGenerateOn(film) ? 'rgba(127,212,180,0.08)' : 'rgba(232,163,60,0.08)', border: `1px solid ${autoGenerateOn(film) ? 'rgba(127,212,180,0.45)' : 'rgba(232,163,60,0.45)'}`, color: autoGenerateOn(film) ? T.done : T.gold, borderRadius: 999, padding: '5px 11px', fontSize: 10, fontWeight: 700, letterSpacing: 0.6, fontFamily: T.mono, cursor: 'pointer' }} data-testid="toggle-film-auto-generate">AUTO GENERATE {autoGenerateOn(film) ? 'ON' : 'OFF · PAUSE AFTER STORYBOARD'}</button>
-        <button type="button" className="pf-ghost" disabled={running} onClick={() => void toggleAutoFlag('auto_mix')} title="Auto Mix: ON = the music bed and subtle SFX are generated automatically and ducked under narration at composition. OFF = narration only." style={{ background: 'transparent', border: `1px solid ${autoMixOn(film) ? 'rgba(127,212,180,0.45)' : T.line}`, color: autoMixOn(film) ? T.done : T.muted, borderRadius: 999, padding: '5px 11px', fontSize: 10, fontWeight: 700, letterSpacing: 0.6, fontFamily: T.mono, cursor: running ? 'default' : 'pointer', opacity: running ? 0.5 : 1 }} data-testid="toggle-film-auto-mix">AUTO MIX {autoMixOn(film) ? 'ON' : 'OFF'}</button>
+        <button type="button" className="pf-ghost" onClick={() => void toggleAutoFlag('auto_generate')} title="Auto Generate: ON = the run continues through scenes, QA and composition. OFF = the director pauses after the storyboard." style={{ background: autoGenerateOn(film) ? 'rgba(22,101,52,0.08)' : 'rgba(180,83,9,0.08)', border: `1px solid ${autoGenerateOn(film) ? 'rgba(22,101,52,0.4)' : 'rgba(180,83,9,0.4)'}`, color: autoGenerateOn(film) ? T.done : T.gold, borderRadius: 999, padding: '5px 11px', fontSize: 10, fontWeight: 700, letterSpacing: 0.6, fontFamily: T.mono, cursor: 'pointer' }} data-testid="toggle-film-auto-generate">AUTO GENERATE {autoGenerateOn(film) ? 'ON' : 'OFF · PAUSE AFTER STORYBOARD'}</button>
+        <button type="button" className="pf-ghost" disabled={running} onClick={() => void toggleAutoFlag('auto_mix')} title="Auto Mix: ON = the music bed and subtle SFX are generated automatically and ducked under narration at composition. OFF = narration only." style={{ background: 'transparent', border: `1px solid ${autoMixOn(film) ? 'rgba(22,101,52,0.4)' : T.line}`, color: autoMixOn(film) ? T.done : T.muted, borderRadius: 999, padding: '5px 11px', fontSize: 10, fontWeight: 700, letterSpacing: 0.6, fontFamily: T.mono, cursor: running ? 'default' : 'pointer', opacity: running ? 0.5 : 1 }} data-testid="toggle-film-auto-mix">AUTO MIX {autoMixOn(film) ? 'ON' : 'OFF'}</button>
         {film.status === 'error' ? (
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: T.fault, background: chip.bg, borderRadius: 999, padding: '4px 5px 4px 11px', maxWidth: '100%' }}>
             <span style={{ fontSize: 10, fontWeight: 700, fontFamily: T.mono, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>NEEDS ATTENTION · {film.error || film.stage_note || 'the run stopped'}</span>
@@ -671,7 +671,7 @@ export default function FilmStudio() {
             const state = film.status === 'ready' || i < trailIdx ? 'done' : i === trailIdx ? 'live' : 'todo';
             const decision = state !== 'todo' ? trailDecision(film, i) : '';
             return (
-              <div key={step.label} style={{ minWidth: 0, padding: '9px 10px', borderRadius: 10, border: `1px solid ${state === 'live' ? T.gold : state === 'done' ? 'rgba(127,212,180,.3)' : T.line}`, background: state === 'live' ? 'rgba(232,163,60,.08)' : state === 'done' ? 'rgba(127,212,180,.05)' : T.canvas }}>
+              <div key={step.label} style={{ minWidth: 0, padding: '9px 10px', borderRadius: 10, border: `1px solid ${state === 'live' ? T.gold : state === 'done' ? 'rgba(22,101,52,.35)' : T.line}`, background: state === 'live' ? 'rgba(180,83,9,.08)' : state === 'done' ? 'rgba(22,101,52,.06)' : T.canvas }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {state === 'done' ? <Check size={11} color={T.done} /> : state === 'live' ? <AgentStreak working={running} size={13} /> : <span style={{ width: 8, height: 8, borderRadius: 999, border: `1px solid ${T.dim}` }} />}
                   <span style={{ color: state === 'todo' ? T.dim : T.bone, fontSize: 10.5, fontWeight: 800 }}>{step.label}</span>
@@ -685,7 +685,7 @@ export default function FilmStudio() {
       </div>
 
       {film.error ? (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: T.fault, fontSize: 12, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.2)', borderRadius: 10, padding: '10px 13px', marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: T.fault, fontSize: 12, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.22)', borderRadius: 10, padding: '10px 13px', marginBottom: 14 }}>
           <AlertTriangle size={13} style={{ flexShrink: 0 }} />
           <span style={{ flex: 1 }}>Needs attention — {film.error}</span>
           <button type="button" className="pf-primary" disabled={running} onClick={() => void retryFilm()} style={{ background: T.fault, color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: 10.5, fontWeight: 800, cursor: running ? 'default' : 'pointer' }}>Retry</button>
@@ -695,7 +695,7 @@ export default function FilmStudio() {
       {needsManualGenerate ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: T.raised, border: `1px solid ${T.line}`, borderRadius: 12, padding: '11px 14px', marginBottom: 14 }}>
           <span style={{ color: T.muted, fontSize: 12 }}>Auto-generate is off — {pendingScenes} scene(s) are storyboarded and waiting.</span>
-          <button type="button" className="pf-primary" onClick={() => void generateScenesNow()} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: T.coral, color: '#1A0E08', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }} data-testid="button-generate-scenes">
+          <button type="button" className="pf-primary" onClick={() => void generateScenesNow()} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: T.coral, color: '#FFFFFF', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }} data-testid="button-generate-scenes">
             <Sparkles size={13} /> Generate scenes
           </button>
         </div>
@@ -708,7 +708,7 @@ export default function FilmStudio() {
             <div style={{ background: T.raised, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
               <video key={film.final_video_url} src={film.final_video_url} controls playsInline style={{ width: '100%', borderRadius: 10, background: '#000', maxHeight: 480 }} data-testid="video-final-film" />
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 11, flexWrap: 'wrap' }}>
-                <a className="pf-primary" href={film.final_video_url} download={`${(film.title || 'product-ad').replace(/[^\w-]+/g, '_')}.mp4`} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.coral, color: '#1A0E08', borderRadius: 10, padding: '10px 20px', fontSize: 12.5, fontWeight: 700, textDecoration: 'none' }} data-testid="link-download-film"><Download size={13} /> Download MP4</a>
+                <a className="pf-primary" href={film.final_video_url} download={`${(film.title || 'product-ad').replace(/[^\w-]+/g, '_')}.mp4`} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.coral, color: '#FFFFFF', borderRadius: 10, padding: '10px 20px', fontSize: 12.5, fontWeight: 700, textDecoration: 'none' }} data-testid="link-download-film"><Download size={13} /> Download MP4</a>
                 {film.duration_s ? <span style={{ color: T.muted, fontSize: 11.5, fontFamily: T.mono }}>{Math.round(Number(film.duration_s))}s</span> : null}
                 <span style={{ color: T.muted, fontSize: 11.5 }}>{film.stage_note || ''}</span>
               </div>
@@ -719,7 +719,7 @@ export default function FilmStudio() {
 
           {/* FINAL VIDEO QA — verdict from inspecting the ACTUAL composed MP4 */}
           {film.final_qa ? (
-            <div style={{ background: T.raised, border: `1px solid ${film.final_qa.pass ? 'rgba(127,212,180,0.4)' : 'rgba(232,163,60,0.5)'}`, borderRadius: 13, padding: 13, marginBottom: 16 }} data-testid="panel-final-qa">
+            <div style={{ background: T.raised, border: `1px solid ${film.final_qa.pass ? 'rgba(22,101,52,0.4)' : 'rgba(180,83,9,0.45)'}`, borderRadius: 13, padding: 13, marginBottom: 16 }} data-testid="panel-final-qa">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 {film.final_qa.pass ? <Check size={13} color={T.done} /> : <AlertTriangle size={13} color={T.gold} />}
                 <span style={{ color: film.final_qa.pass ? T.done : T.gold, fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, fontFamily: T.mono }}>FINAL VIDEO QA {film.final_qa.pass ? 'PASSED' : 'NEEDS ATTENTION'}</span>
@@ -784,14 +784,14 @@ export default function FilmStudio() {
                 </label>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: T.muted, fontSize: 11.5 }}><Music size={12} /> Music: {film.strategy?.music_style || 'auto'} · ducks under narration</span>
               </div>
-              <button type="button" className="pf-primary" onClick={() => void composeNow()} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.coral, color: '#1A0E08', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 13, fontWeight: 800, cursor: 'pointer', marginTop: 12 }} data-testid="button-compose-film">
+              <button type="button" className="pf-primary" onClick={() => void composeNow()} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.coral, color: '#FFFFFF', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 13, fontWeight: 800, cursor: 'pointer', marginTop: 12 }} data-testid="button-compose-film">
                 <Play size={14} /> {film.final_video_url ? 'Re-compose final ad' : 'Compose final ad'}
               </button>
             </div>
           ) : null}
 
           {flagged.length > 0 && !running ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: T.gold, fontSize: 12, background: 'rgba(232,163,60,0.08)', border: '1px solid rgba(232,163,60,0.25)', borderRadius: 10, padding: '9px 13px', marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: T.gold, fontSize: 12, background: 'rgba(180,83,9,0.08)', border: '1px solid rgba(180,83,9,0.25)', borderRadius: 10, padding: '9px 13px', marginBottom: 14 }}>
               <span style={{ flex: 1 }}>Needs attention — {flagged[0].inspection?.issues || `${flagged.length} scene(s) did not pass visual review`}.</span>
               <button type="button" onClick={() => focusScene(flagged[0].id)} style={{ border: `1px solid ${T.gold}`, borderRadius: 8, background: 'transparent', color: T.gold, padding: '5px 9px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}>Open scene</button>
             </div>
@@ -808,7 +808,7 @@ export default function FilmStudio() {
                 const editing = editingScene === sc.id;
                 const failureCause = sc.error || sc.qa_report?.failures?.[0]?.cause || sc.inspection?.issues || 'the rendered scene did not pass validation';
                 return (
-                  <div key={sc.id} id={`pf-scene-card-${sc.id}`} className="pf-card" style={{ display: 'flex', gap: 12, background: T.raised, border: `1px solid ${flashScene === sc.id ? T.coral : weak ? 'rgba(232,163,60,0.45)' : sceneFailed(sc.status) ? T.fault : T.line}`, boxShadow: flashScene === sc.id ? `0 0 0 2px ${T.coral}55` : undefined, borderRadius: 13, padding: 12 }} data-testid={`card-scene-${sc.idx}`}>
+                  <div key={sc.id} id={`pf-scene-card-${sc.id}`} className="pf-card" style={{ display: 'flex', gap: 12, background: T.raised, border: `1px solid ${flashScene === sc.id ? T.coral : weak ? 'rgba(180,83,9,0.45)' : sceneFailed(sc.status) ? T.fault : T.line}`, boxShadow: flashScene === sc.id ? `0 0 0 2px ${T.coral}55` : undefined, borderRadius: 13, padding: 12 }} data-testid={`card-scene-${sc.idx}`}>
                     <div style={{ width: 108, height: 64, borderRadius: 8, background: '#000', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${T.line}` }}>
                       {sc.first_frame_url || sc.keyframe_url || sc.layer_urls?.asset ? (
                         <img src={sc.first_frame_url || sc.keyframe_url || sc.layer_urls?.asset || ''} alt={`Scene ${sc.idx + 1} first frame`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -821,7 +821,7 @@ export default function FilmStudio() {
                         <span style={{ color: T.bone, fontSize: 12.5, fontWeight: 700 }}>{sc.idx + 1}. {sc.beat_title || 'Scene'}</span>
                         <span style={{ color: badge, fontSize: 9.5, fontWeight: 800, fontFamily: T.mono, border: `1px solid ${badge}55`, background: `${badge}18`, borderRadius: 999, padding: '2px 8px' }}>{visualTypeLabel(sc.visual_type)}</span>
                         {sc.user_prompt_override ? (
-                          <span title="This scene generates from your exact edited prompt — the director never replaces it. Use Reset prompt to return to the AI prompt." style={{ color: T.gold, fontSize: 9, fontWeight: 800, fontFamily: T.mono, border: `1px solid ${T.gold}55`, background: 'rgba(232,163,60,0.12)', borderRadius: 999, padding: '2px 8px' }} data-testid={`badge-prompt-override-${sc.idx}`}>YOUR PROMPT</span>
+                          <span title="This scene generates from your exact edited prompt — the director never replaces it. Use Reset prompt to return to the AI prompt." style={{ color: T.gold, fontSize: 9, fontWeight: 800, fontFamily: T.mono, border: `1px solid ${T.gold}55`, background: 'rgba(180,83,9,0.12)', borderRadius: 999, padding: '2px 8px' }} data-testid={`badge-prompt-override-${sc.idx}`}>YOUR PROMPT</span>
                         ) : null}
                         <span style={{ color: T.dim, fontSize: 10, fontFamily: T.mono }} title="Voice-derived duration (narration audio)">{fmtS(sc.duration_s)}{sc.narration_s ? ` · voice ${fmtS(sc.narration_s)}` : ''}</span>
                         {sceneFailed(sc.status) ? (
@@ -835,7 +835,7 @@ export default function FilmStudio() {
                         <div style={{ marginTop: 6 }}>
                           <textarea className="pf-input" rows={2} value={editText} onChange={(e) => setEditText(e.target.value)} style={{ fontSize: 12 }} data-testid={`input-narration-${sc.idx}`} />
                           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                            <button type="button" className="pf-primary" onClick={() => void saveNarrationEdit(sc)} style={{ background: T.coral, color: '#1A0E08', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Save · re-voice · re-render</button>
+                            <button type="button" className="pf-primary" onClick={() => void saveNarrationEdit(sc)} style={{ background: T.coral, color: '#FFFFFF', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Save · re-voice · re-render</button>
                             <button type="button" className="pf-ghost" onClick={() => setEditingScene(null)} style={{ background: 'transparent', border: `1px solid ${T.line}`, color: T.muted, borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
                           </div>
                         </div>
@@ -910,7 +910,7 @@ export default function FilmStudio() {
                         <div style={{ marginTop: 8 }}>
                           <textarea className="pf-input" rows={3} value={promptText} onChange={(e) => setPromptText(e.target.value)} placeholder="Describe exactly what this scene should show — subject, environment, action, camera, lighting…" style={{ fontSize: 12 }} data-testid={`input-prompt-${sc.idx}`} />
                           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                            <button type="button" className="pf-primary" onClick={() => void savePromptEdit(sc)} style={{ background: T.coral, color: '#1A0E08', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }} data-testid={`button-save-prompt-${sc.idx}`}>Save prompt · regenerate scene</button>
+                            <button type="button" className="pf-primary" onClick={() => void savePromptEdit(sc)} style={{ background: T.coral, color: '#FFFFFF', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }} data-testid={`button-save-prompt-${sc.idx}`}>Save prompt · regenerate scene</button>
                             <button type="button" className="pf-ghost" onClick={() => setEditingPrompt(null)} style={{ background: 'transparent', border: `1px solid ${T.line}`, color: T.muted, borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
                           </div>
                         </div>
@@ -945,7 +945,7 @@ export default function FilmStudio() {
                       {v.error ? <div style={{ color: T.fault, fontSize: 10.5, marginTop: 4 }}>{v.error}</div> : null}
                       <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                         {v.status !== 'ready' ? (
-                          <button type="button" className="pf-primary" disabled={running || v.status === 'building'} onClick={() => void buildOneVariation(v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: T.coral, color: '#1A0E08', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer', opacity: running ? 0.5 : 1 }} data-testid={`button-build-variation-${v.id}`}>
+                          <button type="button" className="pf-primary" disabled={running || v.status === 'building'} onClick={() => void buildOneVariation(v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: T.coral, color: '#FFFFFF', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer', opacity: running ? 0.5 : 1 }} data-testid={`button-build-variation-${v.id}`}>
                             {v.status === 'building' ? <Loader2 size={11} className="animate-spin" /> : <Clapperboard size={11} />} Build
                           </button>
                         ) : null}
@@ -987,13 +987,13 @@ export default function FilmStudio() {
             <div style={{ background: T.raised, border: `1px solid ${T.line}`, borderRadius: 13, padding: 14 }}>
               <div style={{ color: T.muted, fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 }}>Ad strategy</div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                <span style={{ color: T.coral, fontSize: 10, fontWeight: 800, fontFamily: T.mono, border: `1px solid ${T.coral}55`, background: 'rgba(255,107,74,0.1)', borderRadius: 999, padding: '3px 9px' }}>{film.strategy.hook_type.toUpperCase()} HOOK</span>
+                <span style={{ color: T.coral, fontSize: 10, fontWeight: 800, fontFamily: T.mono, border: `1px solid ${T.coral}55`, background: 'rgba(200,146,10,0.12)', borderRadius: 999, padding: '3px 9px' }}>{film.strategy.hook_type.toUpperCase()} HOOK</span>
                 <span style={{ color: T.muted, fontSize: 10, fontFamily: T.mono, border: `1px solid ${T.line}`, borderRadius: 999, padding: '3px 9px' }}>{film.strategy.music_style}</span>
               </div>
               {film.strategy.hook_line ? <div style={{ color: T.bone, fontSize: 12, fontStyle: 'italic', marginBottom: 8 }}>“{film.strategy.hook_line}”</div> : null}
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
                 {film.strategy.structure.map((b, i) => (
-                  <span key={`${b}${i}`} style={{ color: T.muted, fontSize: 9, fontWeight: 700, fontFamily: T.mono, background: 'rgba(141,139,148,0.1)', borderRadius: 5, padding: '3px 7px' }}>{b}{i < film.strategy!.structure.length - 1 ? ' →' : ''}</span>
+                  <span key={`${b}${i}`} style={{ color: T.muted, fontSize: 9, fontWeight: 700, fontFamily: T.mono, background: 'rgba(122,96,48,0.1)', borderRadius: 5, padding: '3px 7px' }}>{b}{i < film.strategy!.structure.length - 1 ? ' →' : ''}</span>
                 ))}
               </div>
               <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5 }}>Tone: {film.strategy.tone}</div>

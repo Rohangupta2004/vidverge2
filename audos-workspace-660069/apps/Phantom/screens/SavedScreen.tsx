@@ -11,7 +11,7 @@ import React from 'react';
 import { Archive, Film, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { SavedSummary } from '../store';
 import { CARD_HI, LINE, MONO, TEXT, TEXT_DIM, TEXT_MUTED, normalizeHex, relativeTime, rgba } from '../theme';
-import { Button, EmptyState, Panel, Pill, SectionTitle, useAccent } from '../ui';
+import { Button, EmptyState, Panel, Pill, SectionTitle, Spinner, useAccent } from '../ui';
 import type { Tone } from '../ui';
 
 interface Props {
@@ -61,10 +61,10 @@ export default function SavedScreen({ saved, loading, currentId, onOpen, onRemov
 
       {saved.length === 0 ? (
         <EmptyState
-          icon={<Archive size={30} />}
-          title={loading ? 'Looking for your saved work' : 'Nothing saved yet'}
+          icon={loading ? <Spinner size={120} caption="Looking for your saved work" /> : <Archive size={30} />}
+          title={loading ? 'One moment' : 'Nothing saved yet'}
           body={loading
-            ? 'One moment.'
+            ? 'Your saved comparisons are on their way.'
             : 'Run a comparison and it is saved automatically with its own name and date, so you can come back to it, refresh the competitor data, or render the video later.'}
           action={loading ? undefined : <Button variant="primary" onClick={onNew}><Plus size={14} /> Start a comparison</Button>}
         />

@@ -36,7 +36,7 @@ const labelCol: CSSProperties = {
 
 const laneStyle: CSSProperties = {
   position: 'relative', flex: 1, height: ROW_H, borderRadius: 7,
-  background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)',
+  background: 'rgba(180,120,0,0.04)', border: '1px solid rgba(180,120,0,0.12)',
 };
 
 function clipColor(c: StudioClip): string {
@@ -174,7 +174,7 @@ export default function StudioTimeline(props: {
           disabled={!props.canSplit}
           onClick={props.onSplit}
           title="Split the clip under the playhead (S)"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: LB.textSecondary, borderRadius: 7, padding: '5px 10px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.14)', color: LB.textSecondary, borderRadius: 7, padding: '5px 10px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
         >
           <Scissors size={12} /> Split
         </button>
@@ -196,7 +196,7 @@ export default function StudioTimeline(props: {
           {props.retention.length ? (
             <div style={{ display: 'flex', marginBottom: 4 }}>
               <div style={{ ...labelCol, height: 12, fontSize: 9 }} title="Predicted watch-time retention across the cut">Retention</div>
-              <div style={{ position: 'relative', flex: 1, height: 12, borderRadius: 4, overflow: 'hidden', background: 'rgba(255,255,255,0.03)' }}>
+              <div style={{ position: 'relative', flex: 1, height: 12, borderRadius: 4, overflow: 'hidden', background: 'rgba(180,120,0,0.06)' }}>
                 {props.retention.map((s, i) => (
                   <div
                     key={`ret-${i}`}
@@ -250,8 +250,8 @@ export default function StudioTimeline(props: {
                       style={{
                         position: 'absolute', left: pct(start), width: `calc(${pct(len)} - 2px)`, top: 3, bottom: 3,
                         background: clipColor(c), borderRadius: 7, cursor: 'grab', overflow: 'hidden',
-                        border: selected ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.18)',
-                        boxShadow: selected ? '0 0 10px rgba(245,158,11,0.4)' : 'none',
+                        border: selected ? '2px solid #C8920A' : '1px solid rgba(180,120,0,0.28)',
+                        boxShadow: selected ? '0 0 10px rgba(200,146,10,0.45)' : 'none',
                         opacity: dragging ? 0.75 : 1, zIndex: dragging ? 4 : 1,
                         display: 'flex', alignItems: 'center',
                       }}
@@ -302,10 +302,10 @@ export default function StudioTimeline(props: {
                     title={`${s.reason} — click to replace or generate`}
                     style={{
                       position: 'absolute', left: pct(s.start), width: `calc(${pct(Math.max(0.3, s.end - s.start))} - 2px)`, top: 3, bottom: 3,
-                      background: s.status === 'filled' ? TRACK_COLORS.broll : 'rgba(34,197,94,0.22)',
+                      background: s.status === 'filled' ? TRACK_COLORS.broll : 'rgba(22,101,52,0.14)',
                       border: `1px ${s.status === 'filled' ? 'solid' : 'dashed'} ${TRACK_COLORS.broll}`,
                       borderRadius: 7, cursor: 'pointer', display: 'flex', alignItems: 'center', paddingLeft: 7,
-                      color: s.status === 'filled' ? '#04240f' : '#86efac', fontSize: 10, fontWeight: 700,
+                      color: s.status === 'filled' ? '#FFFFFF' : '#166534', fontSize: 10, fontWeight: 700,
                       whiteSpace: 'nowrap', overflow: 'hidden',
                     }}
                   >
@@ -320,7 +320,7 @@ export default function StudioTimeline(props: {
               </div>
             </div>
 
-            {/* OVERLAY + TEXT — purple */}
+            {/* OVERLAY + TEXT — amber */}
             <div style={{ display: 'flex', marginTop: 5 }}>
               <div style={labelCol} title="Image overlays and animated text layers">Overlay</div>
               <div style={laneStyle} onPointerDown={(e) => { props.onSelectText(null); props.onSelectOverlay(null); props.onSeek(laneSeconds(e.clientX)); }}>
@@ -331,7 +331,7 @@ export default function StudioTimeline(props: {
                     title={`${o.label} · drag to retime`}
                     style={{
                       position: 'absolute', left: pct(o.start), width: `calc(${pct(Math.max(0.3, o.end - o.start))} - 2px)`, top: 3, height: 15,
-                      background: 'rgba(168,85,247,0.55)', border: props.selectedOverlayId === o.id ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.2)',
+                      background: 'rgba(200,146,10,0.9)', border: props.selectedOverlayId === o.id ? '2px solid #C8920A' : '1px solid rgba(180,120,0,0.28)',
                       borderRadius: 5, cursor: 'grab', display: 'flex', alignItems: 'center', paddingLeft: 6,
                       color: '#fff', fontSize: 9.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden',
                     }}
@@ -346,7 +346,7 @@ export default function StudioTimeline(props: {
                     title={`“${l.text}” · drag to retime`}
                     style={{
                       position: 'absolute', left: pct(l.start), width: `calc(${pct(Math.max(0.3, l.end - l.start))} - 2px)`, bottom: 3, height: 15,
-                      background: TRACK_COLORS.overlay, border: props.selectedTextId === l.id ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.2)',
+                      background: TRACK_COLORS.overlay, border: props.selectedTextId === l.id ? '2px solid #C8920A' : '1px solid rgba(180,120,0,0.28)',
                       borderRadius: 5, cursor: 'grab', display: 'flex', alignItems: 'center', paddingLeft: 6,
                       color: '#fff', fontSize: 9.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden',
                     }}
@@ -371,7 +371,7 @@ export default function StudioTimeline(props: {
                     <div
                       style={{
                         position: 'absolute', left: pct(Math.max(0, captionStart)), width: `calc(${pct(Math.max(0.4, captionEnd - captionStart))} - 2px)`,
-                        top: 3, bottom: 3, background: 'rgba(234,179,8,0.16)', border: `1px solid ${TRACK_COLORS.caption}`, borderRadius: 7,
+                        top: 3, bottom: 3, background: 'rgba(200,146,10,0.14)', border: `1px solid ${TRACK_COLORS.caption}`, borderRadius: 7,
                       }}
                     />
                     {props.captions.slice(0, 400).map((c) => (
@@ -414,9 +414,9 @@ export default function StudioTimeline(props: {
                         title={meta ? `${meta.label} · ${t?.duration.toFixed(2)}s — click to change` : 'Add a transition on this cut'}
                         style={{
                           transform: 'translateX(-50%)', height: '100%', minWidth: t ? 70 : 20, padding: t ? '0 7px' : 0,
-                          background: t ? TRACK_COLORS.fx : 'rgba(249,115,22,0.2)',
+                          background: t ? TRACK_COLORS.fx : 'rgba(194,65,12,0.12)',
                           border: `1px ${t ? 'solid' : 'dashed'} ${TRACK_COLORS.fx}`, borderRadius: 6,
-                          color: t ? '#2a1203' : '#fdba74', fontSize: 9.5, fontWeight: 800, cursor: 'pointer',
+                          color: t ? '#FFFFFF' : '#C2410C', fontSize: 9.5, fontWeight: 800, cursor: 'pointer',
                           display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap',
                         }}
                       >
@@ -428,8 +428,8 @@ export default function StudioTimeline(props: {
                           onPointerDown={(e) => e.stopPropagation()}
                           style={{
                             position: 'absolute', bottom: '110%', left: 0, transform: 'translateX(-50%)', zIndex: 20,
-                            background: '#111827', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 9,
-                            padding: 6, display: 'grid', gap: 3, width: 188, boxShadow: '0 10px 28px rgba(0,0,0,0.6)',
+                            background: '#FFFFFF', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 9,
+                            padding: 6, display: 'grid', gap: 3, width: 188, boxShadow: '0 10px 28px rgba(120,80,0,0.16)',
                           }}
                         >
                           {TRANSITIONS.map((x) => (
@@ -440,7 +440,7 @@ export default function StudioTimeline(props: {
                               onClick={() => { props.onSetTransition(c.id, x.id); setTransMenu(null); }}
                               title={x.hint}
                               style={{
-                                textAlign: 'left', background: t?.id === x.id ? 'rgba(249,115,22,0.22)' : 'transparent',
+                                textAlign: 'left', background: t?.id === x.id ? 'rgba(194,65,12,0.14)' : 'transparent',
                                 border: 'none', borderRadius: 6, padding: '5px 7px', color: LB.textSecondary,
                                 fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
                               }}
@@ -453,7 +453,7 @@ export default function StudioTimeline(props: {
                               type="button"
                               className="vs-btn"
                               onClick={() => { props.onSetTransition(c.id, null); setTransMenu(null); }}
-                              style={{ textAlign: 'left', background: 'transparent', border: 'none', borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 2, paddingTop: 6, color: '#f87171', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
+                              style={{ textAlign: 'left', background: 'transparent', border: 'none', borderTop: '1px solid rgba(180,120,0,0.14)', marginTop: 2, paddingTop: 6, color: '#991B1B', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
                             >
                               Remove transition
                             </button>

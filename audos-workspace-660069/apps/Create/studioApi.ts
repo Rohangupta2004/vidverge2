@@ -559,7 +559,7 @@ export async function generateScript(brief: ScriptBrief): Promise<BuiltScript> {
         'Every scene that shows the product must describe it matching that exactly.',
     );
   }
-  if (brief.topic) contextLines.push(`Topic / brief from the user: ${clampText(brief.topic, 500)}`);
+  if (brief.topic) contextLines.push(`Topic / brief from the user: ${clampText(brief.topic, 5000)}`);
   contextLines.push(
     brief.character
       ? `On-camera character (keep them visually identical in every scene, refer to them by name): ${brief.character.name} — ${clampText(brief.character.description, 300)}`

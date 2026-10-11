@@ -21,11 +21,13 @@ import { Film, FilmScene, T, db } from './api';
 import {
   AssemblyProgress, activeScene, allScenesDone, assembleReadyFilm,
   autoPostProduce, autoProduce, changeMusicDirection, changeNarrationVoice,
-  changeVoiceSource, createAndSegmentFilm, createManualScriptFilm, generateScene,
+  changeVoiceSource, createAndSegmentFilm, createManualScriptFilm,
+  generateAllReadyScenes, generateScene,
   isFrameExtractionStalled, msSinceFilmUpdate, prepareFilmAudioStage, prepareScene,
   recoverStalledFrameExtraction, regenerateNarration, regenerateScenePrompt,
   regenerateSfx, resumeFilm, retryAudioLayer, retryScene, runAudioLayerStep,
-  runFinalAssembly, skipAudioLayer, skipScene, useCharacterReferenceFallback,
+  runFinalAssembly, setStyleLock, skipAudioLayer, skipScene,
+  useCharacterReferenceFallback,
 } from './pipeline/orchestrator';
 import { audioReady } from './pipeline/audio';
 import {
@@ -51,6 +53,7 @@ import { videoEngine } from '../../lib/videoEngines';
 import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
 import type { VidvergeAttachment } from '../../lib/vidvergeHandoff';
 import { saveVideoSelection } from '../../lib/videoIntegrations';
+import AppShell from '../../components/ui/AppShell';
 
 type Screen = 'library' | 'create' | 'board' | 'final' | 'legacy' | 'tester';
 
@@ -85,17 +88,18 @@ function writeAutoPref(filmId: number, on: boolean) {
 const APP_CSS = `
   .s2v-app button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease; }
   .s2v-app button:focus-visible, .s2v-app a:focus-visible { outline: 2px solid ${T.live}; outline-offset: 2px; }
-  .s2v-app input:focus-visible, .s2v-app textarea:focus-visible, .s2v-app select:focus-visible { outline: none; border-color: ${T.live} !important; box-shadow: 0 0 0 3px rgba(245,158,11,0.18); }
+  .s2v-app input:focus-visible, .s2v-app textarea:focus-visible, .s2v-app select:focus-visible { outline: none; border-color: ${T.live} !important; box-shadow: 0 0 0 3px rgba(200,146,10,0.18); }
   ${LB_SHIMMER_CSS}
   .s2v-app input, .s2v-app textarea, .s2v-app select { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
   .s2v-row { transition: background-color 0.16s ease; border-radius: 10px; }
-  .s2v-row:hover { background: rgba(255,255,255,0.035) !important; }
-  .s2v-lift:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
+  .s2v-row:hover { background: rgba(200,146,10,0.07) !important; }
+  .s2v-lift:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(120,80,0,0.12); }
   .s2v-lift:active:not(:disabled) { transform: translateY(0); }
-  .s2v-ghost:hover:not(:disabled) { color: ${T.bone} !important; background: rgba(255,255,255,0.05) !important; }
-  .s2v-app ::-webkit-scrollbar { width: 8px; height: 8px; }
-  .s2v-app ::-webkit-scrollbar-thumb { background: ${T.dim}; border-radius: 999px; }
-  .s2v-app ::-webkit-scrollbar-track { background: transparent; }
+  .s2v-ghost:hover:not(:disabled) { color: ${T.bone} !important; background: rgba(200,146,10,0.1) !important; }
+  .s2v-app ::-webkit-scrollbar { width: 6px; height: 6px; }
+  .s2v-app ::-webkit-scrollbar-thumb { background: rgba(200,146,10,0.4); border-radius: 999px; }
+  .s2v-app ::-webkit-scrollbar-thumb:hover { background: rgba(200,146,10,0.7); }
+  .s2v-app ::-webkit-scrollbar-track { background: #FFFAEB; }
   @media (prefers-reduced-motion: reduce) {
     .s2v-app *, .s2v-app *::before, .s2v-app *::after { transition-duration: 0.01ms !important; }
     .s2v-app .animate-spin, .s2v-app .lb-shimmer { animation: none !important; }
@@ -103,11 +107,14 @@ const APP_CSS = `
 `;
 
 /** The studio canvas. A flat fill read cheap next to the rest of the suite, so
- * the shell sits on a subtle navy-to-violet gradient instead. */
-const CANVAS_GRADIENT = 'linear-gradient(160deg, #0d0d1a, #1a1033)';
+ * the shell sits on a subtle amber wash over the dark-cosmic ground instead. */
+const CANVAS_GRADIENT = 'linear-gradient(160deg, #FFFDF4, #FFF3D6)';
 
-/** The amber LightBeam CTA, as a gradient rather than one flat swatch. */
-const CTA_GRADIENT = 'linear-gradient(90deg, #f59e0b, #d97706)';
+/** The LightBeam CTA: the brand's amber-to-cyan sweep. */
+const CTA_GRADIENT = 'linear-gradient(135deg, #E8B737, #C8920A)';
+
+/** Text that sits on CTA_GRADIENT and on the solid accent. */
+const ON_ACCENT = '#ffffff';
 
 function ScriptToVideoApp() {
   const [screen, setScreen] = useState<Screen>('library');
@@ -361,7 +368,7 @@ function ScriptToVideoApp() {
 
   // ------- flow handlers -------
 
-  async function handleCreate(params: { mode?: CreateMode; script: string; aspect: any; screenshotUrl: string | null; characterRefUrl?: string | null; note: string; videoModel?: string }) {
+  async function handleCreate(params: { mode?: CreateMode; script: string; aspect: any; screenshotUrl: string | null; characterRefUrl?: string | null; note: string; videoModel?: string; styleLock?: boolean }) {
     if (running.current) return;
     running.current = true;
     setBusy(true); setError('');
@@ -369,8 +376,8 @@ function ScriptToVideoApp() {
       // Manual Script Mode skips scene detection and the directing pass
       // entirely: the pasted script already says what every clip is.
       const res = params.mode === 'manual'
-        ? await createManualScriptFilm({ script: params.script, aspect: params.aspect, characterRefUrl: params.characterRefUrl || null, referenceImageUrl: params.screenshotUrl, note: params.note, videoModel: params.videoModel }, hooks)
-        : await createAndSegmentFilm({ script: params.script, aspect: params.aspect, referenceImageUrl: params.screenshotUrl, characterRefUrl: params.characterRefUrl || null, note: params.note, videoModel: params.videoModel }, hooks);
+        ? await createManualScriptFilm({ script: params.script, aspect: params.aspect, characterRefUrl: params.characterRefUrl || null, referenceImageUrl: params.screenshotUrl, note: params.note, videoModel: params.videoModel, styleLock: params.styleLock !== false }, hooks)
+        : await createAndSegmentFilm({ script: params.script, aspect: params.aspect, referenceImageUrl: params.screenshotUrl, characterRefUrl: params.characterRefUrl || null, note: params.note, videoModel: params.videoModel, styleLock: params.styleLock !== false }, hooks);
       const freshScenes = await db.listScenes(res.film.id);
       adopt(res.film, freshScenes);
       advancedFor.current = null; postKickedFor.current = null;
@@ -425,6 +432,29 @@ function ScriptToVideoApp() {
   }
   const handleUseCharRef = withEngine((f, list, s) => useCharacterReferenceFallback(f, list, s, hooks));
   const handleSkip = withEngine((f, list, s) => skipScene(f, list, s, hooks));
+
+  /** [Generate All Ready] — render every prepared scene at once instead of
+   * one after another. The sequential loop is untouched; this is the explicit
+   * batch, so post-production is advanced once the whole batch lands. */
+  function handleGenerateAll() {
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(async () => {
+      await generateAllReadyScenes(f, engineScenes.current, hooks);
+      // The batch prepares nothing, so scenes that were still waiting are
+      // picked back up by the sequential loop when auto-generate is on.
+      autoFiredFor.current = '';
+      if (autoRef.current) await autoProduce(f, engineScenes.current, hooks, () => autoRef.current);
+      await maybeAdvancePost();
+    }, { block: true });
+  }
+
+  /** [Style Lock] — toggled from the board mid-production. */
+  const handleToggleStyleLock = (on: boolean) => {
+    const f = engineFilm.current;
+    if (!f) return;
+    void run(() => setStyleLock(f, engineScenes.current, hooks, on));
+  };
 
   function handleToggleAuto(on: boolean) {
     setAuto(on);
@@ -661,6 +691,9 @@ function ScriptToVideoApp() {
       'The create screen has TWO input modes. AI Mode (the default) hands the brief to the director, which reads the whole story and splits it into clips. MANUAL SCRIPT MODE is for a script the user has ALREADY broken into scenes ("Scene 1 — Title | 8 sec", then Visual:, Dialogue — Name:, Camera:): nothing re-reads or re-plans it, every scene is filmed exactly as written, and the button reads "Generate All Scenes". Point the user there when they say their script is already formatted or scene-by-scene. Either mode accepts a character reference image, which is sent with every clip alongside the previous clip’s final frame so one character carries through the film.',
       'This app also has an AGENT STUDIO: one prompt, one clip, on any Runway model (Gen 4.5 by default), with a download button. It creates no film project. Send the user there when they want a single shot rather than a whole film, or want to compare models.',
       'VOICEOVER IS OPTIONAL and never blocks the pipeline. On the final Audio & Assembly screen the VOICEOVER card leads with a Voice source choice: "No Voiceover" (the default — the clips keep their own sound), "ElevenLabs" (one premium voice, offered only when the platform voice catalog answers) and "Built-in AI Voice" (the platform’s own text-to-speech with six voices: alloy, echo, fable, onyx, nova, shimmer). If narration ever fails, the same card offers "Continue Without Voiceover" — music, SFX, scene assembly and the MP4 download all work on every setting. Never tell a user they must connect ElevenLabs to finish a film.',
+      'STORED REFERENCES: the create screen has a “Stored References” section where the user saves a picture once (character, style or location) under a name. Typing @that-name anywhere in the script injects the reference into EVERY scene of the film, so the same face, look or place carries through. Point them there when they ask how to keep a character consistent across clips.',
+      'STYLE LOCK (on by default, on the create screen and the board): once scene 1 renders, its palette, lighting, lens language and mood are read once and prepended to every later prompt, so clip 7 cannot drift away from clip 1. Switching it off lets each scene be imagined on its own.',
+      'GENERATE ALL READY: when two or more scenes have prepared prompts waiting, the board offers one button that renders them all at the same time instead of one after another. Normal production is still sequential, one clip at a time.',
       'Fields you can fill: script (the full video script — filling it opens the create screen prefilled with your text).',
       'Actions you can trigger: generate with {"script":"...","aspect":"16:9"|"9:16"} (starts scene planning and production — include the script in the params), studio (opens the Agent Studio so the user can generate one clip from one prompt), assemble (final assembly with audio layers, only when scenes are done), nativeCut (plain assembly without narration/music).',
       'When the user asks you to write or improve a script, write it yourself, then fill it with FILL_FIELD:script:… and ask if they want you to start generation.',
@@ -668,7 +701,16 @@ function ScriptToVideoApp() {
   };
 
   return (
-    <div className="s2v-app" style={{ position: 'relative', width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: CANVAS_GRADIENT, fontFamily: T.sans, overflow: 'hidden' }}>
+    <AppShell
+      title="Script-to-Video"
+      header={false}
+      watermark={false}
+      scroll={false}
+      maxWidth="full"
+      padding={0}
+      style={{ background: CANVAS_GRADIENT }}
+    >
+    <div className="s2v-app" style={{ position: 'relative', width: '100%', height: '100%', minHeight: 480, display: 'flex', flexDirection: 'column', background: 'transparent', fontFamily: T.sans, overflow: 'hidden' }}>
       <style>{APP_CSS}</style>
       <div style={{ padding: '12px 20px', borderBottom: `1px solid ${T.raised}`, flexShrink: 0 }}>
         <ProductSuiteHeader
@@ -685,7 +727,7 @@ function ScriptToVideoApp() {
                 disabled={screen === 'tester'}
                 title="Generate a single clip from one prompt on any Runway model — it never touches your film projects."
                 onClick={() => { setScreen('tester'); setAuto(false); autoRef.current = false; }}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, background: screen === 'tester' ? T.live : 'rgba(245,158,11,0.12)', border: `1px solid ${T.live}`, color: screen === 'tester' ? '#1A1205' : T.live, fontSize: 12.5, fontWeight: 750, cursor: screen === 'tester' ? 'default' : 'pointer', padding: '7px 13px', borderRadius: 999 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, background: screen === 'tester' ? T.live : 'rgba(200,146,10,0.12)', border: `1px solid ${T.live}`, color: screen === 'tester' ? ON_ACCENT : T.live, fontSize: 12.5, fontWeight: 750, cursor: screen === 'tester' ? 'default' : 'pointer', padding: '7px 13px', borderRadius: 999 }}
               >
                 <Sparkles size={14} /> Agent Studio
               </button>
@@ -700,7 +742,7 @@ function ScriptToVideoApp() {
       </div>
 
       {error ? (
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'rgba(226,114,111,0.1)', borderBottom: '1px solid rgba(226,114,111,0.4)', color: T.fault, fontSize: 12.5, lineHeight: 1.5, padding: '9px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'rgba(153,27,27,0.1)', borderBottom: '1px solid rgba(153,27,27,0.4)', color: T.fault, fontSize: 12.5, lineHeight: 1.5, padding: '9px 20px' }}>
           <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>{friendlyAppError(error)}</span>
         </div>
@@ -743,6 +785,8 @@ function ScriptToVideoApp() {
           redoingId={redoingId}
           onUseCharRef={handleUseCharRef}
           onSkip={handleSkip}
+          onGenerateAll={handleGenerateAll}
+          onToggleStyleLock={handleToggleStyleLock}
         />
       ) : null}
 
@@ -796,6 +840,7 @@ function ScriptToVideoApp() {
         <AgentChatPanel />
       </AgentChatProvider>
     </div>
+    </AppShell>
   );
 }
 
@@ -814,7 +859,7 @@ function LegacyViewer({ legacy: item }: { legacy: LegacyFilm }) {
           <div style={{ marginTop: 16 }}>
             <video src={finalUrl} controls style={{ maxWidth: '100%', maxHeight: 440, borderRadius: 12, background: '#000' }} />
             <div style={{ marginTop: 12 }}>
-              <a className="s2v-lift" href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: CTA_GRADIENT, color: '#1A1205', borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 2px 14px rgba(245,158,11,0.32)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
+              <a className="s2v-lift" href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: CTA_GRADIENT, color: ON_ACCENT, borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 0 24px rgba(200,146,10,0.3)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
                 <Download size={14} /> Download MP4
               </a>
             </div>
@@ -839,15 +884,15 @@ class S2VBoundary extends Component<{ children?: ReactNode }, { error: Error | n
     if (this.state.error) {
       return (
         <div style={{ width: '100%', height: '100%', minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: CANVAS_GRADIENT, fontFamily: T.sans }}>
-          <div style={{ maxWidth: 460, textAlign: 'center', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 16, padding: '32px 28px', boxShadow: '0 24px 60px rgba(0,0,0,0.4)' }}>
-            <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(226,114,111,0.1)', border: '1px solid rgba(226,114,111,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+          <div style={{ maxWidth: 460, textAlign: 'center', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 16, padding: '32px 28px', boxShadow: '0 24px 60px rgba(120,80,0,0.12)' }}>
+            <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(153,27,27,0.1)', border: '1px solid rgba(153,27,27,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
               <AlertCircle size={24} color={T.fault} />
             </div>
             <div style={{ color: T.bone, fontSize: 16.5, fontWeight: 700, letterSpacing: -0.2, marginBottom: 8 }}>This screen hit a snag</div>
             <div style={{ color: T.muted, fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>
               Your film's progress is saved after every step — reopen it from the library and it picks up where it left off.
             </div>
-            <button onClick={() => this.setState({ error: null })} style={{ background: CTA_GRADIENT, color: '#1A1205', border: 'none', borderRadius: 10, padding: '11px 24px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
+            <button onClick={() => this.setState({ error: null })} style={{ background: CTA_GRADIENT, color: ON_ACCENT, border: 'none', borderRadius: 10, padding: '11px 24px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
               Back to your films
             </button>
           </div>

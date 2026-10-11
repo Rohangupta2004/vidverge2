@@ -86,7 +86,7 @@ export default function ProAgent(props: AgentProps) {
       <div className="vp-scrim" onClick={props.onClose} />
       <aside className="vp-agent" aria-label="AI agent">
         <header className="vp-agenthead">
-          <Sparkles size={15} color="#A78BFA" />
+          <Sparkles size={15} color="#C8920A" />
           <b style={{ fontSize: 13, fontWeight: 800 }}>Agent</b>
           <button
             type="button"

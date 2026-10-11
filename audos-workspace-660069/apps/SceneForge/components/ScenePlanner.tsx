@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
-import { Clapperboard, Copy, Eye, GitBranch, Image, Loader2, Plus, Scissors, Trash2, Type, Upload, Video, Volume2, VolumeX, X } from 'lucide-react';
+import { Clapperboard, Copy, Eye, GitBranch, Image, Plus, Scissors, Trash2, Type, Upload, Video, Volume2, VolumeX, X } from 'lucide-react';
 import { IMAGE_MODELS } from '../lib/imageTool';
 import { AVATAR_SAFE_POSITIONS, COMPOSITION_MODES, EFFECT_PRESETS, KIND_COLORS, KIND_LABELS, MEDIA_LAYOUTS, OVERLAY_POSITIONS, OVERLAY_SIZES, TEXT_ANIMATIONS, defaultOverlay, effectPresetMeta, effectiveComposition, normalizeEffect, visualKindOf, type CompositionPosition, type CompositionSpec, type EffectSetting, type MediaLayout, type OverlayConfig, type VisualKind } from '../lib/effects';
 import { isVideoUrl } from '../lib/sceneState';
 import { hasFreshMotionClip, portraitPlacement, sceneDirection, sceneMotionDuration, sceneMotionSpec } from '../lib/motionCapture';
 import { MOTION_KINDS, normalizeMotionSpec, type MotionItem, type MotionSpec } from '../lib/motionSpec';
 import MotionGraphicPlayer from './MotionGraphicPlayer';
+import VergeLoader from '../../../components/VergeLoader';
 import { getProject, type Asset, type Scene } from '../lib/supabase';
 import { forgeApi } from '../lib/forge';
 
@@ -288,7 +289,7 @@ export default function ScenePlanner(props: Props) {
           <label className="text-xs font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">AI video prompt</label>
           <textarea value={scene.video_prompt && !scene.video_prompt.startsWith('mg:') ? scene.video_prompt : ''} onChange={(e) => onPatch(scene.id, { video_prompt: e.target.value })} rows={2} placeholder="Subject, motion, camera move, lighting — no on-screen text (use a Motion Graphic for text)" className="mt-1 w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-3 text-sm text-[var(--space-text-primary)] outline-none placeholder:text-[var(--space-text-muted)] focus:border-[var(--space-brand-primary-500)]" />
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <button disabled={Boolean(generatingSceneId)} onClick={() => onGenerateVideo(scene)} className="flex items-center gap-1.5 rounded-lg bg-[var(--space-brand-primary-600)] px-3 py-2 text-xs font-semibold text-white transition-all hover:bg-[var(--space-brand-primary-700)] disabled:opacity-40">{busyHere ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clapperboard className="h-3.5 w-3.5" />}{hasVideo ? 'Regenerate video' : 'Generate video'}</button>
+            <button disabled={Boolean(generatingSceneId)} onClick={() => onGenerateVideo(scene)} className="flex items-center gap-1.5 rounded-lg bg-[var(--space-brand-primary-600)] px-3 py-2 text-xs font-semibold text-white transition-all hover:bg-[var(--space-brand-primary-700)] disabled:opacity-40">{busyHere ? <VergeLoader size={30} tone="ink" label="Generating the clip" /> : <Clapperboard className="h-3.5 w-3.5" />}{hasVideo ? 'Regenerate video' : 'Generate video'}</button>
             <span className="text-xs text-[var(--space-text-muted)]">{busyHere ? 'Generating the clip…' : hasVideo ? 'Clip ready — an unchanged prompt reuses it for free' : 'Or leave it: the batch run generates it with everything else, in parallel'}</span>
           </div>
           {/* COMPOSITED ELEMENT: a non-full layout crops/masks/scales the clip inside the scene with the caption beside it, instead of a full-screen takeover. */}
@@ -346,7 +347,7 @@ export default function ScenePlanner(props: Props) {
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button type="button" onClick={() => { setPreviewOnVideo(false); setPreviewSceneId(scene.id); }} className="flex items-center gap-1.5 rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-xs font-semibold text-[var(--space-text-primary)] transition-colors hover:border-[var(--space-border-strong)]"><Eye className="h-3.5 w-3.5" />Preview animation</button>
             {avatarUrl ? <button type="button" onClick={() => { setPreviewOnVideo(true); setPreviewSceneId(scene.id); }} className="flex items-center gap-1.5 rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-xs font-semibold text-[var(--space-text-primary)] transition-colors hover:border-[var(--space-border-strong)]"><Clapperboard className="h-3.5 w-3.5" />Preview on video</button> : null}
-            <button type="button" disabled={Boolean(generatingSceneId)} onClick={() => onGenerateMotion(scene)} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition-all disabled:opacity-40" style={{ background: KIND_COLORS[kind] }}>{busyHere ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Video className="h-3.5 w-3.5" />}{freshMotion ? 'Re-capture clip' : 'Capture clip'}</button>
+            <button type="button" disabled={Boolean(generatingSceneId)} onClick={() => onGenerateMotion(scene)} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition-all disabled:opacity-40" style={{ background: KIND_COLORS[kind] }}>{busyHere ? <VergeLoader size={30} label="Recording the animation" /> : <Video className="h-3.5 w-3.5" />}{freshMotion ? 'Re-capture clip' : 'Capture clip'}</button>
             <span className="text-xs text-[var(--space-text-muted)]">{busyHere ? 'Recording the animation in this browser…' : freshMotion ? 'Clip captured — an unchanged spec reuses it' : 'Not captured yet — the batch run records it, or capture now'}</span>
           </div>
           {hasVideo && freshMotion ? <video src={scene.render_url} controls muted className="mt-3 max-h-56 w-full rounded-xl border border-[var(--space-border-default)] bg-black object-contain" /> : null}</>}
@@ -358,7 +359,7 @@ export default function ScenePlanner(props: Props) {
             {kind === 'text_graphics' ? <label className="flex items-center gap-2 text-xs text-[var(--space-text-secondary)]"><input type="checkbox" checked={overlay.showAsset !== false} onChange={(e) => patchOverlay(scene, { showAsset: e.target.checked })} />Show an image behind the text</label> : null}
             {kind === 'image' || overlay.showAsset !== false ? <>
               <label className="cursor-pointer text-xs text-[var(--space-text-brand)]"><Upload className="mr-1 inline h-3.5 w-3.5" />Use my image<input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) onUpload(scene, file); e.currentTarget.value = ''; }} /></label>
-              <button disabled={Boolean(generatingSceneId) || !scene.description.trim()} onClick={() => onGenerateImage(scene)} className="text-xs text-[var(--space-text-brand)] disabled:opacity-50">{busyHere ? <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" /> : <Image className="mr-1 inline h-3.5 w-3.5" />}Generate still</button>
+              <button disabled={Boolean(generatingSceneId) || !scene.description.trim()} onClick={() => onGenerateImage(scene)} className="text-xs text-[var(--space-text-brand)] disabled:opacity-50">{busyHere ? <VergeLoader size={30} style={{ marginRight: 4, verticalAlign: 'middle' }} label="Generating the still" /> : <Image className="mr-1 inline h-3.5 w-3.5" />}Generate still</button>
             </> : null}
           </div>
           {(kind === 'image' || overlay.showAsset !== false) && pickableAssets.length ? <div className="mt-3">
@@ -421,7 +422,7 @@ export default function ScenePlanner(props: Props) {
       const rect = portraitPreview ? portraitPlacement(previewComp, { tall: true }) : null;
       const compact = previewSpec.kind === 'big_stat' || previewSpec.kind === 'text_reveal';
       const unitScale = previewComp.mode === 'central' ? 1.12 : compact ? 1.5 : 1.25;
-      return <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-6" role="dialog" aria-label={`Scene ${previewScene.scene_index} motion preview`} onClick={() => setPreviewSceneId(null)}>
+      return <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(26,16,0,0.35)] p-6" role="dialog" aria-label={`Scene ${previewScene.scene_index} motion preview`} onClick={() => setPreviewSceneId(null)}>
       <div className="relative w-full max-w-3xl rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="font-semibold text-[var(--space-text-primary)]">Scene {previewScene.scene_index} · live motion preview</p>

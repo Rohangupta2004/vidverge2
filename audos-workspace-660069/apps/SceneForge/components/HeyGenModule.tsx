@@ -2,6 +2,9 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, ChevronDown, Loader2, Play, RefreshCw, Search, Upload } from 'lucide-react';
 import { uploadFile } from '../lib/proxy';
 import { sortAvatars, sortVoices, suggestedVoices, withIndiaSeedVoices } from '../lib/heygenCatalog';
+import { PRESENTER_VOICE_SETTINGS, fetchElevenVoices, shortVoiceName, type ElevenVoice } from '../lib/elevenLabs';
+import { rememberNarrationVoice, resolveNarrationVoiceId, setVoicePipeline, voicePipeline } from '../lib/voicePipeline';
+import ElevenVoicePicker from './ElevenVoicePicker';
 import type { HeyGenOptions } from '../hooks/useHeyGen';
 
 const DEFAULTS: HeyGenOptions = {
@@ -78,6 +81,44 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
   const [voiceMode, setVoiceMode] = useState<'catalog' | 'custom'>('catalog');
   const [customVoiceId, setCustomVoiceId] = useState('');
   const [voiceError, setVoiceError] = useState('');
+  // ElevenLabs is the default narration engine: the script is spoken by
+  // ElevenLabs and HeyGen lip-syncs the presenter to that finished track. The
+  // HeyGen catalog stays on screen underneath because that is genuinely what
+  // a render falls back to when ElevenLabs cannot be reached.
+  const [voiceEngine, setVoiceEngine] = useState<'elevenlabs' | 'heygen' | 'upload'>(() => (voicePipeline() === 'heygen_tts' ? 'heygen' : 'elevenlabs'));
+  const [elevenVoices, setElevenVoices] = useState<ElevenVoice[]>([]);
+  const [elevenLoading, setElevenLoading] = useState(true);
+  const [elevenError, setElevenError] = useState('');
+  const [elevenVoiceId, setElevenVoiceId] = useState('');
+  const [uploadedAudioUrl, setUploadedAudioUrl] = useState('');
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [audioFileName, setAudioFileName] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    fetchElevenVoices()
+      .then(async (catalog) => {
+        if (cancelled) return;
+        setElevenVoices(catalog.voices);
+        // The workspace's own narration voice wins; an Indian voice is the
+        // opening default otherwise, as it is across every SceneForge picker.
+        const preferred = await resolveNarrationVoiceId().catch(() => '');
+        if (cancelled) return;
+        setElevenVoiceId((current) => current
+          || (catalog.voices.some((voice) => voice.id === preferred) ? preferred : '')
+          || (catalog.voices.find((voice) => voice.indian) || catalog.voices[0])?.id
+          || '');
+      })
+      .catch((e: any) => { if (!cancelled) setElevenError(String(e?.message || 'The ElevenLabs voice catalog could not be loaded.')); })
+      .finally(() => { if (!cancelled) setElevenLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+  function chooseVoiceEngine(engine: 'elevenlabs' | 'heygen' | 'upload') {
+    setVoiceEngine(engine);
+    // One switch governs every SceneForge surface, so flipping back to
+    // HeyGen's own voice here also debugs the workbench and the Avatar Studio.
+    setVoicePipeline(engine === 'heygen' ? 'heygen_tts' : 'elevenlabs_heygen');
+    setVoiceError('');
+  }
   useEffect(() => setOptions((old) => ({ ...old, aspect_ratio: aspectRatio })), [aspectRatio]);
   const patch = (value: Partial<HeyGenOptions>) => setOptions((old) => ({ ...old, ...value }));
 
@@ -118,12 +159,44 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
       patch({ background: { type: 'image', url: stored.url }, output_format: 'mp4' });
     } finally { setUploading(false); }
   }
+  async function uploadVoice(file?: File) {
+    if (!file) return;
+    setUploadingAudio(true);
+    setVoiceError('');
+    try {
+      const stored = await uploadFile(file, 'sceneforge-v2/custom-voices');
+      setUploadedAudioUrl(stored.url);
+      setAudioFileName(file.name);
+    } catch (e: any) {
+      setVoiceError(String(e?.message || 'The audio file could not be uploaded. Try again.'));
+    } finally { setUploadingAudio(false); }
+  }
   function submit() {
-    if (voiceMode === 'custom' && !options.voice_id.trim()) {
+    if (voiceEngine === 'upload') {
+      if (!uploadedAudioUrl) {
+        setVoiceError('Upload a voice audio file before generating.');
+        return;
+      }
+    } else if (voiceEngine === 'elevenlabs' && !elevenVoiceId) {
+      setVoiceError('Pick the ElevenLabs voice that should narrate this film.');
+      return;
+    } else if (voiceEngine === 'heygen' && voiceMode === 'custom' && !options.voice_id.trim()) {
       setVoiceError('Enter your HeyGen Voice ID (or Voice Clone ID) before generating, or pick a voice from the catalog.');
       return;
     }
-    try { setAdvancedError(''); onGenerate({ ...options, voice_id: options.voice_id.trim(), advanced: JSON.parse(advancedText || '{}') }); }
+    if (elevenVoiceId && voiceEngine !== 'upload') rememberNarrationVoice(elevenVoiceId);
+    try {
+      setAdvancedError('');
+      onGenerate({
+        ...options,
+        voice_id: voiceEngine === 'upload' ? '' : options.voice_id.trim(),
+        voice_engine: voiceEngine,
+        upload_audio_url: voiceEngine === 'upload' ? uploadedAudioUrl : undefined,
+        eleven_voice_id: voiceEngine === 'upload' ? '' : elevenVoiceId,
+        eleven_voice_settings: PRESENTER_VOICE_SETTINGS,
+        advanced: JSON.parse(advancedText || '{}'),
+      });
+    }
     catch { setAdvancedError('Advanced controls must be valid JSON before generation can start.'); setShowAdvanced(true); }
   }
 
@@ -175,6 +248,41 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
     <Section title="Voice">
       {catalogError ? <div className="mb-3"><CatalogNotice tone="error" text={`The live HeyGen voice list could not be fully loaded: ${catalogError} — reopen this step to retry. The India voices below are always available.`} /></div> : null}
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Chip active={voiceEngine === 'elevenlabs'} label="ElevenLabs narration" onClick={() => chooseVoiceEngine('elevenlabs')} />
+        <Chip active={voiceEngine === 'heygen'} label="HeyGen text-to-speech" onClick={() => chooseVoiceEngine('heygen')} />
+        <Chip active={voiceEngine === 'upload'} label="Upload your voice" onClick={() => chooseVoiceEngine('upload')} />
+        <span className="min-w-[min(100%,260px)] flex-1 text-xs leading-relaxed text-[var(--space-text-muted)]">{voiceEngine === 'elevenlabs'
+          ? 'ElevenLabs narrates the script first and HeyGen lip-syncs the presenter to that track, so HeyGen\u2019s own text-to-speech is never heard.'
+          : voiceEngine === 'upload'
+            ? 'Upload your own realistic voice recording. HeyGen lip-syncs the chosen avatar to your audio \u2014 no text-to-speech is used at all.'
+            : 'HeyGen reads the script in its own voice. This is the debugging path \u2014 ElevenLabs narration is the default.'}</span>
+      </div>
+      {voiceEngine === 'upload' ? <div className="sf-fade-up mb-4 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-4">
+        <p className="mb-3 text-sm text-[var(--space-text-secondary)]">Upload a voice recording that matches your script. HeyGen will lip-sync the avatar to your audio exactly as recorded.</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className={`flex cursor-pointer items-center gap-2 rounded-xl border px-4 py-2.5 text-sm transition-colors ${uploadingAudio ? 'border-[var(--space-border-default)] text-[var(--space-text-muted)]' : 'border-[var(--space-border-default)] text-[var(--space-text-primary)] hover:border-[var(--space-border-strong)]'}`}>
+            {uploadingAudio ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {uploadingAudio ? 'Uploading\u2026' : audioFileName ? 'Change file' : 'Upload audio file'}
+            <input type="file" accept="audio/*" className="hidden" disabled={uploadingAudio} onChange={(e) => void uploadVoice(e.target.files?.[0])} />
+          </label>
+          {audioFileName ? <div className="flex items-center gap-2 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-success-500,#22c55e)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-success-500,#22c55e)_10%,transparent)] px-3 py-2 text-sm">
+            <Check className="h-4 w-4 shrink-0 text-[var(--space-semantic-success,#22c55e)]" />
+            <span className="max-w-[200px] truncate text-[var(--space-text-primary)]">{audioFileName}</span>
+          </div> : null}
+        </div>
+        <p className="mt-2 text-xs text-[var(--space-text-muted)]">Accepted: MP3, WAV, M4A, OGG. The audio must match your script \u2014 HeyGen syncs lips to the audio, not the text.</p>
+        {voiceError ? <p role="alert" className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_38%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] px-3 py-2 text-xs text-[var(--space-text-secondary)]">{voiceError}</p> : null}
+      </div> : null}
+      {voiceEngine === 'elevenlabs' ? <div className="sf-fade-up mb-4">
+        <ElevenVoicePicker voices={elevenVoices} value={elevenVoiceId} settings={PRESENTER_VOICE_SETTINGS}
+          loading={elevenLoading} error={elevenError} listHeightClass="max-h-72"
+          onChange={(id) => { setElevenVoiceId(id); rememberNarrationVoice(id); setVoiceError(''); }} />
+        {elevenVoiceId ? <p className="mt-2 text-xs leading-relaxed text-[var(--space-text-muted)]">{shortVoiceName(elevenVoices.find((voice) => voice.id === elevenVoiceId)?.name || elevenVoiceId)} narrates this film. A script with more than one paragraph is narrated beat by beat, so the delivery is paced and the scene planner gets measured beat timings instead of an even guess.</p> : null}
+        {voiceError ? <p role="alert" className="mt-2 rounded-lg border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_38%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] px-3 py-2 text-xs text-[var(--space-text-secondary)]">{voiceError}</p> : null}
+      </div> : null}
+      <div className={voiceEngine === 'elevenlabs' ? 'rounded-xl border border-dashed border-[var(--space-border-default)] p-4' : ''}>
+      {voiceEngine === 'elevenlabs' ? <p className="mb-3 text-xs leading-relaxed text-[var(--space-text-secondary)]"><strong className="text-[var(--space-text-primary)]">Fallback voice.</strong> Used only if ElevenLabs cannot be reached, or if this look is missing from the HeyGen catalog that accepts a ready-made audio track.</p> : null}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <Chip active={voiceMode === 'catalog'} label="Catalog voices" onClick={() => { setVoiceMode('catalog'); setVoiceError(''); }} />
         <Chip active={voiceMode === 'custom'} label="Custom Voice" onClick={() => { setVoiceMode('custom'); setVoiceError(''); patch({ voice_id: customVoiceId.trim() }); }} />
       </div>
@@ -216,12 +324,15 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
               </div>
               : <CatalogNotice tone="empty" text={voiceScope === 'suggested' ? 'No suggested voice matches this search — switch to All voices.' : 'No voices match this search or filter.'} />}
           </>}
+      </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <Field label={'Speed ' + options.voice_settings.speed.toFixed(2) + 'x'}><input type="range" min={0.5} max={1.5} step={0.05} value={options.voice_settings.speed} onChange={(e) => patch({ voice_settings: { ...options.voice_settings, speed: Number(e.target.value) } })} /></Field>
         <Field label="Pitch pass-through"><input type="number" value={options.voice_settings.pitch || 0} onChange={(e) => patch({ voice_settings: { ...options.voice_settings, pitch: Number(e.target.value) } })} className="input" /></Field>
         <Field label="Emotion pass-through"><input value={options.voice_settings.emotion || ''} onChange={(e) => patch({ voice_settings: { ...options.voice_settings, emotion: e.target.value } })} className="input" /></Field>
       </div>
-      <p className="mt-2 text-xs text-[var(--space-text-muted)]">ElevenLabs-linked voices appear in the live HeyGen voice catalog when configured there. SceneForge uses the selected voice ID without inventing an unsupported voice type.</p>
+      <p className="mt-2 text-xs leading-relaxed text-[var(--space-text-muted)]">{voiceEngine === 'elevenlabs'
+        ? 'Speed, pitch and emotion are HeyGen voice settings, so they apply to the fallback voice only \u2014 the ElevenLabs delivery uses the presenter preset.'
+        : 'SceneForge sends the selected HeyGen voice ID as-is and never invents an unsupported voice type.'}</p>
     </Section>
 
     <Section title="Output">
@@ -241,7 +352,7 @@ export default function HeyGenModule(props: { avatars: any[]; voices: any[]; cat
     <button aria-expanded={showAdvanced} onClick={() => setShowAdvanced(!showAdvanced)} className="flex items-center gap-2 text-sm text-[var(--space-text-secondary)]"><ChevronDown className={showAdvanced ? 'h-4 w-4 rotate-180' : 'h-4 w-4'} /> Advanced pass-through JSON</button>
     {showAdvanced ? <textarea value={advancedText} onChange={(e) => { setAdvancedText(e.target.value); setAdvancedError(''); }} rows={6} className="mt-2 w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-3 font-mono text-sm text-[var(--space-text-primary)]" /> : null}
     {advancedError ? <div role="alert" className="sf-fade-up mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] p-3 text-sm"><AlertTriangle className="h-4 w-4 text-[var(--space-semantic-danger)]" /><span className="min-w-[min(100%,220px)] flex-1 text-[var(--space-text-secondary)]">{advancedError}</span><button type="button" onClick={submit} className="flex items-center gap-1 rounded-lg bg-[var(--space-brand-primary-600)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3 w-3" />Try again</button></div> : null}
-    <button disabled={busy || !options.avatar_id || (voiceMode === 'catalog' && !options.voice_id)} onClick={submit} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-3 font-semibold text-white disabled:opacity-40">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{videoUrl ? 'Regenerate avatar video' : 'Generate Avatar Video'}</button>
+    <button disabled={busy || !options.avatar_id || (voiceEngine === 'upload' ? !uploadedAudioUrl : voiceEngine === 'elevenlabs' ? !elevenVoiceId : (voiceMode === 'catalog' && !options.voice_id))} onClick={submit} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-3 font-semibold text-white disabled:opacity-40">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{videoUrl ? 'Regenerate avatar video' : 'Generate Avatar Video'}</button>
     {progress ? <p className="mt-2 text-sm text-[var(--space-text-brand)]">{progress}</p> : null}
     {videoUrl
       ? <video key={videoUrl} src={videoUrl} controls playsInline onError={onVideoError} className={aspectRatio === '9:16' ? 'mt-5 max-h-[520px] max-w-xs rounded-2xl bg-black' : 'mt-5 w-full max-w-3xl rounded-2xl bg-black'} />

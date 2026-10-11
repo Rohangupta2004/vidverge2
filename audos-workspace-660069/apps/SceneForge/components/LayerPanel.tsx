@@ -33,7 +33,7 @@ function Group(props: { title: string; icon?: any; children: any; action?: any }
   const Icon = props.icon;
   return <section className="rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-3">
     <div className="mb-2 flex items-center gap-2">
-      {Icon ? <Icon className="h-3.5 w-3.5 text-[#a78bfa]" /> : null}
+      {Icon ? <Icon className="h-3.5 w-3.5 text-[#C8920A]" /> : null}
       <h3 className="text-[11px] font-bold uppercase tracking-[.14em] text-[var(--space-text-muted)]">{props.title}</h3>
       <span className="ml-auto">{props.action}</span>
     </div>
@@ -44,32 +44,32 @@ function Group(props: { title: string; icon?: any; children: any; action?: any }
 function AddButton(props: { label: string; icon: any; onClick: () => void; disabled?: boolean }) {
   const Icon = props.icon;
   return <button type="button" onClick={props.onClick} disabled={props.disabled}
-    className="flex items-center gap-1.5 rounded-lg border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-2.5 py-2 text-[11px] font-semibold text-[var(--space-text-secondary)] transition-colors hover:border-[#6366f1] hover:text-[var(--space-text-primary)] disabled:opacity-40">
+    className="flex items-center gap-1.5 rounded-lg border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-2.5 py-2 text-[11px] font-semibold text-[var(--space-text-secondary)] transition-colors hover:border-[#C8920A] hover:text-[var(--space-text-primary)] disabled:opacity-40">
     <Icon className="h-3.5 w-3.5" />{props.label}
   </button>;
 }
 
 function StackRow(props: { label: string; meta: string; selected: boolean; hidden?: boolean; onSelect: () => void; onDelete?: () => void; tint: string }) {
   return <div className={props.selected
-    ? 'flex items-center gap-2 rounded-lg border border-[#8b5cf6] bg-[color-mix(in_srgb,#8b5cf6_14%,transparent)] px-2 py-1.5'
-    : 'flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 hover:bg-[color-mix(in_srgb,#ffffff_6%,transparent)]'}>
+    ? 'flex items-center gap-2 rounded-lg border border-[#C8920A] bg-[color-mix(in_srgb,#C8920A_14%,transparent)] px-2 py-1.5'
+    : 'flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]'}>
     <span className="h-5 w-1.5 shrink-0 rounded-full" style={{ background: props.tint }} />
     <button type="button" onClick={props.onSelect} className="min-w-0 flex-1 text-left">
       <span className={props.hidden ? 'block truncate text-xs text-[var(--space-text-muted)] line-through' : 'block truncate text-xs font-medium text-[var(--space-text-primary)]'}>{props.label}</span>
       <span className="block truncate text-[10px] text-[var(--space-text-muted)]">{props.meta}</span>
     </button>
-    {props.onDelete ? <button type="button" onClick={props.onDelete} aria-label={`Delete ${props.label}`} className="shrink-0 rounded p-1 text-[var(--space-text-muted)] hover:bg-[color-mix(in_srgb,#dc2626_18%,transparent)] hover:text-[var(--space-semantic-danger)]"><Trash2 className="h-3 w-3" /></button> : null}
+    {props.onDelete ? <button type="button" onClick={props.onDelete} aria-label={`Delete ${props.label}`} className="shrink-0 rounded p-1 text-[var(--space-text-muted)] hover:bg-[color-mix(in_srgb,#991B1B_12%,transparent)] hover:text-[var(--space-semantic-danger)]"><Trash2 className="h-3 w-3" /></button> : null}
   </div>;
 }
 
 export const TRACK_TINTS = {
-  base: '#334155',
-  text: '#6366f1',
-  brand: '#f59e0b',
-  image: '#0ea5e9',
-  card: '#8b5cf6',
-  caption: '#10b981',
-  music: '#ec4899',
+  base: '#7A6030',
+  text: '#C8920A',
+  brand: '#B4720A',
+  image: '#1D4ED8',
+  card: '#8A5A00',
+  caption: '#166534',
+  music: '#BE185D',
 };
 
 export default function LayerPanel(props: {
@@ -139,7 +139,7 @@ export default function LayerPanel(props: {
     <input value={value} placeholder={placeholder} onChange={(event) => props.onPatchCinematic({ [key]: event.target.value } as Partial<CinematicSpec>)} className="sf-input" />
   </Row>;
 
-  return <aside className="flex h-full w-full flex-col gap-3 overflow-y-auto border-l border-[var(--space-border-strong)] bg-[color-mix(in_srgb,#080d18_92%,transparent)] p-3">
+  return <aside className="flex h-full w-full flex-col gap-3 overflow-y-auto border-l border-[var(--space-border-strong)] bg-[color-mix(in_srgb,#FFFFFF_92%,transparent)] p-3">
     <Group title="Cinematic story" icon={Clapperboard} action={<label className="flex items-center gap-1 text-[10px] text-[var(--space-text-secondary)]">
       <input type="checkbox" checked={cine.enabled} onChange={(event) => props.onPatchCinematic({ enabled: event.target.checked })} />On
     </label>}>
@@ -149,7 +149,7 @@ export default function LayerPanel(props: {
         {MOTION_PRESETS.map((preset) => {
           const active = cine.preset === preset.id;
           return <button key={preset.id} type="button" title={preset.blurb} onClick={() => props.onChoosePreset(preset.id)}
-            className={active ? 'rounded-lg border px-2 py-2 text-left' : 'rounded-lg border border-[var(--space-border-default)] px-2 py-2 text-left hover:border-[#6366f1]'}
+            className={active ? 'rounded-lg border px-2 py-2 text-left' : 'rounded-lg border border-[var(--space-border-default)] px-2 py-2 text-left hover:border-[#C8920A]'}
             style={active ? { borderColor: preset.accent, background: `color-mix(in srgb, ${preset.accent} 14%, transparent)` } : undefined}>
             <span className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: preset.accent }} />
@@ -177,7 +177,7 @@ export default function LayerPanel(props: {
           className="h-9 w-12 shrink-0 cursor-pointer rounded-lg border border-[var(--space-border-default)] bg-transparent" />
         <div className="flex flex-wrap gap-1.5">
           {['#F97316', '#FBBF24', '#22D3EE', '#A78BFA', '#34D399', '#F43F5E'].map((swatch) => <button key={swatch} type="button" aria-label={`Use ${swatch}`} onClick={() => props.onPatchCinematic({ accent: swatch })}
-            className={cine.accent.toLowerCase() === swatch.toLowerCase() ? 'h-7 w-7 rounded-lg border-2 border-white' : 'h-7 w-7 rounded-lg border border-[var(--space-border-strong)]'} style={{ background: swatch }} />)}
+            className={cine.accent.toLowerCase() === swatch.toLowerCase() ? 'h-7 w-7 rounded-lg border-2 border-[#1A1000]' : 'h-7 w-7 rounded-lg border border-[var(--space-border-strong)]'} style={{ background: swatch }} />)}
         </div>
         <span className="text-[10px] uppercase tracking-wide text-[var(--space-text-muted)]">{cine.accent}</span>
       </div>
@@ -213,7 +213,7 @@ export default function LayerPanel(props: {
       </div> : null}
 
       <button type="button" onClick={props.onDownloadSpec}
-        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-[11px] font-semibold text-[var(--space-text-secondary)] hover:border-[#6366f1]">
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-[11px] font-semibold text-[var(--space-text-secondary)] hover:border-[#C8920A]">
         <Download className="h-3.5 w-3.5" />Download the overlay spec (JSON)
       </button>
     </Group>
@@ -230,7 +230,7 @@ export default function LayerPanel(props: {
         <AddButton label="Card" icon={Plus} onClick={props.onAddCard} />
       </div>
       <button type="button" onClick={props.onSuggestCopy} disabled={busy.copy}
-        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#8b5cf6_45%,transparent)] bg-[color-mix(in_srgb,#8b5cf6_14%,transparent)] px-3 py-2 text-[11px] font-semibold text-[#c4b5fd] disabled:opacity-40">
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#C8920A_45%,transparent)] bg-[color-mix(in_srgb,#C8920A_14%,transparent)] px-3 py-2 text-[11px] font-semibold text-[#C8920A] disabled:opacity-40">
         {busy.copy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}Suggest text from the script
       </button>
       {notes.copy ? <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--space-text-secondary)]">{notes.copy}</p> : null}
@@ -263,7 +263,7 @@ export default function LayerPanel(props: {
       </div>
       <div className="mt-2 flex items-center gap-1.5">
         {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]] as const).map(([value, Icon]) => <button key={value} type="button" aria-label={`Align ${value}`} onClick={() => props.onPatchText(text.id, { align: value })}
-          className={text.align === value ? 'rounded-lg bg-[#6366f1] p-2 text-white' : 'rounded-lg border border-[var(--space-border-default)] p-2 text-[var(--space-text-secondary)]'}><Icon className="h-3.5 w-3.5" /></button>)}
+          className={text.align === value ? 'rounded-lg bg-[#C8920A] p-2 text-white' : 'rounded-lg border border-[var(--space-border-default)] p-2 text-[var(--space-text-secondary)]'}><Icon className="h-3.5 w-3.5" /></button>)}
         <select value={text.plate} onChange={(event) => props.onPatchText(text.id, { plate: event.target.value as TextLayer['plate'] })} className="sf-input ml-auto max-w-[9rem]">
           <option value="none">No backdrop</option>
           <option value="pill">Pill backdrop</option>
@@ -286,7 +286,7 @@ export default function LayerPanel(props: {
         <Row label="Logo URL" hint="A logo linked from another site may not be readable for compositing — upload the file if the export complains.">
           <input value={brand.logoUrl} onChange={(event) => props.onPatchBrand(brand.id, { logoUrl: event.target.value })} className="sf-input" />
         </Row>
-        <label className="flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--space-border-strong)] px-3 py-2 text-[11px] font-semibold text-[var(--space-text-secondary)] hover:border-[#6366f1]">
+        <label className="flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--space-border-strong)] px-3 py-2 text-[11px] font-semibold text-[var(--space-text-secondary)] hover:border-[#C8920A]">
           <Upload className="h-3.5 w-3.5" />Upload a logo
           <input type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) props.onUploadLogo(brand.id, file); }} />
         </label>
@@ -350,7 +350,7 @@ export default function LayerPanel(props: {
     <Group title="Captions" icon={Subtitles} action={<label className="flex items-center gap-1 text-[10px] text-[var(--space-text-secondary)]"><input type="checkbox" checked={manifest.captionStyle.enabled} onChange={(event) => props.onPatchCaptions({ enabled: event.target.checked })} />On</label>}>
       <div className="flex flex-wrap gap-1.5">
         <button type="button" onClick={props.onGenerateCaptions} disabled={busy.captions}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-40">
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-40">
           {busy.captions ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Subtitles className="h-3.5 w-3.5" />}Auto-generate from the audio
         </button>
         <button type="button" onClick={props.onOpenCaptions} disabled={!captionCount} className="rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-[11px] font-semibold text-[var(--space-text-secondary)] disabled:opacity-40">Edit {captionCount || ''}</button>
@@ -381,7 +381,7 @@ export default function LayerPanel(props: {
     <Group title="Background music" icon={Music} action={<label className="flex items-center gap-1 text-[10px] text-[var(--space-text-secondary)]"><input type="checkbox" checked={manifest.music.enabled} onChange={(event) => props.onPatchMusic({ enabled: event.target.checked })} />On</label>}>
       <div className="flex flex-wrap gap-1.5">
         <button type="button" onClick={props.onGenerateMusic} disabled={busy.music}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#ec4899_45%,transparent)] bg-[color-mix(in_srgb,#ec4899_12%,transparent)] px-3 py-2 text-[11px] font-semibold text-[#f9a8d4] disabled:opacity-40">
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#BE185D_45%,transparent)] bg-[color-mix(in_srgb,#BE185D_12%,transparent)] px-3 py-2 text-[11px] font-semibold text-[#BE185D] disabled:opacity-40">
           {busy.music ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music className="h-3.5 w-3.5" />}Generate a bed
         </button>
         <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-[11px] font-semibold text-[var(--space-text-secondary)]">

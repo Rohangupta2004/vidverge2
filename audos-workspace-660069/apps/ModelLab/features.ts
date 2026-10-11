@@ -52,11 +52,11 @@ export interface ModelDef {
 }
 
 export const MODELS: ModelDef[] = [
-  { key: 'gpt-5.6-terra', label: 'GPT Terra', badge: 'Balanced', color: '#10b981', provider: 'openai' },
-  { key: 'gpt-5.6-sol', label: 'GPT Sol', badge: 'Frontier', color: '#f59e0b', provider: 'openai' },
-  { key: 'gpt-5.6-luna', label: 'GPT Luna', badge: 'Fast', color: '#3b82f6', provider: 'openai' },
-  { key: 'claude-sonnet-5', label: 'Sonnet 5', badge: 'Balanced', color: '#8b5cf6', provider: 'anthropic' },
-  { key: 'claude-opus-5', label: 'Opus 5', badge: 'Frontier', color: '#ec4899', provider: 'anthropic' },
+  { key: 'gpt-5.6-terra', label: 'GPT Terra', badge: 'Balanced', color: '#166534', provider: 'openai' },
+  { key: 'gpt-5.6-sol', label: 'GPT Sol', badge: 'Frontier', color: '#C8920A', provider: 'openai' },
+  { key: 'gpt-5.6-luna', label: 'GPT Luna', badge: 'Fast', color: '#B4720A', provider: 'openai' },
+  { key: 'claude-sonnet-5', label: 'Sonnet 5', badge: 'Balanced', color: '#C8920A', provider: 'anthropic' },
+  { key: 'claude-opus-5', label: 'Opus 5', badge: 'Frontier', color: '#B45309', provider: 'anthropic' },
 ];
 
 export interface ExtraField {

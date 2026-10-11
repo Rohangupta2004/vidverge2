@@ -127,7 +127,7 @@ export const typography = {
     bold: 'font-bold',        // 700
   },
   
-  // Text colors — token-driven so the dark cinematic theme flows everywhere
+  // Text colors — token-driven so the light warm-gold theme flows everywhere
   color: {
     primary: 'text-[var(--space-text-primary)]',      // Headings, important text
     secondary: 'text-[var(--space-text-secondary)]',  // Body text, descriptions
@@ -257,8 +257,8 @@ export const tw = {
     primary: 'bg-[var(--space-surface-accent-soft)] text-[var(--space-text-brand)]',
     accent: 'bg-[var(--space-brand-highlight-100)] text-[var(--space-text-accent)]',
     success: 'bg-[var(--space-semantic-success-50)] text-[var(--space-semantic-success)]',
-    warning: 'bg-amber-500/15 text-amber-400',
-    danger: 'bg-red-500/15 text-[var(--space-semantic-danger)]',
+    warning: 'bg-amber-500/15 text-amber-700',
+    danger: 'bg-red-500/10 text-[var(--space-semantic-danger)]',
     neutral: 'bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)]',
   },
   
@@ -311,8 +311,8 @@ export const tw = {
   // LEGACY (for backwards compatibility)
   // ---------------------------------------------------------------------------
   priority: {
-    high: 'bg-red-500/15 text-[var(--space-semantic-danger)]',
-    medium: 'bg-amber-500/15 text-amber-400',
+    high: 'bg-red-500/10 text-[var(--space-semantic-danger)]',
+    medium: 'bg-amber-500/15 text-amber-700',
     low: 'bg-[var(--space-semantic-success-50)] text-[var(--space-semantic-success)]',
   },
   

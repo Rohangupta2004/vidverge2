@@ -218,7 +218,7 @@ export async function decideMode(input: {
     };
   }
 
-  const brief = clampText(`${inputs.brief} ${inputs.url}`, 900).trim();
+  const brief = clampText(`${inputs.brief} ${inputs.url}`, 5000).trim();
   const parsed = await askJson(
     MODEL_FAST,
     'You route a video brief to ONE production mode. ' +
@@ -349,7 +349,7 @@ export async function runDirectorAgent(input: {
     `Tone: ${tone.label} (${tone.visual})`,
     `Aspect ratio: ${input.aspect}`,
     input.inputs.url ? `The product page this is for: ${input.inputs.url}` : '',
-    input.inputs.brief ? `The brief, in the visitor's own words: ${clampText(input.inputs.brief, 1200)}` : '',
+    input.inputs.brief ? `The brief, in the visitor's own words: ${clampText(input.inputs.brief, 5000)}` : '',
     input.visualReferences.length > 0
       ? `They uploaded ${input.visualReferences.length} visual reference${input.visualReferences.length === 1 ? '' : 's'}. Use all of them as a visual reference set while planning, and assign the most relevant one to each beat rather than forcing every image into every shot:\n${input.visualReferences.map((description, index) => `${index + 1}. ${clampText(description, 420)}`).join('\n')}`
       : '',

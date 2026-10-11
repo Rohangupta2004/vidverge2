@@ -37,6 +37,10 @@ export type Capability =
   | 'brand-kits'
   | 'brand-glossaries'
   | 'video-agents'
+  // Narrower than an endpoint: the Video Agent exists, but whether it accepts a
+  // ready-made `voice: { type: 'audio' }` source is a separate question and a
+  // separate verdict (lib/heygenAgent).
+  | 'video-agent-audio'
   | 'avatar-photo'
   | 'avatar-prompt'
   | 'avatar-cinematic'
@@ -54,23 +58,37 @@ export type Capability =
 export type CapabilityState = 'unknown' | 'available' | 'unavailable';
 
 const CAP_KEY = 'sceneforge_heygen_caps_v1';
+const CAP_OBSERVATION_KEY = 'sceneforge_heygen_cap_observations_v1';
 
-function readCaps(): Record<string, CapabilityState> {
+export interface CapabilityObservation {
+  state: CapabilityState;
+  /** HeyGen's HTTP status when the probe was rejected; 0 on acceptance. */
+  status: number;
+  /** The exact rejection, or the accepted job id returned by HeyGen. */
+  detail: string;
+  observedAt: string;
+}
+
+function readRecord<T>(key: string): Record<string, T> {
   try {
-    const raw = window.localStorage.getItem(CAP_KEY);
+    const raw = window.localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : {};
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch { return {}; }
 }
-function writeCaps(value: Record<string, CapabilityState>) {
-  try { window.localStorage.setItem(CAP_KEY, JSON.stringify(value)); } catch { /* private mode — the session still works */ }
+function writeRecord(key: string, value: Record<string, unknown>) {
+  try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode — the session still works */ }
 }
 
-let caps: Record<string, CapabilityState> = readCaps();
+let caps: Record<string, CapabilityState> = readRecord<CapabilityState>(CAP_KEY);
+let observations: Record<string, CapabilityObservation> = readRecord<CapabilityObservation>(CAP_OBSERVATION_KEY);
 const listeners = new Set<() => void>();
 
 export function capabilityState(capability: Capability): CapabilityState {
   return caps[capability] || 'unknown';
+}
+export function capabilityObservation(capability: Capability): CapabilityObservation | null {
+  return observations[capability] ? { ...observations[capability] } : null;
 }
 export function allCapabilities(): Record<string, CapabilityState> {
   return { ...caps };
@@ -79,17 +97,46 @@ export function onCapabilityChange(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
-function setCapability(capability: Capability, state: CapabilityState) {
-  if (caps[capability] === state) return;
-  caps = { ...caps, [capability]: state };
-  writeCaps(caps);
+function setCapability(capability: Capability, state: CapabilityState, evidence?: { status?: number; detail?: string }) {
+  const stateChanged = caps[capability] !== state;
+  const observed = evidence ? {
+    state,
+    status: Number(evidence.status) || 0,
+    detail: String(evidence.detail || ''),
+    observedAt: new Date().toISOString(),
+  } : null;
+  if (!stateChanged && !observed) return;
+  if (stateChanged) {
+    caps = { ...caps, [capability]: state };
+    writeRecord(CAP_KEY, caps);
+  }
+  if (observed) {
+    observations = { ...observations, [capability]: observed };
+    writeRecord(CAP_OBSERVATION_KEY, observations);
+  }
   listeners.forEach((listener) => { try { listener(); } catch { /* a bad listener must not break a render */ } });
+}
+
+/**
+ * Record a verdict the CALLER established rather than one `probe` inferred.
+ *
+ * `probe` reads HeyGen's own rejections, which is exactly right for a capability
+ * that is either present or absent. Some are narrower than an endpoint — the
+ * Video Agent answers, but may refuse an audio voice source — and only the call
+ * site can tell a refusal of the FIELD from a refusal of the request. This is
+ * how that verdict reaches the registry, so the UI can explain it in words and
+ * nothing ever retries it.
+ */
+export function markCapability(capability: Capability, state: CapabilityState, evidence?: { status?: number; detail?: string }) {
+  setCapability(capability, state, evidence);
 }
 
 /** Forget what we learned, so a plan upgrade is picked up without a reload. */
 export function resetCapabilities() {
   caps = {};
-  writeCaps(caps);
+  observations = {};
+  writeRecord(CAP_KEY, caps);
+  writeRecord(CAP_OBSERVATION_KEY, observations);
   listeners.forEach((listener) => { try { listener(); } catch { /* ignore */ } });
 }
 

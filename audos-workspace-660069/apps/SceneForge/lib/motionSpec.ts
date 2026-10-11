@@ -4,16 +4,24 @@
 // renders EXACTLY the strings and numbers stored here — no text is ever
 // generated inside an AI video and nothing is hallucinated at render time.
 
+// WHICH KINDS ARE PRODUCT GRAPHICS. Five of these layouts show the PRODUCT, and
+// those are rendered by HeyGen HyperFrames as one finished overlay clip rather
+// than composited as a separate Remotion layer (lib/productGraphics):
+// list_reveal, big_stat, flowchart, annotated_image and comparison. The GSAP
+// renderers for those kinds are now the FALLBACK for an account without
+// HyperFrames — still live, no longer the default path. The rest (timeline,
+// bar_chart, node_graph, branching_diagram, text_reveal) are data visualisation
+// and abstract motion, which the GSAP engine does better; they are untouched.
 export type MotionKind =
   | 'branching_diagram' // root node fanning out to branches
-  | 'flowchart'         // left-to-right steps joined by drawn arrows
+  | 'flowchart'         // left-to-right steps joined by drawn arrows (product: step sequence)
   | 'timeline'          // dated beats along a horizontal line
-  | 'comparison'        // two columns, side by side
-  | 'list_reveal'       // headline + staggered bullet reveals
-  | 'big_stat'          // one number counting up with a label
+  | 'comparison'        // two columns, side by side (product: comparison table)
+  | 'list_reveal'       // headline + staggered bullet reveals (product: feature card)
+  | 'big_stat'          // one number counting up with a label (product: stat callout)
   | 'bar_chart'         // labeled bars growing to exact values
   | 'node_graph'        // connected nodes (networks, maps of relationships)
-  | 'annotated_image'   // a still image with drawn callout annotations
+  | 'annotated_image'   // a still image with drawn callout annotations (product: UI highlight)
   | 'text_reveal';      // pure animated text (the text_overlay scene type)
 
 export interface MotionItem {
@@ -136,7 +144,7 @@ export function normalizeMotionSpec(raw: any, fallbackText = ''): MotionSpec {
 // changes a spec's fingerprint (existing captured clips stay valid).
 // ---------------------------------------------------------------------------
 
-const ACCENT_ROTATION = ['#3B82F6', '#8B5CF6', '#06B6D4', '#10B981', '#F59E0B', '#2DD4BF', '#F472B6'];
+const ACCENT_ROTATION = ['#3B82F6', '#D97706', '#06B6D4', '#10B981', '#F59E0B', '#2DD4BF', '#F472B6'];
 
 const TOPIC_ACCENTS: { pattern: RegExp; accent: string }[] = [
   { pattern: /\b(data|science|scientific|research|study|studies|experiment|measure|percent|rate|statistic)/i, accent: '#06B6D4' }, // data-viz cyan
@@ -144,7 +152,7 @@ const TOPIC_ACCENTS: { pattern: RegExp; accent: string }[] = [
   { pattern: /\b(history|histor|year|decade|century|era|ancient|founded|timeline|evolution)/i, accent: '#F59E0B' },                // historic amber
   { pattern: /\b(risk|danger|warning|threat|decline|loss|fail|crash|crisis|mistake)/i, accent: '#F43F5E' },                        // caution rose
   { pattern: /\b(health|body|brain|medical|medicine|biology|cell|heart)/i, accent: '#14B8A6' },                                    // clinical teal
-  { pattern: /\b(product|app|tech|software|ai|robot|digital|device|platform|feature)/i, accent: '#8B5CF6' },                       // product violet
+  { pattern: /\b(product|app|tech|software|ai|robot|digital|device|platform|feature)/i, accent: '#D97706' },                       // product gold
   { pattern: /\b(nature|climate|earth|planet|energy|solar|forest|ocean|environment)/i, accent: '#84CC16' },                        // organic lime
 ];
 
@@ -153,7 +161,7 @@ const KIND_ACCENTS: Partial<Record<MotionKind, string>> = {
   big_stat: '#06B6D4',
   timeline: '#F59E0B',
   comparison: '#10B981',
-  flowchart: '#8B5CF6',
+  flowchart: '#D97706',
   node_graph: '#38BDF8',
   list_reveal: '#2DD4BF',
 };
@@ -178,8 +186,8 @@ export function accentForSpec(spec: MotionSpec, extraSeed = ''): string {
 export function contrastAccent(accent: string): string {
   const pairs: Record<string, string> = {
     '#3B82F6': '#F59E0B', '#06B6D4': '#F472B6', '#10B981': '#F43F5E', '#F59E0B': '#3B82F6',
-    '#8B5CF6': '#22D3EE', '#14B8A6': '#FB7185', '#2DD4BF': '#F59E0B', '#38BDF8': '#FBBF24',
-    '#84CC16': '#8B5CF6', '#F43F5E': '#10B981', '#F472B6': '#06B6D4',
+    '#D97706': '#22D3EE', '#14B8A6': '#FB7185', '#2DD4BF': '#F59E0B', '#38BDF8': '#FBBF24',
+    '#84CC16': '#D97706', '#F43F5E': '#10B981', '#F472B6': '#06B6D4',
   };
   return pairs[accent.toUpperCase()] || pairs[accent] || '#F59E0B';
 }

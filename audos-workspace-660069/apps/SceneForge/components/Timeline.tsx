@@ -101,10 +101,10 @@ export default function Timeline(props: {
   const stepSec = span <= 12 ? 1 : span <= 40 ? 5 : span <= 120 ? 10 : 30;
   for (let t = 0; t <= span + 0.001; t += stepSec) ticks.push(Math.round(t));
 
-  return <section className="border-t border-[var(--space-border-strong)] bg-[color-mix(in_srgb,#070b14_88%,transparent)]">
+  return <section className="border-t border-[var(--space-border-strong)] bg-[color-mix(in_srgb,#FFFFFF_88%,transparent)]">
     <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
       <button type="button" onClick={onTogglePlay} aria-label={playing ? 'Pause' : 'Play'}
-        className="flex h-9 w-9 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] text-white shadow-[0_4px_14px_rgba(99,102,241,.4)]">
+        className="flex h-9 w-9 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#E8B737,#C8920A)] text-white shadow-[0_4px_14px_rgba(200,146,10,.35)]">
         {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
       </button>
       <button type="button" onClick={() => onSeek(0)} aria-label="Back to start" className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--space-border-default)] text-[var(--space-text-secondary)] hover:border-[var(--space-border-strong)]"><SkipBack className="h-4 w-4" /></button>
@@ -128,20 +128,20 @@ export default function Timeline(props: {
         }}
         onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); seekFromEvent(event.clientX); }}
         onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromEvent(event.clientX); }}
-        className="relative h-7 cursor-ew-resize select-none rounded-lg border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#8b5cf6]">
-        {ticks.map((tick) => <span key={tick} className="absolute top-0 h-full border-l border-[color-mix(in_srgb,#ffffff_10%,transparent)] pl-1 text-[9px] leading-7 text-[var(--space-text-muted)]" style={{ left: pct(tick) }}>{tick}s</span>)}
-        <span className="pointer-events-none absolute -top-0.5 z-10 h-8 w-0.5 bg-[#f59e0b] shadow-[0_0_10px_rgba(245,158,11,.8)]" style={{ left: pct(currentTime) }} />
+        className="relative h-7 cursor-ew-resize select-none rounded-lg border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#C8920A]">
+        {ticks.map((tick) => <span key={tick} className="absolute top-0 h-full border-l border-[color-mix(in_srgb,#B4780A_16%,transparent)] pl-1 text-[9px] leading-7 text-[var(--space-text-muted)]" style={{ left: pct(tick) }}>{tick}s</span>)}
+        <span className="pointer-events-none absolute -top-0.5 z-10 h-8 w-0.5 bg-[#C8920A] shadow-[0_0_10px_rgba(200,146,10,.6)]" style={{ left: pct(currentTime) }} />
       </div>
 
       <div className="relative mt-2 space-y-1.5">
         {/* Measured separately from the label column so a pixel of drag is
             the same number of seconds in every lane. */}
         <div ref={laneRef} className="pointer-events-none absolute bottom-0 left-[7.5rem] right-0 top-0">
-          <span className="absolute inset-y-0 z-10 w-0.5 bg-[#f59e0b]/70" style={{ left: pct(currentTime) }} />
+          <span className="absolute inset-y-0 z-10 w-0.5 bg-[#C8920A]/70" style={{ left: pct(currentTime) }} />
         </div>
         {tracks.map((track) => <div key={track.id} className="flex items-stretch gap-2">
           <span className="w-28 shrink-0 self-center truncate text-[11px] font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">{track.label}</span>
-          <div className="relative h-9 flex-1 rounded-lg border border-[var(--space-border-default)] bg-[color-mix(in_srgb,#ffffff_3%,transparent)]">
+          <div className="relative h-9 flex-1 rounded-lg border border-[var(--space-border-default)] bg-[color-mix(in_srgb,#B4780A_5%,transparent)]">
             {track.clips.map((clip) => {
               const selected = clip.id === selectedId;
               const width = `${Math.max(1.4, Math.min(100, (Math.max(0.2, clip.duration) / span) * 100))}%`;
@@ -151,7 +151,7 @@ export default function Timeline(props: {
                   if (clip.locked) return;
                   drag.current = { id: clip.id, mode: 'move', originX: event.clientX, start: clip.start, duration: clip.duration };
                 }}
-                className={`group absolute top-1 flex h-7 items-center overflow-hidden rounded-md border px-1.5 text-[11px] font-medium ${clip.locked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} ${selected ? 'border-white/70 shadow-[0_0_0_2px_rgba(255,255,255,.25)]' : 'border-transparent'} ${clip.hidden ? 'opacity-40' : ''}`}
+                className={`group absolute top-1 flex h-7 items-center overflow-hidden rounded-md border px-1.5 text-[11px] font-medium ${clip.locked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} ${selected ? 'border-[#1A1000]/70 shadow-[0_0_0_2px_rgba(26,16,0,.22)]' : 'border-transparent'} ${clip.hidden ? 'opacity-40' : ''}`}
                 style={{ left: pct(clip.start), width, background: track.color }}>
                 {clip.locked ? null : <span onPointerDown={(event) => { event.stopPropagation(); onSelect(clip.id); drag.current = { id: clip.id, mode: 'start', originX: event.clientX, start: clip.start, duration: clip.duration }; }}
                   className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize bg-black/30 opacity-0 group-hover:opacity-100" />}

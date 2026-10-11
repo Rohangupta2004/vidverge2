@@ -108,7 +108,7 @@ export interface OmniFallbackResult {
 
 /** Render one clip on Omni Flash through the standard Group A path. */
 export async function generateWithOmniFlash(input: OmniFallbackInput): Promise<OmniFallbackResult> {
-  const prompt = capPromptText(input.prompt, 1000);
+  const prompt = capPromptText(input.prompt, 10000);
   if (prompt.length < 10) {
     throw new Error(`${OMNI_FALLBACK_LABEL} needs a written description of the shot before it can stand in.`);
   }
@@ -121,7 +121,7 @@ export async function generateWithOmniFlash(input: OmniFallbackInput): Promise<O
     appId: input.appId,
     model: OMNI_FALLBACK_MODEL,
     prompt,
-    negativePrompt: input.negativePrompt ? capPromptText(input.negativePrompt, 500) : undefined,
+    negativePrompt: input.negativePrompt ? capPromptText(input.negativePrompt, 10000) : undefined,
     aspectRatio: omniAspect(input.aspect),
     duration: Math.max(4, Math.min(spec?.maxDurationS || 8, Math.round(Number(input.durationSeconds) || 6))),
     generateAudio: true,

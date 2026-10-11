@@ -37,7 +37,7 @@ export default function ProjectQueue({ jobs, onOpen }: { jobs: QueueJob[]; onOpe
 
       <div className="mb-3 flex items-baseline justify-between">
         <h2 className="text-[11px] uppercase tracking-[0.3em] text-[var(--vv-text-dim)]">Recent jobs</h2>
-        <span className="text-[11px] text-white/25">{activeCount} active</span>
+        <span className="text-[11px] text-[#7A6030]">{activeCount} active</span>
       </div>
 
       {visible.length === 0 ? (
@@ -52,15 +52,15 @@ export default function ProjectQueue({ jobs, onOpen }: { jobs: QueueJob[]; onOpe
                 <button
                   type="button"
                   onClick={() => onOpen(job)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-[var(--vv-border)] bg-[var(--vv-surface)] px-3 py-2.5 text-left transition-colors hover:border-[color-mix(in_srgb,var(--vv-gold)_28%,transparent)] hover:bg-white/[0.045] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--vv-gold)]"
+                  className="flex w-full items-center gap-3 rounded-xl border border-[var(--vv-border)] bg-[var(--vv-surface)] px-3 py-2.5 text-left transition-colors hover:border-[color-mix(in_srgb,var(--vv-gold)_28%,transparent)] hover:bg-[rgba(180,120,0,0.06)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--vv-gold)]"
                   title={`Open ${job.name} in ${job.app}`}
                 >
                 <span
                   className="relative flex h-[34px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-md text-[10px] font-semibold tracking-wide text-[var(--vv-gold)]"
                   style={{
                     background:
-                      'linear-gradient(135deg, rgba(245,166,35,0.16), rgba(255,255,255,0.03) 60%, rgba(0,0,0,0.3))',
-                    border: '1px solid rgba(255,255,255,0.05)',
+                      'linear-gradient(135deg, rgba(200,146,10,0.16), rgba(180,120,0,0.06) 60%, rgba(180,120,0,0.12))',
+                    border: '1px solid rgba(180,120,0,0.14)',
                   }}
                 >
                   {done ? <Play size={12} className="text-[var(--vv-gold)]" /> : initials(job.app)}
@@ -68,7 +68,7 @@ export default function ProjectQueue({ jobs, onOpen }: { jobs: QueueJob[]; onOpe
 
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-3">
-                    <span className="truncate text-[13px] text-white/90">{job.name}</span>
+                    <span className="truncate text-[13px] text-[#1A1000]">{job.name}</span>
                     <span className="shrink-0 text-[11px] tabular-nums text-[var(--vv-text-dim)]">{job.progress}%</span>
                   </span>
                   <span className="mt-1 flex items-center gap-2">
@@ -76,16 +76,16 @@ export default function ProjectQueue({ jobs, onOpen }: { jobs: QueueJob[]; onOpe
                       {job.app} · {job.stage}
                     </span>
                   </span>
-                  <span className="mt-1.5 block h-[2px] w-full overflow-hidden rounded-full bg-white/[0.07]">
+                  <span className="mt-1.5 block h-[2px] w-full overflow-hidden rounded-full bg-[rgba(180,120,0,0.14)]">
                     <span
                       className="vvq-fill block h-full rounded-full"
                       style={{
                         width: `${Math.max(2, Math.min(100, job.progress))}%`,
                         background: done
-                          ? 'var(--vv-success, #4ade80)'
+                          ? 'var(--vv-success, #166534)'
                           : failed
-                            ? 'var(--vv-error, #f97316)'
-                            : 'linear-gradient(90deg, rgba(245,166,35,0.35), var(--vv-gold, #F5A623))',
+                            ? 'var(--vv-error, #991B1B)'
+                            : 'linear-gradient(90deg, rgba(200,146,10,0.35), var(--vv-gold, #C8920A))',
                       }}
                     />
                   </span>

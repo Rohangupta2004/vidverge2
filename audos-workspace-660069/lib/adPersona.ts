@@ -199,7 +199,7 @@ export async function extendAdAngle(input: { draft: string; brief: ProductBrief 
     `Product: ${briefText(input.brief) || 'an unnamed product'}`,
     '',
     'The customer wrote this draft angle in their own words:',
-    `"""${draft.slice(0, 1200)}"""`,
+    `"""${draft.slice(0, 5000)}"""`,
     '',
     'Complete it into a full ad angle for a short-form video ad. Keep their idea and their voice.',
     `Answer in exactly this shape: ${answerShape('angle')}`,

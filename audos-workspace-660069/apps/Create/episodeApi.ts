@@ -423,7 +423,7 @@ export async function planSeries(input: {
     'never plan text, captions, subtitles, titles, end cards, signs, labels or logos.';
 
   const user = [
-    `Series brief from the user: ${clampText(input.brief, 700)}`,
+    `Series brief from the user: ${clampText(input.brief, 5000)}`,
     `The recurring lead (identical in every episode): ${input.character.name} — ${clampText(input.character.description, 300)}`,
     `Tone: ${tone.label} (${tone.visual})`,
     `Aspect ratio: ${input.aspect}`,

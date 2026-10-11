@@ -341,7 +341,7 @@ export default function IntakeForm({
                     textAlign: 'center',
                     cursor: uploading || reading ? 'progress' : 'pointer',
                     border: `1px dashed ${dragOver ? T.accentBorder : T.border}`,
-                    background: dragOver ? 'rgba(124,58,237,0.08)' : 'rgba(255,255,255,0.02)',
+                    background: dragOver ? 'rgba(200,146,10,0.1)' : 'rgba(180,120,0,0.05)',
                     transition: 'border-color .15s ease, background .15s ease',
                   }}
                 >
@@ -570,7 +570,7 @@ export default function IntakeForm({
                     borderRadius: 12,
                     cursor: uploading || reading ? 'progress' : 'pointer',
                     border: `1px dashed ${dragOver ? T.accentBorder : T.border}`,
-                    background: dragOver ? 'rgba(124,58,237,0.08)' : 'rgba(255,255,255,0.02)',
+                    background: dragOver ? 'rgba(200,146,10,0.1)' : 'rgba(180,120,0,0.05)',
                     transition: 'border-color .15s ease, background .15s ease',
                   }}
                 >

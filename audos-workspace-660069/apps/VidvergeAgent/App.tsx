@@ -21,27 +21,40 @@ import {
   saveVideoSelection,
   type VideoIntegrationId,
 } from '../../lib/videoIntegrations';
+import AppShell from '../../components/ui/AppShell';
+import { COLORS } from '../../components/theme';
+import { directorOwnerKey } from '../SceneForge/lib/directorStore';
+import { useSpaceRuntime } from '../../SpaceRuntimeContext';
 
 /**
- * Local palette for the agent hub. The gold is inherited from the space brand
- * token so the hub stays in sync with the shell; the literals are fallbacks.
+ * Dark-cosmic palette for the agent hub, mirrored from components/theme.ts so
+ * the hub, the shared UI layer and the rest of the app family stay in step.
+ *
+ * The `--vv-gold*` names are kept as the brand channel the picker, queue and
+ * create-bar subcomponents already read from; they now carry the amber brand
+ * rather than the retired gold.
  */
 const TOKENS = {
-  '--vv-bg': '#08080f',
-  '--vv-surface': '#111118',
-  '--vv-border': 'rgba(255,255,255,0.06)',
-  '--vv-gold': 'var(--space-brand-primary-500, #F5A623)',
-  '--vv-gold-light': '#FFD9A0',
-  '--vv-gold-glow': 'rgba(245,166,35,0.4)',
-  '--vv-text-dim': 'rgba(255,255,255,0.5)',
-  '--vv-success': '#4ade80',
-  '--vv-error': '#f97316',
+  '--vv-bg': COLORS.bg,
+  '--vv-surface': COLORS.surface,
+  '--vv-surface-alt': COLORS.surfaceAlt,
+  '--vv-border': COLORS.border,
+  '--vv-border-hover': COLORS.borderHover,
+  '--vv-gold': COLORS.primary,
+  '--vv-gold-light': COLORS.primaryGlow,
+  '--vv-gold-glow': 'rgba(200,146,10,0.45)',
+  '--vv-accent': COLORS.accent,
+  '--vv-accent-light': COLORS.accentGlow,
+  '--vv-text-dim': 'rgba(26,16,0,0.55)',
+  '--vv-success': COLORS.success,
+  '--vv-error': COLORS.error,
 } as unknown as CSSProperties;
 
 const WORKSPACE_ID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
 const POLL_MS = 5000;
 const HEYGEN_POLL_MS = 8000;
 const HEYGEN_RENDER_TABLE = 'vv_heygen_renders';
+const DIRECTOR_FILMS_TABLE = 'sf_director_films';
 
 type LiveRow = Record<string, any>;
 type JobState = QueueJob['state'];
@@ -176,6 +189,7 @@ const FC_PROGRESS: Record<string, number> = { pending: 3, researching: 12, scrip
 const S2V_PROGRESS: Record<string, number> = { draft: 3, planning: 14, plan_ready: 25, producing: 62, assembling: 91, ready: 100, error: 100 };
 const S2V_MACHINE_PROGRESS: Record<string, number> = { SCRIPT_RECEIVED: 4, ANALYZING_SCRIPT: 10, SEGMENTING_SCRIPT: 16, PREPARING_SCENE: 28, PROMPT_READY: 34, GENERATING_VIDEO: 58, VIDEO_COMPLETED: 68, EXTRACTING_FINAL_FRAME: 72, FRAME_READY: 76, DETERMINE_NEXT_REFERENCE: 79, PREPARE_NEXT_SCENE: 82, ALL_SCENES_COMPLETED: 85, AUDIO_PLANNING: 87, AUDIO_GENERATING: 90, AUDIO_READY: 93, FFMPEG_ASSEMBLY: 96, FINAL_VIDEO: 100 };
 const SV_PROGRESS: Record<string, number> = { analyzing: 10, identity_ready: 20, scripting: 38, building: 66, rendering: 90, completed: 100, failed: 100 };
+const DIRECTOR_PROGRESS: Record<string, number> = { draft: 8, analyzing: 20, narrating: 42, assets: 62, rendering: 84, done: 100, failed: 100 };
 
 function mapRows(table: string, rows: LiveRow[]): QueueJob[] {
   if (table === 'sceneforge_projects') return rows.map((row) => {
@@ -207,6 +221,26 @@ function mapRows(table: string, rows: LiveRow[]): QueueJob[] {
     const status = String(row.status || 'processing').toLowerCase();
     return makeJob(table, row, 'video-enhancer', 'Video Enhancer', String(row.title || 'Video enhancement'), prettyStage(status), status === 'completed' ? 100 : Number(row.progress || 8), stateFrom(status, ['completed'], ['failed', 'error'], ['pending', 'processing']));
   });
+  if (table === DIRECTOR_FILMS_TABLE) return rows.map((row) => {
+    const status = String(row.status || 'draft').toLowerCase();
+    const stage = status === 'done'
+      ? 'Ready to download'
+      : status === 'failed'
+        ? 'Needs attention'
+        : status === 'narrating'
+          ? 'HeyGen narration'
+          : status === 'assets'
+            ? 'Resolving scene images'
+            : status === 'rendering'
+              ? 'Remotion composition'
+              : status === 'analyzing'
+                ? 'Directing visuals'
+                : 'Ready to direct';
+    return {
+      ...makeJob(DIRECTOR_FILMS_TABLE, row, 'sceneforge', 'SceneForge Director', String(row.title || String(row.script || '').slice(0, 54) || 'Untitled Director film'), stage, DIRECTOR_PROGRESS[status] ?? 8, stateFrom(status, ['done'], ['failed'], ['analyzing', 'narrating', 'assets', 'rendering'])),
+      surface: 'director' as const,
+    };
+  });
   if (table === HEYGEN_RENDER_TABLE) return rows.map((row) => {
     const status = String(row.status || 'pending').toLowerCase();
     const stage = status === 'completed'
@@ -223,12 +257,15 @@ function mapRows(table: string, rows: LiveRow[]): QueueJob[] {
   return [];
 }
 
-async function loadLiveJobs(): Promise<QueueJob[]> {
+async function loadLiveJobs(directorKey = ''): Promise<QueueJob[]> {
   const db = (window as any).__workspaceDb;
   if (!db?.from) return [];
-  const tables = ['sceneforge_projects', 'fc_projects', 's2v_films', 'sv_projects', 'video_enhancements', HEYGEN_RENDER_TABLE];
+  const tables = ['sceneforge_projects', 'fc_projects', 's2v_films', 'sv_projects', 'video_enhancements', ...(directorKey ? [DIRECTOR_FILMS_TABLE] : []), HEYGEN_RENDER_TABLE];
   const results = await Promise.allSettled(tables.map(async (table) => {
-    const response = await db.from(table).orderBy('updated_at', 'desc').limit(8).get();
+    const source = table === DIRECTOR_FILMS_TABLE
+      ? db.from(table, { shared: true }).eq('owner_key', directorKey)
+      : db.from(table);
+    const response = await source.orderBy('updated_at', 'desc').limit(8).get();
     return mapRows(table, Array.isArray(response?.data) ? response.data : []);
   }));
   return results.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
@@ -268,8 +305,8 @@ function VergeMark({ size = 22 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <defs>
         <linearGradient id="vvAgentMark" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="var(--vv-gold-light, #FFD9A0)" />
-          <stop offset="100%" stopColor="var(--vv-gold, #F5A623)" />
+          <stop offset="0%" stopColor="var(--vv-gold-light, #E8B737)" />
+          <stop offset="100%" stopColor="var(--vv-gold, #C8920A)" />
         </linearGradient>
       </defs>
       <path
@@ -281,7 +318,7 @@ function VergeMark({ size = 22 }: { size?: number }) {
       />
       <path
         d="M8.4 4.8 L12 11.2 L15.6 4.8"
-        stroke="var(--vv-gold, #F5A623)"
+        stroke="var(--vv-gold, #C8920A)"
         strokeWidth="1.1"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -292,6 +329,8 @@ function VergeMark({ size = 22 }: { size?: number }) {
 }
 
 export default function App() {
+  const { subscription, subscriptionReady, sessionId } = useSpaceRuntime();
+  const accountIdentity = subscriptionReady ? String(subscription?.email || sessionId || '') : '';
   const [agentState, setAgentState] = useState<AgentState>('idle');
   const [status, setStatus] = useState(IDLE_STATUS);
   const [jobs, setJobs] = useState<QueueJob[]>([]);
@@ -312,8 +351,9 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const directorKey = accountIdentity ? directorOwnerKey(accountIdentity).catch(() => '') : Promise.resolve('');
     const refresh = async () => {
-      const next = await loadLiveJobs();
+      const next = await loadLiveJobs(await directorKey);
       if (cancelled) return;
       setJobs(next);
       const previous = previousStates.current;
@@ -346,7 +386,7 @@ export default function App() {
       window.clearInterval(timer);
       if (transitionReset.current) window.clearTimeout(transitionReset.current);
     };
-  }, []);
+  }, [accountIdentity]);
 
   useEffect(() => {
     let cancelled = false;
@@ -489,7 +529,7 @@ export default function App() {
   }
 
   function openJob(job: QueueJob) {
-    saveVidvergeHandoff({ appId: job.appId, projectId: job.projectId });
+    saveVidvergeHandoff({ appId: job.appId, projectId: job.projectId, ...(job.surface ? { surface: job.surface } : {}) });
     openVidvergeStudio(job.appId);
   }
 
@@ -508,39 +548,56 @@ export default function App() {
     agentState === 'working' ? 'Agent working' : agentState === 'error' ? 'Agent paused' : 'Agent ready';
 
   return (
-    <div className="relative h-full w-full overflow-y-auto" style={{ ...TOKENS, background: 'var(--vv-bg)' }}>
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_70%_100%_at_50%_0%,rgba(245,166,35,0.07),transparent_72%)]" />
-
-      <header
-        className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-[var(--vv-border)] px-5 backdrop-blur-xl md:px-8"
-        style={{ background: 'rgba(8,8,15,0.72)' }}
-      >
-        <div className="flex items-center gap-2.5">
+    <AppShell
+      title="Vidverge Agent"
+      eyebrow="Agent hub"
+      subtitle="Describe the video you want. The agent routes the brief to the right studio, watches the render, and hands back a finished cut."
+      maxWidth={1180}
+      watermark={false}
+      style={{ ...TOKENS }}
+      icon={(
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 38,
+            height: 38,
+            borderRadius: 12,
+            background: 'linear-gradient(140deg, rgba(200,146,10,0.22) 0%, rgba(224,163,58,0.14) 100%)',
+            border: '1px solid var(--vv-border)',
+            boxShadow: '0 0 18px rgba(200,146,10,0.22)',
+          }}
+        >
           <VergeMark />
-          <span className="text-[15px] font-medium tracking-tight text-white">Vidverge</span>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <span className="flex items-center gap-2">
+        </span>
+      )}
+      actions={(
+        <>
+          <span className="flex items-center gap-2 rounded-full border border-[var(--vv-border)] bg-[var(--vv-surface)] px-3 py-1.5">
             <span
               className="h-1.5 w-1.5 rounded-full"
-              style={{ background: headerDot, boxShadow: `0 0 8px ${headerDot}` }}
+              style={{
+                background: headerDot,
+                boxShadow: `0 0 8px ${headerDot}`,
+                animation: agentState === 'working' ? 'pulse 1.2s ease-in-out infinite' : undefined,
+              }}
             />
-            <span className="hidden text-[12px] text-[var(--vv-text-dim)] sm:inline">{headerLabel}</span>
+            <span className="text-[11px] text-[var(--vv-text-dim)]">{headerLabel}</span>
           </span>
           <button
             type="button"
             onClick={() => setCalm((prev) => !prev)}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-white/40 transition-colors hover:bg-white/5 hover:text-white/80"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--vv-border)] text-[#7A6030] transition-colors hover:border-[var(--vv-border-hover)] hover:bg-[rgba(180,120,0,0.06)] hover:text-[#1A1000]"
             title={calm ? 'Motion is calmed — switch back to full motion' : 'Calm the motion'}
             aria-label={calm ? 'Switch back to full motion' : 'Calm the motion'}
           >
             {calm ? <ZapOff size={15} /> : <Zap size={15} />}
           </button>
-        </div>
-      </header>
-
-      <main className="relative mx-auto flex min-h-[calc(100%-3.5rem)] w-full max-w-[1180px] flex-col justify-center px-5 pb-16 pt-6 md:px-8">
+        </>
+      )}
+    >
+      <main className="relative flex w-full flex-col justify-center pb-6">
         <AgentCanvas agentState={agentState} statusLabel={status} calm={calm} />
 
         <div className="mx-auto w-full max-w-[880px]">
@@ -565,7 +622,7 @@ export default function App() {
             onSubmit={handleSubmit}
             busy={agentState === 'working'}
           />
-          <p className="mt-3 text-center text-[11px] text-white/25">
+          <p className="mt-3 text-center text-[11px] text-[#7A6030]">
             {heygenAvatar
               ? 'Create renders a HeyGen talking head here · clear the character to route to a studio instead'
               : 'Describe the video · pick the studio · the agent takes it from there'}
@@ -574,7 +631,7 @@ export default function App() {
           {(heygenAvatar || heygenVoice) && (
             <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
               {heygenAvatar && (
-                <span className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--vv-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--vv-gold)_10%,transparent)] py-1 pl-1 pr-3 text-[11px] text-white/80">
+                <span className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--vv-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--vv-gold)_10%,transparent)] py-1 pl-1 pr-3 text-[11px] text-[#1A1000]">
                   {heygenAvatar.previewImage ? (
                     <img src={heygenAvatar.previewImage} alt="" className="h-5 w-5 rounded-full object-cover" />
                   ) : (
@@ -584,7 +641,7 @@ export default function App() {
                 </span>
               )}
               {heygenVoice && (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--vv-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--vv-gold)_10%,transparent)] px-3 py-1 text-[11px] text-white/80">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--vv-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--vv-gold)_10%,transparent)] px-3 py-1 text-[11px] text-[#1A1000]">
                   <Volume2 size={12} className="text-[var(--vv-gold)]" />
                   <span className="max-w-[160px] truncate">{heygenVoice.name}</span>
                 </span>
@@ -634,6 +691,6 @@ export default function App() {
           </div>
         </div>
       </main>
-    </div>
+    </AppShell>
   );
 }

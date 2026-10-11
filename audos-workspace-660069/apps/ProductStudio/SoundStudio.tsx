@@ -130,7 +130,7 @@ export interface SoundTarget {
   videoUrl: string;
   /** The row this video came from, so the result lands on the same gallery card. */
   sourceId: number;
-  source: 'clipstyle' | 'product_launch';
+  source: 'clipstyle' | 'product_launch' | 'launch_engine' | 'motionlaunch';
   /** The film's narration, when the app knows it — used for the captions. */
   scriptText?: string;
 }

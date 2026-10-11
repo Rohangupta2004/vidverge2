@@ -17,6 +17,7 @@ import {
   FilmCharacter, FilmPlan, FilmScene, FilmStyle, PlanScene, ReferenceType,
   SceneDialogue, SceneType, VeoSpec, VoicePlan, newSceneKey, wsToken,
 } from '../api';
+import { resolveVideoModel } from './videoModelService';
 
 const MODEL = 'claude-opus-5';
 
@@ -432,7 +433,7 @@ export interface SegmentedPlan {
 
 const SEGMENT_RULES = `RULES:
 - Every clip is AI-generated video footage. There are no graphics, text cards or overlays — pure visual storytelling.
-- Clip durations are EXACTLY 4, 6, 8 or 10 seconds (the video model's supported lengths). Pick the duration that fits the beat.
+- Clip durations are a WHOLE NUMBER of seconds from 4 to 10 (the video models render any length in that range). Pick the duration that actually fits the beat — 7 and 9 are just as valid as 8, so never pad or trim a beat to hit a round number.
 - A long continuous action becomes MULTIPLE consecutive clips (e.g. a player dribbling up the court and scoring = dribble start → drive → jump → ball through hoop — each its own clip that will later continue from the previous clip's extracted final frame).
 - The script is the source of truth. Never rewrite it. Split it into contiguous script_segment slices that together cover the whole script in order.
 - VERBATIM AND CONTIGUOUS (the pipeline verifies this against the script text): every script_segment is copied character-for-character from the script — never paraphrased, cleaned up, summarized or reordered. The first clip starts at the script's very first words and each next clip starts exactly where the previous one ended, so no word of the script is skipped; the last clip ends at the script's very last words. Title lines, headings, speaker labels and stage directions are part of the script and belong inside the clips' segments (they inform the visuals; they are never shown as text). A segment that cannot be found verbatim in the script is rejected and re-planned.
@@ -446,7 +447,7 @@ const SEGMENT_SYSTEM = `You are the director of a sequential script-to-video pip
 ${SEGMENT_RULES}
 
 OUTPUT SHAPE:
-{ "title": str, "story_summary": str (the complete story in 3-6 sentences), "world": str (the shared setting/world), "visual_style": str (film-wide look: palette, lens language, lighting, mood), "characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "duration_s": 4|6|8|10, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
+{ "title": str, "story_summary": str (the complete story in 3-6 sentences), "world": str (the shared setting/world), "visual_style": str (film-wide look: palette, lens language, lighting, mood), "characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "duration_s": whole seconds 4–10, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
 
 const SEGMENT_CONTINUE_SYSTEM = `You are the director of a sequential script-to-video pipeline, CONTINUING a clip plan that is already underway. The story, world, visual style and characters are decided and given to you, and the earlier clips are already planned. Segment ONLY the REMAINING SCRIPT into further clips, continuing the sequence exactly where it left off. Reply with ONE JSON object and nothing else.
 
@@ -455,7 +456,7 @@ ${SEGMENT_RULES}
 - Never stop early and never answer with an empty "scenes" list: every word of the REMAINING SCRIPT lands in a clip — a one-word line, a closing sentence, credits or an end marker included (film those as a brief closing shot). The pipeline checks the clips against the script text and rejects a plan that leaves any of it uncovered.
 
 OUTPUT SHAPE:
-{ "new_characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "duration_s": 4|6|8|10, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
+{ "new_characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "duration_s": whole seconds 4–10, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
 
 /** Consecutive clips may overlap by a few words (the model repeats a phrase
  * at a boundary): a clip may begin up to this many source words BEFORE the
@@ -657,7 +658,11 @@ function normalizeSegmentCharacters(list: unknown): SegmentedPlan['characters'] 
 }
 
 function normalizeSegmentScenes(list: unknown): SegmentedPlan['scenes'] {
-  const snap = (n: unknown) => [4, 6, 8, 10].sort((a, b) => Math.abs(a - (Number(n) || 6)) - Math.abs(b - (Number(n) || 6)))[0];
+  // CLAMP, never snap: every provider this app runs on renders any whole
+  // number of seconds in this range, so the director's chosen beat length is
+  // kept as written. videoModelService.resolveDuration applies the specific
+  // model's own floor and ceiling later.
+  const snap = (n: unknown) => Math.min(10, Math.max(4, Math.round(Number(n) || 6)));
   return (Array.isArray(list) ? list : [])
     .filter((s: any) => s && String(s.script_segment || '').trim())
     .map((s: any) => ({
@@ -813,9 +818,14 @@ export async function prepareScenePrompt(params: {
   // the video prompt, with the exact words, speaker, delivery and language. A
   // scene without one must not have the model inventing speech that would
   // double-talk the ElevenLabs narration layer.
+  // THE PROMPT BUDGET IS THE MODEL'S OWN LIMIT, not a fixed 1000 characters:
+  // Seedance carries 2500, and trimming its prompts to Omni Flash's ceiling
+  // was cutting prepared scenes off mid-sentence.
+  const maxChars = Math.max(500, resolveVideoModel(film.video_model).promptMaxChars);
+
   if (dialogue) {
     const block = buildDialogueBlock(dialogue, film);
-    prompt = `${prompt.replace(/\s*Dialogue:\s*"[\s\S]*$/i, '').trim().slice(0, Math.max(200, 1000 - block.length - 2))}\n${block}`;
+    prompt = `${prompt.replace(/\s*Dialogue:\s*"[\s\S]*$/i, '').trim().slice(0, Math.max(200, maxChars - block.length - 2))}\n${block}`;
   } else {
     const noTalk = 'speaking to camera, talking, moving lips as if speaking, voice-over';
     if (!/speaking to camera/i.test(negative)) negative = `${negative}, ${noTalk}`.slice(0, 500);
@@ -825,10 +835,33 @@ export async function prepareScenePrompt(params: {
     continuation,
     reference_type: referenceType,
     needs_character: out?.needs_character ? String(out.needs_character) : null,
-    prompt: prompt.slice(0, 1000),
+    prompt: prompt.slice(0, maxChars),
     negative,
     reasoning: String(out?.reasoning || '').slice(0, 300),
   };
+}
+
+const STYLE_LOCK_SYSTEM = `You are the director of photography of a film being generated clip by clip. Scene 1 has just rendered, and its look is now the film's contract. Read scene 1's production prompt and write the film's VISUAL STYLE FINGERPRINT: 2-3 sentences of plain prose, no preamble, no lists, no headings, no quotation marks.
+
+Name ONLY what must stay identical in every later clip: the color palette, the lighting (sources, contrast, time of day), the lens language (focal length, depth of field, camera behaviour), the film stock / grain / texture, and the overall mood.
+
+NEVER describe the scene's subject, action, location, characters or dialogue — those change from clip to clip, and repeating them here would force every later clip to re-film scene 1. Never mention scene numbers.`;
+
+/**
+ * STYLE LOCK — the film's visual fingerprint, read from the clip that
+ * actually rendered first. Scene 1 defines the look; the orchestrator then
+ * prepends this text to every later prompt so the film cannot drift in
+ * palette, lighting or lens language halfway through. Deliberately short:
+ * it shares a hard character budget with the scene's own prompt.
+ */
+export async function extractStyleFingerprint(params: { film: Film; prompt: string }): Promise<string> {
+  const plan = params.film.plan || ({} as FilmPlan);
+  const user = [
+    `FILM-WIDE STYLE DIRECTION: ${plan.visual_style || plan.style_direction || '(none recorded)'}`,
+    `SCENE 1'S PRODUCTION PROMPT (the clip that just rendered — the look to lock):\n"""\n${String(params.prompt || '').slice(0, 2000)}\n"""`,
+  ].join('\n\n');
+  const text = await askOpus({ system: STYLE_LOCK_SYSTEM, user, maxTokens: 700, effort: 'low' });
+  return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 600);
 }
 
 /** The explicit dialogue block appended to every dialogue scene's video

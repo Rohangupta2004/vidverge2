@@ -250,12 +250,23 @@ export function rosterInputLabel(model: RunwayRosterModel): string {
   return 'Image \u2192 video';
 }
 
-/** Clip lengths the grid offers for a model. */
+/**
+ * Clip lengths the grid offers for a model, derived from that model's REAL
+ * limits instead of a fixed list.
+ *
+ * Runway's duration field is a range, not an enum — the proxy's own words are
+ * "duration must be an integer from 2 to 10" — so every whole second inside
+ * the model's min/max is a legal choice, and a model the platform later lets
+ * run longer offers those lengths here with no code change. The old fixed
+ * [4, 5, 6, 8, 10] list made 7s and 9s clips unpickable and, worse, let the
+ * callers that snapped onto it round a customer's choice DOWN.
+ */
 export function rosterDurations(model: RunwayRosterModel | null): number[] {
-  const min = model?.minDurationS ?? 2;
-  const max = model?.maxDurationS ?? 10;
-  const choices = [4, 5, 6, 8, 10].filter((d) => d >= min && d <= max);
-  return choices.length ? choices : [Math.max(min, Math.min(max, 5))];
+  const min = Math.max(1, Math.ceil(model?.minDurationS ?? 2));
+  const max = Math.max(min, Math.floor(model?.maxDurationS ?? 10));
+  const choices: number[] = [];
+  for (let d = min; d <= max; d += 1) choices.push(d);
+  return choices.length ? choices : [min];
 }
 
 export function clampRosterDuration(seconds: number | null | undefined, model: RunwayRosterModel | null): number {

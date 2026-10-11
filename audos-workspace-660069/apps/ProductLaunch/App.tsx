@@ -1,393 +1,563 @@
-// PRODUCT LAUNCH ENGINE
+// PRODUCT LAUNCH — the autonomous film agent.
 //
-// Four screens, one direction of travel:
+// The mental model is one sentence: OPUS DECIDES THE FILM, PRODUCTLAUNCH
+// EXECUTES IT RELIABLY. Everything creative is a model decision recorded in a
+// FilmSpec; everything mechanical is deterministic code that either succeeds
+// or says exactly why it did not.
 //
-//   1 INTAKE       five empty fields — the only content this app ever has
-//   2 GENERATION   Claude Opus 5 (extended thinking) writes the script
-//   3 COMPOSITION  the Remotion Player runs that script at 60fps, then the
-//                  SAME source and props are submitted for the MP4
-//   4 REVIEW       the finished file, plus a contact-sheet verdict from a
-//                  single Opus 5 vision call
+//   URL
+//     -> web + screenshot extraction           ProductContext
+//     -> Opus writes 2-3 competing concepts    FilmSpec[]
+//     -> highest concept_score wins            FilmSpec   (creative truth)
+//     -> typed primitives                      ComponentPlan
+//     -> code generation                       Film.tsx
+//     -> compile gate + fix loop               (free: no render spent)
+//     -> render                                MP4
+//     -> 24 frames -> contact sheet            QAResult
+//     -> brief-aware critic                    CriticOutput
+//     -> revise and re-render, or stop
 //
-// THERE IS NO TEMPLATE IN THIS APP. No sample product, no demo script, no
-// preset scene list, no poster image, no mocked response and no setTimeout
-// pretending to be work. Every run starts from the words the creator typed
-// and, when they give a URL, from a live read of their own page. If the model
-// cannot be reached the run stops and says so — there is nothing canned to
-// fall back to, by design.
+// The gate before the render is the whole economic argument of this
+// architecture: a fault found by the compiler costs one Sonnet turn, and the
+// same fault found by the critic costs a render.
+//
+// This app ships NO content. There is no sample product, no demo concept and
+// no placeholder film. Every word a viewer sees comes from the creator's own
+// page or from a model reading it, and when a step cannot run the run stops
+// and says so, because a canned film pretending to be theirs is worse than an
+// error.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Rocket } from 'lucide-react';
+import { ArrowRight, Rocket } from 'lucide-react';
 
-import { filmSeconds, planTiming } from './lib/filmTiming';
-import { LAUNCH_FILM_TSX } from './lib/filmSource';
+import { errorMessage } from './lib/ai-client';
 import {
-  EMPTY_LAUNCH_INPUT,
-  LAUNCH_AUDIO_URL,
-  PREVIEW_FPS,
-  RENDER_FPS,
-  type FilmProps,
-  type LaunchInput,
-  type LaunchScript,
-} from './lib/launchTypes';
-import { analyzeContactSheet, generateLaunchScript, type SiteEvidence } from './lib/opusClient';
-import { buildPlayerFrame } from './lib/playerFrame';
+  bestIteration,
+  MAX_ITERATIONS,
+  shouldContinueIteration,
+  type IterationDecision,
+  type IterationRecord,
+} from './lib/iteration-manager';
+import { isLikelyUrl, normalizeUrl } from './lib/platform';
 import {
-  buildContactSheet,
-  extractFrames,
-  pollRender,
-  readSite,
-  sampleTimestamps,
-  submitRender,
-  type RenderPhase,
-} from './lib/renderPipeline';
+  PipelineTracker,
+  formatMs,
+  freshSteps,
+  type PipelineSnapshot,
+} from './lib/pipeline-events';
+import { generateComponentPlan } from './pipeline/component-plan';
+import { compileFixLoop } from './pipeline/compile-check';
+import { generateConcepts } from './pipeline/concepts';
+import { emitFilmCodeFromPlan, generateFilmCode } from './pipeline/codegen';
+import { runCritique } from './pipeline/critic';
+import { extractProductContext } from './pipeline/extract';
+import { runTechnicalQA } from './pipeline/qa';
+import { filmThemeFrom, renderFilm } from './pipeline/render';
+import { reviseFilmSpec } from './pipeline/revise';
+import { auditConcepts, selectBestConcept, type ConceptAudit } from './pipeline/select-concept';
+import { verifySchemaCoverage } from './sdk/component-schema';
+import { planWarnings } from './types/component-plan.types';
+import type { CriticOutput } from './types/critic.types';
+import { filmSeconds, type FilmSpec } from './types/film-spec.types';
+import type { ProductContext } from './types/product-context.types';
 
-import ComposeScreen from './components/ComposeScreen';
-import GenerateScreen, { type GenerationPhase } from './components/GenerateScreen';
-import IntakeScreen from './components/IntakeScreen';
-import ReviewScreen, { type AnalysisProgress } from './components/ReviewScreen';
-import { ACCENT, BORDER, LaunchKeyframes, MUTED, StepRail, TEXT } from './components/LaunchUi';
+import AppShell from '../../components/ui/AppShell';
+import Badge from '../../components/ui/Badge';
+import { ProgressBar, Stepper } from '../../components/ui/primitives';
+import ConceptSelector from './components/ConceptSelector';
+import CriticReport from './components/CriticReport';
+import PipelineProgress from './components/PipelineProgress';
+import VideoResult from './components/VideoResult';
+import {
+  ACCENT,
+  BORDER,
+  ErrorNote,
+  INPUT_STYLE,
+  LaunchKeyframes,
+  MUTED,
+  PrimaryButton,
+  TEXT,
+} from './components/LaunchUi';
 
-type Screen = 'intake' | 'generating' | 'composition' | 'review';
+type View = 'input' | 'running' | 'concepts' | 'critic' | 'result';
 
-const RAIL = [
-  { id: 'intake', label: 'Brief' },
-  { id: 'generating', label: 'Script' },
-  { id: 'composition', label: 'Composition' },
-  { id: 'review', label: 'Review' },
+/** The launch stages the creator is walked through, in order. */
+const LAUNCH_STAGES: Array<{ label: string; views: View[] }> = [
+  { label: 'Product', views: ['input'] },
+  { label: 'Concepts', views: ['concepts'] },
+  { label: 'Build', views: ['running'] },
+  { label: 'Critique', views: ['critic'] },
+  { label: 'Launch film', views: ['result'] },
 ];
 
-const SCREEN_INDEX: Record<Screen, number> = {
-  intake: 0,
-  generating: 1,
-  composition: 2,
-  review: 3,
-};
-
-const IDLE_ANALYSIS: AnalysisProgress = {
-  state: 'idle',
-  framesDone: 0,
-  framesTotal: 0,
-  sheet: null,
-  verdict: null,
-  error: '',
-};
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function stageIndexFor(view: View): number {
+  const found = LAUNCH_STAGES.findIndex((stage) => stage.views.indexOf(view) !== -1);
+  return found === -1 ? 0 : found;
 }
 
-function basePhases(withSite: boolean): GenerationPhase[] {
-  const phases: GenerationPhase[] = [];
-  if (withSite) {
-    phases.push({
-      id: 'site',
-      label: 'Reading your page',
-      detail: 'Fetching the live page, harvesting its copy and palette, and photographing it.',
-      state: 'waiting',
-      ms: 0,
-    });
-  }
-  phases.push({
-    id: 'script',
-    label: 'Claude Opus 5 writes the film',
-    detail: 'Frontier model, extended thinking on: scenes, kinetic lines, cuts, colour and the closing line.',
-    state: 'waiting',
-    ms: 0,
-  });
-  phases.push({
-    id: 'plan',
-    label: 'Laying it on the timeline',
-    detail: 'Every scene placed on a 60fps grid, with the overlap each transition needs.',
-    state: 'waiting',
-    ms: 0,
-  });
-  return phases;
+interface BuildOutcome {
+  videoUrl: string;
+  frameCount: number;
+  filmCode: string;
+  codeSource: 'model' | 'printed';
+  critic: CriticOutput | null;
+  stopReason: string;
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('intake');
+  const [view, setView] = useState<View>('input');
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState('');
 
-  // Screen 1 — the brief. Preserved across a Regenerate, cleared by nothing.
-  const [input, setInput] = useState<LaunchInput>(EMPTY_LAUNCH_INPUT);
+  const trackerRef = useRef<PipelineTracker | null>(null);
+  if (!trackerRef.current) trackerRef.current = new PipelineTracker();
+  const tracker = trackerRef.current;
 
-  // Screen 2 — generation.
-  const [phases, setPhases] = useState<GenerationPhase[]>([]);
-  const [startedAt, setStartedAt] = useState(0);
-  const [script, setScript] = useState<LaunchScript | null>(null);
-  const [evidence, setEvidence] = useState<SiteEvidence | null>(null);
-  const [genError, setGenError] = useState('');
-  const generating = useRef(false);
+  const [snapshot, setSnapshot] = useState<PipelineSnapshot>({
+    steps: freshSteps(),
+    iteration: 1,
+    startedAt: 0,
+  });
+  useEffect(() => tracker.subscribe(setSnapshot), [tracker]);
 
-  // Screen 3 — render.
-  const [renderPhase, setRenderPhase] = useState<RenderPhase | ''>('');
-  const [renderElapsedMs, setRenderElapsedMs] = useState(0);
-  const [renderError, setRenderError] = useState('');
-  const [rendering, setRendering] = useState(false);
-  const [videoUrl, setVideoUrl] = useState('');
+  // The run's artefacts. Held in refs as well as state because the pipeline is
+  // one long async function that must not read a stale closure after a
+  // re-render.
+  const [context, setContext] = useState<ProductContext | null>(null);
+  const [audits, setAudits] = useState<ConceptAudit[]>([]);
+  const [spec, setSpec] = useState<FilmSpec | null>(null);
+  const [critic, setCritic] = useState<CriticOutput | null>(null);
+  const [decision, setDecision] = useState<IterationDecision>({ shouldContinue: false, reason: '' });
+  const [history, setHistory] = useState<IterationRecord[]>([]);
+  const [outcome, setOutcome] = useState<BuildOutcome | null>(null);
 
-  // Screen 4 — the contact-sheet review.
-  const [analysis, setAnalysis] = useState<AnalysisProgress>(IDLE_ANALYSIS);
+  const contextRef = useRef<ProductContext | null>(null);
+  const specRef = useRef<FilmSpec | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const runningRef = useRef(false);
 
-  useEffect(() => { window.scrollTo({ top: 0 }); }, [screen]);
+  // A gate the pipeline awaits while the creator looks at a concept list or a
+  // critique. Resolving it is what lets one async function span a decision
+  // the UI has to make.
+  const gateRef = useRef<((value: unknown) => void) | null>(null);
+  const openGate = useCallback(<T, >(): Promise<T> => new Promise<T>((resolve) => {
+    gateRef.current = resolve as unknown as (value: unknown) => void;
+  }), []);
+  const closeGate = useCallback((value: unknown): void => {
+    const resolve = gateRef.current;
+    gateRef.current = null;
+    if (resolve) resolve(value);
+  }, []);
 
-  const screenshotUrl = evidence?.screenshotUrl || '';
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [view]);
 
-  /** The film, assembled for one frame rate. Both mounts use this one builder. */
-  const filmPropsFor = useCallback((fps: number): FilmProps | null => {
-    if (!script) return null;
-    return {
-      ...script,
-      productName: input.productName.trim(),
-      tone: input.tone,
-      audioUrl: LAUNCH_AUDIO_URL,
-      screenshotUrl,
-      timing: planTiming(script, fps),
-    };
-  }, [script, input.productName, input.tone, screenshotUrl]);
-
-  const previewDoc = useMemo(() => {
-    const props = filmPropsFor(PREVIEW_FPS);
-    if (!props) return '';
-    return buildPlayerFrame({
-      compositionTsx: LAUNCH_FILM_TSX,
-      props: props as unknown as Record<string, unknown>,
-      durationInFrames: props.timing.totalFrames,
-      fps: PREVIEW_FPS,
-      accent: props.brandColor || '#F59E0B',
-    });
-  }, [filmPropsFor]);
+  const ready = useMemo(() => isLikelyUrl(url), [url]);
 
   // -------------------------------------------------------------------------
-  // Screen 2 — generation
+  // The build loop: plan -> code -> compile -> render -> QA -> critique
   // -------------------------------------------------------------------------
 
-  const runGeneration = useCallback(async (brief: LaunchInput) => {
-    if (generating.current) return;
-    generating.current = true;
+  const buildLoop = useCallback(async (
+    startSpec: FilmSpec,
+    ctx: ProductContext,
+    startIteration: number,
+    priorHistory: IterationRecord[],
+  ): Promise<BuildOutcome> => {
+    const signal = abortRef.current?.signal;
+    const theme = filmThemeFrom(ctx);
+    let current = startSpec;
+    let records = priorHistory.slice();
+    let iteration = startIteration;
+    let lastScore: number | null = records.length
+      ? records[records.length - 1].critic.overall_score
+      : null;
 
-    const withSite = Boolean(brief.websiteUrl.trim());
-    const plan = basePhases(withSite);
-    setPhases(plan);
-    setScript(null);
-    setEvidence(null);
-    setGenError('');
-    setVideoUrl('');
-    setRenderPhase('');
-    setRenderError('');
-    setAnalysis(IDLE_ANALYSIS);
-    setStartedAt(Date.now());
-    setScreen('generating');
+    for (;;) {
+      setSpec(current);
+      specRef.current = current;
+      if (iteration > 1) tracker.beginIteration(iteration);
+      setView('running');
 
-    const advance = (id: string, state: GenerationPhase['state'], ms: number) => {
-      setPhases((current) => current.map((phase) => (
-        phase.id === id ? { ...phase, state, ms: ms || phase.ms } : phase
-      )));
-    };
+      // 4 — component plan
+      tracker.start('plan');
+      const builtPlan = await generateComponentPlan(current, ctx, {
+        signal,
+        onProgress: (detail, attempt) => tracker.note('plan', detail, attempt),
+      });
+      const warnings = planWarnings(builtPlan);
+      tracker.done('plan', String(builtPlan.scenes.length) + ' scenes, '
+        + String(builtPlan.scenes.reduce((sum, scene) => sum + scene.layers.length, 0))
+        + ' layers, ' + String(builtPlan.total_frames) + ' frames'
+        + (warnings.length ? '  ·  ' + warnings.map((entry) => entry.warning).join(' ') : ''));
 
-    let current = withSite ? 'site' : 'script';
-    try {
-      let siteEvidence: SiteEvidence | null = null;
-
-      if (withSite) {
-        const begun = Date.now();
-        advance('site', 'running', 0);
-        siteEvidence = await readSite(brief.websiteUrl);
-        setEvidence(siteEvidence);
-        setPhases((list) => list.map((phase) => (phase.id === 'site'
-          ? {
-            ...phase,
-            state: 'done',
-            ms: Date.now() - begun,
-            detail: siteEvidence
-              ? (siteEvidence.screenshotUrl
-                ? 'Page read and photographed — the screenshot is composited into the film.'
-                : 'Page read. No screenshot was available, so the film runs on type alone.')
-              : 'That page could not be read, so the film is written from your words alone.',
-          }
-          : phase)));
+      // 5 — code generation
+      tracker.start('codegen', 'Writing Film.tsx against the plan…');
+      let codeSource: 'model' | 'printed' = 'model';
+      let code = '';
+      try {
+        code = await generateFilmCode(builtPlan, { signal });
+        tracker.done('codegen', String(code.split('\n').length) + ' lines');
+      } catch (codeError) {
+        code = emitFilmCodeFromPlan(builtPlan);
+        codeSource = 'printed';
+        tracker.done('codegen', 'The code model failed (' + errorMessage(codeError)
+          + '), so the film was printed from the validated plan instead.');
       }
 
-      current = 'script';
-      const scriptBegun = Date.now();
-      advance('script', 'running', 0);
-      const written = await generateLaunchScript(brief, siteEvidence);
-      advance('script', 'done', Date.now() - scriptBegun);
+      // 6 — the compile gate. Free, and it runs before anything expensive.
+      tracker.start('compile');
+      const gate = await compileFixLoop(code, 3, {
+        plan: builtPlan,
+        signal,
+        onProgress: (detail, attempt) => tracker.note('compile', detail, attempt),
+      });
+      if (gate.success) {
+        code = gate.code;
+        tracker.done('compile', gate.attempts
+          ? 'Clean after ' + String(gate.attempts) + ' repair attempt(s).'
+          : 'Clean on the first pass.');
+      } else {
+        // The plan is already validated, so printing it is strictly safer than
+        // rendering source the gate just rejected.
+        code = emitFilmCodeFromPlan(builtPlan);
+        codeSource = 'printed';
+        tracker.done('compile', 'The generated file could not be made valid ('
+          + String(gate.errors.length) + ' error(s) left), so the film was printed '
+          + 'directly from the validated component plan.');
+      }
 
-      current = 'plan';
-      const planBegun = Date.now();
-      advance('plan', 'running', 0);
-      const timing = planTiming(written, PREVIEW_FPS);
-      setScript(written);
-      setPhases((list) => list.map((phase) => (phase.id === 'plan'
-        ? {
-          ...phase,
-          state: 'done',
-          ms: Math.max(1, Date.now() - planBegun),
-          detail: written.scenes.length + ' scenes · ' + filmSeconds(timing).toFixed(1)
-            + 's · ' + timing.totalFrames + ' frames at 60fps.',
-        }
-        : phase)));
-    } catch (error) {
-      advance(current, 'failed', 0);
-      setGenError(message(error));
-    } finally {
-      generating.current = false;
+      // 7 — render
+      tracker.start('render', 'Submitting to the render service…');
+      const render = await renderFilm(code, {
+        frameCount: builtPlan.total_frames,
+        theme,
+        onProgress: (phase, elapsedMs) => tracker.note(
+          'render',
+          phase === 'pending' ? 'Queued…' : 'Rendering 1920x1080 at 30fps — ' + formatMs(elapsedMs),
+        ),
+      });
+      tracker.done('render', filmSeconds(current).toFixed(1) + 's of video in ' + formatMs(render.durationMs));
+
+      // 8 — technical QA
+      tracker.start('qa');
+      const qa = await runTechnicalQA(render.videoUrl, {
+        frameCount: builtPlan.total_frames,
+        onProgress: (detail) => tracker.note('qa', detail),
+      });
+      tracker.done('qa', String(qa.frames.length) + ' frames'
+        + (qa.hasBlankFrames ? '  ·  blank frames detected' : '')
+        + (qa.hasTextOverflow ? '  ·  edge-bleeding content detected' : '')
+        + (qa.blockedReason ? '  ·  ' + qa.blockedReason : ''));
+
+      // 9 — the critic
+      tracker.start('critic', 'Opus is reading the contact sheet against the brief…');
+      const verdict = await runCritique(qa, current, ctx, lastScore, { iteration, signal });
+      tracker.done('critic', 'Scored ' + verdict.overall_score.toFixed(2)
+        + (verdict.shippable ? ' — shippable' : ' — not shippable yet'));
+
+      const nextDecision = shouldContinueIteration(verdict, iteration);
+      const record: IterationRecord = {
+        iteration,
+        videoUrl: render.videoUrl,
+        critic: verdict,
+        decision: nextDecision,
+      };
+      records = records.concat([record]);
+
+      setCritic(verdict);
+      setDecision(nextDecision);
+      setHistory(records);
+      setView('critic');
+
+      const wantsAnother = await openGate<boolean>();
+      const canIterate = iteration < MAX_ITERATIONS;
+
+      if (!wantsAnother || !canIterate) {
+        // The best cut wins, not necessarily the last one — a revision is
+        // allowed to come back worse than the film it replaced.
+        const best = bestIteration(records) || record;
+        return {
+          videoUrl: best.videoUrl,
+          frameCount: builtPlan.total_frames,
+          filmCode: code,
+          codeSource,
+          critic: best.critic,
+          stopReason: !canIterate && wantsAnother ? 'max_iterations_reached' : nextDecision.reason,
+        };
+      }
+
+      setView('running');
+      tracker.note('critic', 'Scored ' + verdict.overall_score.toFixed(2)
+        + ' — revising the spec from the critique…');
+      current = await reviseFilmSpec(current, verdict, ctx, { iteration: iteration + 1, signal });
+      lastScore = verdict.overall_score;
+      iteration += 1;
     }
-  }, []);
+  }, [openGate, tracker]);
 
   // -------------------------------------------------------------------------
-  // Screen 3 — render
+  // The whole run
   // -------------------------------------------------------------------------
 
-  const runRender = useCallback(async () => {
-    const props = filmPropsFor(RENDER_FPS);
-    if (!props || rendering) return;
-    setRendering(true);
-    setRenderError('');
-    setRenderPhase('pending');
-    setRenderElapsedMs(0);
+  const finish = useCallback((result: BuildOutcome) => {
+    tracker.start('output');
+    tracker.done('output', 'Done.');
+    setOutcome(result);
+    setView('result');
+  }, [tracker]);
+
+  const startRun = useCallback(async (target: string) => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
+
+    tracker.reset();
+    setError('');
+    setContext(null);
+    setAudits([]);
+    setSpec(null);
+    setCritic(null);
+    setHistory([]);
+    setOutcome(null);
+    setView('running');
+
     try {
-      const operationId = await submitRender({
-        compositionTsx: LAUNCH_FILM_TSX,
-        props: props as unknown as Record<string, unknown>,
-        durationInFrames: props.timing.totalFrames,
+      // A schema that has drifted from the SDK types would let an invalid film
+      // through the gate, so it is checked once before anything is spent.
+      const drift = verifySchemaCoverage();
+      if (drift.length) throw new Error('The SDK schema is out of sync: ' + drift.join(' '));
+
+      // 1 — extraction
+      tracker.start('extract', 'Reading ' + normalizeUrl(target) + '…');
+      const ctx = await extractProductContext(target, {
+        signal,
+        onProgress: (detail) => tracker.note('extract', detail),
       });
-      const url = await pollRender(operationId, (phase, elapsedMs) => {
-        setRenderPhase(phase);
-        setRenderElapsedMs(elapsedMs);
+      setContext(ctx);
+      contextRef.current = ctx;
+      tracker.done('extract', ctx.product_name + ' — ' + String(ctx.assets.length) + ' asset(s), '
+        + String(ctx.pages_analyzed.length) + ' page(s), confidence '
+        + ctx.extraction_confidence.toFixed(2)
+        + (ctx.extraction_gaps.length ? '  ·  ' + String(ctx.extraction_gaps.length) + ' gap(s)' : ''));
+
+      // 2 — competing concepts
+      tracker.start('concepts', 'Opus is writing competing concepts…');
+      const concepts = await generateConcepts(ctx, {
+        signal,
+        onProgress: (detail) => tracker.note('concepts', detail),
       });
-      setVideoUrl(url);
-      setRenderPhase('complete');
-      setScreen('review');
-    } catch (error) {
-      setRenderPhase('failed');
-      setRenderError(message(error));
+      const audited = auditConcepts(concepts, ctx);
+      setAudits(audited);
+      tracker.done('concepts', String(concepts.length) + ' concepts, top score '
+        + concepts[0].concept_score.toFixed(2));
+
+      // 3 — selection. Auto-selects the highest score; the creator may overrule.
+      tracker.start('select', 'Waiting on the concept choice…');
+      setView('concepts');
+      const chosen = await openGate<FilmSpec>();
+      const winner = chosen || selectBestConcept(concepts, ctx);
+      tracker.done('select', winner.narrative_arc + '  (score '
+        + winner.concept_score.toFixed(2) + ')');
+
+      finish(await buildLoop(winner, ctx, 1, []));
+    } catch (runError) {
+      const failed = tracker.failedStep();
+      const message = errorMessage(runError);
+      if (!failed) {
+        const running = tracker.snapshot().steps.find((step) => step.state === 'running');
+        if (running) tracker.fail(running.id, message);
+      }
+      setError(message);
+      setView('running');
     } finally {
-      setRendering(false);
+      runningRef.current = false;
     }
-  }, [filmPropsFor, rendering]);
+  }, [buildLoop, finish, openGate, tracker]);
 
-  // -------------------------------------------------------------------------
-  // Screen 4 — contact-sheet review
-  // -------------------------------------------------------------------------
+  /**
+   * Retry from where it broke rather than from the top.
+   *
+   * Extraction and concepts are the only steps whose inputs are the URL, so a
+   * failure there restarts the run. Everything from the plan onwards already
+   * has a ProductContext and a FilmSpec in hand, and re-reading the site to
+   * retry a render would be both slow and pointless.
+   */
+  const retry = useCallback(async () => {
+    if (runningRef.current) return;
+    const failed = tracker.failedStep();
+    const ctx = contextRef.current;
+    const currentSpec = specRef.current;
 
-  const runAnalysis = useCallback(async (url: string, cut: LaunchScript) => {
-    const timing = planTiming(cut, RENDER_FPS);
-    const stamps = sampleTimestamps(filmSeconds(timing));
-    setAnalysis({ ...IDLE_ANALYSIS, state: 'sampling', framesTotal: stamps.length });
+    if (!failed || !ctx || !currentSpec || failed.id === 'extract' || failed.id === 'concepts') {
+      startRun(url);
+      return;
+    }
+
+    runningRef.current = true;
+    setError('');
+    tracker.beginIteration(snapshot.iteration);
+    setView('running');
     try {
-      const frames = await extractFrames(url, stamps, (done, total) => {
-        setAnalysis((current) => ({ ...current, framesDone: done, framesTotal: total }));
-      });
-      setAnalysis((current) => ({ ...current, state: 'stitching' }));
-      const sheet = await buildContactSheet(frames);
-      setAnalysis((current) => ({ ...current, state: 'reading', sheet }));
-      const verdict = await analyzeContactSheet({
-        dataUrl: sheet.dataUrl,
-        frameUrls: frames.map((frame) => frame.url),
-      });
-      setAnalysis((current) => ({ ...current, state: 'done', verdict }));
-    } catch (error) {
-      setAnalysis((current) => ({ ...current, state: 'failed', error: message(error) }));
+      finish(await buildLoop(currentSpec, ctx, snapshot.iteration, history));
+    } catch (runError) {
+      const message = errorMessage(runError);
+      const running = tracker.snapshot().steps.find((step) => step.state === 'running');
+      if (running) tracker.fail(running.id, message);
+      setError(message);
+    } finally {
+      runningRef.current = false;
     }
-  }, []);
+  }, [buildLoop, finish, history, snapshot.iteration, startRun, tracker, url]);
 
-  // The review runs itself the moment a file exists, once per render.
-  const analysedUrl = useRef('');
-  useEffect(() => {
-    if (!videoUrl || !script || analysedUrl.current === videoUrl) return;
-    analysedUrl.current = videoUrl;
-    runAnalysis(videoUrl, script);
-  }, [videoUrl, script, runAnalysis]);
+  const restart = useCallback(() => {
+    abortRef.current?.abort();
+    gateRef.current = null;
+    runningRef.current = false;
+    tracker.reset();
+    setView('input');
+    setError('');
+    setOutcome(null);
+  }, [tracker]);
 
-  const regenerate = useCallback(() => {
-    // Screen 1, every field exactly as the creator left it.
-    setScript(null);
-    setVideoUrl('');
-    setRenderPhase('');
-    setRenderError('');
-    setAnalysis(IDLE_ANALYSIS);
-    analysedUrl.current = '';
-    setScreen('intake');
-  }, []);
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
+  const stageIndex = stageIndexFor(view);
 
   return (
-    <div
-      style={{
-        minHeight: '100%',
-        padding: '26px 28px 40px',
-        color: TEXT,
-        fontFamily: 'var(--space-font-body, Inter, system-ui, sans-serif)',
-      }}
+    <AppShell
+      title="Product Launch"
+      eyebrow="Launch film agent"
+      subtitle="Opus decides the film. This app executes it — reads your page, designs competing concepts, builds the winner, then watches it back and fixes what it got wrong."
+      maxWidth={1040}
+      watermark={false}
+      icon={(
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 38,
+            height: 38,
+            borderRadius: 12,
+            background: 'linear-gradient(140deg, rgba(200,146,10,0.22) 0%, rgba(224,163,58,0.14) 100%)',
+            border: '1px solid ' + BORDER,
+          }}
+        >
+          <Rocket size={19} style={{ color: ACCENT }} />
+        </span>
+      )}
+      actions={context ? <Badge variant="cyan">{context.product_name}</Badge> : null}
+      contentStyle={{ color: TEXT }}
     >
       <LaunchKeyframes />
 
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 18,
-          flexWrap: 'wrap',
-          paddingBottom: 20,
-          marginBottom: 26,
-          borderBottom: '1px solid ' + BORDER,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-          <Rocket size={19} style={{ color: ACCENT }} />
-          <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em' }}>Product Launch</span>
-          <span style={{ fontSize: 12.5, color: MUTED }}>Kinetic launch films, written by Claude Opus 5</span>
-        </div>
-        <StepRail steps={RAIL} activeIndex={SCREEN_INDEX[screen]} />
-      </header>
+      {/* Where the creator is in the launch, kept visible on every screen. */}
+      <div style={{ marginBottom: 28 }}>
+        <Stepper steps={LAUNCH_STAGES.map((stage) => stage.label)} current={stageIndex} />
+        <ProgressBar
+          value={(stageIndex / (LAUNCH_STAGES.length - 1)) * 100}
+          style={{ marginTop: 16 }}
+        />
+      </div>
 
-      {screen === 'intake' ? (
-        <IntakeScreen
-          value={input}
-          onChange={setInput}
-          onGenerate={() => runGeneration(input)}
-          error={genError}
+      {view === 'input' ? (
+        <section style={{ maxWidth: 620, margin: '2vh auto 0', textAlign: 'center' }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: 40,
+              fontWeight: 900,
+              letterSpacing: '-0.045em',
+              lineHeight: 1.05,
+              color: TEXT,
+            }}
+          >
+            Paste a URL. Get a launch film.
+          </h1>
+          <p style={{ margin: '16px auto 34px', maxWidth: 480, fontSize: 14.5, lineHeight: 1.6, color: MUTED }}>
+            The agent reads your product page, designs two or three competing films, builds the one
+            it believes in, renders it, then watches it back and fixes what it got wrong.
+          </p>
+
+          <input
+            type="url"
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter' && ready) startRun(url); }}
+            placeholder="https://your-product.com"
+            spellCheck={false}
+            autoComplete="url"
+            style={{ ...INPUT_STYLE, fontSize: 17, padding: '17px 20px', textAlign: 'center' }}
+          />
+
+          <div style={{ marginTop: 18 }}>
+            <PrimaryButton onClick={() => startRun(url)} disabled={!ready} width="100%">
+              Generate SaaS Launch Film <ArrowRight size={16} />
+            </PrimaryButton>
+          </div>
+
+          <p style={{ margin: '22px 0 0', fontSize: 12, lineHeight: 1.6, color: MUTED }}>
+            {'1920x1080 · 30fps · 15-30 seconds · up to '
+              + String(MAX_ITERATIONS) + ' critique-driven iterations'}
+          </p>
+
+          <ErrorNote>{error}</ErrorNote>
+        </section>
+      ) : null}
+
+      {view === 'running' ? (
+        <>
+          <PipelineProgress
+            steps={snapshot.steps}
+            iteration={snapshot.iteration}
+            startedAt={snapshot.startedAt}
+            onRetry={retry}
+          />
+          {error ? (
+            <div style={{ maxWidth: 760, margin: '18px auto 0' }}>
+              <ErrorNote>{error}</ErrorNote>
+              <div style={{ marginTop: 14 }}>
+                <PrimaryButton onClick={restart}>Start over</PrimaryButton>
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {view === 'concepts' ? (
+        <ConceptSelector audits={audits} onConfirm={(chosen) => closeGate(chosen)} />
+      ) : null}
+
+      {view === 'critic' && critic ? (
+        <CriticReport
+          critic={critic}
+          decision={decision}
+          iteration={snapshot.iteration}
+          maxIterations={MAX_ITERATIONS}
+          onRevise={() => closeGate(true)}
+          onShip={() => closeGate(false)}
         />
       ) : null}
 
-      {screen === 'generating' ? (
-        <GenerateScreen
-          phases={phases}
-          startedAt={startedAt}
-          script={script}
-          error={genError}
-          onBack={() => setScreen('intake')}
-          onRetry={() => runGeneration(input)}
-          onContinue={() => setScreen('composition')}
+      {view === 'result' && outcome && spec ? (
+        <VideoResult
+          videoUrl={outcome.videoUrl}
+          spec={spec}
+          critic={outcome.critic}
+          frameCount={outcome.frameCount}
+          stopReason={outcome.stopReason}
+          history={history}
+          filmCode={outcome.filmCode}
+          codeSource={outcome.codeSource}
+          onRestart={restart}
         />
       ) : null}
-
-      {screen === 'composition' && script ? (
-        <ComposeScreen
-          script={script}
-          srcDoc={previewDoc}
-          screenshotUrl={screenshotUrl}
-          rendering={rendering}
-          renderPhase={renderPhase}
-          renderElapsedMs={renderElapsedMs}
-          renderError={renderError}
-          onRender={runRender}
-          onBack={() => setScreen('generating')}
-        />
-      ) : null}
-
-      {screen === 'review' && script && videoUrl ? (
-        <ReviewScreen
-          videoUrl={videoUrl}
-          script={script}
-          analysis={analysis}
-          onRegenerate={regenerate}
-          onBackToComposition={() => setScreen('composition')}
-          onRetryAnalysis={() => runAnalysis(videoUrl, script)}
-        />
-      ) : null}
-    </div>
+    </AppShell>
   );
 }

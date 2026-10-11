@@ -26,7 +26,7 @@ export default function StoryboardReview(props: {
 
   const total = props.scenes.reduce((sum, scene) => sum + (scene.durationSec || 0), 0);
 
-  return <div className="rounded-xl border border-[color-mix(in_srgb,#8b5cf6_34%,transparent)] bg-[color-mix(in_srgb,#8b5cf6_7%,transparent)] p-4">
+  return <div className="rounded-xl border border-[color-mix(in_srgb,#C8920A_34%,transparent)] bg-[color-mix(in_srgb,#C8920A_7%,transparent)] p-4">
     <div className="flex flex-wrap items-center gap-2">
       <h3 className="text-sm font-semibold text-[var(--space-text-primary)]">
         HeyGen&rsquo;s plan &mdash; {props.scenes.length} scene{props.scenes.length === 1 ? '' : 's'}

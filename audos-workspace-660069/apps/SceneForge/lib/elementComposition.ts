@@ -429,8 +429,19 @@ export function validateElementComposition(comp: ElementComposition): Compositio
   // Z-order sanity: two overlapping focus-band elements on one z read as accidental stacking.
   const zs = comp.elements.map((el) => el.z);
   if (new Set(zs).size < zs.length) warnings.push('Two or more elements share a z-order — make stacking explicit.');
-  // Focus: at most one element should carry the viewer's focus at a time.
-  if (comp.elements.filter((el) => el.focus).length > 3) warnings.push('More than three focus elements — the viewer cannot know where to look.');
+  // THE VISUAL BUDGET, in the element model's own terms. A composition groups
+  // many elements into one visual — a laptop and its screen are one thing — so
+  // the budget is enforced on FOCUS rather than on element count: exactly one
+  // element is the thing the viewer is meant to look at, and only one at a time
+  // (lib/visualBudget states the same rule for the directed-layer model).
+  const focused = comp.elements.filter((el) => el.focus);
+  if (focused.length > 1) {
+    const overlapping = focused.some((el, index) => focused.slice(index + 1).some((other) => el.start < other.end && other.start < el.end));
+    const named = focused.map((el) => el.id).join(', ');
+    warnings.push(overlapping
+      ? `${focused.length} elements claim the viewer's focus at the same time (${named}). ONE dominant visual + ONE supporting layer — more than two competing layers is a production error, not a creative choice.`
+      : `${focused.length} elements claim focus (${named}). They do not overlap in time, so the scene still reads, but each handover has to be deliberate rather than accidental.`);
+  }
   return { errors, warnings };
 }
 

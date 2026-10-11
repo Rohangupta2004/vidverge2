@@ -12,6 +12,8 @@ export interface VidvergeHandoff {
   prompt?: string;
   attachment?: VidvergeAttachment | null;
   projectId?: string | number;
+  /** Optional named surface inside a multi-surface studio. */
+  surface?: 'director';
   /** Native Audos video integration slug for the target studio. */
   videoIntegration?: string;
   /** Model id within that integration (Group A string, kling-*, runway id, etc.). */

@@ -1,6 +1,6 @@
 /**
  * GradientOrb — the animated Vidverge agent brand icon.
- * A slowly rotating purple→pink→gold conic gradient sphere with a gentle
+ * A slowly rotating amber→pink→gold conic gradient sphere with a gentle
  * breathe/pulse. `thinking` adds a fast spinning dashed ring around the orb;
  * `idle` slows the breathe right down.
  */
@@ -20,7 +20,7 @@ const ORB_CSS = `
 @keyframes vvOrbRing { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .vv-orb-pulse { animation: vvOrbPulse 3s ease-in-out infinite; }
 .vv-orb-pulse-idle { animation: vvOrbPulse 5.5s ease-in-out infinite; }
-.vv-orb-core { border-radius: 50%; animation: vvOrbSpin 7s linear infinite; background: conic-gradient(from 20deg, #7C3AED, #EC4899, #F59E0B, #EC4899, #7C3AED); }
+.vv-orb-core { border-radius: 50%; animation: vvOrbSpin 7s linear infinite; background: conic-gradient(from 20deg, #D97706, #EC4899, #F59E0B, #EC4899, #D97706); }
 .vv-orb-ring { position: absolute; inset: -17%; animation: vvOrbRing 1.4s linear infinite; }
 `;
 
@@ -49,7 +49,7 @@ export function GradientOrb({ size = 'md', thinking = false, idle = false, onCli
           <circle cx="24" cy="24" r="22" stroke="url(#vvOrbRingGrad)" strokeWidth="2.4" strokeDasharray="9 7" strokeLinecap="round" />
           <defs>
             <linearGradient id="vvOrbRingGrad" x1="0" y1="0" x2="48" y2="48">
-              <stop offset="0" stopColor="#7C3AED" />
+              <stop offset="0" stopColor="#D97706" />
               <stop offset="0.5" stopColor="#EC4899" />
               <stop offset="1" stopColor="#F59E0B" />
             </linearGradient>

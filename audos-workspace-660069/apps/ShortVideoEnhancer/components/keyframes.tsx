@@ -115,7 +115,7 @@ function ChannelGraph({ g, channel, keys, playhead }: {
             }} />
         );
       })}
-      <div style={{ position: 'absolute', top: 0, bottom: 0, left: headAt + '%', width: 1, background: 'rgba(255,255,255,0.5)' }} />
+      <div style={{ position: 'absolute', top: 0, bottom: 0, left: headAt + '%', width: 1, background: 'rgba(120,80,0,0.45)' }} />
     </div>
   );
 }

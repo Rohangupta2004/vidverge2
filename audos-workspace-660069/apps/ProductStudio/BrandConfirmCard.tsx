@@ -32,8 +32,8 @@ const labelStyle: React.CSSProperties = {
 };
 
 const COLOR_ROLES: { key: keyof NonNullable<BrandKit['colors']> & string; label: string; fallback: string }[] = [
-  { key: 'primary', label: 'Primary', fallback: '#6d5efc' },
-  { key: 'secondary', label: 'Secondary', fallback: '#8b7dfc' },
+  { key: 'primary', label: 'Primary', fallback: '#fcc25e' },
+  { key: 'secondary', label: 'Secondary', fallback: '#fccd7d' },
   { key: 'accent', label: 'Accent', fallback: '#22d3ee' },
   { key: 'background', label: 'Background', fallback: '#090b14' },
   { key: 'text', label: 'Text', fallback: '#f8fafc' },
@@ -82,8 +82,8 @@ export default function BrandConfirmCard({ capture, busy, onConfirm, onCancel }:
   const confirm = () => {
     const kit: BrandKit = {
       colors: {
-        primary: hex6(colors.primary, '#6d5efc'),
-        secondary: hex6(colors.secondary, '#8b7dfc'),
+        primary: hex6(colors.primary, '#fcc25e'),
+        secondary: hex6(colors.secondary, '#fccd7d'),
         accent: hex6(colors.accent, '#22d3ee'),
         background: hex6(colors.background, '#090b14'),
         text: hex6(colors.text, '#f8fafc'),
@@ -102,7 +102,7 @@ export default function BrandConfirmCard({ capture, busy, onConfirm, onCancel }:
   };
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Confirm your brand" style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(4,8,18,0.66)' }}>
+    <div role="dialog" aria-modal="true" aria-label="Confirm your brand" style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(26,16,0,0.35)' }}>
       <div className="ps-fade-up" style={{ width: 'min(560px, 94vw)', maxHeight: '92vh', overflowY: 'auto', borderRadius: 18, border: `1px solid ${S.borderStrong}`, background: S.panelStrong, padding: 'clamp(16px, 3vw, 24px)', boxSizing: 'border-box' }} data-testid="brand-confirm-card">
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
           <span aria-hidden="true" style={{ display: 'inline-flex', width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', color: S.brand, background: 'var(--space-surface-accent-soft)', flexShrink: 0 }}>

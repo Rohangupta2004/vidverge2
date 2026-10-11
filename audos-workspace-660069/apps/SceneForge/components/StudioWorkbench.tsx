@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import {
   AlertTriangle, CheckCircle2, ChevronRight, Circle, Clapperboard, Clock, Download, FileText,
-  Film, Layers, Loader2, MessageSquareText, Mic, Music, Palette, Pencil, Play, Plus, RefreshCw, Search,
+  Film, Layers, MessageSquareText, Mic, Music, Palette, Pencil, Play, Plus, RefreshCw, Search,
   Settings, Sparkles, Trash2, Upload, User, Volume2, VolumeX, Wand2, X, XCircle,
 } from 'lucide-react';
 import type { Project, Scene } from '../lib/supabase';
@@ -30,12 +30,14 @@ import type { AudioConfig, AudioMode, StudioConfig, SidebarTab, TransitionStyle 
 import { emptySceneAudio, lineFor, lipsyncState, overrunningScenes, scenesNeedingLipsync, scenesNeedingVoice, voicedScenes, voiceoverState } from '../lib/sceneAudio';
 import { MODEL_NOTE, type ElevenVoice, type VoiceSettings } from '../lib/elevenLabs';
 import ElevenVoicePicker from './ElevenVoicePicker';
+import { rememberNarrationVoice, resolveNarrationVoiceId, setVoicePipeline, voicePipeline } from '../lib/voicePipeline';
 import { brollSuggestions, visionOf } from '../lib/sceneVision';
 import { BROLL_POSITIONS, brollOf, defaultBrollFor, searchPexelsVideos, sceneWindowSec, uploadBrollClip, type BrollClip, type BrollPosition, type PexelsClip } from '../lib/broll';
 import { isVideoUrl, sceneSettled } from '../lib/sceneState';
 import { KIND_LABELS, visualKindOf } from '../lib/effects';
 import { sortAvatars, sortVoices, withIndiaSeedVoices } from '../lib/heygenCatalog';
 import VideoIntegrationPicker from '../../../components/VideoIntegrationPicker';
+import VergeLoader from '../../../components/VergeLoader';
 import { defaultModelForIntegration, integrationForEngineId, type VideoIntegrationId } from '../../../lib/videoIntegrations';
 
 /** Live state of a Generate All run, so the bar can say "Generating scene 2 of 4". */
@@ -115,7 +117,9 @@ export interface StudioWorkbenchProps {
   charactersLoading: boolean;
   charactersError: string;
   characterNote: string;
-  onGenerateAvatar: (options: { avatar_id: string; voice_id: string }) => void;
+  /** `voice_engine` and `eleven_voice_id` choose which pipeline narrates this
+   * presenter master — see lib/voicePipeline. */
+  onGenerateAvatar: (options: { avatar_id: string; voice_id: string; voice_engine: 'elevenlabs' | 'heygen'; eleven_voice_id: string }) => void;
   onUploadCharacterPhoto: (file: File) => void;
   onOpenLibrary: () => void;
   onOpenSettings: () => void;
@@ -136,7 +140,7 @@ function statusOf(scene: Scene, generatingSceneId: string | null): SceneStatus {
 }
 
 function StatusIcon({ status }: { status: SceneStatus }) {
-  if (status === 'generating') return <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--sf-info)]" />;
+  if (status === 'generating') return <VergeLoader size={30} label="Working" />;
   if (status === 'done') return <CheckCircle2 className="h-3.5 w-3.5 text-[var(--sf-ok)]" />;
   if (status === 'error') return <XCircle className="h-3.5 w-3.5 text-[var(--sf-bad)]" />;
   return <Circle className="h-3.5 w-3.5 text-[var(--sf-dim)]" />;
@@ -161,17 +165,40 @@ function Pill({ children, tone = 'muted' }: { children: ReactNode; tone?: 'muted
   return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${toneClass}`}>{children}</span>;
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+/**
+ * A labelled control.
+ *
+ * `error` puts the reason UNDER the field that caused it, in red, beside the red
+ * border the control itself takes on — a toast that disappears leaves the
+ * customer staring at a form with no idea which field is wrong.
+ */
+function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string; children: ReactNode }) {
   return <label className="block">
-    <span className="block text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--sf-dim)]">{label}</span>
+    <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[.14em] text-[var(--sf-dim)]">{label}</span>
     {children}
-    {hint ? <span className="mt-1 block text-[11px] leading-relaxed text-[var(--sf-dim)]">{hint}</span> : null}
+    {error
+      ? <span role="alert" className="mt-1.5 block text-[11px] leading-relaxed text-[var(--sf-bad)]">{error}</span>
+      : hint ? <span className="mt-1.5 block text-[11px] leading-relaxed text-[var(--sf-dim)]">{hint}</span> : null}
   </label>;
 }
 
-const inputClass = 'mt-1.5 w-full rounded-lg border border-[var(--sf-line)] bg-[var(--sf-sunken)] px-3 py-2 text-sm text-[var(--sf-text)] outline-none placeholder:text-[var(--sf-dim)] focus:border-[var(--sf-accent)]';
-const buttonClass = 'inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--sf-line)] px-3 py-2 text-xs font-semibold text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-chip)] disabled:cursor-not-allowed disabled:opacity-40';
-const primaryClass = 'inline-flex items-center justify-center gap-1.5 rounded-lg bg-[var(--sf-accent)] px-3.5 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40';
+// ONE geometry for every control on this surface: a 44px minimum height, the
+// same radius and padding as the studio's `.st-field` (styles/fieldStyles), and
+// a focus RING rather than a border that merely changes colour by a shade.
+// Mismatched heights down a column of controls is what made these panels read as
+// assembled rather than designed.
+//
+// `min-h-11` rather than a fixed height on purpose: the same class dresses
+// single-line inputs, selects AND textareas, and a textarea has to be free to
+// grow to its `rows`.
+const FIELD_BASE = 'w-full rounded-xl border bg-[var(--sf-sunken)] px-3.5 py-2.5 text-sm leading-normal text-[var(--sf-text)] outline-none transition-[border-color,box-shadow] placeholder:text-[var(--sf-dim)] disabled:cursor-not-allowed disabled:opacity-55';
+const FIELD_RESTING = 'border-[var(--sf-line)] hover:border-[var(--sf-dim)] focus:border-[var(--sf-accent)] focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--sf-accent)_40%,transparent)]';
+const FIELD_INVALID = 'border-[var(--sf-bad)] focus:border-[var(--sf-bad)] focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--sf-bad)_38%,transparent)]';
+const inputClass = `min-h-11 ${FIELD_BASE} ${FIELD_RESTING}`;
+/** The same control, in its error state. Pair it with `Field`'s `error`. */
+const invalidInputClass = `min-h-11 ${FIELD_BASE} ${FIELD_INVALID}`;
+const buttonClass = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--sf-line)] px-3.5 text-xs font-semibold text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-chip)] disabled:cursor-not-allowed disabled:opacity-40';
+const primaryClass = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[var(--sf-accent)] px-4 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40';
 
 // --------------------------------------------------------------------------
 // Scene card
@@ -180,7 +207,9 @@ const primaryClass = 'inline-flex items-center justify-center gap-1.5 rounded-lg
 function SceneThumb({ scene, status }: { scene: Scene; status: SceneStatus }) {
   const url = String(scene.render_url || '');
   if (status === 'generating' || (!url && status === 'pending')) {
-    return <div className={`sf-shimmer h-full w-full ${status === 'generating' ? '' : 'opacity-50'}`} />;
+    return status === 'generating'
+      ? <div className="flex h-full w-full items-center justify-center bg-[var(--sf-sunken)]"><VergeLoader size={64} label="Generating this scene" /></div>
+      : <div className="h-full w-full bg-[var(--sf-sunken)] opacity-50" />;
   }
   if (!url) return <div className="flex h-full w-full items-center justify-center bg-[var(--sf-sunken)]"><Film className="h-4 w-4 text-[var(--sf-dim)]" /></div>;
   if (isVideoUrl(url)) {
@@ -280,9 +309,9 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
   return <div className="sf-studio flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--sf-bg)] text-[var(--sf-text)]">
     <style>{`
       .sf-studio {
-        --sf-bg: color-mix(in srgb, var(--space-surface-bg) 86%, #05060d);
-        --sf-panel: color-mix(in srgb, var(--space-surface-card) 88%, #06070f);
-        --sf-sunken: color-mix(in srgb, var(--space-surface-panel) 72%, #04050b);
+        --sf-bg: color-mix(in srgb, var(--space-surface-bg) 86%, #FFF3D6);
+        --sf-panel: color-mix(in srgb, var(--space-surface-card) 88%, #FFFFFF);
+        --sf-sunken: color-mix(in srgb, var(--space-surface-panel) 72%, #FFFAEB);
         --sf-chip: color-mix(in srgb, var(--space-text-primary) 7%, transparent);
         --sf-line: color-mix(in srgb, var(--space-border-default) 80%, transparent);
         --sf-line-strong: var(--space-border-strong);
@@ -330,7 +359,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
               <Sparkles className="h-3.5 w-3.5" />Generate All
             </button>}
         <button onClick={onExport} disabled={exportBusy || !ordered.length} className={buttonClass} title="Render the finished film: every clip plus the title card, lower thirds, transitions, B-roll and audio, in one server-side pass">
-          {exportBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Film className="h-3.5 w-3.5" />}Export
+          {exportBusy ? <VergeLoader size={28} label="Exporting" /> : <Film className="h-3.5 w-3.5" />}Export
         </button>
         {finalVideoUrl ? <button onClick={props.onDownload} className={buttonClass} title="Save the finished MP4"><Download className="h-3.5 w-3.5" />MP4</button> : null}
         <button aria-label="Assistant" title="Ask the assistant" onClick={props.onOpenAssistant} className="rounded-lg border border-[var(--sf-line)] p-2 hover:bg-[var(--sf-chip)]"><MessageSquareText className="h-4 w-4" /></button>
@@ -349,7 +378,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
         <button aria-label="Dismiss" onClick={onDismissError} className="shrink-0 rounded p-0.5 hover:bg-[var(--sf-chip)]"><X className="h-3.5 w-3.5" /></button>
       </div> : null}
       {progress.active ? <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--sf-dim)]">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--sf-info)]" />
+        <VergeLoader size={30} label="Working" />
         <strong className="font-semibold text-[var(--sf-text)]">
           {progress.currentIndex
             ? `Generating scene ${progress.currentIndex} of ${progress.total}`
@@ -359,7 +388,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
         <span className="min-w-0 flex-1 truncate">{progress.message || note}</span>
       </div> : null}
       {!progress.active && exportBusy ? <div className="mt-1 flex items-center gap-2 text-xs text-[var(--sf-dim)]">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--sf-info)]" />
+        <VergeLoader size={30} label="Working" />
         <span className="min-w-0 flex-1 truncate">{exportMessage || 'Rendering the final MP4…'}</span>
         <span className="h-1.5 w-28 overflow-hidden rounded-full bg-[var(--sf-line)]"><span className="block h-full rounded-full bg-[var(--sf-accent)] transition-all" style={{ width: `${Math.max(3, Math.min(100, exportProgress))}%` }} /></span>
       </div> : null}
@@ -429,7 +458,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
       role="menu"
       style={{ left: menu.x, top: menu.y }}
       onClick={(event) => event.stopPropagation()}
-      className="fixed z-50 w-[200px] overflow-hidden rounded-xl border border-[var(--sf-line)] bg-[var(--sf-panel)] py-1 shadow-[0_18px_50px_rgba(0,0,0,0.5)]"
+      className="fixed z-50 w-[200px] overflow-hidden rounded-xl border border-[var(--sf-line)] bg-[var(--sf-panel)] py-1 shadow-[0_18px_50px_rgba(120,80,0,0.18)]"
     >
       <button role="menuitem" onClick={() => { onRegenerateScene(menu.scene); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--sf-chip)]"><RefreshCw className="h-3.5 w-3.5" />Regenerate this scene</button>
       <button role="menuitem" onClick={() => { setEditing({ scene: menu.scene, text: String(menu.scene.description || '') }); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--sf-chip)]"><Pencil className="h-3.5 w-3.5" />Edit script</button>
@@ -457,7 +486,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
     />
 
     {/* ---------------- SCENE SCRIPT EDITOR ---------------- */}
-    {editing ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(3,5,12,0.7)] p-4" onClick={() => setEditing(null)}>
+    {editing ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(26,16,0,0.35)] p-4" onClick={() => setEditing(null)}>
       <div onClick={(event) => event.stopPropagation()} className="w-full max-w-lg rounded-2xl border border-[var(--sf-line)] bg-[var(--sf-panel)] p-5">
         <h3 className="text-sm font-bold">Scene {editing.scene.scene_index} script</h3>
         <p className="mt-1 text-xs text-[var(--sf-dim)]">This text is what the provider films. Saving marks the scene for regeneration.</p>
@@ -466,8 +495,15 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
           rows={5}
           value={editing.text}
           onChange={(event) => setEditing({ scene: editing.scene, text: event.target.value })}
-          className={inputClass}
+          placeholder="What the viewer sees in this shot — subject, setting, action, camera"
+          aria-invalid={editing.text.trim() ? undefined : true}
+          className={`mt-3 ${editing.text.trim() ? inputClass : invalidInputClass}`}
         />
+        {/* Save is disabled on an empty script, so the reason sits on the field
+            instead of leaving a dead button with no explanation beside it. */}
+        {editing.text.trim() ? null : <span role="alert" className="mt-1.5 block text-[11px] leading-relaxed text-[var(--sf-bad)]">
+          A scene needs a script before it can be filmed — describe what happens in this shot.
+        </span>}
         <div className="mt-3 flex justify-end gap-2">
           <button onClick={() => setEditing(null)} className={buttonClass}>Cancel</button>
           <button onClick={() => { onEditSceneScript(editing.scene, editing.text.trim()); setEditing(null); }} disabled={!editing.text.trim()} className={primaryClass}>Save scene script</button>
@@ -518,11 +554,11 @@ function ProviderSelect({ providers, loading, value, onChange, onRefresh }: {
 
   return <div className="relative" onClick={(event) => event.stopPropagation()}>
     <button onClick={() => setOpen((value) => !value)} className={buttonClass}>
-      {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span className={`h-1.5 w-1.5 rounded-full ${current?.state === 'available' ? 'bg-[var(--sf-ok)]' : current?.state === 'unconfigured' ? 'bg-[var(--sf-bad)]' : 'bg-[var(--sf-warn)]'}`} />}
+      {loading ? <VergeLoader size={28} label="Loading" /> : <span className={`h-1.5 w-1.5 rounded-full ${current?.state === 'available' ? 'bg-[var(--sf-ok)]' : current?.state === 'unconfigured' ? 'bg-[var(--sf-bad)]' : 'bg-[var(--sf-warn)]'}`} />}
       <span className="max-w-[140px] truncate">{current?.label || 'Choose provider'}</span>
       <ChevronRight className="h-3 w-3 rotate-90" />
     </button>
-    {open ? <div className="absolute right-0 top-full z-50 mt-1.5 w-[320px] overflow-hidden rounded-xl border border-[var(--sf-line)] bg-[var(--sf-panel)] py-1 shadow-[0_18px_50px_rgba(0,0,0,0.5)]">
+    {open ? <div className="absolute right-0 top-full z-50 mt-1.5 w-[320px] overflow-hidden rounded-xl border border-[var(--sf-line)] bg-[var(--sf-panel)] py-1 shadow-[0_18px_50px_rgba(120,80,0,0.18)]">
       <div className="flex items-center justify-between px-3 py-1.5">
         <span className="text-[10px] font-bold uppercase tracking-[.16em] text-[var(--sf-dim)]">Scene clips</span>
         <button onClick={onRefresh} className="inline-flex items-center gap-1 text-[10px] text-[var(--sf-dim)] hover:text-[var(--sf-text)]"><RefreshCw className="h-3 w-3" />Recheck</button>
@@ -625,11 +661,29 @@ function ScriptPanel({ project, config, onConfig, onSaveScript, onRewriteScript,
 // Character
 // --------------------------------------------------------------------------
 
-function CharacterPanel({ project, config, onConfig, avatars, voices, charactersLoading, charactersError, characterNote, onGenerateAvatar, onUploadCharacterPhoto, providers, busy }: PanelProps) {
+function CharacterPanel({ project, config, onConfig, avatars, voices, charactersLoading, charactersError, characterNote, onGenerateAvatar, onUploadCharacterPhoto, providers, busy, elevenVoices, elevenVoicesLoading, elevenVoicesError }: PanelProps) {
   const [query, setQuery] = useState('');
   const [avatarId, setAvatarId] = useState('');
   const [voiceId, setVoiceId] = useState('');
+  // ElevenLabs narrates and HeyGen lip-syncs the presenter to that finished
+  // track; the HeyGen voice below is only what a render falls back to. The
+  // switch is the shared one, so flipping it here also debugs the wizard.
+  const [voiceEngine, setVoiceEngine] = useState<'elevenlabs' | 'heygen'>(() => (voicePipeline() === 'heygen_tts' ? 'heygen' : 'elevenlabs'));
+  const [elevenVoiceId, setElevenVoiceId] = useState('');
   const photoRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (elevenVoiceId || !elevenVoices.length) return;
+    let cancelled = false;
+    void resolveNarrationVoiceId().catch(() => '').then((preferred) => {
+      if (cancelled) return;
+      setElevenVoiceId((current) => current
+        || (elevenVoices.some((voice) => voice.id === preferred) ? preferred : '')
+        || (elevenVoices.find((voice) => voice.indian) || elevenVoices[0])?.id
+        || '');
+    });
+    return () => { cancelled = true; };
+  }, [elevenVoices, elevenVoiceId]);
 
   const avatarViews = useMemo(() => sortAvatars(avatars), [avatars]);
   const voiceViews = useMemo(() => sortVoices(withIndiaSeedVoices(voices)), [voices]);
@@ -682,7 +736,7 @@ function CharacterPanel({ project, config, onConfig, avatars, voices, characters
       {charactersError ? <p className="mt-2 text-[11px] text-[var(--sf-bad)]">{charactersError}</p> : null}
       <div className="mt-2 grid max-h-[220px] grid-cols-3 gap-2 overflow-y-auto">
         {charactersLoading && !filtered.length
-          ? [0, 1, 2, 3, 4, 5].map((index) => <div key={index} className="sf-shimmer aspect-square rounded-lg" />)
+          ? <div className="col-span-3 flex justify-center py-4"><VergeLoader size={96} caption="Loading characters" /></div>
           : filtered.slice(0, 48).map((view) => <button
               key={view.id}
               onClick={() => setAvatarId(view.id)}
@@ -696,7 +750,26 @@ function CharacterPanel({ project, config, onConfig, avatars, voices, characters
       </div>
     </div>
 
-    <Field label="Voice">
+    <Field label="Narration voice" hint="ElevenLabs narrates the script first and HeyGen lip-syncs the presenter to that finished track, so HeyGen's own text-to-speech is never heard. Switch engines only to compare the two.">
+      <div className="mt-1.5 flex gap-1.5">
+        {([{ id: 'elevenlabs', label: 'ElevenLabs' }, { id: 'heygen', label: 'HeyGen TTS' }] as const).map((option) => <button
+          key={option.id}
+          onClick={() => { setVoiceEngine(option.id); setVoicePipeline(option.id === 'heygen' ? 'heygen_tts' : 'elevenlabs_heygen'); }}
+          className={`flex-1 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${voiceEngine === option.id ? 'border-[var(--sf-accent)] bg-[color-mix(in_srgb,var(--sf-accent)_16%,transparent)]' : 'border-[var(--sf-line)] hover:bg-[var(--sf-chip)]'}`}
+        >{option.label}</button>)}
+      </div>
+    </Field>
+
+    {voiceEngine === 'elevenlabs' ? <ElevenVoicePicker
+      voices={elevenVoices}
+      value={elevenVoiceId}
+      loading={elevenVoicesLoading}
+      error={elevenVoicesError}
+      listHeightClass="max-h-56"
+      onChange={(id) => { setElevenVoiceId(id); rememberNarrationVoice(id); }}
+    /> : null}
+
+    <Field label={voiceEngine === 'elevenlabs' ? 'Fallback HeyGen voice' : 'HeyGen voice'} hint={voiceEngine === 'elevenlabs' ? 'Used only if ElevenLabs cannot be reached, or if this presenter is missing from the HeyGen catalog that accepts a ready-made audio track.' : undefined}>
       <select value={voiceId} onChange={(event) => setVoiceId(event.target.value)} className={inputClass}>
         <option value="">Choose a voice</option>
         {voiceViews.slice(0, 200).map((view) => <option key={view.id} value={view.id}>{view.name} · {view.language}</option>)}
@@ -704,8 +777,8 @@ function CharacterPanel({ project, config, onConfig, avatars, voices, characters
     </Field>
 
     <button
-      onClick={() => onGenerateAvatar({ avatar_id: avatarId, voice_id: voiceId })}
-      disabled={busy || blocked || !avatarId || !voiceId || !project.script}
+      onClick={() => onGenerateAvatar({ avatar_id: avatarId, voice_id: voiceId, voice_engine: voiceEngine, eleven_voice_id: elevenVoiceId })}
+      disabled={busy || blocked || !avatarId || !project.script || (voiceEngine === 'elevenlabs' ? !elevenVoiceId : !voiceId)}
       className={`${primaryClass} w-full`}
     ><Clapperboard className="h-3.5 w-3.5" />{project.heygen_video_url ? 'Re-render presenter' : 'Render presenter'}</button>
     {!project.script ? <p className="text-[11px] text-[var(--sf-dim)]">Apply a script first — the presenter reads it.</p> : null}
@@ -790,7 +863,7 @@ function StylePanel({ project, config, onConfig, onAutoGraphics, autoGraphicsBus
     </div>
 
     <button onClick={onAutoGraphics} disabled={autoGraphicsBusy} className={`${buttonClass} w-full`}>
-      {autoGraphicsBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}Auto-apply graphics
+      {autoGraphicsBusy ? <VergeLoader size={28} label="Applying graphics" /> : <Wand2 className="h-3.5 w-3.5" />}Auto-apply graphics
     </button>
     <p className="text-[11px] leading-relaxed text-[var(--sf-dim)]">{autoGraphicsNote || 'Writes a lower third and a subject callout on every analyzed scene, using what Gemini Vision actually saw in the frame. Hand-made overlays are kept.'}</p>
   </>;
@@ -903,7 +976,7 @@ function AudioPanel({ project, scenes, config, onConfig, providers, avatars, cha
         </div>
         <div className="mt-2 grid max-h-[200px] grid-cols-3 gap-2 overflow-y-auto">
           {charactersLoading && !filteredAvatars.length
-            ? [0, 1, 2, 3, 4, 5].map((index) => <div key={index} className="sf-shimmer aspect-square rounded-lg" />)
+            ? <div className="col-span-3 flex justify-center py-4"><VergeLoader size={96} caption="Loading characters" /></div>
             : filteredAvatars.map((view) => <button
                 key={view.id}
                 onClick={() => patchAudio({ lipsync_avatar_id: view.id })}
@@ -962,7 +1035,7 @@ function AudioPanel({ project, scenes, config, onConfig, providers, avatars, cha
 
       <div className="flex gap-2">
         <button onClick={onNarrateScenes} disabled={audioBusy || busy || !audio.voice_id || !needVoice.length} className={`${primaryClass} flex-1`}>
-          {audioBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Volume2 className="h-3.5 w-3.5" />}
+          {audioBusy ? <VergeLoader size={28} tone="ink" label="Narrating scenes" /> : <Volume2 className="h-3.5 w-3.5" />}
           {needVoice.length ? `Narrate ${plural(needVoice.length, 'scene')}` : rows.length ? 'All lines narrated' : 'Narrate scenes'}
         </button>
         {lipsync ? <button onClick={onLipsyncScenes} disabled={audioBusy || busy || heygenBlocked || !audio.lipsync_avatar_id || !needLips.length} className={buttonClass} title={!audio.lipsync_avatar_id ? 'Pick a lip-sync presenter first' : needVoice.length ? 'Narrate every line before lip-syncing' : undefined}>
@@ -990,7 +1063,7 @@ function MusicPanel({ project, config, onConfig, onGenerateMusic, onMixMusic, mu
     </Field>
     <div className="flex gap-2">
       <button onClick={() => onGenerateMusic(prompt.trim())} disabled={musicBusy} className={`${primaryClass} flex-1`}>
-        {musicBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Music className="h-3.5 w-3.5" />}Generate bed
+        {musicBusy ? <VergeLoader size={28} tone="ink" label="Generating the music bed" /> : <Music className="h-3.5 w-3.5" />}Generate bed
       </button>
       <button onClick={onMixMusic} disabled={musicBusy || !project.music_url} className={buttonClass}>Mix into film</button>
     </div>
@@ -1029,7 +1102,7 @@ function ContextPanel({ selected, onAnalyzeScene, analyzingSceneId, onConfig }: 
     <div className="flex items-center justify-between gap-2">
       <h3 className="text-xs font-bold">Scene {selected.scene_index} context</h3>
       <button onClick={() => onAnalyzeScene(selected)} disabled={analyzing || !selected.render_url} className={buttonClass}>
-        {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}{vision ? 'Re-analyze' : 'Analyze'}
+        {analyzing ? <VergeLoader size={28} label="Analysing the scene" /> : <Sparkles className="h-3.5 w-3.5" />}{vision ? 'Re-analyze' : 'Analyze'}
       </button>
     </div>
     {!selected.render_url ? <p className="text-[11px] text-[var(--sf-dim)]">This scene has no clip yet — generate it first and vision runs automatically.</p> : null}
@@ -1144,7 +1217,7 @@ function BrollPanel({ selected, onSetBroll, config }: PanelProps) {
             className={`${inputClass} mt-0`}
           />
           <button onClick={() => void search(term)} disabled={searching || !term.trim()} className={buttonClass}>
-            {searching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+            {searching ? <VergeLoader size={28} label="Searching" /> : <Search className="h-3.5 w-3.5" />}
           </button>
         </div>
       </Field>

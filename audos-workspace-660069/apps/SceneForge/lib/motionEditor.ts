@@ -106,7 +106,21 @@ export interface ImageLayer extends TimedLayer {
   fit: 'cover' | 'contain';
 }
 
-export type CardTemplateId = 'feature-card' | 'stat-counter' | 'product-cta' | 'quote-card';
+// The HyperFrame bundles (lib/hyperFrameBundles). The first four are the
+// editor's original cards; the last three exist because SceneForge's PRODUCT
+// graphic beats are routed through HyperFrames rather than drawn as separate
+// Remotion layers (lib/productGraphics) — a step sequence, a UI highlight and a
+// comparison table are the three product primitives the first four could not
+// express. Adding ids is additive: every card already saved in a project keeps
+// its own template.
+export type CardTemplateId =
+  | 'feature-card'
+  | 'stat-counter'
+  | 'product-cta'
+  | 'quote-card'
+  | 'step-sequence'
+  | 'ui-highlight'
+  | 'comparison-table';
 
 export interface CardLayer extends TimedLayer {
   template: CardTemplateId;

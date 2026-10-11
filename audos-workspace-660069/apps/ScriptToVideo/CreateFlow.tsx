@@ -4,7 +4,8 @@
  * AI MODE (the default): paste the script (source of truth, never rewritten),
  * pick the aspect, optionally attach a reference image and a director note.
  * Submitting hands the WHOLE script to Opus 5, which reads the complete story
- * before segmenting it into sequential 4/6/8/10-second clips.
+ * before segmenting it into sequential clips of 4–10 seconds each — whatever
+ * length the beat needs, bounded only by the chosen model's real limit.
  *
  * MANUAL SCRIPT MODE: paste a script that is ALREADY broken into scenes. No
  * model reads it — the parser in ../manualScript.ts pulls the scenes straight
@@ -16,16 +17,20 @@
  * with every clip alongside the previous clip's final frame.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Clapperboard, FileUp, Image as ImageIcon, Loader2, UserRound, X } from 'lucide-react';
-import { Aspect, ParsedScript, T, uploadBlob } from './api';
+import {
+  AlertTriangle, AtSign, Clapperboard, FileUp, Image as ImageIcon, Lock, Plus,
+  Trash2, UserRound, X,
+} from 'lucide-react';
+import { Aspect, ParsedScript, StoredReference, T, db, referenceSlug, uploadBlob } from './api';
 import { parseManualScript } from './manualScript';
-import { DEFAULT_FILM_MODEL, VIDEO_MODELS, VideoModelConfig } from './pipeline/videoModelService';
+import { DEFAULT_FILM_MODEL, VIDEO_MODELS, VideoModelConfig, VideoModelService } from './pipeline/videoModelService';
 import ModelGrid, { ModelGridOption } from './ModelGrid';
 import {
   rosterInputLabel, rosterModel, rosterNote, rosterState,
   subscribeRunwayRoster, syncRunwayRoster,
 } from './runwayRoster';
 import VideoIntegrationPicker from '../../components/VideoIntegrationPicker';
+import VergeLoader from '../../components/VergeLoader';
 import {
   loadVideoSelection, saveVideoSelection, type VideoIntegrationId,
 } from '../../lib/videoIntegrations';
@@ -56,7 +61,7 @@ function OrientationToggle({ value, onChange, disabled }: { value: Aspect; onCha
           borderRadius: 999, background: T.live,
           transform: `translateX(${index * 100}%)`,
           transition: 'transform .28s cubic-bezier(.22,.9,.3,1)',
-          boxShadow: '0 2px 12px rgba(245,158,11,0.28)',
+          boxShadow: '0 2px 12px rgba(200,146,10,0.28)',
         }}
       />
       {options.map((option) => {
@@ -182,7 +187,7 @@ function CharacterRefField(props: {
           onClick={() => inputRef.current?.click()}
           style={{ display: 'flex', alignItems: 'center', gap: 7, background: T.raised, border: `1px solid ${T.dim}`, color: T.bone, fontSize: 13, cursor: 'pointer', padding: '9px 14px', borderRadius: 8 }}
         >
-          {props.busy ? <Loader2 size={14} className="animate-spin" /> : <UserRound size={14} />}
+          {props.busy ? <VergeLoader size={32} label="Uploading your character" /> : <UserRound size={14} />}
           {props.previewUrl ? 'Replace character' : 'Upload character'}
         </button>
         {props.previewUrl ? (
@@ -205,13 +210,219 @@ function CharacterRefField(props: {
   );
 }
 
+/**
+ * STORED REFERENCES — pictures the customer saves ONCE and then summons from
+ * any script by typing @name. The list lives in WorkspaceDB, so a reference
+ * added here is available to every future film, and the pipeline injects
+ * every resolved mention into every scene of the film it was used in.
+ */
+function StoredReferencesField({ disabled }: { disabled: boolean }) {
+  const [refs, setRefs] = useState<StoredReference[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState('');
+  const [kind, setKind] = useState<StoredReference['type']>('character');
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // The first read happens while the workspace session may still be loading,
+  // so it stays quiet — an empty list is the honest answer then, and the add
+  // button reports for itself if the session really is not ready.
+  async function refresh(quiet = false) {
+    try { setRefs(await db.listReferences()); }
+    catch (ex: any) { if (!quiet) setErr(String(ex?.message || ex)); }
+  }
+  useEffect(() => { void refresh(true); }, []);
+
+  const slug = referenceSlug(label);
+
+  async function add(file: File) {
+    if (!slug) { setErr('Name the reference first — that name is what you type as @name in a script.'); return; }
+    setBusy(true); setErr('');
+    try {
+      const url = await VideoModelService.uploadReference(file, file.name);
+      await db.addReference({
+        name: slug,
+        display_name: label.trim() || slug,
+        url,
+        type: kind,
+        ...(description.trim() ? { description: description.trim() } : {}),
+      });
+      setLabel(''); setDescription(''); setKind('character'); setAdding(false);
+      await refresh();
+    } catch (ex: any) {
+      setErr(String(ex?.message || ex));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(ref: StoredReference) {
+    setBusy(true); setErr('');
+    try {
+      await db.deleteReference(ref.id);
+      setRefs((list) => list.filter((r) => r.id !== ref.id));
+    } catch (ex: any) {
+      setErr(String(ex?.message || ex));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const chip = (text: string) => (
+    <span style={{ color: T.muted, fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', border: `1px solid ${T.dim}`, borderRadius: 999, padding: '1px 7px' }}>{text}</span>
+  );
+
+  return (
+    <details style={{ marginTop: 18, background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 12, padding: '11px 14px' }}>
+      <summary style={{ cursor: 'pointer', color: T.bone, fontSize: 13, fontWeight: 700, listStylePosition: 'inside' }}>
+        Stored References <span style={{ color: T.muted, fontWeight: 500 }}>— {refs.length ? `${refs.length} saved` : 'none yet'}</span>
+      </summary>
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7, color: T.dim, fontSize: 12, lineHeight: 1.55, marginTop: 10 }}>
+        <AtSign size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+        <span>Type <span style={{ fontFamily: T.mono, color: T.bone }}>@name</span> anywhere in your script to inject this reference into every scene</span>
+      </div>
+
+      {refs.length ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+          {refs.map((ref) => (
+            <div key={ref.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: T.canvas, border: `1px solid ${T.dim}`, borderRadius: 10, padding: '7px 10px' }}>
+              <img src={ref.url} alt="" style={{ width: 38, height: 38, objectFit: 'cover', borderRadius: 7, border: `1px solid ${T.dim}`, flexShrink: 0 }} />
+              <span style={{ minWidth: 0, flex: 1 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                  <span style={{ fontFamily: T.mono, color: T.live, fontSize: 12.5, fontWeight: 700 }}>@{ref.name}</span>
+                  {chip(ref.type || 'character')}
+                </span>
+                <span style={{ display: 'block', color: T.muted, fontSize: 11.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {ref.description || ref.display_name || ''}
+                </span>
+              </span>
+              <button
+                className="s2v-ghost"
+                disabled={busy || disabled}
+                title={`Remove @${ref.name}`}
+                onClick={() => remove(ref)}
+                style={{ flexShrink: 0, background: 'none', border: 'none', color: T.muted, cursor: busy || disabled ? 'default' : 'pointer', padding: 4 }}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {adding ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 12, background: T.canvas, border: `1px solid ${T.dim}`, borderRadius: 10, padding: '11px 12px' }}>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Display name — e.g. Maya"
+            style={{ background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 8, color: T.bone, fontSize: 13, padding: '9px 12px', outline: 'none' }}
+          />
+          <div style={{ color: T.dim, fontSize: 11.5 }}>
+            {slug ? <>Called with <span style={{ fontFamily: T.mono, color: T.live }}>@{slug}</span></> : 'The @name is made from the display name.'}
+          </div>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            {(['character', 'style', 'location'] as StoredReference['type'][]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="radio"
+                aria-checked={kind === option}
+                onClick={() => setKind(option)}
+                style={{ background: kind === option ? T.live : T.raised, color: kind === option ? '#1A1205' : T.muted, border: `1px solid ${kind === option ? T.live : T.dim}`, borderRadius: 999, padding: '6px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+              >
+                {option[0].toUpperCase()}{option.slice(1)}
+              </button>
+            ))}
+          </div>
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Appearance note (optional) — injected into every scene's prompt"
+            style={{ background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 8, color: T.bone, fontSize: 13, padding: '9px 12px', outline: 'none' }}
+          />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              className="s2v-lift"
+              disabled={busy || disabled || !slug}
+              onClick={() => fileRef.current?.click()}
+              style={{ display: 'flex', alignItems: 'center', gap: 7, background: busy || !slug ? T.raised : T.live, color: busy || !slug ? T.dim : '#1A1205', border: 'none', borderRadius: 9, padding: '9px 15px', fontSize: 12.5, fontWeight: 700, cursor: busy || !slug ? 'default' : 'pointer' }}
+            >
+              {busy ? <VergeLoader size={30} label="Saving your reference" /> : <ImageIcon size={13} />}
+              {busy ? 'Saving…' : 'Choose image & save'}
+            </button>
+            <button
+              className="s2v-ghost"
+              disabled={busy}
+              onClick={() => { setAdding(false); setErr(''); }}
+              style={{ background: 'none', border: 'none', color: T.muted, fontSize: 12.5, cursor: 'pointer', padding: '6px 4px' }}
+            >
+              Cancel
+            </button>
+          </div>
+          <input
+            ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }}
+            onChange={(e) => { const file = e.target.files?.[0]; if (file) void add(file); e.target.value = ''; }}
+          />
+        </div>
+      ) : (
+        <button
+          className="s2v-ghost"
+          disabled={disabled}
+          onClick={() => { setAdding(true); setErr(''); }}
+          style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 12, background: 'transparent', border: `1px solid ${T.dim}`, color: T.bone, borderRadius: 9, padding: '8px 14px', fontSize: 12.5, cursor: disabled ? 'default' : 'pointer' }}
+        >
+          <Plus size={13} /> Add reference
+        </button>
+      )}
+
+      {err ? <div style={{ color: T.fault, fontSize: 12, marginTop: 9 }}>{err}</div> : null}
+    </details>
+  );
+}
+
+/**
+ * STYLE LOCK — freeze the film's look after scene 1. On by default: a film
+ * produced clip by clip drifts in palette and light unless the first clip's
+ * look is carried forward deliberately.
+ */
+function StyleLockToggle({ value, onChange, disabled }: { value: boolean; onChange: (next: boolean) => void; disabled: boolean }) {
+  return (
+    <div style={{ marginTop: 20 }}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        disabled={disabled}
+        onClick={() => onChange(!value)}
+        style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'transparent', border: 'none', padding: 0, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1 }}
+      >
+        <span
+          aria-hidden
+          style={{ position: 'relative', width: 38, height: 22, borderRadius: 999, background: value ? T.live : T.raised, border: `1px solid ${value ? T.live : T.dim}`, flexShrink: 0, transition: 'background-color .22s ease' }}
+        >
+          <span style={{ position: 'absolute', top: 3, left: 3, width: 14, height: 14, borderRadius: '50%', background: value ? '#1A1205' : T.muted, transform: `translateX(${value ? 16 : 0}px)`, transition: 'transform .22s cubic-bezier(.22,.9,.3,1)' }} />
+        </span>
+        <Lock size={14} color={value ? T.live : T.dim} />
+        <span style={{ color: value ? T.bone : T.muted, fontSize: 13.5, fontWeight: 700 }}>Style Lock</span>
+      </button>
+      <div style={{ color: T.dim, fontSize: 12, marginTop: 8, lineHeight: 1.55, maxWidth: 480 }}>
+        Locks the visual style after the first scene so every clip matches the same look, palette and lighting.
+      </div>
+    </div>
+  );
+}
+
 /** What the parser actually found, shown before anything is generated so a
  * mis-formatted script is caught here rather than three clips in. */
 function ParsePreview({ parsed, hasText }: { parsed: ParsedScript; hasText: boolean }) {
   if (!hasText) return null;
   if (!parsed.scenes.length) {
     return (
-      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 16, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 10, padding: '11px 14px' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 16, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.25)', borderRadius: 10, padding: '11px 14px' }}>
         <AlertTriangle size={14} color={T.fault} style={{ flexShrink: 0, marginTop: 2 }} />
         <span style={{ color: T.fault, fontSize: 12.5, lineHeight: 1.6 }}>
           No scenes detected. Each scene needs its own opening line in the form{' '}
@@ -238,7 +449,7 @@ function ParsePreview({ parsed, hasText }: { parsed: ParsedScript; hasText: bool
             <summary style={{ cursor: 'pointer', listStylePosition: 'inside', color: T.bone, fontSize: 12.5, fontWeight: 600 }}>
               <span style={{ fontFamily: T.mono, color: T.muted, marginRight: 8 }}>{String(scene.index).padStart(2, '0')}</span>
               {scene.title}
-              <span style={{ color: T.live, fontWeight: 700, marginLeft: 8 }}>{scene.durationSec}s</span>
+              <span style={{ color: T.live, fontWeight: 800, fontFamily: T.mono, marginLeft: 8 }}>{scene.durationSec}s</span>
             </summary>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 9, color: T.muted, fontSize: 12, lineHeight: 1.55 }}>
               {scene.visual
@@ -261,12 +472,15 @@ export function CreateScreen(props: {
   initialShotUrl?: string;
   initialShotName?: string;
   busy: boolean;
-  onSubmit: (params: { mode: CreateMode; script: string; aspect: Aspect; screenshotUrl: string | null; characterRefUrl: string | null; note: string; videoModel: string }) => void;
+  onSubmit: (params: { mode: CreateMode; script: string; aspect: Aspect; screenshotUrl: string | null; characterRefUrl: string | null; note: string; videoModel: string; styleLock: boolean }) => void;
 }) {
   const { initialText, initialShotUrl, initialShotName, busy, onSubmit } = props;
   const [text, setText] = useState(initialText || '');
   const [mode, setMode] = useState<CreateMode>('ai');
   const [aspect, setAspect] = useState<Aspect>('16:9');
+  // Style Lock defaults ON: matching clips are what a film needs, and a
+  // customer who wants every scene re-imagined can switch it off here.
+  const [styleLock, setStyleLock] = useState(true);
   // The model choice survives this screen unmounting for the rest of the
   // browser session, so the last-used engine stays selected between films.
   const [videoModel, setVideoModel] = useState<string>(() => {
@@ -328,7 +542,7 @@ export function CreateScreen(props: {
       blurb: live ? live.blurb : 'Runs every clip of this film.',
       meta: live
         ? `${rosterInputLabel(live)} · ${live.minDurationS}–${live.maxDurationS}s`
-        : `Clips up to ${m.safeMaxDuration}s · ${m.maxReferenceImages} reference images`,
+        : `Clips up to ${m.safeMaxDuration}s · ${m.maxReferenceImages} reference image${m.maxReferenceImages === 1 ? '' : 's'}`,
       badge: m.id === DEFAULT_FILM_MODEL.id ? 'Default' : live?.speed === 'fast' ? 'Fast' : live?.speed === 'cinematic' ? 'Cinematic' : '',
       available: live ? live.available : !m.availabilityNote,
       unavailableReason: live ? live.unavailableReason : m.availabilityNote,
@@ -424,6 +638,7 @@ export function CreateScreen(props: {
         {mode === 'manual' ? (
           <div style={{ marginTop: 26 }}>
             <CharacterRefField previewUrl={charPreview} busy={charBusy} disabled={busy} error={charErr} onPick={pickCharacterRef} onClear={clearCharacterRef} />
+            <StoredReferencesField disabled={busy} />
           </div>
         ) : null}
 
@@ -433,6 +648,7 @@ export function CreateScreen(props: {
           <div style={{ color: T.dim, fontSize: 12, marginTop: 9, lineHeight: 1.55 }}>
             Every clip renders at {aspect}, and the final assembly inherits it — a portrait film stitches to a portrait MP4.
           </div>
+          <StyleLockToggle value={styleLock} onChange={setStyleLock} disabled={busy} />
         </div>
 
         <details style={{ marginTop: 22, background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 12, padding: '12px 14px' }}>
@@ -485,6 +701,7 @@ export function CreateScreen(props: {
         {mode === 'ai' ? (
           <div style={{ marginTop: 30 }}>
             <CharacterRefField previewUrl={charPreview} busy={charBusy} disabled={busy} error={charErr} onPick={pickCharacterRef} onClear={clearCharacterRef} />
+            <StoredReferencesField disabled={busy} />
           </div>
         ) : null}
 
@@ -493,7 +710,7 @@ export function CreateScreen(props: {
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <button className="s2v-ghost" disabled={shotBusy} onClick={() => fileRef.current?.click()} style={{ display: 'flex', alignItems: 'center', gap: 7, background: T.raised, border: `1px solid ${T.dim}`, color: T.bone, fontSize: 13, cursor: 'pointer', padding: '9px 14px', borderRadius: 8 }}>
-            {shotBusy ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />} {shotUrl ? 'Replace image' : 'Attach image'}
+            {shotBusy ? <VergeLoader size={32} label="Uploading your image" /> : <ImageIcon size={14} />} {shotUrl ? 'Replace image' : 'Attach image'}
           </button>
           {shotUrl ? (
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -527,22 +744,27 @@ export function CreateScreen(props: {
           />
         </details>
 
-        {err ? <div style={{ color: T.fault, fontSize: 12.5, lineHeight: 1.5, marginTop: 14, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '9px 13px' }}>{err}</div> : null}
+        {err ? <div style={{ color: T.fault, fontSize: 12.5, lineHeight: 1.5, marginTop: 14, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.25)', borderRadius: 9, padding: '9px 13px' }}>{err}</div> : null}
 
         <button
           className="s2v-lift"
           disabled={!canGo || busy || shotBusy || charBusy}
           onClick={() => onSubmit({
-            mode, script: text.trim(), aspect, screenshotUrl: shotUrl || null, characterRefUrl: charUrl || null, note: note.trim(),
+            mode, script: text.trim(), aspect, screenshotUrl: shotUrl || null, characterRefUrl: charUrl || null, note: note.trim(), styleLock,
             videoModel: modelMode === 'auto' ? autoPick.apiModel : (nativeModel || VIDEO_MODELS.find((m) => m.id === videoModel)?.apiModel || videoModel),
           })}
-          style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 26, background: canGo && !busy ? T.live : T.raised, color: canGo && !busy ? '#1A1205' : T.dim, border: 'none', borderRadius: 11, padding: '14px 28px', fontSize: 15, fontWeight: 700, cursor: canGo && !busy ? 'pointer' : 'default', boxShadow: canGo && !busy ? '0 2px 12px rgba(245,158,11,0.25)' : 'none' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 26, background: canGo && !busy ? T.live : T.raised, color: canGo && !busy ? '#1A1205' : T.dim, border: 'none', borderRadius: 11, padding: '14px 28px', fontSize: 15, fontWeight: 700, cursor: canGo && !busy ? 'pointer' : 'default', boxShadow: canGo && !busy ? '0 2px 12px rgba(200,146,10,0.25)' : 'none' }}
         >
-          {busy ? <Loader2 size={17} className="animate-spin" /> : <Clapperboard size={17} />}
+          {busy ? <VergeLoader size={38} label="Planning your film" /> : <Clapperboard size={17} />}
           {busy
             ? (mode === 'manual' ? 'Reading your scenes…' : 'The director is reading your story…')
             : (mode === 'manual' ? 'Generate All Scenes' : 'Plan my film')}
         </button>
+        {busy ? (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+            <VergeLoader size={120} caption={mode === 'manual' ? 'Reading your scenes' : 'The director is reading your story'} />
+          </div>
+        ) : null}
         {busy ? (
           <div style={{ color: T.muted, fontSize: 12.5, marginTop: 12 }}>
             {mode === 'manual'

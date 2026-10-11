@@ -191,8 +191,8 @@ export default function HomeScreen() {
             borderRadius: 14,
             cursor: 'pointer',
             textAlign: 'left',
-            border: `1px solid ${liveProduction.phase === 'done' ? 'rgba(74,222,128,0.32)' : T.accentBorder}`,
-            background: liveProduction.phase === 'done' ? 'rgba(74,222,128,0.07)' : T.accentSoft,
+            border: `1px solid ${liveProduction.phase === 'done' ? 'rgba(22,101,52,0.32)' : T.accentBorder}`,
+            background: liveProduction.phase === 'done' ? 'rgba(22,101,52,0.07)' : T.accentSoft,
           }}
         >
           <Sparkles
@@ -281,8 +281,8 @@ export default function HomeScreen() {
             padding: 6,
             borderRadius: 20,
             background: fieldError
-              ? 'linear-gradient(135deg, rgba(248,113,113,0.55), rgba(127,29,29,0.2))'
-              : 'linear-gradient(135deg, rgba(37,99,235,0.34), rgba(59,130,246,0.18) 45%, rgba(45,212,191,0.22))',
+              ? 'linear-gradient(135deg, rgba(153,27,27,0.45), rgba(153,27,27,0.16))'
+              : 'linear-gradient(135deg, rgba(200,146,10,0.34), rgba(232,183,55,0.18) 45%, rgba(224,163,58,0.22))',
           }}
         >
           <div
@@ -292,7 +292,7 @@ export default function HomeScreen() {
               gap: 8,
               padding: 8,
               borderRadius: 17,
-              background: 'rgba(10,15,30,0.88)',
+              background: 'rgba(255,255,255,0.92)',
               backdropFilter: 'blur(14px)',
             }}
           >
@@ -410,9 +410,9 @@ export default function HomeScreen() {
                   color: selected ? '#fff' : T.sub,
                   border: selected ? `1px solid ${T.accentBorder}` : `1px solid ${T.border}`,
                   background: selected
-                    ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 60%, #1d4ed8 100%)'
+                    ? 'linear-gradient(135deg, #E8B737 0%, #C8920A 60%, #B4720A 100%)'
                     : 'transparent',
-                  boxShadow: selected ? '0 8px 24px -12px rgba(37,99,235,0.8)' : 'none',
+                  boxShadow: selected ? '0 8px 24px -12px rgba(200,146,10,0.5)' : 'none',
                   transition: 'all .16s ease',
                 }}
               >
@@ -457,7 +457,7 @@ export default function HomeScreen() {
                   onClick={() => removeReference(url)}
                   aria-label={`Remove reference ${index + 1}`}
                   className="rc-iconbtn rc-ring"
-                  style={{ position: 'absolute', right: 4, top: 4, width: 24, height: 24, borderRadius: 999, border: 0, background: 'rgba(0,0,0,0.72)', color: '#fff', cursor: 'pointer' }}
+                  style={{ position: 'absolute', right: 4, top: 4, width: 24, height: 24, borderRadius: 999, border: 0, background: 'rgba(26,16,0,0.72)', color: '#fff', cursor: 'pointer' }}
                 >
                   <X size={12} />
                 </button>

@@ -211,7 +211,7 @@ export default function BriefScreen() {
                           cursor: 'pointer',
                           background: '#000',
                           border: selected ? `2px solid ${T.accent}` : `1px solid ${T.border}`,
-                          boxShadow: selected ? '0 0 0 3px rgba(59,130,246,0.16)' : 'none',
+                          boxShadow: selected ? '0 0 0 3px rgba(200,146,10,0.16)' : 'none',
                         }}
                         data-testid="button-product-image"
                       >
@@ -221,7 +221,7 @@ export default function BriefScreen() {
                           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                         />
                         {selected ? (
-                          <span style={{ position: 'absolute', top: 8, right: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 999, color: '#fff', background: T.accent, boxShadow: '0 4px 12px rgba(0,0,0,0.35)' }}>
+                          <span style={{ position: 'absolute', top: 8, right: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 999, color: '#fff', background: T.accent, boxShadow: '0 4px 12px rgba(120,80,0,0.2)' }}>
                             <Check size={14} />
                           </span>
                         ) : null}

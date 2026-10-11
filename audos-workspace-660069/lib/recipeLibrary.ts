@@ -19,8 +19,8 @@
 
 export const RECIPE_VIDEOS_TABLE = 'vv_recipe_videos';
 
-/** The longest prompt any recipe submit may carry. */
-export const RECIPE_PROMPT_MAX = 500;
+/** The longest prompt any recipe submit may carry — Runway's own promptText ceiling. */
+export const RECIPE_PROMPT_MAX = 1000;
 
 export interface RecipeGeneration {
   mediaUrls: string[];
@@ -58,7 +58,7 @@ export async function saveRecipeGeneration(generation: RecipeGeneration): Promis
         kind: generation.kind,
         recipe_id: generation.recipeId || null,
         model: generation.model || null,
-        prompt: String(generation.prompt || '').slice(0, 2000) || null,
+        prompt: String(generation.prompt || '').slice(0, 10000) || null,
         aspect_ratio: generation.aspectRatio || null,
         task_id: generation.taskId || null,
       });

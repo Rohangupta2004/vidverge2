@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, Captions, Check, Circle, Download, Layers,
-  Loader2, Mic, Music, RefreshCw, SkipForward, Sparkles, Volume2,
+  Mic, Music, RefreshCw, SkipForward, Sparkles, Volume2,
 } from 'lucide-react';
 import { Film, FilmScene, T, VoiceSourceId } from './api';
 import { MUSIC_PRESETS, MusicPreset, VoiceOption, listVoices } from './pipeline/finish';
@@ -22,9 +22,10 @@ import { audioReady, audioScenes, isSpokenSource, musicReady, narrationReady, sf
 import { openAiVoiceLabel } from './pipeline/voiceSource';
 import { AssemblyProgress, sceneTargetDuration } from './pipeline/orchestrator';
 import AudioCards from './AudioCards';
+import VergeLoader from '../../components/VergeLoader';
 
 const fieldStyle = {
-  width: '100%', background: '#151519', color: T.bone, border: `1px solid ${T.dim}`,
+  width: '100%', background: '#FFFFFF', color: T.bone, border: `1px solid ${T.dim}`,
   borderRadius: 8, padding: '8px 10px', fontSize: 12.5,
 } as const;
 
@@ -40,7 +41,7 @@ function StateDot({ state }: { state: 'done' | 'active' | 'failed' | 'todo' }) {
   const color = state === 'done' ? T.done : state === 'active' ? T.live : state === 'failed' ? T.fault : T.dim;
   return (
     <span style={{ color, display: 'inline-flex', flexShrink: 0 }}>
-      {state === 'done' ? <Check size={12} /> : state === 'active' ? <Loader2 size={12} className="animate-spin" /> : state === 'failed' ? <AlertTriangle size={12} /> : <Circle size={11} />}
+      {state === 'done' ? <Check size={12} /> : state === 'active' ? <VergeLoader size={28} label="In progress" /> : state === 'failed' ? <AlertTriangle size={12} /> : <Circle size={11} />}
     </span>
   );
 }
@@ -79,7 +80,7 @@ function AudioTimeline({ film, scenes }: { film: Film; scenes: FilmScene[] }) {
     cursor += target(s);
     return block;
   });
-  const trackStyle = { position: 'relative' as const, flex: 1, height: 18, background: '#101014', borderRadius: 5, overflow: 'hidden' };
+  const trackStyle = { position: 'relative' as const, flex: 1, height: 18, background: '#FFFAEB', borderRadius: 5, overflow: 'hidden' };
   const musicOk = !!audio && audio.music?.status === 'ready' && !!audio.music.audioUrl;
   const sfxItems = (audio?.sfx || []).filter((f) => f.status === 'ready' && f.audioUrl);
   return (
@@ -103,7 +104,7 @@ function AudioTimeline({ film, scenes }: { film: Film; scenes: FilmScene[] }) {
             }
             const voicePct = n.duration_s ? Math.min(100, (n.duration_s / target(b.s)) * 100) : 100;
             return (
-              <div key={b.s.id} title={`Scene ${b.s.idx + 1}: "${(n.text || '').slice(0, 90)}"${n.duration_s ? ` · ${n.duration_s.toFixed(1)}s` : ''}`} style={{ position: 'absolute', left: `${b.leftPct}%`, width: `calc(${(b.widthPct * voicePct) / 100}% - 1px)`, top: 2, bottom: 2, background: n.status === 'ready' ? 'rgba(127,212,180,0.55)' : n.status === 'failed' ? 'rgba(226,114,111,0.5)' : 'rgba(127,212,180,0.2)', borderRadius: 3 }} />
+              <div key={b.s.id} title={`Scene ${b.s.idx + 1}: "${(n.text || '').slice(0, 90)}"${n.duration_s ? ` · ${n.duration_s.toFixed(1)}s` : ''}`} style={{ position: 'absolute', left: `${b.leftPct}%`, width: `calc(${(b.widthPct * voicePct) / 100}% - 1px)`, top: 2, bottom: 2, background: n.status === 'ready' ? 'rgba(22,101,52,0.45)' : n.status === 'failed' ? 'rgba(153,27,27,0.5)' : 'rgba(22,101,52,0.18)', borderRadius: 3 }} />
             );
           })}
         </div>
@@ -111,7 +112,7 @@ function AudioTimeline({ film, scenes }: { film: Film; scenes: FilmScene[] }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <TrackLabel>MUSIC</TrackLabel>
         <div style={trackStyle}>
-          {musicOk ? <div title={`${audio!.music!.preset} music — ducks under narration automatically`} style={{ position: 'absolute', left: 0, right: 0, top: 5, bottom: 5, background: 'linear-gradient(90deg, transparent, rgba(122,140,255,0.45) 6%, rgba(122,140,255,0.45) 94%, transparent)', borderRadius: 3 }} /> : (
+          {musicOk ? <div title={`${audio!.music!.preset} music — ducks under narration automatically`} style={{ position: 'absolute', left: 0, right: 0, top: 5, bottom: 5, background: 'linear-gradient(90deg, transparent, rgba(190,24,93,0.42) 6%, rgba(190,24,93,0.42) 94%, transparent)', borderRadius: 3 }} /> : (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', paddingLeft: 8, color: T.dim, fontSize: 9.5 }}>{audio?.music?.status === 'skipped' ? 'skipped' : audio?.music?.status === 'failed' ? 'failed' : '—'}</div>
           )}
         </div>
@@ -179,7 +180,7 @@ function AssemblyProgressCard({ progress, filmUpdatedAt }: { progress: AssemblyP
   const statusWord = (status: string) => status === 'active' ? 'running' : status;
 
   return (
-    <div style={{ marginTop: 14, background: '#101014', border: `1px solid ${T.dim}`, borderRadius: 12, padding: '13px 15px' }}>
+    <div style={{ marginTop: 14, background: '#FFFFFF', border: `1px solid ${T.dim}`, borderRadius: 12, padding: '13px 15px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ color: T.live, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>FINAL ASSEMBLY</span>
         <span style={{ marginLeft: 'auto', color: T.bone, fontSize: 13, fontWeight: 700, fontFamily: T.mono }}>{progress.percent}%</span>
@@ -402,12 +403,12 @@ function FinalHeader(props: {
 
       {/* The frame takes the FILM's own shape, so a 9:16 cut is reviewed
           portrait instead of letterboxed inside a widescreen box. */}
-      <div style={{ margin: '16px auto 0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0C0C0F', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 20px 50px rgba(0,0,0,0.4)', width: '100%', maxWidth: film.aspect_ratio === '9:16' ? 272 : 820, aspectRatio: videoUrl ? (film.aspect_ratio === '9:16' ? '9 / 16' : '16 / 9') : undefined }}>
+      <div style={{ margin: '16px auto 0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0C0C0F', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(180,120,0,0.14)', boxShadow: '0 20px 50px rgba(120,80,0,0.12)', width: '100%', maxWidth: film.aspect_ratio === '9:16' ? 272 : 820, aspectRatio: videoUrl ? (film.aspect_ratio === '9:16' ? '9 / 16' : '16 / 9') : undefined }}>
         {videoUrl ? (
           <video key={videoUrl} src={videoUrl} controls poster={film.final_thumb_url || undefined} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} />
         ) : (
           <div style={{ color: T.dim, fontSize: 13, padding: 56, textAlign: 'center' }}>
-            {assembling ? 'Final Assembly is running…' : 'Run Final Assembly — the finished film plays here when it lands.'}
+            {assembling ? <VergeLoader size={140} caption="Assembling your final film" /> : 'Run Final Assembly — the finished film plays here when it lands.'}
           </div>
         )}
       </div>
@@ -420,7 +421,7 @@ function FinalHeader(props: {
       </div>
 
       {film.error ? (
-        <div style={{ color: T.fault, fontSize: 12.5, lineHeight: 1.5, marginTop: 12, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '10px 13px' }}>
+        <div style={{ color: T.fault, fontSize: 12.5, lineHeight: 1.5, marginTop: 12, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.25)', borderRadius: 9, padding: '10px 13px' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}><AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{film.error}</span></div>
           <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
             {narrFailed ? (<>
@@ -571,7 +572,7 @@ export function FinalScreen(props: {
               Opus writes a natural spoken narration for each scene (faithful to your script — nothing invented), a music bed is composed to match the story arc, and subtle SFX land the key moments. The voiceover is optional: pick its source on the VOICEOVER card above — No Voiceover, ElevenLabs, or the built-in AI voice — and the rest of the pipeline runs either way. You can also just press Final Assembly; it prepares whatever is missing first.
             </div>
             <button style={{ ...smallBtn(true), marginTop: 10 }} disabled={busy || assembling || !ready.length} onClick={props.onPrepareAudio}>
-              {busy ? <Loader2 size={12} className="animate-spin" /> : <Mic size={12} />} Prepare narration, music &amp; SFX
+              {busy ? <VergeLoader size={28} tone="ink" label="Preparing audio" /> : <Mic size={12} />} Prepare narration, music &amp; SFX
             </button>
           </Section>
         )}

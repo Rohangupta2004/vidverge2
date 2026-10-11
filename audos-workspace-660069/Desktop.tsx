@@ -1,5 +1,5 @@
 import { useState, Suspense, LazyExoticComponent, ComponentType, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
-import { Bot, Folder, X, Activity, Clapperboard, Moon, Heart, Calendar, Users, FileText, BarChart, Settings as SettingsIcon, MessageCircle, Plane, TrendingUp, LineChart, Dumbbell, Brain, Target, Zap, Star, Clock, CheckCircle, List, BookOpen, Coffee, Music, Camera, MapPin, Wallet, ShoppingCart, Gift, Lightbulb, Sparkles, Rocket, Home, Building, Globe, Mail, Phone, Video, Mic, Image, Play, Pause, Volume2, Wifi, Cloud, Sun, Umbrella, Thermometer, Wind, Droplets, Leaf, Flower2, Film, Mountain, Waves, Compass, Map, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond, Gem, Key, Lock, Unlock, Shield, Eye, Search, Filter, SortAsc, Download, Upload, Share2, Link, ExternalLink, Copy, Clipboard, Trash2, Edit, Pencil, PenTool, Scissors, Bookmark, Flag, Bell, AlertCircle, Info, HelpCircle, XCircle, CheckCircle2, Circle, Square, Triangle, Hexagon, Octagon, Hash, AtSign, DollarSign, Percent, Calculator, Code, Terminal, Database, Server, Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker, Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote, PiggyBank, TrendingDown, AreaChart, PieChart, FlaskConical, Ghost, Radar, Crosshair, Wand2 } from 'lucide-react';
+import { Bot, Folder, X, Activity, Clapperboard, Moon, Heart, Calendar, Users, FileText, BarChart, Settings as SettingsIcon, MessageCircle, Plane, TrendingUp, LineChart, Dumbbell, Brain, Target, Zap, Star, Clock, CheckCircle, List, BookOpen, Coffee, Music, Camera, MapPin, Wallet, ShoppingCart, Gift, Lightbulb, Sparkles, Rocket, Home, Building, Globe, Mail, Phone, Video, Mic, Image, Play, Pause, Volume2, Wifi, Cloud, Sun, Umbrella, Thermometer, Wind, Droplets, Leaf, Flower2, Film, Mountain, Waves, Compass, Map, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond, Gem, Key, Lock, Unlock, Shield, Eye, Search, Filter, SortAsc, Download, Upload, Share2, Link, ExternalLink, Copy, Clipboard, Trash2, Edit, Pencil, PenTool, Scissors, Bookmark, Flag, Bell, AlertCircle, Info, HelpCircle, XCircle, CheckCircle2, Circle, Square, Triangle, Hexagon, Octagon, Hash, AtSign, DollarSign, Percent, Calculator, Code, Terminal, Database, Server, Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker, Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote, PiggyBank, TrendingDown, AreaChart, PieChart, FlaskConical, Ghost, Radar, Crosshair, Wand2, Type } from 'lucide-react';
 import type { SpaceConfig, DesktopBranding, DesktopThemeTokens } from './types';
 import { useSpaceRuntime } from './SpaceRuntimeContext';
 import FileBrowser from './components/FileBrowser';
@@ -21,6 +21,8 @@ import { tw } from './lib/colors';
 import { isTenantDelegationCanvas } from './lib/tenant-delegation-canvas';
 import { LauncherFX } from './components/HomeLauncher';
 import AgentChatView from './components/AgentChatView';
+import VergeLoader from './components/VergeLoader';
+import BrandLogo from './components/BrandLogo';
 import { useAgentChatRuntime } from './components/useAgentChatRuntime';
 
 const DESKTOP_VERSION = 2;
@@ -177,7 +179,7 @@ const baseIconMap: Record<string, ComponentType<any>> = {
   Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker,
   Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote,
   PiggyBank, TrendingDown, AreaChart, PieChart, Flower2, Clapperboard, Film,
-  FlaskConical, Ghost, Radar, Crosshair, Wand2,
+  FlaskConical, Ghost, Radar, Crosshair, Wand2, Type,
 };
 
 // Create case-insensitive lookup with common aliases
@@ -427,6 +429,20 @@ export default function SpaceDesktop({
     const urlAppParam = new URLSearchParams(window.location.search).get('app') || (window as any).__DEEP_LINK_APP_ID__ || initialAppId;
     const deepLinkId = hash || urlAppParam?.toLowerCase() || '';
 
+    // App-first landing: when nothing deep-links to a specific view, open the
+    // configured default landing app (config.desktop.layout.defaultLandingView
+    // = 'app') instead of the agent-hero launcher.
+    if (!deepLinkId) {
+      // Always land on Vidverge Agent when no deep link is present
+      const landing = (config.desktop?.layout || {}) as any;
+      const defaultAppId = landing.defaultLandingAppId || 'vidverge-agent';
+      const landingApp = config.apps.find(app => app.id === defaultAppId) || config.apps[0];
+      if (landingApp) {
+        setActiveWindowId(landingApp.id);
+        return;
+      }
+    }
+
     if (deepLinkId) {
       const matchingApp = config.apps.find(
         app => app.id.toLowerCase() === deepLinkId || app.name.toLowerCase() === deepLinkId
@@ -601,7 +617,7 @@ export default function SpaceDesktop({
         className="fixed inset-0 flex items-center justify-center"
       >
         <div className="flex flex-col items-center gap-3 opacity-70">
-          {LoadingSpinner ? <LoadingSpinner /> : <div className="w-8 h-8 rounded-full border-2 border-current border-t-transparent animate-spin" />}
+          <VergeLoader size={120} />
           <span className="text-sm" style={{ color: 'var(--space-text)' }}>Setting up your account…</span>
         </div>
       </div>
@@ -640,7 +656,7 @@ export default function SpaceDesktop({
         className="fixed inset-0 flex items-center justify-center"
       >
         <div className="flex flex-col items-center gap-3 opacity-70">
-          {LoadingSpinner ? <LoadingSpinner /> : <div className="w-8 h-8 rounded-full border-2 border-current border-t-transparent animate-spin" />}
+          <VergeLoader size={120} />
         </div>
       </div>
     );
@@ -652,7 +668,7 @@ export default function SpaceDesktop({
     if (!isAppWindow || !CurrentApp || !currentAppConfig) {
       return (
         <div className="fixed inset-0 flex items-center justify-center" style={rootStyle}>
-          {LoadingSpinner ? <LoadingSpinner /> : <div className="w-8 h-8 rounded-full border-2 border-current border-t-transparent animate-spin" />}
+          <VergeLoader size={120} />
         </div>
       );
     }
@@ -664,7 +680,7 @@ export default function SpaceDesktop({
         data-testid="tenant-delegation-canvas"
       >
         <AppErrorBoundary key={currentAppConfig.id} appName={currentAppConfig.name}>
-          <Suspense fallback={LoadingSpinner ? <LoadingSpinner /> : null}>
+          <Suspense fallback={<div className="flex h-full w-full items-center justify-center"><VergeLoader size={120} caption="Opening your studio" /></div>}>
             <CurrentApp appConfig={currentAppConfig} dataFile={currentAppConfig.dataFile || ''} />
           </Suspense>
         </AppErrorBoundary>
@@ -694,19 +710,20 @@ export default function SpaceDesktop({
           <CreditBalance />
           <button
             onClick={() => setPricingRequest({ trigger: 'nav' })}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold text-white transition-all hover:scale-105"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold text-[var(--space-text-primary)] transition-all hover:scale-105"
             style={{
-              // Brand-neutral chrome: the amber primary CTA stays the ONE accent —
-              // the plan badge no longer competes in blue.
-              background: 'linear-gradient(90deg, #10141f 0%, #0b0e16 100%)',
-              border: isSubscriber ? '1px solid rgba(245,158,11,0.45)' : '1px solid rgba(148,163,184,0.28)',
-              boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+              // Quiet chrome on the brand ground: a subscriber gets the gold
+              // edge, everyone else a neutral one. The gradient CTA stays the
+              // single loud accent anywhere on screen.
+              background: 'linear-gradient(90deg, #FFFFFF 0%, #FFF6DD 100%)',
+              border: isSubscriber ? '1px solid rgba(200,146,10,0.45)' : '1px solid rgba(180,120,0,0.18)',
+              boxShadow: '0 6px 18px rgba(120,80,0,0.12)',
             }}
             title={planButtonTitle}
             data-testid="button-open-plans"
             data-plan-tier={userTier || 'unknown'}
           >
-            <Crown className="w-4 h-4" style={{ color: '#fbbf24' }} />
+            <Crown className="w-4 h-4" style={{ color: '#C8920A' }} />
             {planLabel}
           </button>
         </div>
@@ -772,9 +789,13 @@ export default function SpaceDesktop({
             <LauncherFX />
             {/* Headline above the hero chat */}
             <div className="relative text-center pt-7 pb-4 vv-fade-up">
-              {runtimeTheme.branding.logoUrl && (
-                <img src={runtimeTheme.branding.logoUrl} alt="" aria-hidden="true" style={{ width: 118, height: 64, objectFit: 'cover', objectPosition: 'center', mixBlendMode: 'screen', filter: 'drop-shadow(0 0 22px rgba(245,158,11,.46))', margin: '0 auto 6px' }} />
-              )}
+              {/* The mark is drawn from the brand tokens rather than loaded from
+                  branding.logoUrl: that PNG is still painted in the retired
+                  gold, and `objectFit: cover` at 118x64 was cropping the tips
+                  of the V off. */}
+              <div className="mb-2 flex justify-center">
+                <BrandLogo size={190} />
+              </div>
               <h1 className="text-3xl font-bold text-[var(--space-text-primary)]" style={{ letterSpacing: '-0.02em' }}>
                 <span className="vv-title-shimmer">What would you like to make today?</span>
               </h1>
@@ -785,7 +806,7 @@ export default function SpaceDesktop({
 
             {/* Hero agent chat — the dominant element of the main screen */}
             <div className="relative flex-1 min-h-0 w-full max-w-5xl mx-auto pb-6 vv-fade-up">
-              <div className="h-full rounded-3xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] overflow-hidden shadow-[0_30px_80px_-24px_rgba(0,0,0,0.85)]">
+              <div className="h-full rounded-3xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] overflow-hidden shadow-[0_24px_60px_-28px_rgba(120,80,0,0.35)]">
                 <HeroAgentChat spaceId={spaceId} />
               </div>
             </div>
@@ -848,7 +869,7 @@ export default function SpaceDesktop({
                   )}
                   {isAppWindow && CurrentApp && currentAppConfig && (
                     <AppErrorBoundary key={currentAppConfig.id} appName={currentAppConfig.name}>
-                      <Suspense fallback={<LoadingSpinner />}>
+                      <Suspense fallback={<div className="flex h-full w-full items-center justify-center"><VergeLoader size={120} caption="Opening your studio" /></div>}>
                         <CurrentApp appConfig={currentAppConfig} dataFile={currentAppConfig.dataFile || ''} />
                       </Suspense>
                     </AppErrorBoundary>
@@ -871,9 +892,9 @@ export default function SpaceDesktop({
             <div className="relative h-full flex flex-col overflow-hidden bg-[var(--space-surface-bg)]">
               <LauncherFX compact />
               <div className="relative px-5 pt-5 pb-1 text-center vv-fade-up">
-                {runtimeTheme.branding.logoUrl && (
-                  <img src={runtimeTheme.branding.logoUrl} alt="" aria-hidden="true" style={{ width: 96, height: 52, objectFit: 'cover', objectPosition: 'center', mixBlendMode: 'screen', filter: 'drop-shadow(0 0 18px rgba(245,158,11,.42))', margin: '0 auto 4px' }} />
-                )}
+                <div className="mb-1 flex justify-center">
+                  <BrandLogo size={132} />
+                </div>
                 <h1 className="text-xl font-bold text-[var(--space-text-primary)]">
                   <span className="vv-title-shimmer">What would you like to make today?</span>
                 </h1>
@@ -950,7 +971,7 @@ export default function SpaceDesktop({
                 )}
                 {isAppWindow && CurrentApp && currentAppConfig && (
                   <AppErrorBoundary key={currentAppConfig.id} appName={currentAppConfig.name}>
-                    <Suspense fallback={<LoadingSpinner />}>
+                    <Suspense fallback={<div className="flex h-full w-full items-center justify-center"><VergeLoader size={120} caption="Opening your studio" /></div>}>
                       <CurrentApp appConfig={currentAppConfig} dataFile={currentAppConfig.dataFile || ''} />
                     </Suspense>
                   </AppErrorBoundary>

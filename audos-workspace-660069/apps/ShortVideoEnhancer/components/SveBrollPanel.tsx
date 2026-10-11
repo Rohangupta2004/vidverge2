@@ -100,7 +100,7 @@ export function SveBrollPanel(props: BrollPanelProps) {
             onClick={() => setSelectedId(clip.id === selectedId ? null : clip.id)}
           >
             <span className="sve-broll-thumb" style={clip.posterUrl ? { backgroundImage: 'url(' + clip.posterUrl + ')' } : undefined}>
-              {clip.posterUrl ? null : <Film size={14} style={{ margin: '9px auto', display: 'block', color: '#9C86C6' }} />}
+              {clip.posterUrl ? null : <Film size={14} style={{ margin: '9px auto', display: 'block', color: '#7A6030' }} />}
             </span>
             <span className="sve-broll-meta">
               <strong>{clip.name}</strong>
@@ -113,7 +113,7 @@ export function SveBrollPanel(props: BrollPanelProps) {
               role="button"
               tabIndex={0}
               title="Remove this B-roll clip"
-              style={{ color: '#F87171', display: 'grid', placeItems: 'center', width: 26, height: 26 }}
+              style={{ color: '#991B1B', display: 'grid', placeItems: 'center', width: 26, height: 26 }}
               onClick={(event) => { event.stopPropagation(); removeClip(clip.id); }}
             >
               <Trash2 size={14} />

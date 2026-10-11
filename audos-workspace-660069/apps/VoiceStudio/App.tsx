@@ -14,6 +14,8 @@ import { useState, type ComponentType } from 'react';
 import { Clapperboard, Globe, KeyRound, Mic, Music, Repeat, UserPlus, Volume2 } from 'lucide-react';
 import { StudioStyles, T, ToastProvider } from './components/Ui';
 import { useKeyVerdict } from './hooks/useKeyVerdict';
+import AppShell from '../../components/ui/AppShell';
+import Badge from '../../components/ui/Badge';
 import TextToSpeechTab from './tabs/TextToSpeechTab';
 import VoiceCloneTab from './tabs/VoiceCloneTab';
 import SpeechToSpeechTab from './tabs/SpeechToSpeechTab';
@@ -57,7 +59,7 @@ function KeyStatus() {
   return (
     <div
       className="flex items-start gap-2 rounded-xl px-3 py-2.5 text-[11px] leading-snug"
-      style={{ background: 'rgba(8,10,18,0.5)', border: `1px solid ${T.border}`, color: T.textMuted }}
+      style={{ background: 'rgba(255,250,235,0.9)', border: `1px solid ${T.border}`, color: T.textMuted }}
     >
       <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: tone }} />
       <span className="min-w-0">
@@ -82,27 +84,28 @@ export default function VoiceStudio() {
   return (
     <ToastProvider>
       <StudioStyles />
-      <div className="min-h-full" style={{ background: T.page, color: T.text }}>
-        <div className="mx-auto flex max-w-[94rem] flex-col gap-5 px-4 py-5 sm:px-6 lg:flex-row lg:gap-6 lg:py-7">
+      <AppShell
+        title="Voice Studio"
+        eyebrow="Voice and avatar"
+        subtitle="Speech, cloned voices, re-voicing, dubbing, sound effects, music and avatar lip-sync — seven engines behind one rail."
+        maxWidth="full"
+        watermark={false}
+        icon={(
+          <span
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
+            style={{
+              background: `linear-gradient(135deg, ${T.accent}, ${T.cyan})`,
+              boxShadow: '0 8px 22px rgba(200,146,10,0.4)',
+            }}
+          >
+            <Mic className="h-5 w-5" style={{ color: '#FFFFFF' }} />
+          </span>
+        )}
+        actions={<Badge variant="violet">{current.label}</Badge>}
+      >
+        <div className="flex flex-col gap-5 lg:flex-row lg:gap-6">
           {/* Rail: a left sidebar on desktop, a horizontally scrolling strip on mobile. */}
           <aside className="shrink-0 lg:w-60">
-            <div className="mb-4 flex items-center gap-3">
-              <span
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
-                style={{ background: `linear-gradient(135deg, ${T.accent}, ${T.accentDeep})`, boxShadow: '0 8px 22px rgba(124,58,237,0.38)' }}
-              >
-                <Mic className="h-5 w-5" style={{ color: '#FFFFFF' }} />
-              </span>
-              <div className="min-w-0">
-                <h1 className="text-base font-semibold leading-tight" style={{ color: T.text }}>
-                  Voice Studio
-                </h1>
-                <p className="text-[11px] leading-snug" style={{ color: T.textMuted }}>
-                  Full-stack AI voice &amp; avatar creation
-                </p>
-              </div>
-            </div>
-
             <nav
               className="vs-scroll -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0"
               aria-label="Voice Studio features"
@@ -146,7 +149,7 @@ export default function VoiceStudio() {
             </div>
           </main>
         </div>
-      </div>
+      </AppShell>
     </ToastProvider>
   );
 }

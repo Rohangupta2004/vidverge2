@@ -7,7 +7,8 @@
  */
 
 import React, { createContext, useContext } from 'react';
-import { AlertTriangle, Check, Info, Loader2 } from 'lucide-react';
+import { AlertTriangle, Check, Info } from 'lucide-react';
+import VergeLoader from '../../components/VergeLoader';
 import {
   CARD, CARD_HI, DANGER, DEFAULT_ACCENT, INK_DEEP, LINE, LINE_HI, MONO, PANEL,
   SUCCESS, TEXT, TEXT_DIM, TEXT_MUTED, monogram, normalizeHex, readableOn, rgba, tileColor,
@@ -23,8 +24,10 @@ export function useAccent(): string {
   return useContext(AccentContext);
 }
 
-export function Spinner({ size = 15 }: { size?: number }) {
-  return <Loader2 size={size} style={{ animation: 'vergeye-spin 1s linear infinite' }} />;
+export function Spinner({
+  size = 15, tone, label, caption,
+}: { size?: number; tone?: 'amber' | 'ink'; label?: string; caption?: string }) {
+  return <VergeLoader size={caption ? size : Math.round(size * 2.2)} tone={tone} label={label} caption={caption} />;
 }
 
 export function Panel({
@@ -107,7 +110,7 @@ export function Button({
 
   return (
     <button type={type} title={title} onClick={inert ? undefined : onClick} disabled={inert} style={{ ...base, ...skin }}>
-      {busy ? <Spinner size={14} /> : null}
+      {busy ? <Spinner size={14} tone={variant === 'primary' && !/^#?f{3}(f{3})?$/i.test(readableOn(accent)) ? 'ink' : 'amber'} /> : null}
       {children}
     </button>
   );
@@ -176,7 +179,7 @@ export type Tone = 'idle' | 'accent' | 'good' | 'bad' | 'warn';
 function toneHex(tone: Tone, accent: string): string {
   if (tone === 'good') return SUCCESS;
   if (tone === 'bad') return DANGER;
-  if (tone === 'warn') return '#fbbf24';
+  if (tone === 'warn') return '#B45309';
   if (tone === 'accent') return accent;
   return TEXT_MUTED;
 }
@@ -294,7 +297,7 @@ export function Breadcrumb<T extends string>({
                 width: 18, height: 18, borderRadius: 999, flexShrink: 0,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 10.5, fontWeight: 800, fontFamily: MONO,
-                background: active ? rgba('#000000', 0.18) : done ? rgba(accent, 0.22) : rgba('#ffffff', 0.07),
+                background: active ? rgba('#000000', 0.18) : done ? rgba(accent, 0.22) : rgba('#b47800', 0.1),
               }}>
                 {done ? <Check size={11} /> : index + 1}
               </span>

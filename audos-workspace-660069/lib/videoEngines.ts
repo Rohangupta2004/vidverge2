@@ -14,17 +14,23 @@
  *  D — image companions                POST /api/veo/generate/image
  *                                      POST /api/generate/image
  *
- * KLING IS LIVE (re-verified 27 Sep 2026): GET /api/generate/kling/models
- * answers 200 with kling-v1, v1-5, v1-6 and v2-master. The `comingSoon: true`
- * flags on KLING_MODELS below are LEFT AS THEY ARE on purpose — Product Video,
- * SceneForge and Script-to-Video gate on them today and flipping them here
- * would silently change those apps. Any surface that wants Kling should do what
- * Ads Studio does: check GET /api/generate/kling/models at runtime and fall
- * back to Omni Flash on 503.
+ * KLING IS NOT REACHABLE (re-verified live 9 Oct 2026, superseding the
+ * 27 Sep note that said it was). The catalogue endpoint is NOT a liveness
+ * check: GET /api/generate/kling/models still answers 200 with kling-v1,
+ * v1-5, v1-6 and v2-master, but it serves a STATIC list, and an actual submit
+ * to POST /api/generate/kling/text-to-video answers
+ *   503 "Kling is not configured on this platform (KLING_API_KEY missing)."
+ * So a surface must never conclude Kling is usable from the 200 on /models —
+ * only a submit tells the truth. Treat 503 as the expected answer today and
+ * fall back to Omni Flash.
  *
  * Higgsfield video models live in HIGGSFIELD_VIDEO_MODELS below (native
- * /api/generate/higgsfield/* proxy). Kling is live when GET
- * /api/generate/kling/models answers 200.
+ * /api/generate/higgsfield/* proxy) and are the only non-Google provider
+ * verified working end to end on 9 Oct 2026.
+ *
+ * See ENGINE_HEALTH near the bottom of this file for the per-model outcome of
+ * that sweep — which ids actually produced a clip, and which ones the proxy
+ * refused.
  */
 
 export type EngineGroup = 'group-a' | 'runway-video' | 'runway-recipe' | 'kling' | 'higgsfield';
@@ -136,6 +142,13 @@ export const GROUP_A_MODELS: GroupAModel[] = [
     costHint: 'lowest cost / clip',
   }),
   gA({
+    id: 'openrouter/bytedance/seedance-2.5-fast', name: 'Seedance 2.5 Fast', provider: 'ByteDance · OpenRouter', tier: 'Fast',
+    blurb: 'Newer Seedance generation, same fast OpenRouter path. Seed image only — reference images and last frame answer 400 on OpenRouter models.',
+    supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
+    supports4k: false, supportsAudio: false, maxDurationS: 10, defaultDurationS: 6,
+    costHint: 'low cost / clip',
+  }),
+  gA({
     id: 'openrouter/google/veo-3.1', name: 'Veo 3.1 (OpenRouter)', provider: 'Google · OpenRouter', tier: 'Cinematic',
     blurb: 'Veo 3.1 routed through OpenRouter. Seed image only on this path — no ingredients.',
     supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
@@ -183,7 +196,7 @@ export function validateGroupAInputs(modelId: string, inputs: {
   if (!m) return `Unknown model "${modelId}".`;
   const prompt = String(inputs.prompt || '').trim();
   if (prompt.length < 10) return 'The prompt needs at least 10 characters.';
-  if (prompt.length > 1000) return 'The prompt is over the 1000-character limit.';
+  if (prompt.length > 10000) return 'The prompt is over the 10,000-character limit.';
   const refs = (inputs.referenceImages || []).length;
   const seed = Boolean(inputs.imageData);
   const last = Boolean(inputs.lastFrameImage);
@@ -784,7 +797,9 @@ export interface KlingModel {
 }
 
 export const KLING_COMING_SOON_MESSAGE =
-  'Kling is not reachable from this workspace yet — connect Kling on the platform or pick another engine.';
+  'Kling is not reachable from this workspace yet — a submit answers 503 "Kling is not configured on this '
+  + 'platform (KLING_API_KEY missing)" (verified 9 Oct 2026). The models catalogue answering 200 does not mean '
+  + 'it is usable. Pick another engine, or ask the platform to add the Kling key.';
 
 export const KLING_MODELS: KlingModel[] = [
   { group: 'kling', id: 'kling-v2-master', name: 'Kling v2 Master', tier: 'Cinematic',
@@ -946,8 +961,9 @@ export function recommendEngine(input: RecommendInput): Recommendation {
 // Misc shared helpers
 // ---------------------------------------------------------------------------
 
-/** Cap text at a proxy limit on a sentence/word boundary. */
-export function capPromptText(text: string, max = 1000): string {
+/** Cap text at a proxy limit on a sentence/word boundary. The proxy accepts
+ *  10,000 characters and forwards them unchanged. */
+export function capPromptText(text: string, max = 10000): string {
   const t = String(text || '').trim();
   if (t.length <= max) return t;
   const cut = t.slice(0, max);
@@ -961,7 +977,7 @@ export function capPromptText(text: string, max = 1000): string {
 export function tierColor(tier: EngineTier): { bg: string; fg: string } {
   switch (tier) {
     case 'Fast': return { bg: 'rgba(45,212,191,0.16)', fg: '#2DD4BF' };
-    case 'Cinematic': return { bg: 'rgba(168,85,247,0.16)', fg: '#C084FC' };
+    case 'Cinematic': return { bg: 'rgba(245,158,11,0.16)', fg: '#FBBF24' };
     case 'Character': return { bg: 'rgba(232,163,60,0.16)', fg: '#E8A33C' };
     case 'Lite': return { bg: 'rgba(148,163,184,0.16)', fg: '#94A3B8' };
     case 'Pro': return { bg: 'rgba(59,130,246,0.16)', fg: '#60A5FA' };
@@ -1054,6 +1070,56 @@ export function fallbackEngineFor(id: string): string | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// ENGINE HEALTH — the 9 Oct 2026 end-to-end sweep, as data.
+//
+// One minimal paid generation per model (shortest duration, 720p, audio off),
+// polled to a terminal state. Selectors use this to warn before a customer
+// picks a model the platform is currently refusing, instead of letting them
+// discover it at submit time. It is a SNAPSHOT, not a gate: nothing is hidden
+// or blocked on it, and a model marked 'broken' is still selectable because
+// these outages have flipped both ways before.
+// ---------------------------------------------------------------------------
+
+export type EngineHealth = 'working' | 'broken' | 'rejected' | 'unconfigured';
+
+export const ENGINE_HEALTH_CHECKED_AT = '2026-10-09';
+
+export const ENGINE_HEALTH: Record<string, { health: EngineHealth; note: string }> = {
+  'gemini-omni-flash-preview': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
+  'veo-3.1-generate-preview': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
+  'veo-3.1-fast-generate-preview': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
+  'veo-3.0-generate-001': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic veo_video_error_* id). Use Veo 3.1.' },
+  'veo-3.0-fast-generate-001': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic veo_video_error_* id). Use Veo 3.1 Fast.' },
+  'veo-2.0-generate-001': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic veo_video_error_* id). Use Veo 3.1.' },
+  'sora-2': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic sora_error_* id). Veo 3.1 is the working stand-in.' },
+  'sora-2-pro': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic sora_error_* id). Veo 3.1 is the working stand-in.' },
+  'openrouter/bytedance/seedance-2.0-fast': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
+  'openrouter/bytedance/seedance-2.5-fast': { health: 'rejected', note: 'Not in the proxy model enum — answers 400. Use Seedance 2.0 Fast.' },
+  'openrouter/google/veo-3.1': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
+  'openrouter/google/veo-3.1-fast': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
+  'openrouter/google/veo-3.1-lite': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
+  'minimax-hailuo-02': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip. Duration must be 6 or 10 seconds.' },
+  'dop-turbo': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip from a source image.' },
+  'dop-standard': { health: 'working', note: 'Verified 9 Oct 2026 — accepted and rendered from a source image.' },
+  'dop-lite': { health: 'working', note: 'Verified 9 Oct 2026 — accepted and rendered from a source image.' },
+  'kling-v2-master': { health: 'unconfigured', note: 'A submit answers 503 — KLING_API_KEY is missing on this platform.' },
+  'kling-v1-6': { health: 'unconfigured', note: 'A submit answers 503 — KLING_API_KEY is missing on this platform.' },
+  'kling-v1-5': { health: 'unconfigured', note: 'A submit answers 503 — KLING_API_KEY is missing on this platform.' },
+  'kling-v1': { health: 'unconfigured', note: 'A submit answers 503 — KLING_API_KEY is missing on this platform.' },
+};
+
+export function engineHealth(id: string | null | undefined): { health: EngineHealth; note: string } | null {
+  return ENGINE_HEALTH[String(id || '')] || null;
+}
+
+/** The short warning a selector shows next to a model the last sweep could not
+ *  run, or null when the model is fine (or was never swept). */
+export function engineHealthWarning(id: string | null | undefined): string | null {
+  const entry = engineHealth(id);
+  return entry && entry.health !== 'working' ? entry.note : null;
+}
+
 /** Tier badge colors for the flat quality tiers (LightBeam palette). */
 export function qualityTierColor(tier: EngineQualityTier): { bg: string; fg: string } {
   switch (tier) {
@@ -1070,18 +1136,29 @@ export function qualityTierColor(tier: EngineQualityTier): { bg: string; fg: str
 // logic never gets hard-coded into an isolated page again. Purely additive:
 // nothing above changed, and no app behaviour changes until a surface calls it.
 //
-// Grounded in PROBE-VERIFIED platform behaviour (docs/IMPLEMENTATION_MAP.md §4):
-//  · WORKING today: gemini-omni-flash-preview, veo-3.1-generate-preview,
-//    veo-3.1-fast-generate-preview, Sora 2/Pro.
-//  · BROKEN platform-side (synthetic *_error_* ids): every openrouter/* model
-//    including Seedance 2.0 Fast, plus veo-3.0/2.0 — only routed when the
-//    caller has SEEN a submit succeed this session (availability flag).
-//  · RUNWAY: generation ENABLED — verified 28 Sep 2026 (vv-media-capabilities
-//    answered generationEnabled:true and the founder ran a live test). Runway
-//    routes are therefore ON by default; pass runwayEnabled:false only after
-//    a submit answered 503 this session. Kling submits still need the
-//    platform KLING_API_KEY — keep Kling gated on a live check.
-//  · EXCLUDED: Higgsfield, by founder ruling of 23 Sep 2026.
+// Grounded in PROBE-VERIFIED platform behaviour. Re-verified end to end on
+// 9 Oct 2026 with one real minimal generation per model, which INVERTED two of
+// the previous findings — OpenRouter recovered and Sora broke — so the notes
+// below replace the 28 Sep ones rather than sitting alongside them:
+//  · WORKING, clip returned: gemini-omni-flash-preview,
+//    veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and EVERY
+//    openrouter/* id in the enum (seedance-2.0-fast, veo-3.1, veo-3.1-fast,
+//    veo-3.1-lite). The managed POST /api/generate/video works too.
+//  · BROKEN platform-side (the proxy answers 200 with a synthetic *_error_*
+//    id instead of a real operation): sora-2, sora-2-pro, veo-3.0-generate-001,
+//    veo-3.0-fast-generate-001, veo-2.0-generate-001. No request shape fixes
+//    this from here; the fallbackChain on each route is what covers it.
+//  · NOT IN THE PROXY ENUM (hard 400): openrouter/bytedance/seedance-2.5-fast.
+//  · RUNWAY: live. The free quote answers 200 with a real price, so routes stay
+//    ON by default; pass runwayEnabled:false only after a submit answered 503
+//    this session. The paid submit needs a browser X-Workspace-DB-Token.
+//  · KLING: NOT configured — a submit answers 503 KLING_API_KEY missing, even
+//    though GET /api/generate/kling/models still answers 200 with a static
+//    list. Never gate Kling on that catalogue call.
+//  · HIGGSFIELD: verified WORKING (Hailuo 02 text-to-video and all three DoP
+//    image-to-video models returned clips). It is excluded from VIDEO_ENGINES
+//    because that list is Group-A-only — reach it through
+//    lib/videoIntegrations.ts, which routes it correctly.
 //  · UI is CODE: a product-interface shot is never sent to generative video.
 // ---------------------------------------------------------------------------
 
@@ -1106,7 +1183,11 @@ export interface EngineAvailability {
   runwayEnabled?: boolean;
   /** True only after GET /api/generate/kling/models answered 200 AND a submit worked. */
   klingEnabled?: boolean;
-  /** True only after an openrouter/* submit returned a REAL operation id this session. */
+  /** OpenRouter submits were re-verified working on 9 Oct 2026 (Seedance 2.0
+   * Fast and all three OpenRouter Veo ids each returned a real operation and a
+   * finished clip), so undefined now counts as TRUE — the same convention
+   * runwayEnabled uses. Pass false only after an openrouter/* submit came back
+   * with a synthetic openrouter_error_* id this session. */
   openRouterHealthy?: boolean;
 }
 
@@ -1141,9 +1222,9 @@ export function routeShotIntent(intent: ShotIntent, avail: EngineAvailability = 
         reason: 'Veo 3.1: hero cinematic quality, 4K, up to 3 reference ingredients or a locked last frame.',
       };
     case 'fast_broll':
-      return avail.openRouterHealthy
-        ? { kind: 'engine', engineId: SEEDANCE, fallbackChain: [OMNI, VEO_31_FAST], reason: 'Seedance 2.0 Fast is the cheapest fastest B-roll engine and a submit succeeded this session.' }
-        : { kind: 'engine', engineId: OMNI, fallbackChain: [VEO_31_FAST], reason: 'OpenRouter submits are broken platform-side (synthetic openrouter_error_* ids), so Omni Flash is the proven fast B-roll route — the same one veh-broll-generate uses.' };
+      return avail.openRouterHealthy !== false
+        ? { kind: 'engine', engineId: SEEDANCE, fallbackChain: [OMNI, VEO_31_FAST], reason: 'Seedance 2.0 Fast is the cheapest, fastest B-roll engine, and it was re-verified end to end on 9 Oct 2026.' }
+        : { kind: 'engine', engineId: OMNI, fallbackChain: [VEO_31_FAST], reason: 'An openrouter/* submit came back as a synthetic openrouter_error_* id this session, so Omni Flash takes the fast B-roll work — the same route veh-broll-generate uses.' };
     case 'character_consistency':
       return {
         kind: 'engine', engineId: OMNI, fallbackChain: [VEO_31],
@@ -1164,9 +1245,13 @@ export function routeShotIntent(intent: ShotIntent, avail: EngineAvailability = 
         ? { kind: 'engine', engineId: 'gen4_turbo', fallbackChain: [VEO_31_FAST, OMNI], reason: 'Runway Gen 4 Turbo at $0.05/s is the cheapest image-to-video once enabled.' }
         : { kind: 'engine', engineId: VEO_31_FAST, fallbackChain: [OMNI], reason: 'Runway answered 503 this session — Veo 3.1 Fast animates a single seed image (imageData) as the fallback; gen4_turbo resumes when Runway recovers.' };
     case 'surreal_stylized':
+      // Sora stays the primary because it is the right engine for this intent
+      // and its current failure is platform-side, fast (the proxy answers in
+      // well under a second with a synthetic sora_error_* id) and already
+      // absorbed by the fallback chain. Veo 3.1 is what actually renders today.
       return {
-        kind: 'engine', engineId: 'sora-2', fallbackChain: [VEO_31],
-        reason: 'Sora 2 is strongest for surreal, stylized and complex multi-subject scenes.',
+        kind: 'engine', engineId: 'sora-2', fallbackChain: [VEO_31, VEO_31_FAST],
+        reason: 'Sora 2 is strongest for surreal, stylized and complex multi-subject scenes. As of the 9 Oct 2026 sweep Sora submits are refused platform-side, so expect the chain to land on Veo 3.1.',
       };
     case 'video_to_video':
       return avail.runwayEnabled !== false

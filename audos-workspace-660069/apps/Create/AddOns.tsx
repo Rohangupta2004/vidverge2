@@ -67,7 +67,7 @@ function Row({
           overflow: 'hidden',
           color: chosen ? T.accentFg : T.muted,
           border: `1px solid ${chosen ? T.accentBorder : T.border}`,
-          background: chosen ? T.accentSoft : 'rgba(255,255,255,0.03)',
+          background: chosen ? T.accentSoft : 'rgba(180,120,0,0.05)',
         }}
       >
         {thumb ? (
@@ -190,7 +190,7 @@ export default function AddOns() {
         style={{
           borderRadius: 16,
           border: `1px solid ${T.border}`,
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02))',
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,250,235,0.9))',
           overflow: 'hidden',
         }}
       >

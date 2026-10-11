@@ -7,9 +7,11 @@
 import { useState } from 'react';
 import { Download, FileUp, Layers, Monitor, Play, Smartphone, Trash2, X } from 'lucide-react';
 import { cacheAsset, describeError, type CachedAsset } from '../../lib/heygenApi';
+import { AGENT_AUDIO_UNSUPPORTED_NOTE, videoAgentAudioRuledOut } from '../../lib/heygenAgent';
+import { voicePipeline } from '../../lib/voicePipeline';
 import { setOrientation, setToggles, useHeyGenSession } from '../../lib/heygenSession';
 import { useCompose, type Generated } from '../../lib/useCompose';
-import { Button, CapabilityNote, Field, Notice, Panel, Progress, Segmented, Toggle } from './ui';
+import { Button, CapabilityNote, Field, Notice, Panel, Progress, Segmented, Toggle, fieldClassFor } from './ui';
 import StoryboardReview from './StoryboardReview';
 
 export type { Generated };
@@ -49,6 +51,11 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
   const ready = Boolean(session.avatarId) && Boolean(brief.trim() || scenes.some((scene) => scene.prompt.trim()));
   const portrait = session.orientation === 'portrait';
   const { busy, phase } = compose;
+  const elevenLabsStoryboard = voicePipeline() === 'elevenlabs_heygen';
+  // The Video Agent on this account will not lip-sync to a ready-made track, so
+  // a voiced film is assembled scene by scene instead. Said out loud, because a
+  // silent fallback here would look like the suite being slow for no reason.
+  const voicedSceneBySceneOnly = elevenLabsStoryboard && videoAgentAudioRuledOut();
 
   return <Panel
     step={step}
@@ -61,6 +68,10 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
       works &mdash; switch to Quick render in the header.
     </CapabilityNote>
 
+    {voicedSceneBySceneOnly ? <Notice tone="info" title="Your film is rendered scene by scene">
+      {AGENT_AUDIO_UNSUPPORTED_NOTE}
+    </Notice> : null}
+
     <div className="space-y-4">
       <Field label="Your brief" hint="For example: a 45-second explainer for founders on why scene consistency matters, ending on a free-trial CTA.">
         <textarea
@@ -68,8 +79,8 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
           onChange={(event) => setBrief(event.target.value)}
           rows={4}
           disabled={busy}
-          placeholder="A 45-second product explainer for founders"
-          className="st-field resize-y"
+          placeholder="A 45-second explainer for founders on why scene consistency matters, ending on a free-trial CTA"
+          className="st-textarea"
         />
       </Field>
 
@@ -81,18 +92,19 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
             options={[{ value: 'portrait', label: 'Portrait', icon: Smartphone }, { value: 'landscape', label: 'Landscape', icon: Monitor }]}
           />
         </Field>
-        <Field label="Product images or screenshots" hint="Uploaded once and reused — attaching the same file twice costs nothing.">
+        <Field label="Product images or screenshots" hint="Uploaded once and reused — attaching the same file twice costs nothing." error={uploadError}>
           <input
             type="file"
             multiple
             accept="image/*,application/pdf"
             disabled={busy || uploading}
+            aria-invalid={uploadError ? true : undefined}
             onChange={(event) => {
               const list = event.target.files;
               event.target.value = '';
               if (list?.length) void addFiles(list);
             }}
-            className="st-field file:mr-3 file:rounded-lg file:border-0 file:bg-[color-mix(in_srgb,#8b5cf6_22%,transparent)] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
+            className={`${fieldClassFor('st-field', Boolean(uploadError))} file:mr-3 file:rounded-lg file:border-0 file:bg-[color-mix(in_srgb,#C8920A_22%,transparent)] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-[#1A1000]`}
           />
         </Field>
       </div>
@@ -106,15 +118,16 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
           </button>
         </span>)}
       </div> : null}
-      {uploadError ? <Notice tone="error" title="That file could not be attached">{uploadError}</Notice> : null}
 
       <div className="grid gap-2 sm:grid-cols-3">
         <Toggle
-          checked={session.storyboardReview}
+          checked={session.storyboardReview || elevenLabsStoryboard}
           onChange={(value) => setToggles({ storyboardReview: value })}
-          disabled={busy}
+          disabled={busy || elevenLabsStoryboard}
           label="Review storyboard first"
-          hint="See and edit the scene plan before any render credit is spent."
+          hint={elevenLabsStoryboard
+            ? 'Required for ElevenLabs: SceneForge needs each scene line before it can make the lip-sync tracks.'
+            : 'See and edit the scene plan before any render credit is spent.'}
         />
         <Toggle
           checked={session.transparentBackground}
@@ -143,15 +156,15 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
             onChange={(event) => setScenes((current) => current.map((entry) => entry.key === scene.key ? { ...entry, prompt: event.target.value } : entry))}
             rows={2}
             disabled={busy}
-            placeholder="What happens in this scene?"
-            className="st-field resize-y"
+            placeholder="What the viewer sees and hears in this scene"
+            className="st-textarea"
           />
           <button
             type="button"
             aria-label={`Remove scene ${index + 1}`}
             disabled={busy}
             onClick={() => setScenes((current) => current.filter((entry) => entry.key !== scene.key))}
-            className="mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--space-border-default)] text-[var(--space-text-muted)] hover:border-[var(--space-border-strong)]"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--space-border-default)] text-[var(--space-text-muted)] hover:border-[var(--space-border-strong)]"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -165,7 +178,7 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
           disabled={!ready}
         >
           <Play className="h-4 w-4" />
-          {session.storyboardReview ? 'Plan the storyboard' : 'Generate video'}
+          {session.storyboardReview || elevenLabsStoryboard ? 'Plan the storyboard' : 'Generate video'}
         </Button>
         <Button tone="ghost" onClick={() => setScenes((current) => [...current, newScene()])} disabled={busy}>
           <Layers className="h-3.5 w-3.5" />Add a scene
@@ -203,6 +216,8 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
 
       {compose.error ? <Notice tone="error" title="That did not go through">{compose.error}</Notice> : null}
 
+      {compose.note && !compose.error ? <Notice tone="info" title="How this film was made">{compose.note}</Notice> : null}
+
       {compose.storyboard.length ? <StoryboardReview
         scenes={compose.storyboard}
         busy={phase === 'rendering'}
@@ -219,7 +234,7 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
           style={session.transparentBackground ? {
             // A checkerboard behind an alpha render is the only way the
             // customer can see that the background really is transparent.
-            backgroundImage: 'linear-gradient(45deg,#2a2a35 25%,transparent 25%,transparent 75%,#2a2a35 75%),linear-gradient(45deg,#2a2a35 25%,transparent 25%,transparent 75%,#2a2a35 75%)',
+            backgroundImage: 'linear-gradient(45deg,#EDE3CC 25%,transparent 25%,transparent 75%,#EDE3CC 75%),linear-gradient(45deg,#EDE3CC 25%,transparent 25%,transparent 75%,#EDE3CC 75%)',
             backgroundSize: '20px 20px',
             backgroundPosition: '0 0,10px 10px',
           } : undefined}
@@ -230,7 +245,7 @@ export default function ComposePanel({ step, onGenerated }: { step: number; onGe
           target="_blank"
           rel="noopener"
           className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white"
-          style={{ backgroundImage: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
+          style={{ backgroundImage: 'linear-gradient(135deg,#E8B737,#C8920A)' }}
         >
           <Download className="h-4 w-4" />Download MP4
         </a>

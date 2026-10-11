@@ -7,7 +7,7 @@
  * here and both surfaces import them.
  */
 import { CSSProperties } from 'react';
-import { Loader2 } from 'lucide-react';
+import VergeLoader from '../../components/VergeLoader';
 import { T } from './api';
 
 export const card: CSSProperties = {
@@ -78,6 +78,6 @@ export function Tag(props: { children: any; tone?: 'ok' | 'warn' | 'bad' | 'info
   );
 }
 
-export function Spin() {
-  return <Loader2 size={15} style={{ animation: 'adsspin 1s linear infinite' }} />;
+export function Spin(props: { size?: number; label?: string; caption?: string } = {}) {
+  return <VergeLoader size={props.size ?? 34} label={props.label} caption={props.caption} />;
 }

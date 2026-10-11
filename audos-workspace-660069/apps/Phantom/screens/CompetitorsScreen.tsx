@@ -17,7 +17,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ArrowRight, Check, Plus, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { Competitor, Profile, analyzeCompetitor, discoverCompetitors } from '../store';
 import { INK_DEEP, LINE, MONO, TEXT, TEXT_DIM, TEXT_MUTED, rgba } from '../theme';
-import { BrandMark, Button, EmptyState, Field, LogStream, Notice, Panel, Pill, SectionTitle, useAccent } from '../ui';
+import { BrandMark, Button, EmptyState, Field, LogStream, Notice, Panel, Pill, SectionTitle, Spinner, useAccent } from '../ui';
 
 interface Props {
   brand: Profile;
@@ -228,11 +228,13 @@ export default function CompetitorsScreen({ brand, competitors, onCompetitors, o
       {error ? <Notice tone="bad">{error}</Notice> : null}
       {note ? <Notice tone="warn">{note}</Notice> : null}
 
+      {phase === 'reading' ? <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'center' }}><Spinner size={120} caption="Reading competitor sites" /></div> : null}
+
       {log.length > 0 ? <div style={{ marginBottom: 16 }}><LogStream lines={log} busy={busyAll} /></div> : null}
 
       {phase === 'searching' && competitors.length === 0 ? (
         <Panel style={{ padding: '52px 32px', textAlign: 'center' }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: TEXT, marginBottom: 8 }}>{'Finding your competitors\u2026'}</div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}><Spinner size={120} caption="Finding your competitors" /></div>
           <div style={{ fontSize: 13.3, color: TEXT_DIM, maxWidth: 440, margin: '0 auto', lineHeight: 1.6 }}>
             Three searches, then a read of every site that comes back. This usually takes under a minute.
           </div>

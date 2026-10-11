@@ -32,25 +32,28 @@ export default function HyperFrameCard(props: {
     setLength(templateOf(template).defaultDuration);
   }, [template, card]);
 
-  const ready = definition.fields.every((field) => String(variables[field.key] || '').trim().length > 0);
+  // Optional fields are meant to be blank — a step sequence ships three steps as
+  // happily as five — so only the required ones gate the render.
+  const missing = definition.fields.filter((field) => !field.optional && !String(variables[field.key] || '').trim());
+  const ready = missing.length === 0;
 
-  return <div className="absolute inset-0 z-50 flex items-center justify-center bg-[color-mix(in_srgb,#040713_72%,transparent)] p-4" onClick={props.onClose}>
+  return <div className="absolute inset-0 z-50 flex items-center justify-center bg-[color-mix(in_srgb,#1A1000_35%,transparent)] p-4" onClick={props.onClose}>
     <div className="sfme-rise flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[var(--space-border-strong)] bg-[var(--space-surface-card)] shadow-2xl" onClick={(event) => event.stopPropagation()}>
       <header className="flex items-center gap-3 border-b border-[var(--space-border-default)] px-5 py-3.5">
-        <Sparkles className="h-4 w-4 text-[#a78bfa]" />
+        <Sparkles className="h-4 w-4 text-[#C8920A]" />
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-bold text-[var(--space-text-primary)]">{card ? 'Edit card' : 'Add a card'}</h2>
           <p className="truncate text-[11px] text-[var(--space-text-muted)]">Rendered on its own, then composited at {start.toFixed(1)}s.</p>
         </div>
-        <button type="button" onClick={props.onClose} aria-label="Close" className="rounded-lg p-1.5 text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#ffffff_7%,transparent)]"><X className="h-4 w-4" /></button>
+        <button type="button" onClick={props.onClose} aria-label="Close" className="rounded-lg p-1.5 text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_10%,transparent)]"><X className="h-4 w-4" /></button>
       </header>
 
       <div className="grid flex-1 gap-4 overflow-y-auto p-5 md:grid-cols-[200px_minmax(0,1fr)]">
         <div className="space-y-1.5">
           {CARD_TEMPLATES.map((option) => <button key={option.id} type="button" onClick={() => { setTemplate(option.id); if (!card) setVariables({}); }}
             className={option.id === template
-              ? 'w-full rounded-xl border-2 border-[#8b5cf6] bg-[color-mix(in_srgb,#8b5cf6_12%,transparent)] p-3 text-left'
-              : 'w-full rounded-xl border border-[var(--space-border-default)] p-3 text-left hover:border-[#6366f1]'}>
+              ? 'w-full rounded-xl border-2 border-[#C8920A] bg-[color-mix(in_srgb,#C8920A_12%,transparent)] p-3 text-left'
+              : 'w-full rounded-xl border border-[var(--space-border-default)] p-3 text-left hover:border-[#C8920A]'}>
             <span className="block text-xs font-bold text-[var(--space-text-primary)]">{option.name}</span>
             <span className="mt-0.5 block text-[10px] leading-relaxed text-[var(--space-text-muted)]">{option.blurb}</span>
           </button>)}
@@ -60,8 +63,11 @@ export default function HyperFrameCard(props: {
           {definition.fields.map((field) => <label key={field.key} className="block">
             <span className="block text-[11px] font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">{field.label}</span>
             {field.multiline
-              ? <textarea rows={3} value={variables[field.key] || ''} placeholder={field.placeholder} onChange={(event) => setVariables((old) => ({ ...old, [field.key]: event.target.value }))} className="sf-input mt-1 resize-y" />
-              : <input value={variables[field.key] || ''} placeholder={field.placeholder} onChange={(event) => setVariables((old) => ({ ...old, [field.key]: event.target.value }))} className="sf-input mt-1" />}
+              ? <textarea rows={3} value={variables[field.key] || ''} placeholder={field.placeholder} onChange={(event) => setVariables((old) => ({ ...old, [field.key]: event.target.value }))} className="sf-textarea mt-1" />
+              : <input value={variables[field.key] || ''} placeholder={field.placeholder}
+                aria-invalid={missing.some((entry) => entry.key === field.key) ? true : undefined}
+                onChange={(event) => setVariables((old) => ({ ...old, [field.key]: event.target.value }))}
+                className={missing.some((entry) => entry.key === field.key) ? 'sf-input sf-input--error mt-1' : 'sf-input mt-1'} />}
           </label>)}
 
           <div className="grid grid-cols-2 gap-3">
@@ -85,15 +91,15 @@ export default function HyperFrameCard(props: {
 
           <div className="rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">Preview</p>
-            <div className="mt-2 rounded-xl p-4" style={{ background: 'linear-gradient(135deg, rgba(10,14,24,.95), rgba(22,16,40,.95))', borderTop: `3px solid ${kit.primary}` }}>
+            <div className="mt-2 rounded-xl p-4" style={{ background: 'linear-gradient(135deg, rgba(10,14,24,.95), rgba(40,31,16,.95))', borderTop: `3px solid ${kit.primary}` }}>
               {template === 'stat-counter'
                 ? <div className="text-center">
                   <p className="text-3xl font-black" style={{ color: kit.accent }}>{variables.value || '0'}</p>
                   <p className="mt-1 text-sm font-semibold" style={{ color: kit.textColor }}>{variables.label || 'What it measures'}</p>
                 </div>
                 : <div>
-                  <p className="text-base font-extrabold leading-snug" style={{ color: kit.textColor }}>{template === 'quote-card' ? `\u201C${variables.quote || 'Your quote'}\u201D` : (variables.title || 'Your title')}</p>
-                  <p className="mt-1.5 text-xs leading-relaxed text-[var(--space-text-secondary)]">{variables.body || variables.attribution || ''}</p>
+                  <p className="text-base font-extrabold leading-snug" style={{ color: kit.textColor }}>{template === 'quote-card' ? `\u201C${variables.quote || 'Your quote'}\u201D` : (variables.title || variables.headline || variables.leftTitle || variables.label || 'Your title')}</p>
+                  <p className="mt-1.5 text-xs leading-relaxed text-[var(--space-text-secondary)]">{variables.body || variables.attribution || variables.step1 || variables.left1 || variables.detail || ''}</p>
                   {variables.cta ? <span className="mt-3 inline-block rounded-full px-3 py-1.5 text-xs font-bold" style={{ background: kit.primary, color: kit.contrast }}>{variables.cta}</span> : null}
                 </div>}
             </div>
@@ -107,10 +113,12 @@ export default function HyperFrameCard(props: {
       </div>
 
       <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--space-border-default)] px-5 py-3.5">
-        <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--space-text-muted)]">{ready ? cardSummary(template, variables) : 'Fill every field to render the card.'}</span>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--space-text-muted)]">
+          {ready ? cardSummary(template, variables) : `Still needed: ${missing.map((field) => field.label).join(', ')}.`}
+        </span>
         <button type="button" onClick={props.onClose} className="rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-xs font-semibold text-[var(--space-text-secondary)]">Cancel</button>
         <button type="button" disabled={!ready || rendering} onClick={() => props.onSubmit({ template, variables, start, duration: length, placement })}
-          className="flex items-center gap-2 rounded-xl bg-[linear-gradient(135deg,#6366f1,#8b5cf6)] px-4 py-2 text-xs font-bold text-white shadow-[0_4px_16px_rgba(99,102,241,.4)] disabled:opacity-40">
+          className="flex items-center gap-2 rounded-xl bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-4 py-2 text-xs font-bold text-white shadow-[0_4px_16px_rgba(200,146,10,.35)] disabled:opacity-40">
           {rendering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}{rendering ? 'Rendering the card…' : card ? 'Re-render card' : 'Render card'}
         </button>
       </footer>

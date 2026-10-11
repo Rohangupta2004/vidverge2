@@ -189,7 +189,7 @@ export async function generateStyledScript(req: ScriptRequest): Promise<StyledSc
       ? 'THE CUSTOMER TYPED THIS DESCRIPTION OF THE VIDEO THEY WANT. It is both the brief and the creative direction — honour its specifics and do not replace its idea with your own:'
       : 'PRODUCT BRIEF (use its real specifics — actual features, numbers and problems):',
     req.productContext.slice(0, 4000),
-    req.steer ? '\nTHE CUSTOMER ALSO ASKED FOR THIS ON THIS REWRITE:\n' + req.steer.slice(0, 600) : '',
+    req.steer ? '\nTHE CUSTOMER ALSO ASKED FOR THIS ON THIS REWRITE:\n' + req.steer.slice(0, 5000) : '',
     '\nWrite the script now.',
   ].filter(Boolean).join('\n');
 

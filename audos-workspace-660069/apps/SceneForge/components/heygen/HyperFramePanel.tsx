@@ -30,8 +30,8 @@ function kitFromSession(primary: string, accent: string, logoUrl: string): Brand
   return {
     name: 'SceneForge',
     logoUrl,
-    primary: primary || '#6366f1',
-    accent: accent || '#8b5cf6',
+    primary: primary || '#f59e0b',
+    accent: accent || '#d97706',
     contrast: '#0b1022',
     textColor: '#ffffff',
     font: 'Inter, system-ui, sans-serif',
@@ -47,9 +47,9 @@ export default function HyperFramePanel({ step, onRendered }: { step: number; on
   const [error, setError] = useState('');
   const [frames, setFrames] = useState<RenderedFrame[]>([]);
 
-  // The four zips are uploaded in the background the first time this panel is
-  // opened, so the customer's first "Render overlay" is not also paying for
-  // an upload. A failure here is silent: the upload simply happens on use.
+  // Every template's zip is uploaded in the background the first time this panel
+  // is opened, so the customer's first "Render overlay" is not also paying for an
+  // upload. A failure here is silent: the upload simply happens on use.
   useEffect(() => {
     void prewarmTemplates(FRAME_TEMPLATES.map((entry) => entry.id));
   }, []);
@@ -110,7 +110,7 @@ export default function HyperFramePanel({ step, onRendered }: { step: number; on
     step={step}
     done={frames.length > 0}
     title="Motion graphics"
-    hint="Animated overlay cards in your brand — a feature list, a stat, a CTA or a testimonial. Each one renders on its own."
+    hint="Animated overlay cards in your brand — a feature list, a stat, a CTA, a testimonial, a step sequence, a UI highlight or a comparison table. Each one renders on its own."
   >
     <CapabilityNote capability="hyperframes" label="HeyGen HyperFrames">
       SceneForge&rsquo;s own Motion Graphics Editor still builds these cards as styled plates and composites them into your
@@ -134,7 +134,7 @@ export default function HyperFramePanel({ step, onRendered }: { step: number; on
               rows={3}
               disabled={busy}
               placeholder={field.placeholder}
-              className="st-field resize-y"
+              className="st-textarea"
             />
             : <input
               value={variables[field.key] || ''}

@@ -56,15 +56,40 @@ interface RiveRuntime {
 /** Fetched at most once per page and shared by every stage on it. */
 let runtimeRequest: Promise<RiveRuntime> | null = null;
 
+// MUST match the @rive-app/canvas runtime bundled by
+// @rive-app/react-canvas@4.29.1, which is @rive-app/canvas@2.38.1.
+const RIVE_WASM_URL = 'https://unpkg.com/@rive-app/canvas@2.38.1/rive.wasm';
+
+/**
+ * REQUIRED, once. Rive downloads a separate rive.wasm the first time a canvas
+ * mounts; if that URL does not resolve the canvas stays blank with no error.
+ *
+ * The pinned react-canvas build does NOT re-export `RuntimeLoader`, so reading
+ * it straight off that namespace throws on undefined. Fall back to the canvas
+ * runtime, where it lives on the default export. Pinning is best-effort either
+ * way: a miss must never reject, or every stage would report total failure over
+ * a .wasm URL the runtime can still resolve on its own.
+ */
+async function pinRiveWasmUrl(reactCanvas: any): Promise<void> {
+  try {
+    let loader: any = reactCanvas?.RuntimeLoader;
+    if (!loader?.setWasmUrl) {
+      const canvas: any = await import('@rive-app/canvas');
+      loader = (canvas?.default ?? canvas)?.RuntimeLoader;
+    }
+    loader?.setWasmUrl?.(RIVE_WASM_URL);
+  } catch (error) {
+    console.warn('[Rive] could not pin the rive.wasm URL', error);
+  }
+}
+
 function loadRiveRuntime(): Promise<RiveRuntime> {
   if (!runtimeRequest) {
-    runtimeRequest = import('@rive-app/react-canvas').then((mod: any) => {
-      // REQUIRED, once. Rive downloads a separate rive.wasm the first time a
-      // canvas mounts; if that URL does not resolve the canvas stays blank
-      // with no error. The version MUST match the @rive-app/canvas runtime
-      // bundled by @rive-app/react-canvas@4.29.1, which is
-      // @rive-app/canvas@2.38.1.
-      mod.RuntimeLoader.setWasmUrl('https://unpkg.com/@rive-app/canvas@2.38.1/rive.wasm');
+    runtimeRequest = import('@rive-app/react-canvas').then(async (mod: any) => {
+      await pinRiveWasmUrl(mod);
+      if (typeof mod?.useRive !== 'function' || typeof mod?.useStateMachineInput !== 'function') {
+        throw new Error('@rive-app/react-canvas did not provide the hooks this stage needs');
+      }
       return { useRive: mod.useRive, useStateMachineInput: mod.useStateMachineInput };
     });
   }

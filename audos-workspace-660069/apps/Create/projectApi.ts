@@ -407,7 +407,7 @@ export async function planScenes(brief: ProjectBrief, character: CharacterRef): 
     'never mention the character\'s name changing.';
 
   const context = [
-    `Brief from the user: ${clampText(brief.brief, 700)}`,
+    `Brief from the user: ${clampText(brief.brief, 5000)}`,
     brief.brand ? `Brand / product: ${clampText(brief.brand, 120)}` : '',
     brief.brandContext ? `Brand context: ${clampText(brief.brandContext, 400)}` : '',
     `On-camera character (identical in every scene): ${character.name} — ${clampText(character.description, 300)}`,

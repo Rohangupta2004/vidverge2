@@ -242,8 +242,7 @@ export default function CompareScreen({
           </>
         ) : (
           <Panel style={{ padding: '54px 32px', textAlign: 'center' }}>
-            <div style={{ color: accent, display: 'flex', justifyContent: 'center', marginBottom: 14 }}><Spinner size={26} /></div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: TEXT, marginBottom: 8 }}>Building your comparison</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}><Spinner size={120} caption="Building your comparison" /></div>
             <div style={{ fontSize: 13.3, color: TEXT_DIM, maxWidth: 460, margin: '0 auto 18px', lineHeight: 1.6 }}>
               {competitors.filter((c) => c.included && c.fetched).length + 1} columns, seven rows, then the positioning read-out.
             </div>
@@ -363,11 +362,11 @@ export default function CompareScreen({
             <div style={{ fontSize: 11.4, letterSpacing: 2, textTransform: 'uppercase', color: TEXT_MUTED, fontFamily: MONO }}>
               Positioning read-out
             </div>
-            {!insights ? <Spinner size={14} /> : null}
           </div>
 
           {!insights ? (
-            <div style={{ fontSize: 12.5, color: TEXT_MUTED, lineHeight: 1.6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, fontSize: 12.5, color: TEXT_MUTED, lineHeight: 1.6, textAlign: 'center' }}>
+              <Spinner size={110} caption="Reading your table" />
               Reading the finished table for what rivals do better, what you own, and where the market is unclaimed.
             </div>
           ) : (
@@ -376,13 +375,13 @@ export default function CompareScreen({
                 icon={<TrendingUp size={14} />}
                 title="What competitors do better"
                 lines={insights.competitorsBetter}
-                tone="#f87171"
+                tone="#991B1B"
               />
               <InsightBlock
                 icon={<Sparkles size={14} />}
                 title="Your unique advantages"
                 lines={insights.yourAdvantages}
-                tone="#4ade80"
+                tone="#166534"
               />
               <InsightBlock
                 icon={<Target size={14} />}
@@ -394,7 +393,7 @@ export default function CompareScreen({
                 icon={<MessageSquare size={14} />}
                 title="Messaging improvements"
                 lines={insights.messagingImprovements}
-                tone="#60a5fa"
+                tone="#1D4ED8"
               />
               <div style={{
                 borderTop: `1px solid ${LINE}`, paddingTop: 15, marginTop: 4,

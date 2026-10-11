@@ -62,7 +62,7 @@ export async function generateCharacterImage(brief: string, onProgress?: (messag
         orientation: 'horizontal',
         pose: 'half_body',
         style: 'Realistic',
-        appearance: `Professional, friendly product presenter for this brief: ${brief.slice(0, 240)}. Studio lighting, plain dark background, chest-up, facing camera. No text or logos anywhere in frame.`,
+        appearance: `Professional, friendly product presenter for this brief: ${brief.slice(0, 2000)}. Studio lighting, plain dark background, chest-up, facing camera. No text or logos anywhere in frame.`,
       }),
     });
     const generationId = created?.data?.generation_id || created?.generation_id;

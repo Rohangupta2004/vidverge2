@@ -64,6 +64,8 @@ export interface TimelineProps {
   onTrim: (id: string, nextIn: number, nextOut: number) => void;
   onBeforeEdit: () => void;
   onSplit: () => void;
+  onSplitAt: (time: number) => void;
+  onInsert: (kind: 'aiVideo' | 'aiImage' | 'overlay' | 'motion' | 'cut', time: number) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
   onRipple: (id: string) => void;
@@ -73,6 +75,7 @@ export interface TimelineProps {
 }
 
 type Menu = { x: number; y: number; clipId: string } | null;
+type InsertPoint = { x: number; y: number; time: number; open: boolean; clientX: number; clientY: number } | null;
 
 export default function ProTimeline(props: TimelineProps) {
   const {
@@ -83,8 +86,13 @@ export default function ProTimeline(props: TimelineProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const laneRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const addMenuRef = useRef<HTMLDivElement | null>(null);
+  const addTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const addWasOpenRef = useRef(false);
   const [resizing, setResizing] = useState(false);
   const [menu, setMenu] = useState<Menu>(null);
+  const [insertPoint, setInsertPoint] = useState<InsertPoint>(null);
+  const [splitMode, setSplitMode] = useState(false);
   const [drag, setDrag] = useState<{ kind: 'in' | 'out' | 'text'; id: string } | null>(null);
 
   const duration = Math.max(1, timelineDuration(clips));
@@ -125,6 +133,46 @@ export default function ProTimeline(props: TimelineProps) {
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   }, [props, timeAt]);
+
+  const showInsertPoint = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return;
+    const time = timeAt(e.clientX);
+    props.onSeek(time);
+    if (splitMode) {
+      props.onSplitAt(time);
+      return;
+    }
+    const lane = laneRef.current?.getBoundingClientRect();
+    if (!lane) return;
+    setInsertPoint({
+      x: time * pxPerSec,
+      y: Math.max(24, e.clientY - lane.top),
+      time,
+      open: false,
+      clientX: e.clientX,
+      clientY: e.clientY,
+    });
+  }, [props, pxPerSec, splitMode, timeAt]);
+
+  const openAddAtPlayhead = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    addTriggerRef.current = e.currentTarget;
+    props.onCollapse(false);
+    setInsertPoint({
+      x: playhead * pxPerSec,
+      y: 46,
+      time: playhead,
+      open: true,
+      clientX: box.left + box.width / 2,
+      clientY: box.bottom + 8,
+    });
+  }, [playhead, props, pxPerSec]);
+
+  const applyInsert = useCallback((kind: 'aiVideo' | 'aiImage' | 'overlay' | 'motion' | 'cut') => {
+    if (!insertPoint) return;
+    props.onInsert(kind, insertPoint.time);
+    setInsertPoint(null);
+  }, [insertPoint, props]);
 
   // ---- height drag (the grip along the top edge) ---------------------------
   const startResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -234,15 +282,33 @@ export default function ProTimeline(props: TimelineProps) {
   }, [playhead, pxPerSec]);
 
   useEffect(() => {
-    if (!menu) return undefined;
-    const close = () => setMenu(null);
+    if (!menu && !insertPoint?.open) return undefined;
+    const close = () => { setMenu(null); setInsertPoint((point) => point ? { ...point, open: false } : null); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
     window.addEventListener('pointerdown', close);
-    window.addEventListener('keydown', close);
+    window.addEventListener('keydown', closeOnEscape);
     return () => {
       window.removeEventListener('pointerdown', close);
-      window.removeEventListener('keydown', close);
+      window.removeEventListener('keydown', closeOnEscape);
     };
-  }, [menu]);
+  }, [insertPoint?.open, menu]);
+
+  useEffect(() => {
+    if (insertPoint?.open) {
+      addWasOpenRef.current = true;
+      const frame = window.requestAnimationFrame(() => addMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus());
+      return () => window.cancelAnimationFrame(frame);
+    }
+    if (addWasOpenRef.current) {
+      addWasOpenRef.current = false;
+      const frame = window.requestAnimationFrame(() => {
+        const remembered = addTriggerRef.current;
+        const target = remembered?.isConnected ? remembered : rootRef.current?.querySelector<HTMLButtonElement>('[data-timeline-add="true"]');
+        target?.focus();
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+  }, [insertPoint?.open]);
 
   const menuClip = menu ? clips.find((c) => c.id === menu.clipId) || null : null;
 
@@ -261,10 +327,13 @@ export default function ProTimeline(props: TimelineProps) {
       >
         {collapsed ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Timeline
       </button>
-      <span className="vp-mono" style={{ fontSize: 11.5, color: '#E4E4E4', fontWeight: 700 }}>
+      <span className="vp-mono" style={{ fontSize: 11.5, color: '#1A1000', fontWeight: 700 }}>
         {timecode(playhead)}
       </span>
       <span className="vp-mono" style={{ fontSize: 10.5, color: PRO.text3 }}>/ {timecode(duration)}</span>
+      <button data-timeline-add="true" type="button" className="vp-btn xs primary" onClick={openAddAtPlayhead} title="Add video, image, overlay, motion or a cut at the playhead">
+        <Plus size={12} /> Add
+      </button>
       <span className="vp-spread" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
         <button
           type="button"
@@ -288,8 +357,14 @@ export default function ProTimeline(props: TimelineProps) {
           <Plus size={12} />
         </button>
         <span className="vp-divider" />
-        <button type="button" className="vp-btn xs" onClick={props.onSplit} title="Split at the playhead (S)">
-          <Scissors size={11} /> Split
+        <button
+          type="button"
+          className={`vp-btn xs${splitMode ? ' on' : ''}`}
+          onClick={() => setSplitMode((active) => !active)}
+          title="Scissors mode — click a clip to split exactly there"
+          aria-pressed={splitMode}
+        >
+          <Scissors size={11} /> {splitMode ? 'Click to cut' : 'Split'}
         </button>
       </span>
     </div>
@@ -338,14 +413,14 @@ export default function ProTimeline(props: TimelineProps) {
         <div className="vp-tlwrap" ref={scrollRef} style={{ flex: '1 1 auto', minWidth: 0 }}>
           <div className="vp-tlgrid" ref={laneRef} style={{ width }}>
             {/* ruler */}
-            <div className="vp-ruler" onPointerDown={scrub}>
+            <div className="vp-ruler" onPointerDown={scrub} onClick={showInsertPoint}>
               {ticks.map((t) => (
                 <span key={t} style={{ left: `${t * pxPerSec}px` }}>{timecode(t).slice(0, 5)}</span>
               ))}
             </div>
 
             {/* VIDEO */}
-            <div className="vp-trk" onPointerDown={scrub}>
+            <div className="vp-trk" onPointerDown={scrub} onClick={showInsertPoint} style={{ cursor: splitMode ? 'crosshair' : undefined }}>
               {clips.map((clip, i) => {
                 const start = starts[i];
                 const len = clipLength(clip);
@@ -358,6 +433,12 @@ export default function ProTimeline(props: TimelineProps) {
                     title={`${clip.label} · ${len.toFixed(1)}s`}
                     onPointerDown={(e) => {
                       e.stopPropagation();
+                      if (splitMode) {
+                        const time = timeAt(e.clientX);
+                        props.onSeek(time);
+                        props.onSplitAt(time);
+                        return;
+                      }
                       props.onSelectClips(e.shiftKey ? Array.from(new Set([...selectedClipIds, clip.id])) : [clip.id]);
                       props.onSeek(start + 0.01);
                     }}
@@ -409,7 +490,7 @@ export default function ProTimeline(props: TimelineProps) {
             </div>
 
             {/* AUDIO */}
-            <div className="vp-trk" onPointerDown={scrub}>
+            <div className="vp-trk" onPointerDown={scrub} onClick={showInsertPoint}>
               {clips.map((clip, i) => {
                 const start = starts[i];
                 const len = clipLength(clip);
@@ -454,8 +535,8 @@ export default function ProTimeline(props: TimelineProps) {
                     top: 4,
                     bottom: 4,
                     ...span(s.start, s.end),
-                    background: 'rgba(0,0,0,.55)',
-                    border: '1px dashed rgba(255,255,255,.22)',
+                    background: 'rgba(26,16,0,.38)',
+                    border: '1px dashed rgba(200,146,10,.55)',
                     borderRadius: 4,
                     pointerEvents: 'none',
                   }}
@@ -469,7 +550,7 @@ export default function ProTimeline(props: TimelineProps) {
                     top: 'auto',
                     bottom: 2,
                     height: 9,
-                    background: 'linear-gradient(90deg,#4C1D95,#7C3AED)',
+                    background: 'linear-gradient(90deg,#78350F,#D97706)',
                     cursor: 'default',
                   }}
                   title={`Music bed · ${musicLabel}`}
@@ -478,7 +559,7 @@ export default function ProTimeline(props: TimelineProps) {
             </div>
 
             {/* TEXT */}
-            <div className="vp-trk" onPointerDown={scrub}>
+            <div className="vp-trk" onPointerDown={scrub} onClick={showInsertPoint}>
               {captions.map((cue) => (
                 <div
                   key={cue.id}
@@ -514,7 +595,7 @@ export default function ProTimeline(props: TimelineProps) {
             </div>
 
             {/* FX */}
-            <div className="vp-trk" onPointerDown={scrub}>
+            <div className="vp-trk" onPointerDown={scrub} onClick={showInsertPoint}>
               {globalEffects.map((fx, i) => (
                 <div
                   key={`g-${fx}`}
@@ -523,7 +604,7 @@ export default function ProTimeline(props: TimelineProps) {
                     ...span(0, duration),
                     top: 4 + i * 8,
                     height: 7,
-                    background: 'linear-gradient(90deg,#7C3AED,#A855F7)',
+                    background: 'linear-gradient(90deg,#D97706,#F59E0B)',
                     cursor: 'default',
                   }}
                   title={`${fx} — whole video`}
@@ -537,7 +618,7 @@ export default function ProTimeline(props: TimelineProps) {
                     ...span(o.start, o.end),
                     top: 16,
                     bottom: 4,
-                    background: 'linear-gradient(180deg,#0E7490,#155E75)',
+                    background: 'linear-gradient(180deg,#B4720A,#8A5708)',
                   }}
                   title={`${o.label} — B-roll overlay`}
                   onClick={() => { props.onSelectBroll(o.id); props.onSeek(o.start + 0.01); }}
@@ -553,7 +634,7 @@ export default function ProTimeline(props: TimelineProps) {
                     ...span(o.start, o.end),
                     top: 16,
                     bottom: 4,
-                    background: 'linear-gradient(180deg,#9333EA,#6B21A8)',
+                    background: 'linear-gradient(180deg,#D97706,#92400E)',
                     cursor: 'default',
                   }}
                   title={`${o.label} — image overlay`}
@@ -563,11 +644,58 @@ export default function ProTimeline(props: TimelineProps) {
               ))}
             </div>
 
+            {insertPoint ? (
+              <>
+                <button
+                  type="button"
+                  aria-label={`Add at ${timecode(insertPoint.time)}`}
+                  title={`Add at ${timecode(insertPoint.time)}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const box = e.currentTarget.getBoundingClientRect();
+                    addTriggerRef.current = e.currentTarget;
+                    setInsertPoint((point) => point ? { ...point, open: true, clientX: box.left + box.width / 2, clientY: box.bottom + 8 } : point);
+                  }}
+                  style={{
+                    position: 'absolute', left: insertPoint.x, top: insertPoint.y, zIndex: 18,
+                    width: 24, height: 24, marginLeft: -12, marginTop: -12, borderRadius: '50%',
+                    display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#160d02',
+                    background: 'linear-gradient(135deg,#FFD66E,#F5A20A)', border: '1px solid rgba(255,255,255,.42)',
+                    boxShadow: '0 0 0 5px rgba(200,146,10,.18),0 8px 24px rgba(120,80,0,.18)',
+                  }}
+                >
+                  <Plus size={14} />
+                </button>
+              </>
+            ) : null}
+
             {/* the playhead rides over every lane and never swallows a click */}
             <div className="vp-playhead" style={{ left: `${playhead * pxPerSec}px` }} />
           </div>
         </div>
       </div>
+
+      {insertPoint?.open ? (
+        <div
+          ref={addMenuRef}
+          className="vp-addmenu"
+          role="dialog"
+          aria-modal="false"
+          aria-label={`Add at ${timecode(insertPoint.time)}`}
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            left: Math.max(12, Math.min(insertPoint.clientX - 122, window.innerWidth - 260)),
+            top: Math.max(64, Math.min(insertPoint.clientY, window.innerHeight - 330)),
+          }}
+        >
+          <div className="vp-addhead"><span>Add to timeline</span><b>{timecode(insertPoint.time)}</b></div>
+          <button type="button" onClick={() => applyInsert('aiVideo')}><VideoIcon size={16} /><span><b>AI Video</b><small>Generate real B-roll at this moment</small></span></button>
+          <button type="button" onClick={() => applyInsert('aiImage')}><Sparkles size={16} /><span><b>AI Image</b><small>Generate a timed visual layer</small></span></button>
+          <button type="button" onClick={() => applyInsert('overlay')}><Plus size={16} /><span><b>Overlay</b><small>Add image, logo, video or text</small></span></button>
+          <button type="button" onClick={() => applyInsert('motion')}><Diamond size={16} /><span><b>Motion</b><small>Animate, reframe or add camera movement</small></span></button>
+          <button type="button" onClick={() => applyInsert('cut')}><Scissors size={16} /><span><b>Cut here</b><small>Split the active clip exactly at playhead</small></span></button>
+        </div>
+      ) : null}
 
       {menu && menuClip ? (
         <div

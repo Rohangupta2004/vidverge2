@@ -31,7 +31,7 @@ function TypedField({ text, start = 24 }: { text: string; start?: number }) {
   const frame = useCurrentFrame();
   const count = Math.max(0, Math.floor((frame - start) / 1.7));
   const shown = text.slice(0, count);
-  return <span>{shown}<span style={{ opacity: frame % 18 < 10 ? 1 : 0, color: '#8b5cf6' }}>|</span></span>;
+  return <span>{shown}<span style={{ opacity: frame % 18 < 10 ? 1 : 0, color: '#f59e0b' }}>|</span></span>;
 }
 
 export function ScreenBase({ identity, feature, variant }: ScreenProps & { variant: Variant }) {

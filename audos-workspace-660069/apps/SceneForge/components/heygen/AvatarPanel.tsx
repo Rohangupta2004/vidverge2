@@ -24,7 +24,7 @@ function AvatarTile({ view, selected, onPick }: { view: AvatarView; selected: bo
     onClick={onPick}
     aria-pressed={selected}
     className={`group overflow-hidden rounded-xl border p-2 text-left ${selected
-      ? 'border-[#8b5cf6] bg-[color-mix(in_srgb,#8b5cf6_14%,transparent)] shadow-[0_0_0_3px_color-mix(in_srgb,#8b5cf6_28%,transparent)]'
+      ? 'border-[#C8920A] bg-[color-mix(in_srgb,#C8920A_14%,transparent)] shadow-[0_0_0_3px_color-mix(in_srgb,#C8920A_28%,transparent)]'
       : 'border-[var(--space-border-default)] hover:border-[var(--space-border-strong)]'}`}
   >
     <div className="aspect-[3/4] overflow-hidden rounded-lg bg-[var(--space-surface-muted)]">

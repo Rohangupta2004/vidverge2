@@ -19,7 +19,6 @@ import {
   Film,
   Plus,
   Trash2,
-  Loader2,
   Users,
   Smartphone,
   CheckCircle2,
@@ -42,6 +41,7 @@ import {
   STUDIO_EVENTS,
   submitVideo,
 } from '../lib/reelioStudio';
+import VergeLoader from './VergeLoader';
 
 const FONT = "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
@@ -192,10 +192,10 @@ export function ScriptStudio({
 
   if (done) {
     return (
-      <div style={{ fontFamily: FONT, color: '#fff', padding: 32, textAlign: 'center' }}>
-        <CheckCircle2 size={40} color="#4ade80" style={{ margin: '0 auto 14px' }} />
+      <div style={{ fontFamily: FONT, color: '#1A1000', padding: 32, textAlign: 'center' }}>
+        <CheckCircle2 size={40} color="#166534" style={{ margin: '0 auto 14px' }} />
         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Rolling camera 🎬</h3>
-        <p style={{ margin: '8px auto 0', maxWidth: 360, fontSize: 13.5, color: '#9ca3af', lineHeight: 1.5 }}>
+        <p style={{ margin: '8px auto 0', maxWidth: 360, fontSize: 13.5, color: '#7A6030', lineHeight: 1.5 }}>
           Your video is generating. Track it in the chat — the progress card will hand you the
           finished MP4 in a few minutes, and it'll be waiting in My Videos.
         </p>
@@ -204,21 +204,19 @@ export function ScriptStudio({
   }
 
   return (
-    <div style={{ fontFamily: FONT, color: '#fff', display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ fontFamily: FONT, color: '#1A1000', display: 'flex', flexDirection: 'column', gap: 16 }}>
       <style>{`
-        @keyframes ssSpin { to { transform: rotate(360deg); } }
-        .ss-spin { animation: ssSpin .9s linear infinite; }
         .ss-btn { transition: transform .16s ease, filter .16s ease; }
         .ss-btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
       `}</style>
 
       {/* Selections row */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button type="button" className="ss-btn" onClick={openCharacters} style={chipStyle(!!character, '#2563eb')}>
+        <button type="button" className="ss-btn" onClick={openCharacters} style={chipStyle(!!character, '#C8920A')}>
           <Users size={13} />
           {character ? `Character: ${character.name}` : 'Pick a character'}
         </button>
-        <button type="button" className="ss-btn" onClick={openMockups} style={chipStyle(!!mockup, '#0d9488')}>
+        <button type="button" className="ss-btn" onClick={openMockups} style={chipStyle(!!mockup, '#B4720A')}>
           <Smartphone size={13} />
           {mockup ? `Mockup: ${mockup.name}` : 'Pick a mockup'}
         </button>
@@ -238,7 +236,7 @@ export function ScriptStudio({
           placeholder="Tone (e.g. upbeat, cinematic)"
           style={{ ...inputStyle, flex: '1 1 160px' }}
         />
-        <div style={{ display: 'inline-flex', borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.12)' }}>
+        <div style={{ display: 'inline-flex', borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(180,120,0,0.14)' }}>
           {(['16:9', '9:16'] as const).map((a) => {
             const on = aspect === a;
             return (
@@ -252,8 +250,8 @@ export function ScriptStudio({
                   fontWeight: 600,
                   cursor: 'pointer',
                   border: 'none',
-                  color: on ? '#0a0a0a' : '#9ca3af',
-                  background: on ? '#60a5fa' : 'transparent',
+                  color: on ? '#FFFFFF' : '#7A6030',
+                  background: on ? '#C8920A' : 'transparent',
                 }}
               >
                 {a}
@@ -270,8 +268,8 @@ export function ScriptStudio({
             key={s.key}
             style={{
               borderRadius: 14,
-              border: '1px solid rgba(255,255,255,0.10)',
-              background: '#101014',
+              border: '1px solid rgba(180,120,0,0.14)',
+              background: '#FFFFFF',
               padding: 14,
             }}
           >
@@ -288,12 +286,12 @@ export function ScriptStudio({
                     fontSize: 12,
                     fontWeight: 700,
                     color: '#fff',
-                    background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                    background: 'linear-gradient(135deg, #C8920A, #B4720A)',
                   }}
                 >
                   {idx + 1}
                 </span>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#93c5fd' }}>Scene {idx + 1}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#B4720A' }}>Scene {idx + 1}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <button type="button" onClick={() => moveScene(idx, -1)} disabled={idx === 0} style={iconBtn(idx === 0)} title="Move up">
@@ -333,7 +331,7 @@ export function ScriptStudio({
                   gap: 8,
                   marginTop: 10,
                   fontSize: 12,
-                  color: '#5eead4',
+                  color: '#B4720A',
                   cursor: 'pointer',
                 }}
               >
@@ -341,7 +339,7 @@ export function ScriptStudio({
                   type="checkbox"
                   checked={!!s.withMockup}
                   onChange={(e) => updateScene(s.key, { withMockup: e.target.checked })}
-                  style={{ accentColor: '#0d9488' }}
+                  style={{ accentColor: '#B4720A' }}
                 />
                 Show the “{mockup.name}” mockup on the phone in this scene
               </label>
@@ -355,7 +353,7 @@ export function ScriptStudio({
                   gap: 8,
                   marginTop: 10,
                   fontSize: 12,
-                  color: '#93c5fd',
+                  color: '#B4720A',
                   cursor: 'pointer',
                 }}
               >
@@ -371,7 +369,7 @@ export function ScriptStudio({
                       ),
                     )
                   }
-                  style={{ accentColor: '#2563eb' }}
+                  style={{ accentColor: '#C8920A' }}
                 />
                 <ImageIcon size={13} />
                 Use my uploaded screenshot as this scene’s visual reference
@@ -393,8 +391,8 @@ export function ScriptStudio({
             borderRadius: 12,
             fontSize: 13,
             fontWeight: 600,
-            color: scenes.length >= 6 ? '#6b7280' : '#93c5fd',
-            border: '1px dashed rgba(37,99,235,0.4)',
+            color: scenes.length >= 6 ? '#A08B5F' : '#B4720A',
+            border: '1px dashed rgba(200,146,10,0.4)',
             background: 'transparent',
             cursor: scenes.length >= 6 ? 'not-allowed' : 'pointer',
           }}
@@ -404,7 +402,7 @@ export function ScriptStudio({
       </div>
 
       {error && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#f87171', fontSize: 12.5 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#991B1B', fontSize: 12.5 }}>
           <AlertTriangle size={13} /> {error}
         </div>
       )}
@@ -417,16 +415,16 @@ export function ScriptStudio({
           justifyContent: 'space-between',
           gap: 12,
           flexWrap: 'wrap',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
+          borderTop: '1px solid rgba(180,120,0,0.14)',
           paddingTop: 14,
         }}
       >
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontSize: 13, color: '#d1d5db', cursor: 'pointer' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontSize: 13, color: '#3D2800', cursor: 'pointer' }}>
           <input
             type="checkbox"
             checked={confirmed}
             onChange={(e) => setConfirmed(e.target.checked)}
-            style={{ accentColor: '#2563eb', width: 16, height: 16 }}
+            style={{ accentColor: '#C8920A', width: 16, height: 16 }}
           />
           This script looks good — I'm ready to generate
         </label>
@@ -448,12 +446,12 @@ export function ScriptStudio({
             border: 'none',
             cursor: !confirmed || submitting ? 'not-allowed' : 'pointer',
             opacity: !confirmed || submitting ? 0.5 : 1,
-            background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
-            boxShadow: confirmed ? '0 8px 26px rgba(37,99,235,0.45)' : 'none',
+            background: 'linear-gradient(90deg, #C8920A 0%, #B4720A 100%)',
+            boxShadow: confirmed ? '0 8px 26px rgba(200,146,10,0.45)' : 'none',
           }}
           data-testid="button-generate-video"
         >
-          {submitting ? <Loader2 size={16} className="ss-spin" /> : <Film size={16} />}
+          {submitting ? <VergeLoader size={34} label="Starting your render" /> : <Film size={16} />}
           {submitting ? 'Starting…' : 'Generate Video'}
         </button>
       </div>
@@ -471,8 +469,8 @@ function chipStyle(active: boolean, color: string): React.CSSProperties {
     fontSize: 12.5,
     fontWeight: 600,
     cursor: 'pointer',
-    color: active ? '#fff' : '#9ca3af',
-    border: `1px solid ${active ? color : 'rgba(255,255,255,0.14)'}`,
+    color: active ? '#1A1000' : '#7A6030',
+    border: `1px solid ${active ? color : 'rgba(180,120,0,0.14)'}`,
     background: active ? `${color}22` : 'transparent',
   };
 }
@@ -482,9 +480,9 @@ function iconBtn(disabled: boolean): React.CSSProperties {
     padding: 6,
     borderRadius: 8,
     cursor: disabled ? 'not-allowed' : 'pointer',
-    border: '1px solid rgba(255,255,255,0.1)',
+    border: '1px solid rgba(180,120,0,0.14)',
     background: 'transparent',
-    color: disabled ? '#4b5563' : '#9ca3af',
+    color: disabled ? '#A08B5F' : '#7A6030',
   };
 }
 
@@ -492,9 +490,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.04)',
-  color: '#fff',
+  border: '1px solid rgba(180,120,0,0.14)',
+  background: 'rgba(180,120,0,0.06)',
+  color: '#1A1000',
   fontSize: 13.5,
   outline: 'none',
   fontFamily: FONT,
@@ -507,7 +505,7 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 600,
   textTransform: 'uppercase',
   letterSpacing: 0.4,
-  color: '#6b7280',
+  color: '#7A6030',
   marginBottom: 5,
 };
 

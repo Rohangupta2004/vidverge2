@@ -26,7 +26,7 @@ export const OVERLAY_COLORS: Record<OverlayKind, string> = {
   callout: '#FFB224',    // amber
   highlight: '#FF6B6B',  // coral
   step: '#34E0B0',       // mint
-  label: '#A78BFA',      // violet
+  label: '#FCD34D',      // gold
   diagram: '#22D3EE',    // cyan
 };
 

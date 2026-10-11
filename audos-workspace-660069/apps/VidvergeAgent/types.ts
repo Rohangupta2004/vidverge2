@@ -14,6 +14,7 @@ export interface QueueJob {
   progress: number;
   app: string;
   appId: string;
+  surface?: 'director';
   state: 'active' | 'waiting' | 'completed' | 'failed';
   updatedAt: string;
 }

@@ -35,12 +35,12 @@ export function ThinkingSteps({ steps, isStreaming = false }: ThinkingStepsProps
   const open = userToggled ?? (isStreaming || !allSettled);
 
   return (
-    <div style={{ borderRadius: 12, border: '1px solid rgba(148, 163, 184, 0.18)', background: 'rgba(124, 58, 237, 0.07)', overflow: 'hidden' }}>
+    <div style={{ borderRadius: 12, border: '1px solid rgba(148, 163, 184, 0.18)', background: 'rgba(217, 119, 6, 0.07)', overflow: 'hidden' }}>
       <style>{STEPS_CSS}</style>
       <button
         type="button"
         onClick={() => setUserToggled(!open)}
-        style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer', color: '#c4b5fd', fontSize: 11.5, fontWeight: 700, letterSpacing: 0.3, textAlign: 'left' }}
+        style={{ display: 'flex', alignItems: 'center', gap: 7, width: '100%', padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer', color: '#fcd34d', fontSize: 11.5, fontWeight: 700, letterSpacing: 0.3, textAlign: 'left' }}
       >
         <span aria-hidden style={{ fontSize: 13 }}>{allSettled ? '💭' : '🤔'}</span>
         {allSettled ? `Thought for ${steps.length} steps` : `Thinking… (${steps.length} step${steps.length === 1 ? '' : 's'})`}

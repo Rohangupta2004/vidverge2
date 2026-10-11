@@ -19,7 +19,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Smartphone,
   Monitor,
-  Loader2,
   Trash2,
   CheckCircle2,
   Wand2,
@@ -41,6 +40,7 @@ import {
   STUDIO_EVENTS,
   writeFailureNotice,
 } from '../lib/reelioStudio';
+import VergeLoader from './VergeLoader';
 
 const FONT = "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
@@ -201,28 +201,26 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
   const pad = compact ? 16 : 24;
 
   return (
-    <div style={{ fontFamily: FONT, color: '#fff' }}>
+    <div style={{ fontFamily: FONT, color: '#1A1000' }}>
       <style>{`
-        @keyframes msSpin { to { transform: rotate(360deg); } }
-        .ms-spin { animation: msSpin .9s linear infinite; }
         .ms-btn { transition: transform .16s ease, filter .16s ease; }
         .ms-btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
         .ms-card { transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
-        .ms-card:hover { transform: translateY(-3px); border-color: rgba(45,212,191,0.5); }
+        .ms-card:hover { transform: translateY(-3px); border-color: rgba(200,146,10,0.45); }
       `}</style>
 
       {/* Generator */}
       <div
         style={{
           borderRadius: 18,
-          border: '1px solid rgba(45,212,191,0.24)',
-          background: 'linear-gradient(180deg, rgba(13,148,136,0.10) 0%, rgba(255,255,255,0.02) 100%)',
+          border: '1px solid rgba(180,120,0,0.14)',
+          background: 'linear-gradient(180deg, rgba(200,146,10,0.10) 0%, rgba(180,120,0,0.04) 100%)',
           padding: pad,
           marginBottom: 22,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-          <Wand2 size={16} color="#5eead4" />
+          <Wand2 size={16} color="#B4720A" />
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Generate an app mockup</h3>
         </div>
 
@@ -254,7 +252,7 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
               style={{ display: 'none' }}
               onChange={(event) => void handleUpload(event.target.files && event.target.files[0])}
             />
-            <div style={{ display: 'inline-flex', borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.12)' }}>
+            <div style={{ display: 'inline-flex', borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(180,120,0,0.14)' }}>
               {(['phone', 'desktop'] as const).map((p) => {
                 const on = platform === p;
                 const Icon = p === 'phone' ? Smartphone : Monitor;
@@ -272,8 +270,8 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                       fontWeight: 600,
                       cursor: 'pointer',
                       border: 'none',
-                      color: on ? '#0a0a0a' : '#9ca3af',
-                      background: on ? '#5eead4' : 'transparent',
+                      color: on ? '#FFFFFF' : '#7A6030',
+                      background: on ? '#C8920A' : 'transparent',
                       textTransform: 'capitalize',
                     }}
                   >
@@ -296,15 +294,15 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                 borderRadius: 12,
                 fontSize: 13.5,
                 fontWeight: 600,
-                color: '#dbeafe',
-                border: '1px solid rgba(96,165,250,0.34)',
+                color: '#B4720A',
+                border: '1px solid rgba(200,146,10,0.34)',
                 cursor: uploading || generating ? 'not-allowed' : 'pointer',
                 opacity: uploading || generating ? 0.7 : 1,
-                background: 'rgba(37,99,235,0.10)',
+                background: 'rgba(200,146,10,0.10)',
               }}
               data-testid="button-upload-mockup"
             >
-              {uploading ? <Loader2 size={15} className="ms-spin" /> : <Upload size={15} />}
+              {uploading ? <VergeLoader size={30} label="Uploading your mockup" /> : <Upload size={15} />}
               {uploading ? 'Uploading…' : 'Upload mockup'}
             </button>
 
@@ -325,27 +323,28 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                 border: 'none',
                 cursor: generating || uploading ? 'not-allowed' : 'pointer',
                 opacity: generating || uploading ? 0.7 : 1,
-                background: 'linear-gradient(90deg, #0d9488 0%, #1d4ed8 100%)',
-                boxShadow: '0 6px 20px rgba(13,148,136,0.35)',
+                background: 'linear-gradient(90deg, #C8920A 0%, #B4720A 100%)',
+                boxShadow: '0 6px 20px rgba(200,146,10,0.35)',
               }}
             >
-              {generating ? <Loader2 size={15} className="ms-spin" /> : <Wand2 size={15} />}
+              {generating ? <VergeLoader size={30} label="Generating your mockup" /> : <Wand2 size={15} />}
               {generating ? 'Generating…' : 'Generate mockup'}
             </button>
           </div>
 
           {error && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#f87171', fontSize: 12.5 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#991B1B', fontSize: 12.5 }}>
               <AlertTriangle size={13} /> {error}
             </div>
           )}
           {generating && (
-            <p style={{ margin: 0, fontSize: 12, color: '#6b7280' }}>
-              Rendering a realistic {platform} screen — this takes ~15–30 seconds.
-            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '8px 0' }}>
+              <VergeLoader size={120} caption={`Rendering your ${platform} screen`} />
+              <p style={{ margin: 0, fontSize: 12, color: '#7A6030' }}>This takes ~15–30 seconds.</p>
+            </div>
           )}
           {!generating && justAdded !== null && selectedId !== justAdded && (
-            <p style={{ margin: 0, fontSize: 12, color: '#5eead4' }}>
+            <p style={{ margin: 0, fontSize: 12, color: '#B4720A' }}>
               Saved to your mockups. Tap “Use this” on it when you want it in a video — nothing is
               added to a render until you do.
             </p>
@@ -355,8 +354,8 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
 
       {/* Gallery */}
       {loading ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '32px 0', color: '#9ca3af' }}>
-          <Loader2 size={18} className="ms-spin" /> <span style={{ fontSize: 14 }}>Loading your mockups…</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '32px 0' }}>
+          <VergeLoader size={120} caption="Loading your mockups" />
         </div>
       ) : mockups.length === 0 ? (
         <div
@@ -368,12 +367,12 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
             textAlign: 'center',
             padding: '36px 20px',
             borderRadius: 16,
-            border: '1px solid rgba(255,255,255,0.08)',
-            background: '#0b0b0f',
-            color: '#9ca3af',
+            border: '1px solid rgba(180,120,0,0.14)',
+            background: '#FFFFFF',
+            color: '#7A6030',
           }}
         >
-          <Smartphone size={26} color="rgba(255,255,255,0.7)" />
+          <Smartphone size={26} color="rgba(180,120,0,0.55)" />
           <p style={{ margin: 0, fontSize: 14, maxWidth: 380 }}>
             No mockups yet. Upload your product screen or describe one above to generate a realistic app UI —
             the character will be shown holding or using it.
@@ -398,10 +397,10 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                 className="ms-card"
                 style={{
                   borderRadius: 16,
-                  border: isSel ? '1px solid #2dd4bf' : '1px solid rgba(255,255,255,0.10)',
-                  background: '#101014',
+                  border: isSel ? '1px solid #C8920A' : '1px solid rgba(180,120,0,0.14)',
+                  background: '#FFFFFF',
                   overflow: 'hidden',
-                  boxShadow: isSel ? '0 0 0 1px #2dd4bf, 0 14px 40px rgba(45,212,191,0.28)' : 'none',
+                  boxShadow: isSel ? '0 0 0 1px #C8920A, 0 14px 40px rgba(200,146,10,0.28)' : 'none',
                   display: 'flex',
                   flexDirection: 'column',
                 }}
@@ -410,7 +409,7 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                   {m.image_url ? (
                     <img src={m.image_url} alt={m.screen || m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, #0d9488, #0a0a0f)' }}>
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, #C8920A, #E0A33A)' }}>
                       {isDesktop ? <Monitor size={24} color="rgba(255,255,255,0.6)" /> : <Smartphone size={24} color="rgba(255,255,255,0.6)" />}
                     </div>
                   )}
@@ -427,8 +426,8 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                         borderRadius: 999,
                         fontSize: 10.5,
                         fontWeight: 700,
-                        color: '#0a0a0a',
-                        background: 'rgba(45,212,191,0.95)',
+                        color: '#FFFFFF',
+                        background: 'rgba(200,146,10,0.95)',
                       }}
                     >
                       <CheckCircle2 size={11} /> In use
@@ -440,7 +439,7 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                     {m.name}
                   </h4>
                   {m.screen && (
-                    <p style={{ margin: 0, fontSize: 11.5, color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <p style={{ margin: 0, fontSize: 11.5, color: '#7A6030', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {m.screen}
                     </p>
                   )}
@@ -456,9 +455,9 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                         fontSize: 12,
                         fontWeight: 600,
                         cursor: 'pointer',
-                        border: isSel ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(45,212,191,0.5)',
-                        color: isSel ? '#d1d5db' : '#5eead4',
-                        background: isSel ? 'rgba(255,255,255,0.05)' : 'rgba(45,212,191,0.12)',
+                        border: isSel ? '1px solid rgba(180,120,0,0.36)' : '1px solid rgba(200,146,10,0.45)',
+                        color: isSel ? '#3D2800' : '#B4720A',
+                        background: isSel ? 'rgba(180,120,0,0.06)' : 'rgba(200,146,10,0.12)',
                       }}
                     >
                       {isSel ? 'Selected' : 'Use this'}
@@ -467,7 +466,7 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                       type="button"
                       onClick={() => void handleDelete(m.id)}
                       title="Delete"
-                      style={{ padding: 7, borderRadius: 9, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#9ca3af' }}
+                      style={{ padding: 7, borderRadius: 9, cursor: 'pointer', border: '1px solid rgba(180,120,0,0.14)', background: 'transparent', color: '#7A6030' }}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -486,9 +485,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.04)',
-  color: '#fff',
+  border: '1px solid rgba(180,120,0,0.14)',
+  background: 'rgba(180,120,0,0.06)',
+  color: '#1A1000',
   fontSize: 13.5,
   outline: 'none',
   fontFamily: FONT,

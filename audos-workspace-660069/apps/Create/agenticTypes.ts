@@ -628,11 +628,11 @@ export const MAX_SHOT_REGENERATIONS = 2;
 export const CONTINUITY_PASS_SCORE = 0.72;
 /**
  * THE VEO PROMPT WINDOW, enforced not assumed: /api/veo/generate/video rejects
- * a prompt outside 10–1000 characters, and the generate-video hook slices at
- * the same ceiling. Every prompt this system builds is clamped to fit.
+ * a prompt outside 10–10,000 characters, and forwards everything it accepts
+ * to the provider unchanged. Every prompt this system builds is clamped to fit.
  */
 export const VEO_PROMPT_MIN = 10;
-export const VEO_PROMPT_MAX = 1000;
+export const VEO_PROMPT_MAX = 10000;
 /** Room for one shot's own description inside the assembled prompt. */
 export const SHOT_PROMPT_MAX = 420;
 export const SHOT_DIALOGUE_MAX = 120;

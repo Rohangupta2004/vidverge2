@@ -15,7 +15,7 @@ import { panelCard, PanelHeader, PrimaryButton, ErrLine, Chip } from './editorPa
 import { SFX_PRESETS } from './sfxSuite';
 import type { SfxCue } from './sfxSuite';
 
-const ACCENT = '#FF6B4A'; // VidVerge brand coral
+const ACCENT = '#B45309'; // VidVerge brand coral
 
 function CueRow({ cue, onVolume, onRemove, onSeek }: {
   cue: SfxCue; onVolume: (v: number) => void; onRemove: () => void; onSeek: () => void;
@@ -92,9 +92,9 @@ export function SfxPanel({
           value={customPrompt}
           onChange={(e) => setCustomPrompt(e.target.value)}
           rows={2}
-          maxLength={300}
+          maxLength={450}
           placeholder="Describe a custom sound effect, e.g. a glass bottle popping open…"
-          style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontSize: 12.5, color: P.text, background: 'rgba(7,10,18,0.6)', border: '1px solid ' + P.border, borderRadius: 10, padding: '10px 12px', outline: 'none', marginBottom: 10, fontFamily: 'inherit', lineHeight: 1.5 }}
+          style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontSize: 12.5, color: P.text, background: 'rgba(255,253,244,0.9)', border: '1px solid ' + P.border, borderRadius: 10, padding: '10px 12px', outline: 'none', marginBottom: 10, fontFamily: 'inherit', lineHeight: 1.5 }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           <span style={{ fontSize: 11.5, color: P.sub, fontWeight: 700 }}>Length</span>
@@ -111,7 +111,7 @@ export function SfxPanel({
           disabled={disabled || busy || !customPrompt.trim()}
           busy={busy}
           gradient={'linear-gradient(100deg, ' + ACCENT + ', ' + P.amber + ')'}
-          shadow="0 12px 30px -14px rgba(255,107,74,0.55)"
+          shadow="0 12px 30px -14px rgba(180,83,9,0.45)"
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
           {busy ? 'Generating…' : 'Add custom effect at playhead'}

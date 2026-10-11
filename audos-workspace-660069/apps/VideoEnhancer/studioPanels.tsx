@@ -38,8 +38,8 @@ const subText: CSSProperties = { color: LB.textMuted, fontSize: 11, fontWeight: 
 function ghostButton(active = false): CSSProperties {
   return {
     display: 'inline-flex', alignItems: 'center', gap: 5,
-    background: active ? 'rgba(245,158,11,0.16)' : 'rgba(255,255,255,0.05)',
-    border: `1px solid ${active ? 'rgba(245,158,11,0.5)' : 'rgba(255,255,255,0.1)'}`,
+    background: active ? 'rgba(200,146,10,0.14)' : 'rgba(180,120,0,0.06)',
+    border: `1px solid ${active ? 'rgba(200,146,10,0.5)' : 'rgba(180,120,0,0.14)'}`,
     color: active ? LB.accent : LB.textSecondary,
     borderRadius: 7, padding: '5px 10px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
   };
@@ -120,7 +120,7 @@ export function CutPlanPanel(props: {
       ) : null}
 
       {props.planError ? (
-        <div style={{ color: '#fbbf24', fontSize: 11.5, lineHeight: 1.55, marginBottom: 10 }}>
+        <div style={{ color: '#B45309', fontSize: 11.5, lineHeight: 1.55, marginBottom: 10 }}>
           The measured edits below are ready. The creative pass could not run: {props.planError}
         </div>
       ) : null}
@@ -133,7 +133,7 @@ export function CutPlanPanel(props: {
               key={card.id}
               style={{
                 display: 'flex', gap: 10, padding: 9, borderRadius: 10,
-                background: 'rgba(255,255,255,0.03)',
+                background: 'rgba(180,120,0,0.05)',
                 border: `1px solid color-mix(in srgb, ${meta.color} 34%, transparent)`,
                 borderLeft: `3px solid ${meta.color}`,
               }}
@@ -145,7 +145,7 @@ export function CutPlanPanel(props: {
                 title="Jump the playhead here"
                 style={{
                   width: 78, height: 46, flexShrink: 0, borderRadius: 7, overflow: 'hidden', padding: 0,
-                  border: '1px solid rgba(255,255,255,0.12)', background: '#000', cursor: 'pointer',
+                  border: '1px solid rgba(180,120,0,0.14)', background: '#000', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
               >
@@ -180,7 +180,7 @@ export function CutPlanPanel(props: {
                   type="button"
                   className="vs-btn"
                   onClick={() => props.onReject(card.id)}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: LB.textMuted, borderRadius: 7, padding: '6px 11px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'transparent', border: '1px solid rgba(180,120,0,0.14)', color: LB.textMuted, borderRadius: 7, padding: '6px 11px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
                 >
                   <X size={12} /> Reject
                 </button>
@@ -202,11 +202,11 @@ export function CutPlanPanel(props: {
           <div style={{ display: 'grid', gap: 5, marginTop: 7 }}>
             {decided.map((card) => (
               <div key={card.id} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: LB.textMuted }}>
-                <span style={{ color: card.status === 'applied' ? '#4ade80' : card.status === 'failed' ? '#f87171' : LB.textMuted, fontWeight: 800, width: 58, flexShrink: 0 }}>
+                <span style={{ color: card.status === 'applied' ? '#166534' : card.status === 'failed' ? '#991B1B' : LB.textMuted, fontWeight: 800, width: 58, flexShrink: 0 }}>
                   {card.status === 'applied' ? 'Applied' : card.status === 'failed' ? 'Failed' : card.status === 'accepted' ? 'Accepted' : 'Rejected'}
                 </span>
                 <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.title}</span>
-                {card.note ? <span style={{ color: '#f87171', flexShrink: 0 }}>{card.note}</span> : null}
+                {card.note ? <span style={{ color: '#991B1B', flexShrink: 0 }}>{card.note}</span> : null}
               </div>
             ))}
           </div>
@@ -289,7 +289,7 @@ export function TranscriptPanel(props: {
       </div>
 
       {props.note ? (
-        <div style={{ color: props.exactTimings ? LB.textMuted : '#fbbf24', fontSize: 11, lineHeight: 1.5, marginBottom: 8 }}>{props.note}</div>
+        <div style={{ color: props.exactTimings ? LB.textMuted : '#B45309', fontSize: 11, lineHeight: 1.5, marginBottom: 8 }}>{props.note}</div>
       ) : null}
 
       {props.words.length ? (
@@ -300,7 +300,7 @@ export function TranscriptPanel(props: {
           <div
             style={{
               maxHeight: 260, overflowY: 'auto', lineHeight: 2, fontSize: 13.5,
-              background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)',
+              background: 'rgba(255,250,235,0.9)', border: '1px solid rgba(180,120,0,0.10)',
               borderRadius: 9, padding: '10px 12px',
             }}
           >
@@ -321,8 +321,8 @@ export function TranscriptPanel(props: {
                         title={w.removed ? 'Cut from the video — double-click to put it back' : `${w.start.toFixed(2)}s — double-click to cut it`}
                         style={{
                           cursor: 'pointer', padding: '1px 2px', borderRadius: 4, marginRight: 3,
-                          color: w.removed ? 'rgba(248,113,113,0.65)' : live ? '#241503' : LB.textPrimary,
-                          background: selected ? 'rgba(59,130,246,0.4)' : live ? LB.accent : 'transparent',
+                          color: w.removed ? 'rgba(153,27,27,0.7)' : live ? '#241503' : LB.textPrimary,
+                          background: selected ? 'rgba(29,78,216,0.22)' : live ? LB.accent : 'transparent',
                           textDecoration: w.removed ? 'line-through' : w.filler ? 'underline' : 'none',
                           textDecorationColor: w.filler ? LB.accent : undefined,
                           textDecorationThickness: w.filler ? '2px' : undefined,
@@ -342,7 +342,7 @@ export function TranscriptPanel(props: {
                     title={allRemoved ? 'Restore this sentence' : 'Cut this whole sentence out of the video'}
                     style={{
                       background: 'transparent', border: 'none', cursor: 'pointer', padding: '0 4px',
-                      color: allRemoved ? '#4ade80' : 'rgba(255,255,255,0.25)', fontSize: 11, verticalAlign: 'middle',
+                      color: allRemoved ? '#166534' : 'rgba(180,120,0,0.45)', fontSize: 11, verticalAlign: 'middle',
                     }}
                   >
                     {allRemoved ? <RotateCcw size={11} /> : <Trash2 size={11} />}
@@ -382,7 +382,7 @@ export function BrollPanel(props: {
     return (
       <div style={panel}>
         <div style={headRow}>
-          <Film size={14} color="#22c55e" />
+          <Film size={14} color="#166534" />
           <span style={headText}>B-roll slots</span>
         </div>
         <div style={{ color: LB.textMuted, fontSize: 11.5, lineHeight: 1.6 }}>
@@ -394,7 +394,7 @@ export function BrollPanel(props: {
   return (
     <div style={panel}>
       <div style={headRow}>
-        <Film size={14} color="#22c55e" />
+        <Film size={14} color="#166534" />
         <span style={headText}>B-roll slots</span>
         <span style={subText}>{props.slots.length} candidate{props.slots.length === 1 ? '' : 's'}</span>
       </div>
@@ -402,21 +402,21 @@ export function BrollPanel(props: {
         {props.slots.map((slot) => {
           const open = props.selectedId === slot.id;
           return (
-            <div key={slot.id} style={{ position: 'relative', borderRadius: 10, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.06)', padding: 9 }}>
+            <div key={slot.id} style={{ position: 'relative', borderRadius: 10, border: '1px solid rgba(22,101,52,0.3)', background: 'rgba(22,101,52,0.06)', padding: 9 }}>
               <button
                 type="button"
                 className="vs-btn"
                 onClick={() => { props.onSelect(open ? null : slot.id); props.onSeek(slot.start); }}
                 style={{ display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 30px)', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}
               >
-                <ChevronRight size={13} color="#86efac" style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                <ChevronRight size={13} color="#166534" style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
                 <span style={{ color: LB.textPrimary, fontSize: 12, fontWeight: 650 }}>
                   {fmtTimecode(slot.start)}–{fmtTimecode(slot.end)}
                 </span>
                 <span style={{ color: LB.textMuted, fontSize: 11, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {slot.reason}
                 </span>
-                <span style={{ fontSize: 10.5, fontWeight: 800, color: slot.status === 'filled' ? '#4ade80' : slot.status === 'failed' ? '#f87171' : '#86efac' }}>
+                <span style={{ fontSize: 10.5, fontWeight: 800, color: slot.status === 'filled' ? '#166534' : slot.status === 'failed' ? '#991B1B' : '#B45309' }}>
                   {slot.status === 'generating' ? 'Generating' : slot.status === 'filled' ? 'Filled' : slot.status === 'failed' ? 'Failed' : 'Open'}
                 </span>
               </button>
@@ -426,7 +426,7 @@ export function BrollPanel(props: {
                 onClick={() => props.onRemove(slot.id)}
                 title={slot.status === 'filled' ? 'Delete this B-roll clip' : 'Delete this B-roll slot'}
                 aria-label={slot.status === 'filled' ? 'Delete this B-roll clip' : 'Delete this B-roll slot'}
-                style={{ position: 'absolute', top: 5, right: 5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 27, height: 27, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.24)', color: '#f87171', borderRadius: 7, cursor: 'pointer', padding: 0 }}
+                style={{ position: 'absolute', top: 5, right: 5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 27, height: 27, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.24)', color: '#991B1B', borderRadius: 7, cursor: 'pointer', padding: 0 }}
               >
                 <Trash2 size={12} />
               </button>
@@ -439,9 +439,9 @@ export function BrollPanel(props: {
                     onChange={(e) => props.onPrompt(slot.id, e.target.value)}
                     rows={3}
                     placeholder="What should the cutaway show?"
-                    style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 8, color: LB.textPrimary, fontSize: 12, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                    style={{ width: '100%', background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 8, padding: 8, color: LB.textPrimary, fontSize: 12, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
                   />
-                  {slot.error ? <div style={{ color: '#f87171', fontSize: 11, lineHeight: 1.5 }}>{slot.error}</div> : null}
+                  {slot.error ? <div style={{ color: '#991B1B', fontSize: 11, lineHeight: 1.5 }}>{slot.error}</div> : null}
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <button
                       type="button"
@@ -465,7 +465,7 @@ export function BrollPanel(props: {
                     <button type="button" className="vs-btn" onClick={() => props.onPickStock(slot.id)} style={ghostButton()}>
                       Stock footage
                     </button>
-                    <button type="button" className="vs-btn" onClick={() => props.onRemove(slot.id)} style={{ ...ghostButton(), color: '#f87171' }}>
+                    <button type="button" className="vs-btn" onClick={() => props.onRemove(slot.id)} style={{ ...ghostButton(), color: '#991B1B' }}>
                       <X size={12} /> Dismiss
                     </button>
                   </div>
@@ -516,8 +516,8 @@ export function ChatPanel(props: {
             style={{
               justifySelf: m.role === 'user' ? 'end' : 'start',
               maxWidth: '92%',
-              background: m.role === 'user' ? 'rgba(245,158,11,0.16)' : 'rgba(255,255,255,0.05)',
-              border: `1px solid ${m.role === 'user' ? 'rgba(245,158,11,0.32)' : 'rgba(255,255,255,0.08)'}`,
+              background: m.role === 'user' ? 'rgba(200,146,10,0.14)' : 'rgba(180,120,0,0.06)',
+              border: `1px solid ${m.role === 'user' ? 'rgba(200,146,10,0.32)' : 'rgba(180,120,0,0.12)'}`,
               borderRadius: 10, padding: '7px 10px',
               color: m.role === 'user' ? LB.textPrimary : LB.textSecondary,
               fontSize: 12, lineHeight: 1.55,
@@ -553,7 +553,7 @@ export function ChatPanel(props: {
           placeholder={props.hasFootage ? 'Ask for an edit…' : 'Upload footage first'}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(draft); } }}
-          style={{ flex: 1, minWidth: 0, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: LB.textPrimary, fontSize: 12.5, fontFamily: 'inherit' }}
+          style={{ flex: 1, minWidth: 0, background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 8, padding: '8px 10px', color: LB.textPrimary, fontSize: 12.5, fontFamily: 'inherit' }}
         />
         <button
           type="button"

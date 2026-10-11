@@ -120,12 +120,21 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
   // paint their own backdrop from the timeline's background layer.
   let backdropImage: SVGElement | null = null;
   if (!transparent && !direction && spec.imageUrl && spec.kind !== 'annotated_image') {
-    backdropImage = el('image', { x: -W * 0.03, y: -H * 0.03, width: W * 1.06, height: H * 1.06, href: spec.imageUrl, preserveAspectRatio: 'xMidYMid slice', opacity: 0.34 }, svg);
+    backdropImage = el('image', { x: -W * 0.03, y: -H * 0.03, width: W * 1.06, height: H * 1.06, href: spec.imageUrl, preserveAspectRatio: 'xMidYMid slice', opacity: THEME.paper ? 0.48 : 0.52 }, svg);
     backdropImage.setAttributeNS('http://www.w3.org/1999/xlink', 'href', spec.imageUrl);
     // Paper theme: photos get pulled into the flat palette (desaturated) and
     // washed with paper rather than dimmed with navy.
     if (THEME.paper) backdropImage.setAttribute('filter', `url(#${desatFilter(defs, 0.25)})`);
-    el('rect', { x: 0, y: 0, width: W, height: H, fill: BG, opacity: 0.56 }, svg);
+    // Vignette: edges darken toward rgba(0,0,0,0.55) while the center stays
+    // transparent, so the center of the image reads vibrant while text at the
+    // edges keeps its contrast — readable borders without flattening the
+    // whole picture the way a full-frame scrim does.
+    const vignetteId = `mgVignette${Math.floor(Math.random() * 1e9)}`;
+    const vignette = el('radialGradient', { id: vignetteId, cx: '50%', cy: '50%', r: '75%' }, defs);
+    el('stop', { offset: '55%', 'stop-color': '#000', 'stop-opacity': 0 }, vignette);
+    el('stop', { offset: '100%', 'stop-color': '#000', 'stop-opacity': 0.55 }, vignette);
+    el('rect', { x: 0, y: 0, width: W, height: H, fill: `url(#${vignetteId})` }, svg);
+    el('rect', { x: 0, y: 0, width: W, height: H, fill: BG, opacity: 0.42 }, svg);
   }
 
   const root = el<SVGGElement>('g', { opacity: 0 }, svg);
@@ -133,14 +142,18 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
   // content, fading in and out with it, so exact text reads on any footage
   // while the presenter remains visible around the card.
   if (transparent && options.panel !== false) {
-    el('rect', { x: W * 0.015, y: H * 0.015, width: W * 0.97, height: H * 0.97, rx: THEME.paper ? 8 : Math.min(W, H) * 0.055, fill: PANEL_GLASS, stroke: GLASS_EDGE, 'stroke-width': 2 }, root);
+    el('rect', { x: W * 0.015, y: H * 0.015, width: W * 0.97, height: H * 0.97, rx: THEME.paper ? 8 : Math.min(W, H) * 0.055, fill: PANEL_GLASS, stroke: GLASS_EDGE, 'stroke-width': 2, style: 'backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);' }, root);
   }
   const tl = gsap.timeline({ paused: true });
   tl.to(root, { opacity: 1, duration: 0.35, ease: 'power1.out' }, 0);
-  if (glowRect) tl.to(glowRect, { opacity: 1, duration: 0.8, ease: 'power1.out' }, 0);
+  if (glowRect) tl.to(glowRect, { opacity: 0.72, duration: 0.8, ease: 'power1.out' }, 0);
   if (backdropImage) {
     gsap.set(backdropImage, { transformOrigin: '50% 50%', scale: 1 });
-    tl.to(backdropImage, { scale: 1.07, duration: total, ease: 'none' }, 0);
+    // Ken Burns: a slow zoom plus a subtle lateral drift whose direction is
+    // derived deterministically from the spec kind (so a given scene always
+    // drifts the same way) — the backdrop feels alive, not a dead card.
+    const driftDir = (String(spec.kind || '').charCodeAt(0) % 2 === 0) ? 1 : -1;
+    tl.to(backdropImage, { scale: 1.09, x: driftDir * W * 0.012, duration: total, ease: 'none' }, 0);
   }
 
   const intro = Math.min(1, total * 0.18);

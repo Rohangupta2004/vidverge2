@@ -19,25 +19,25 @@ import {
 import type { RunwayCapabilities, RunwayModeId } from '../../lib/runway';
 
 const C = {
-  surface: '#1a1a1a',
-  card: '#222222',
-  border: '#333333',
-  accent: '#8b5cf6',
-  text: '#ffffff',
-  text2: '#aaaaaa',
-  success: '#22c55e',
-  error: '#ef4444',
+  surface: '#FFFAEB',
+  card: '#FFFFFF',
+  border: 'rgba(180,120,0,0.14)',
+  accent: '#C8920A',
+  text: '#1A1000',
+  text2: '#7A6030',
+  success: '#166534',
+  error: '#991B1B',
 };
 const FONT = 'system-ui, sans-serif';
 
 const RUNWAY_THEME = {
   bg: 'transparent',
-  panel: '#1a1a1a',
+  panel: '#FFFAEB',
   card: C.card,
   line: C.border,
-  lineStrong: '#444444',
+  lineStrong: 'rgba(180,120,0,0.36)',
   ink: C.text,
-  soft: '#dddddd',
+  soft: '#3D2800',
   muted: C.text2,
   accent: C.accent,
   onAccent: '#ffffff',
@@ -132,10 +132,10 @@ export default function RunwayLab() {
               </div>
               <div style={{ fontSize: 12.5, color: C.text2, lineHeight: 1.6 }}>{info?.blurb || ''}</div>
               <div style={{ fontSize: 11.5, color: C.text2, marginTop: 9, lineHeight: 1.7 }}>
-                <div><b style={{ color: '#dddddd' }}>Modes:</b> {info?.textToVideo ? 'text-to-video and image-to-video' : 'image-to-video only'}</div>
-                <div><b style={{ color: '#dddddd' }}>Duration:</b> {live?.durations.length ? `${live.durations.join(', ')}s` : info?.durations}</div>
-                <div><b style={{ color: '#dddddd' }}>Ratios:</b> {ratios.length ? ratios.map(ratioLabel).join(' · ') : '—'}</div>
-                <div><b style={{ color: '#dddddd' }}>Cost:</b> {live?.price || info?.priceNote || '—'}</div>
+                <div><b style={{ color: '#3D2800' }}>Modes:</b> {info?.textToVideo ? 'text-to-video and image-to-video' : 'image-to-video only'}</div>
+                <div><b style={{ color: '#3D2800' }}>Duration:</b> {live?.durations.length ? `${live.durations.join(', ')}s` : info?.durations}</div>
+                <div><b style={{ color: '#3D2800' }}>Ratios:</b> {ratios.length ? ratios.map(ratioLabel).join(' · ') : '—'}</div>
+                <div><b style={{ color: '#3D2800' }}>Cost:</b> {live?.price || info?.priceNote || '—'}</div>
               </div>
               <div style={{ display: 'flex', gap: 7, marginTop: 11, flexWrap: 'wrap' }}>
                 {info?.textToVideo ? (
@@ -165,15 +165,15 @@ export default function RunwayLab() {
             <div key={m.id} className="ml-card" style={{ background: C.card, border: `1px solid ${mode === m.id ? C.accent : C.border}`, borderRadius: 12, padding: 14, opacity: offline ? 0.55 : 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 14.5, fontWeight: 800 }}>{info?.name || m.label}</span>
-                <Pill text={m.kind === 'image' ? 'Images' : 'Video'} color={m.kind === 'image' ? '#38bdf8' : C.accent} />
+                <Pill text={m.kind === 'image' ? 'Images' : 'Video'} color={m.kind === 'image' ? '#B4720A' : C.accent} />
                 {live?.version ? <Pill text={`v${live.version}`} color={C.text2} /> : null}
                 {offline ? <Pill text="Not enabled" color={C.error} /> : null}
               </div>
               <div style={{ fontSize: 12.5, color: C.text2, lineHeight: 1.6 }}>{live?.description || info?.purpose || m.blurb}</div>
               <div style={{ fontSize: 11.5, color: C.text2, marginTop: 9, lineHeight: 1.7 }}>
-                <div><b style={{ color: '#dddddd' }}>Inputs:</b> {live?.fields.length ? live.fields.join(', ') : info?.inputsNote || m.inputs}</div>
-                <div><b style={{ color: '#dddddd' }}>Outputs:</b> {live?.outputs || (m.kind === 'image' ? 4 : 1)}</div>
-                <div><b style={{ color: '#dddddd' }}>Cost:</b> {live?.price || info?.priceNote || '—'}</div>
+                <div><b style={{ color: '#3D2800' }}>Inputs:</b> {live?.fields.length ? live.fields.join(', ') : info?.inputsNote || m.inputs}</div>
+                <div><b style={{ color: '#3D2800' }}>Outputs:</b> {live?.outputs || (m.kind === 'image' ? 4 : 1)}</div>
+                <div><b style={{ color: '#3D2800' }}>Cost:</b> {live?.price || info?.priceNote || '—'}</div>
               </div>
               <button
                 className="ml-btn"

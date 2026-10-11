@@ -28,6 +28,12 @@ export interface CardField {
   label: string;
   placeholder: string;
   multiline?: boolean;
+  /**
+   * A field the card renders fine without. The editor's Render button requires
+   * every REQUIRED field — a step sequence with four optional step slots could
+   * never be rendered otherwise, because three of them are meant to be blank.
+   */
+  optional?: boolean;
 }
 
 export interface CardTemplate {
@@ -80,6 +86,56 @@ export const CARD_TEMPLATES: CardTemplate[] = [
       { key: 'attribution', label: 'Who said it', placeholder: 'Priya, Head of Growth' },
     ],
   },
+  // The three PRODUCT primitives. These exist for lib/productGraphics — the
+  // pipeline routes a flowchart, an annotated screenshot and a comparison beat
+  // through HeyGen rather than compositing them as separate Remotion layers —
+  // and the editor gets them for free, which is why they carry proper fields
+  // and placeholders rather than being hidden internals.
+  {
+    id: 'step-sequence',
+    name: 'Step Sequence',
+    blurb: 'A process the viewer reads one step at a time.',
+    defaultDuration: 6,
+    fields: [
+      { key: 'headline', label: 'Headline', placeholder: 'How it works' },
+      { key: 'step1', label: 'Step 1', placeholder: 'Write the brief' },
+      { key: 'step2', label: 'Step 2', placeholder: 'Approve the storyboard' },
+      { key: 'step3', label: 'Step 3', placeholder: 'Render in one pass' },
+      { key: 'step4', label: 'Step 4 (optional)', placeholder: 'Leave blank to use three steps', optional: true },
+      { key: 'step5', label: 'Step 5 (optional)', placeholder: 'Leave blank to use four steps', optional: true },
+    ],
+  },
+  {
+    id: 'ui-highlight',
+    name: 'UI Highlight',
+    blurb: 'A screenshot zooming in, with the part that matters marked and labelled.',
+    defaultDuration: 5,
+    fields: [
+      { key: 'image', label: 'Screenshot URL', placeholder: 'Paste the image URL of the screen to show' },
+      { key: 'label', label: 'What to point at', placeholder: 'One click to render' },
+      { key: 'detail', label: 'Supporting line', placeholder: 'No timeline wrangling, no exports to chase.', multiline: true, optional: true },
+      { key: 'focusX', label: 'Highlight centre across (0\u2013100)', placeholder: '50 is the middle of the frame', optional: true },
+      { key: 'focusY', label: 'Highlight centre down (0\u2013100)', placeholder: '52 is just below centre', optional: true },
+    ],
+  },
+  {
+    id: 'comparison-table',
+    name: 'Comparison Table',
+    blurb: 'Two columns read against each other, row by row.',
+    defaultDuration: 6,
+    fields: [
+      { key: 'leftTitle', label: 'Left column heading', placeholder: 'By hand' },
+      { key: 'rightTitle', label: 'Right column heading', placeholder: 'With SceneForge' },
+      { key: 'left1', label: 'Left row 1', placeholder: 'Three days per video' },
+      { key: 'right1', label: 'Right row 1', placeholder: 'One afternoon' },
+      { key: 'left2', label: 'Left row 2', placeholder: 'A freelance editor on call' },
+      { key: 'right2', label: 'Right row 2', placeholder: 'One brief, one pass' },
+      { key: 'left3', label: 'Left row 3 (optional)', placeholder: 'Leave blank for a two-row table', optional: true },
+      { key: 'right3', label: 'Right row 3 (optional)', placeholder: 'Leave blank for a two-row table', optional: true },
+      { key: 'left4', label: 'Left row 4 (optional)', placeholder: 'Leave blank for a three-row table', optional: true },
+      { key: 'right4', label: 'Right row 4 (optional)', placeholder: 'Leave blank for a three-row table', optional: true },
+    ],
+  },
 ];
 
 export function templateOf(id: CardTemplateId): CardTemplate {
@@ -125,6 +181,11 @@ const BUNDLE_ALIASES: Record<CardTemplateId, Record<string, string>> = {
   'stat-counter': { value: 'stat', label: 'label' },
   'product-cta': { title: 'product', body: 'tagline', cta: 'cta' },
   'quote-card': { quote: 'quote', attribution: 'author' },
+  // The three product templates were authored after the bundles, so their
+  // editor field keys already match their bundle variables. No translation.
+  'step-sequence': {},
+  'ui-highlight': {},
+  'comparison-table': {},
 };
 
 function bundleVariables(template: CardTemplateId, variables: Record<string, string>): Record<string, string> {

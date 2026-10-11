@@ -37,6 +37,7 @@ import {
 import { DEFAULT_ACCENT, INK, LINE, MONO, SPIN_CSS, TEXT, TEXT_DIM, TEXT_MUTED, normalizeHex, rgba } from './theme';
 import { AccentProvider, Button, Notice, Breadcrumb, Pill, useAccent } from './ui';
 import { openVidvergeStudio, saveVidvergeHandoff } from '../../lib/vidvergeHandoff';
+import AppShell from '../../components/ui/AppShell';
 import BrandScreen from './screens/BrandScreen';
 import CompetitorsScreen from './screens/CompetitorsScreen';
 import CompareScreen from './screens/CompareScreen';
@@ -327,18 +328,23 @@ export default function VergeyeApp() {
 
   return (
     <AccentProvider accent={accent}>
-      <div
+      {/* The app keeps its own accent-driven header: the accent is read off the
+          customer's site, so the title block has to wear their brand, not the
+          shared amber one. The shell supplies the ground, beams and grid. */}
+      <AppShell
+        title="Vergeye"
+        header={false}
+        watermark={false}
+        maxWidth={1420}
         className="vergeye-app"
         style={{
-          minHeight: '100%',
           background: `radial-gradient(ellipse 90% 55% at 12% -8%, ${rgba(accent, 0.1)} 0%, transparent 58%), ${INK}`,
           color: TEXT,
-          fontFamily: 'inherit',
         }}
       >
         <style>{SPIN_CSS}</style>
 
-        <div className="vergeye-pad" style={{ maxWidth: 1420, margin: '0 auto', padding: '26px 30px 60px' }}>
+        <div className="vergeye-pad">
           <Header
             analysis={analysis}
             onSaved={() => setShowSaved(!showSaved)}
@@ -371,7 +377,7 @@ export default function VergeyeApp() {
             <span style={{ marginLeft: 'auto', fontFamily: MONO, opacity: 0.7 }}>{ownerKey().slice(0, 10)}</span>
           </div>
         </div>
-      </div>
+      </AppShell>
     </AccentProvider>
   );
 }

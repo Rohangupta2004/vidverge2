@@ -60,7 +60,7 @@ const input: CSSProperties = {
 
 const pill = (active: boolean): CSSProperties => ({
   background: active ? T.accent : 'transparent',
-  color: active ? '#0A0A0A' : T.soft,
+  color: active ? '#FFFFFF' : T.soft,
   border: `1px solid ${active ? T.accent : T.line}`,
   borderRadius: 999,
   padding: '5px 13px',

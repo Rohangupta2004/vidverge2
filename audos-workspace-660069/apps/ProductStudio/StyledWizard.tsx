@@ -769,7 +769,7 @@ export default function StyledWizard({ initialStyle, onExit }: { initialStyle?: 
                 value={manualDesc}
                 onChange={(e) => { setManualDesc(e.currentTarget.value); setScriptApproved(false); }}
                 rows={6}
-                maxLength={2000}
+                maxLength={10000}
                 placeholder={style.id === 'text2video'
                   ? 'Describe the video you want in plain English. What happens, who or what is in it, where it is set, and how it should feel. The AI generates directly from your words.'
                   : 'What is the product, who is it for, and what does it do? A few sentences is plenty.'}
@@ -933,7 +933,7 @@ export default function StyledWizard({ initialStyle, onExit }: { initialStyle?: 
                     <span style={{ fontSize: 11.5, fontWeight: 800, color: S.brand }}>[{b.code}]</span>
                     <span style={{ fontSize: 10.5, fontWeight: 800, padding: '2px 7px', borderRadius: 999, background: S.panelStrong, color: S.muted }}>{beatSceneLabel(b)}</span>
                     <span style={{ fontSize: 11, color: S.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 100 }}>{b.text}</span>
-                    <span style={{ fontSize: 10.5, color: countWords(prompts[i]) < 25 || countWords(prompts[i]) > 44 ? '#fbbf24' : S.muted }}>{countWords(prompts[i])} words</span>
+                    <span style={{ fontSize: 10.5, color: countWords(prompts[i]) < 25 || countWords(prompts[i]) > 44 ? '#B45309' : S.muted }}>{countWords(prompts[i])} words</span>
                   </div>
                   <textarea value={prompts[i]} onChange={(e) => setPrompts((cur) => cur.map((p, j) => (j === i ? e.currentTarget.value : p)))} rows={2} className="ps-input" style={{ ...inputStyle, fontSize: 12.5, lineHeight: 1.55, resize: 'vertical' }} data-testid={`input-prompt-${b.code}`} />
                 </div>

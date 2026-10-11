@@ -64,13 +64,13 @@ export const LOOKS: Look[] = [
   { id: 'cool', label: 'Cool', category: 'modern', grade: 'cool', effects: [], adjust: { brightness: 2, contrast: 4, saturation: 4 }, swatch: 'linear-gradient(135deg,#0C4A6E,#67E8F9)', chip: 'saturate(1.1) hue-rotate(-12deg)' },
   { id: 'matte', label: 'Matte', category: 'minimal', grade: 'none', effects: ['vignette'], adjust: { brightness: 4, contrast: -9, saturation: -13 }, swatch: 'linear-gradient(135deg,#3F3F46,#A1A1AA)', chip: 'contrast(.92) saturate(.87) brightness(1.04)' },
   { id: 'bw', label: 'B&W', category: 'cinematic', grade: 'bw', effects: [], adjust: { brightness: 0, contrast: 8, saturation: 0 }, swatch: 'linear-gradient(135deg,#09090B,#D4D4D8)', chip: 'grayscale(1) contrast(1.16)' },
-  { id: 'vivid', label: 'Vivid', category: 'modern', grade: 'none', effects: [], adjust: { brightness: 2, contrast: 12, saturation: 38 }, swatch: 'linear-gradient(135deg,#DB2777,#7C3AED 48%,#06B6D4)', chip: 'saturate(1.42) contrast(1.1)' },
+  { id: 'vivid', label: 'Vivid', category: 'modern', grade: 'none', effects: [], adjust: { brightness: 2, contrast: 12, saturation: 38 }, swatch: 'linear-gradient(135deg,#DB2777,#D97706 48%,#06B6D4)', chip: 'saturate(1.42) contrast(1.1)' },
   { id: 'fade', label: 'Fade', category: 'minimal', grade: 'none', effects: [], adjust: { brightness: 7, contrast: -13, saturation: -16 }, swatch: 'linear-gradient(135deg,#6B7280,#E5E7EB)', chip: 'contrast(.87) brightness(1.07) saturate(.84)' },
-  { id: 'neon', label: 'Neon', category: 'modern', grade: 'cool', effects: ['bloom'], adjust: { brightness: 2, contrast: 10, saturation: 42 }, swatch: 'linear-gradient(135deg,#7C3AED,#22D3EE)', chip: 'saturate(1.5) contrast(1.12) hue-rotate(-12deg)' },
+  { id: 'neon', label: 'Neon', category: 'modern', grade: 'cool', effects: ['bloom'], adjust: { brightness: 2, contrast: 10, saturation: 42 }, swatch: 'linear-gradient(135deg,#D97706,#22D3EE)', chip: 'saturate(1.5) contrast(1.12) hue-rotate(-12deg)' },
   { id: 'grain', label: 'Film Grain', category: 'cinematic', grade: 'cinematic', effects: ['filmGrain'], adjust: { brightness: 0, contrast: 4, saturation: 0 }, swatch: 'linear-gradient(135deg,#1C1917,#78716C)', chip: 'contrast(1.1) saturate(1.1)' },
   { id: 'vignette', label: 'Vignette', category: 'cinematic', grade: 'none', effects: ['vignette'], adjust: { brightness: 0, contrast: 5, saturation: 0 }, swatch: 'radial-gradient(circle at 50% 50%,#A8A29E,#0C0A09 78%)', chip: 'contrast(1.05)' },
   { id: 'retro', label: 'Retro', category: 'retro', grade: 'vintage', effects: ['lightLeak'], adjust: { brightness: 4, contrast: -5, saturation: -8 }, swatch: 'linear-gradient(135deg,#4D3C2A,#D6B889)', chip: 'sepia(.3) saturate(.86) brightness(1.06)' },
-  { id: 'lofi', label: 'Lo-Fi', category: 'retro', grade: 'vintage', effects: ['filmGrain', 'vignette'], adjust: { brightness: 2, contrast: -8, saturation: -12 }, swatch: 'linear-gradient(135deg,#44403C,#A78BFA)', chip: 'sepia(.3) saturate(.78) contrast(.92)' },
+  { id: 'lofi', label: 'Lo-Fi', category: 'retro', grade: 'vintage', effects: ['filmGrain', 'vignette'], adjust: { brightness: 2, contrast: -8, saturation: -12 }, swatch: 'linear-gradient(135deg,#44403C,#FCD34D)', chip: 'sepia(.3) saturate(.78) contrast(.92)' },
 ];
 
 export const LOOK_CATEGORIES: { id: LookCategory | 'all'; label: string }[] = [
@@ -409,8 +409,8 @@ export default function ProControls(props: ControlsProps) {
                     globalEffects: on ? d.globalEffects.filter((x) => x !== fx.id) : [...d.globalEffects, fx.id],
                   }))}
                 >
-                  <b style={{ fontSize: 11.5, display: 'block', color: on ? '#DDD3FF' : '#D0D0D0' }}>{fx.label}</b>
-                  <small style={{ fontSize: 10, color: '#6A6A6A', lineHeight: 1.4 }}>{fx.hint}</small>
+                  <b style={{ fontSize: 11.5, display: 'block', color: on ? '#1A1000' : '#3D2800' }}>{fx.label}</b>
+                  <small style={{ fontSize: 10, color: '#7A6030', lineHeight: 1.4 }}>{fx.hint}</small>
                 </button>
               );
             })}
@@ -542,8 +542,8 @@ export default function ProControls(props: ControlsProps) {
                   props.onSelectText(layer.id);
                 }}
               >
-                <b style={{ fontSize: 11, display: 'block', color: '#D7D7D7' }}>{s.label}</b>
-                <small style={{ fontSize: 9.5, color: '#6A6A6A' }}>{s.blurb}</small>
+                <b style={{ fontSize: 11, display: 'block', color: '#1A1000' }}>{s.label}</b>
+                <small style={{ fontSize: 9.5, color: '#7A6030' }}>{s.blurb}</small>
               </button>
             ))}
           </div>
@@ -740,8 +740,8 @@ export default function ProControls(props: ControlsProps) {
                 disabled={!props.hasFootage}
                 onClick={() => props.onMotion(m.id, props.motionAmount)}
               >
-                <b style={{ fontSize: 10.5, display: 'block', color: '#D7D7D7' }}>{m.label}</b>
-                <small style={{ fontSize: 9.5, color: '#6A6A6A' }}>{m.blurb}</small>
+                <b style={{ fontSize: 10.5, display: 'block', color: '#1A1000' }}>{m.label}</b>
+                <small style={{ fontSize: 9.5, color: '#7A6030' }}>{m.blurb}</small>
               </button>
             ))}
           </div>
@@ -981,10 +981,10 @@ export default function ProControls(props: ControlsProps) {
                 className={`vp-tile pad${on ? ' on' : ''}`}
                 onClick={() => props.commit((d) => ({ ...d, musicBedId: bed.id, musicUrl: '', musicStyle: 'none' }))}
               >
-                <b style={{ fontSize: 11, display: 'block', color: '#D7D7D7' }}>
+                <b style={{ fontSize: 11, display: 'block', color: '#1A1000' }}>
                   <Music2 size={10} style={{ marginRight: 4 }} />{bed.label}
                 </b>
-                <small style={{ fontSize: 9.5, color: '#6A6A6A' }}>Looping instrumental</small>
+                <small style={{ fontSize: 9.5, color: '#7A6030' }}>Looping instrumental</small>
               </button>
             );
           })}
@@ -993,8 +993,8 @@ export default function ProControls(props: ControlsProps) {
             className={`vp-tile pad${doc.musicBedId === 'none' && !doc.musicUrl ? ' on' : ''}`}
             onClick={() => props.commit((d) => ({ ...d, musicBedId: 'none', musicUrl: '', musicStyle: 'none' }))}
           >
-            <b style={{ fontSize: 11, display: 'block', color: '#D7D7D7' }}>No music</b>
-            <small style={{ fontSize: 9.5, color: '#6A6A6A' }}>Original audio only</small>
+            <b style={{ fontSize: 11, display: 'block', color: '#1A1000' }}>No music</b>
+            <small style={{ fontSize: 9.5, color: '#7A6030' }}>Original audio only</small>
           </button>
         </div>
       </Section>

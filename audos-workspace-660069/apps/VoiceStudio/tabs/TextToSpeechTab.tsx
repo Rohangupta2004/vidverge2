@@ -35,7 +35,7 @@ const EXAMPLES = [
   'Mumbai se Bengaluru tak, 2,000 creators har hafte Vidverge pe videos bana rahe hain.',
 ];
 
-const MAX_CHARS = 5000;
+const MAX_CHARS = 10000;
 
 export default function TextToSpeechTab() {
   const toast = useToast();

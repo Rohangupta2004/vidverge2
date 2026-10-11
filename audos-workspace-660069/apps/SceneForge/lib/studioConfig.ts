@@ -91,7 +91,7 @@ export interface StudioConfig {
   saved_at: string;
 }
 
-export const DEFAULT_ACCENT = '#6366F1';
+export const DEFAULT_ACCENT = '#F59E0B';
 
 export const DEFAULT_AUDIO_CONFIG: AudioConfig = {
   mode: 'off',
@@ -127,7 +127,7 @@ const httpUrl = (value: unknown) => (/^https?:\/\//i.test(String(value || '')) ?
 // Hard ceilings so a corrupt or runaway record can never bloat the project
 // row: the segments route itself narrates at most 100 lines per batch.
 const MAX_AUDIO_SCENES = 200;
-const MAX_LINE_CHARS = 2000;
+const MAX_LINE_CHARS = 10000;
 
 function normalizeSceneAudio(raw: unknown): SceneAudio | null {
   const source = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, any>;

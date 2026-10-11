@@ -9,7 +9,7 @@ import { Check, Mic, Play, Search } from 'lucide-react';
 import { describeError } from '../../lib/heygenApi';
 import { MIN_CLONE_SECONDS, audioDuration, cloneVoice, isSupportedAudio, listV3Voices } from '../../lib/heygenVoice';
 import { setVoice, useHeyGenSession } from '../../lib/heygenSession';
-import { Button, CapabilityNote, Field, LockBadge, Notice, Panel, Progress, Segmented } from './ui';
+import { Button, CapabilityNote, Field, LockBadge, Notice, Panel, Progress, Segmented, fieldClassFor } from './ui';
 
 type Mode = 'library' | 'clone';
 
@@ -106,7 +106,8 @@ export default function VoicePanel({ step }: { step: number }) {
       {mode === 'library' ? <div className="space-y-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--space-text-muted)]" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or language" className="st-field pl-9" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} inputMode="search" autoComplete="off"
+            placeholder="Search HeyGen voices by name, language or gender" className="st-field st-field--icon" />
         </div>
 
         {loading ? <div className="grid gap-2 sm:grid-cols-2">
@@ -119,11 +120,11 @@ export default function VoicePanel({ step }: { step: number }) {
                   {filtered.slice(0, limit).map((voice) => {
                     const selected = session.voiceId === voice.id;
                     return <div key={voice.id} className={`flex items-center gap-3 rounded-xl border p-3 ${selected
-                      ? 'border-[#8b5cf6] bg-[color-mix(in_srgb,#8b5cf6_12%,transparent)]'
+                      ? 'border-[#C8920A] bg-[color-mix(in_srgb,#C8920A_12%,transparent)]'
                       : 'border-[var(--space-border-default)] bg-[var(--space-surface-panel)]'}`}>
                       <button type="button" onClick={() => setVoice(voice.id, voice.name, false)} className="min-w-0 flex-1 text-left">
                         <div className="flex items-center gap-2 truncate text-sm font-medium text-[var(--space-text-primary)]">
-                          {selected ? <Check className="h-3.5 w-3.5 shrink-0 text-[#a78bfa]" /> : null}
+                          {selected ? <Check className="h-3.5 w-3.5 shrink-0 text-[#C8920A]" /> : null}
                           <span className="truncate">{voice.name}</span>
                         </div>
                         <div className="truncate text-xs text-[var(--space-text-muted)]">
@@ -136,7 +137,7 @@ export default function VoicePanel({ step }: { step: number }) {
                         aria-label={`Hear ${voice.name}`}
                         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--space-border-default)] text-[var(--space-text-secondary)] hover:border-[var(--space-border-strong)]"
                       >
-                        <Play className={`h-3.5 w-3.5 ${playing === voice.id ? 'animate-pulse text-[#a78bfa]' : ''}`} />
+                        <Play className={`h-3.5 w-3.5 ${playing === voice.id ? 'animate-pulse text-[#C8920A]' : ''}`} />
                       </button> : null}
                     </div>;
                   })}
@@ -151,28 +152,32 @@ export default function VoicePanel({ step }: { step: number }) {
         </CapabilityNote>
 
         <Field label="Name this voice" hint="So you can tell it apart from HeyGen's stock voices later.">
-          <input value={cloneName} onChange={(event) => setCloneName(event.target.value)} placeholder="My voice" className="st-field" />
+          <input value={cloneName} onChange={(event) => setCloneName(event.target.value)}
+            placeholder="e.g. My studio voice" className="st-field" />
         </Field>
 
+        {/* The clone's failure messages are about the FILE, so they sit on the
+            file field itself rather than only in the notice below. */}
         <Field
           label="Your recording"
           hint={`A WAV, MP3 or M4A of at least ${MIN_CLONE_SECONDS} seconds of clear speech — no music or background noise. Read anything you like.`}
+          error={cloneError}
         >
           <input
             type="file"
             accept="audio/*,video/mp4"
             disabled={cloning}
+            aria-invalid={cloneError ? true : undefined}
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.target.value = '';
               if (file) void runClone(file);
             }}
-            className="st-field file:mr-3 file:rounded-lg file:border-0 file:bg-[color-mix(in_srgb,#8b5cf6_22%,transparent)] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
+            className={`${fieldClassFor('st-field', Boolean(cloneError))} file:mr-3 file:rounded-lg file:border-0 file:bg-[color-mix(in_srgb,#C8920A_22%,transparent)] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-[#1A1000]`}
           />
         </Field>
 
         {cloning ? <Progress elapsedSec={cloneElapsed} expectedSec={90} label="Cloning your voice" /> : null}
-        {cloneError ? <Notice tone="error" title="Your voice could not be cloned">{cloneError}</Notice> : null}
         {session.voiceCloned ? <Notice tone="ok" title="Voice cloned">
           Every scene you generate from now on speaks in your own voice.
         </Notice> : null}

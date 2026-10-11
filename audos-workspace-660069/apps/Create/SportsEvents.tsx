@@ -126,7 +126,7 @@ function RunSteps({ phase }: { phase: SportsPhase }) {
                 fontSize: 11,
                 fontWeight: 600,
                 whiteSpace: 'nowrap',
-                color: active ? '#fff' : done ? T.success : T.muted,
+                color: active ? T.accentFg : done ? T.success : T.muted,
                 border: active ? `1px solid ${T.accentBorder}` : `1px solid ${T.border}`,
                 background: active ? T.accentSoft : 'transparent',
               }}
@@ -149,11 +149,11 @@ function RunSteps({ phase }: { phase: SportsPhase }) {
 function statusChip(scene: SportsScene): { label: string; color: string; bg: string; spin: boolean } {
   switch (scene.phase) {
     case 'complete':
-      return { label: 'Done ✓', color: T.success, bg: 'rgba(74,222,128,0.12)', spin: false };
+      return { label: 'Done ✓', color: T.success, bg: 'rgba(22,101,52,0.12)', spin: false };
     case 'failed':
-      return { label: 'Failed ✗', color: T.danger, bg: 'rgba(239,68,68,0.12)', spin: false };
+      return { label: 'Failed ✗', color: T.danger, bg: 'rgba(153,27,27,0.1)', spin: false };
     case 'pending':
-      return { label: 'Queued', color: T.muted, bg: 'rgba(148,163,184,0.12)', spin: false };
+      return { label: 'Queued', color: T.muted, bg: 'rgba(122,96,48,0.12)', spin: false };
     case 'expanding':
       return { label: 'Expanding…', color: T.accentFg, bg: T.accentSoft, spin: true };
     default:
@@ -174,7 +174,7 @@ function SceneCard({ scene, total, aspect }: { scene: SportsScene; total: number
         flexDirection: 'column',
         gap: 10,
         padding: '14px 16px',
-        borderColor: failed ? 'rgba(239,68,68,0.36)' : T.border,
+        borderColor: failed ? 'rgba(153,27,27,0.36)' : T.border,
       }}
       data-testid={`card-sports-scene-${scene.index + 1}`}
     >
@@ -306,7 +306,7 @@ function SceneCard({ scene, total, aspect }: { scene: SportsScene; total: number
           <span style={{ flex: 1 }}>{scene.error}</span>
           <GhostButton
             onClick={() => void regenerateSportsScene(scene.index)}
-            style={{ minHeight: 34, padding: '6px 12px', fontSize: 12.5, color: T.danger, borderColor: 'rgba(239,68,68,0.4)', flexShrink: 0 }}
+            style={{ minHeight: 34, padding: '6px 12px', fontSize: 12.5, color: T.danger, borderColor: 'rgba(153,27,27,0.4)', flexShrink: 0 }}
             testId={`button-retry-sports-scene-${scene.index + 1}`}
           >
             <RotateCcw size={12} /> Retry scene
@@ -322,7 +322,7 @@ function SceneCard({ scene, total, aspect }: { scene: SportsScene; total: number
             target="_blank"
             rel="noopener noreferrer"
             className="rc-ghost"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: T.sub, textDecoration: 'none', border: `1px solid ${T.border}`, background: 'rgba(255,255,255,0.03)' }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 10, fontSize: 12.5, fontWeight: 600, color: T.sub, textDecoration: 'none', border: `1px solid ${T.border}`, background: 'rgba(180,120,0,0.05)' }}
             data-testid={`link-download-sports-scene-${scene.index + 1}`}
           >
             <Download size={13} /> Download
@@ -353,7 +353,7 @@ function SceneCard({ scene, total, aspect }: { scene: SportsScene; total: number
 function ChainConnector({ from }: { from: SportsScene }) {
   const passed = !!from.lastFrameUrl;
   const broken = !passed && from.phase === 'complete';
-  const color = passed ? T.accentFg : broken ? '#fbbf24' : T.muted;
+  const color = passed ? T.accentFg : broken ? '#B45309' : T.muted;
   return (
     <div
       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 6px 0 18px' }}
@@ -452,7 +452,7 @@ export default function SportsEvents() {
           style={{ width: 46, height: 46, borderRadius: 10, objectFit: 'cover', border: `1px solid ${T.accentBorder}`, background: '#000', flexShrink: 0 }}
         />
       ) : (
-        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 46, height: 46, borderRadius: 10, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 46, height: 46, borderRadius: 10, background: 'rgba(180,120,0,0.1)', flexShrink: 0 }}>
           <UserRound size={20} color={T.accentFg} />
         </span>
       )}

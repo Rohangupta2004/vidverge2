@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSpaceRuntime } from '../SpaceRuntimeContext';
+import VergeLoader from './VergeLoader';
 import type { DesktopThemeTokens } from '../types';
 
 // Version marker for auto-upgrade detection
 // Increment this when making breaking changes that stale copies need
-export const EMAIL_GATE_VERSION = 108; // v108: curated public showcase endpoint with a privacy-safe 6-video seed fallback
+export const EMAIL_GATE_VERSION = 112; // v112: logo light-field behind every section, branded VergeLoader motion on every loading state, competitor table removed, concierge price removed; auth flow untouched
 
 type ParsedResponseBody = { data: unknown; rawText: string };
 
@@ -16,16 +17,31 @@ function isCanonicalWorkspaceSession(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('wses_');
 }
 
+// Globals the host page injects. Typed so the gate never needs `any`.
+type AudosWindow = Window & {
+  __WORKSPACE_ID__?: string;
+  __GDPR_ENABLED__?: boolean;
+  __GUEST_MODE_ENABLED__?: boolean;
+  __SOCIAL_PROVIDERS__?: unknown;
+  __META_PIXEL_ID__?: string | number;
+  __REDDIT_PIXEL_ID__?: string | number;
+  __AUDOS_FORCE_VISITOR__?: boolean;
+  __audosAcceptedSessionId?: string;
+  __workspaceDb?: { setSessionId?: (id: string) => void };
+  __audosTrackMetaEvent?: (event: string, payload: Record<string, unknown>) => string | undefined;
+  fbq?: (...args: unknown[]) => void;
+  rdt?: (...args: unknown[]) => void;
+};
+
+const audosWindow = (): AudosWindow => window as AudosWindow;
+
 /**
  * Hand a freshly server-accepted session to the injected data runtime before
  * rendering any app. The marker prevents stale localStorage values from being
  * mistaken for authenticated sessions on later reads in the same tab.
  */
 function acceptDataSession(sessionId: string): void {
-  const runtimeWindow = window as Window & {
-    __audosAcceptedSessionId?: string;
-    __workspaceDb?: { setSessionId?: (id: string) => void };
-  };
+  const runtimeWindow = audosWindow();
   runtimeWindow.__audosAcceptedSessionId = sessionId;
   runtimeWindow.__workspaceDb?.setSessionId?.(sessionId);
 }
@@ -137,107 +153,114 @@ interface EmailGateProps {
 
 type GateStep = 'loading' | 'email' | 'code' | 'complete';
 
-// Derive a usable color set from a single hex primary color
-function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-  const clean = hex.replace('#', '');
-  if (clean.length !== 6) return null;
-  return {
-    r: parseInt(clean.substring(0, 2), 16),
-    g: parseInt(clean.substring(2, 4), 16),
-    b: parseInt(clean.substring(4, 6), 16),
-  };
-}
+// ── Vidverge landing design system ──────────────────────────────────────
+// Presentation only for the SIGNED-OUT view. The dark-cosmic ground with
+// amber-to-cyan studio light, mirroring components/theme.ts so the gate and
+// the shell behind it read as one product. No rainbow gradients, no pastels,
+// no white surfaces anywhere.
+const BG = '#050508';
+const BG_DEEP = '#030305';
+const CARD = '#0D0D14';
+const LINE = '#40301B';
+const BRAND = '#F59E0B';
+const BRAND_HI = '#FCD34D';
+/** Text sitting on a BRAND-filled surface. */
+const INK = '#FFFFFF';
+const TEXT = '#FFFAF1';
+const MUTED = '#BBA899';
+const DIM = '#80705A';
+const BRAND_GLOW = '0 0 24px rgba(245,158,11,0.25)';
+const MONO = "ui-monospace, SFMono-Regular, Menlo, 'SF Mono', monospace";
+const FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+const CONTAINER = 1180;
 
-function colorWithAlpha(hex: string, alpha: number): string {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return hex;
-  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
-}
+// ── Section 3 · Finished customer renders ───────────────────────────────
+// Real published MP4s produced inside Vidverge. Hardcoded on purpose: the
+// landing page performs no database read.
+// `ratio` and `railWidth` mirror each finished file’s real pixel dimensions, so
+// a frame never letterboxes the footage it holds. Rail widths are chosen to
+// give every tile in a row the same height (~280px).
+type GalleryItem = { title: string; url: string; ratio: string; railWidth: number };
+type GallerySection = {
+  app: string;
+  blurb: string;
+  items: GalleryItem[];
+};
 
-// ── Prismatic Refraction landing: tokens and media ──────────────────────
-// Everything below this line is presentation for the SIGNED-OUT view only.
-// None of it participates in session, OTP, or registration logic.
-
-const PRISM_CANVAS = '#06060f';
-const PRISM_BORDER = 'rgba(255,255,255,0.08)';
-const PRISM_TEXT = '#ffffff';
-const PRISM_TEXT_SECONDARY = 'rgba(255,255,255,0.62)';
-const PRISM_TEXT_MUTED = 'rgba(255,255,255,0.38)';
-const PRISM_GRADIENT =
-  'linear-gradient(135deg, #ff6090 0%, #ff9060 18%, #ffd060 36%, #60ffa0 54%, #60c0ff 72%, #9060ff 100%)';
-const PRISM_MONO = "ui-monospace, SFMono-Regular, Menlo, 'SF Mono', monospace";
-const PRISM_EDGE_GLOW = '0 0 60px rgba(144,96,255,0.12), 0 0 120px rgba(255,96,144,0.08)';
-
-// Every clip on the landing page is a finished VidVerge render.
-const PRISM_REEL = 'https://storage.googleapis.com/audos-images/runway/f24710e5-7c6d-4db4-92b4-c2c235877575';
-
-const HERO_VIDEO_URL = `${PRISM_REEL}/rw_3aa8ef7b-8559-471e-bb2a-47e43fac334f-0.mp4`;
-
-type ShowcaseVideo = { url: string; label: string; category: string };
-
-// The "Made with VidVerge" fallback wall — six renders, one per output style.
-// The public showcase replaces these only when it returns a complete six-clip set.
-const SEED_VIDEOS: ShowcaseVideo[] = [
-  { url: `${PRISM_REEL}/rw_3aa8ef7b-8559-471e-bb2a-47e43fac334f-0.mp4`, label: 'Product Ad', category: 'product-ad' },
-  { url: `${PRISM_REEL}/rw_daaac5c0-4177-4db7-b414-9d6b3165b86c-0.mp4`, label: 'AI Video', category: 'ai-video' },
-  { url: `${PRISM_REEL}/rw_09ca17c2-948f-46fa-b49d-6116f230d5bf-0.mp4`, label: 'VFX', category: 'vfx' },
-  { url: `${PRISM_REEL}/rw_ca185c15-4ae7-46d9-a226-69e9b8d3fdb6-0.mp4`, label: 'Motion', category: 'motion' },
-  { url: `${PRISM_REEL}/rw_a0ee6086-1793-43b1-9afd-42f61c24479e-0.mp4`, label: 'UGC', category: 'ugc' },
-  { url: `${PRISM_REEL}/rw_e8145bf3-c59b-460b-a43e-94d6e5605b46-0.mp4`, label: 'Creative', category: 'creative' },
+const GALLERY: GallerySection[] = [
+  {
+    app: 'Faceless Content',
+    blurb: 'Narrated, archive-grade shorts with no camera and no face.',
+    items: [
+      {
+        title: 'The 7 Shipwrecks',
+        url: 'https://storage.googleapis.com/audos-images/videos/f24710e5-7c6d-4db4-92b4-c2c235877575_stitched_1791266089359.mp4',
+        ratio: '16 / 9',
+        railWidth: 498,
+      },
+      {
+        title: 'The Byzantine Bureaucracy',
+        url: 'https://storage.googleapis.com/audos-images/videos/f24710e5-7c6d-4db4-92b4-c2c235877575_stitched_1790851696192.mp4',
+        ratio: '16 / 9',
+        railWidth: 498,
+      },
+      {
+        title: 'The Great Emu War',
+        url: 'https://storage.googleapis.com/audos-images/videos/f24710e5-7c6d-4db4-92b4-c2c235877575_stitched_1790842437622.mp4',
+        ratio: '16 / 9',
+        railWidth: 498,
+      },
+    ],
+  },
+  {
+    app: 'Script-to-Video',
+    blurb: 'A written script in, a shot-matched cinematic cut out.',
+    items: [
+      {
+        title: 'The Discovery',
+        url: 'https://storage.googleapis.com/audos-images/uploads/s2v/db7f2cdc-d92b-4140-a047-baeff2f50f48.mp4',
+        ratio: '16 / 9',
+        railWidth: 498,
+      },
+      {
+        title: 'FineGlaze — Monsoon Facade Leakage',
+        url: 'https://storage.googleapis.com/audos-images/videos/f24710e5-7c6d-4db4-92b4-c2c235877575_stitched_1790966536543.mp4',
+        ratio: '16 / 9',
+        railWidth: 498,
+      },
+      {
+        title: 'B.E.E.F. Basketball Shooting Form',
+        url: 'https://storage.googleapis.com/audos-images/uploads/s2v/f552955a-bd54-41ba-b0c0-b1306adae2a6.mp4',
+        ratio: '9 / 16',
+        railWidth: 158,
+      },
+    ],
+  },
+  // The Product Video (Clip Style) row is held back on purpose. Its only
+  // finished render — 'Audos — Record Label For Founders',
+  // remotioncloudrun-29i6x7bt7e/renders/4d1de4a8-eabd-44ba-a802-0a9c81c82026/out.mp4
+  // — is a 1080×1350 file whose picture is black for all 39 seconds (audio
+  // only; every sampled frame reads luma 0). Re-render it, then restore the
+  // section here with ratio '4 / 5' and railWidth 224.
+  {
+    app: 'Product Launch',
+    blurb: 'Launch films cut for the day you ship.',
+    items: [
+      {
+        title: 'VicharakAI',
+        url: 'https://storage.googleapis.com/remotioncloudrun-29i6x7bt7e/renders/03ad1f56-7dc0-420c-b6ec-46b872811515/out.mp4',
+        ratio: '16 / 9',
+        railWidth: 498,
+      },
+    ],
+  },
 ];
 
-// Capability strips: one render each, alternating video-left / video-right.
-const PRISM_STRIPS: Array<{ label: string; desc: string; detail: string; url: string }> = [
-  {
-    label: 'Generate',
-    desc: 'Large cinematic examples.',
-    detail: 'Brief to video in one shot.',
-    url: `${PRISM_REEL}/rw_eeb8bba1-5bc1-4211-ac95-523e72137659-0.mp4`,
-  },
-  {
-    label: 'Transform',
-    desc: 'Before and after comparisons.',
-    detail: 'Raw footage to a refined cut.',
-    url: `${PRISM_REEL}/rw_5c1b96af-332c-4a1e-bc89-7e1c6ce5b574-0.mp4`,
-  },
-  {
-    label: 'VFX',
-    desc: 'Transformation clips.',
-    detail: 'Cinematic effects, instantly.',
-    url: `${PRISM_REEL}/rw_dd29ff27-75bd-4b33-a88b-87eadd2ab14b-0.mp4`,
-  },
-  {
-    label: 'Ads',
-    desc: 'UGC and product advertisements.',
-    detail: 'Scroll-stopping every time.',
-    url: `${PRISM_REEL}/rw_078709f5-9dbb-4a68-b7eb-d136562d75cf-0.mp4`,
-  },
-  {
-    label: 'Edit',
-    desc: 'Before and after editing examples.',
-    detail: 'Precision, with no timeline.',
-    url: `${PRISM_REEL}/rw_5c9b9d09-4d85-4e6d-941f-4545ed692996-0.mp4`,
-  },
-  {
-    label: 'Create',
-    desc: 'Creative experimental videos.',
-    detail: 'Push every boundary.',
-    url: `${PRISM_REEL}/rw_30a8d769-ba8f-4b9d-8292-7c1ef94381fe-0.mp4`,
-  },
-];
+const HERO_VIDEO = GALLERY[0].items[0]; // The 7 Shipwrecks — 1280×720
+const HERO_INSET = GALLERY[1].items[2]; // B.E.E.F. Shooting Form — 720×1280
 
-// ── Motion sections: placeholder media ─────────────────────────────────
-// PLACEHOLDER CLIPS — public royalty-free sample MP4s standing in for
-// finished VidVerge renders. The five motion sections (motion hero, feature
-// strip, how-it-works, results reel, final CTA) all resolve their video
-// through this list by `slot`, so swapping a clip is a one-line edit here
-// and nothing in the JSX needs to change.
-const SAMPLE_CLIP_BASE = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample';
-const sampleClip = (name: string) => ({
-  url: `${SAMPLE_CLIP_BASE}/${name}.mp4`,
-  poster: `${SAMPLE_CLIP_BASE}/images/${name}.jpg`,
-});
-
+// Kept for other surfaces that resolve a landing clip by slot. Every entry now
+// points at a finished customer render — no generated placeholders.
 type MotionClipSlot =
   | 'hero'
   | 'feature-consistency'
@@ -257,78 +280,408 @@ type MotionClipSlot =
 type PlaceholderClip = { slot: MotionClipSlot; url: string; poster?: string };
 
 export const PLACEHOLDER_CLIPS: PlaceholderClip[] = [
-  { slot: 'hero', ...sampleClip('ForBiggerBlazes') },
-  { slot: 'feature-consistency', ...sampleClip('ForBiggerEscapes') },
-  { slot: 'feature-script', ...sampleClip('ForBiggerFun') },
-  { slot: 'feature-vfx', ...sampleClip('ForBiggerMeltdowns') },
-  { slot: 'step-1', ...sampleClip('ForBiggerJoyrides') },
-  { slot: 'step-2', url: 'https://www.w3schools.com/html/mov_bbb.mp4' },
-  { slot: 'step-3', url: 'https://www.w3schools.com/html/movie.mp4' },
-  { slot: 'reel-1', ...sampleClip('ForBiggerBlazes') },
-  { slot: 'reel-2', ...sampleClip('ForBiggerEscapes') },
-  { slot: 'reel-3', ...sampleClip('ForBiggerFun') },
-  { slot: 'reel-4', ...sampleClip('ForBiggerJoyrides') },
-  { slot: 'reel-5', ...sampleClip('ForBiggerMeltdowns') },
-  { slot: 'reel-6', url: 'https://www.w3schools.com/html/mov_bbb.mp4' },
-  { slot: 'final-cta', ...sampleClip('ForBiggerEscapes') },
+  { slot: 'hero', url: HERO_VIDEO.url },
+  { slot: 'feature-consistency', url: GALLERY[0].items[0].url },
+  { slot: 'feature-script', url: GALLERY[1].items[0].url },
+  { slot: 'feature-vfx', url: GALLERY[1].items[1].url },
+  { slot: 'step-1', url: GALLERY[1].items[2].url },
+  { slot: 'step-2', url: GALLERY[0].items[1].url },
+  { slot: 'step-3', url: GALLERY[2].items[0].url },
+  { slot: 'reel-1', url: GALLERY[0].items[0].url },
+  { slot: 'reel-2', url: GALLERY[0].items[1].url },
+  { slot: 'reel-3', url: GALLERY[0].items[2].url },
+  { slot: 'reel-4', url: GALLERY[1].items[0].url },
+  { slot: 'reel-5', url: GALLERY[1].items[1].url },
+  { slot: 'reel-6', url: GALLERY[1].items[2].url },
+  { slot: 'final-cta', url: GALLERY[2].items[0].url },
 ];
 
-const clipFor = (slot: MotionClipSlot): PlaceholderClip =>
-  PLACEHOLDER_CLIPS.find((clip) => clip.slot === slot) ?? PLACEHOLDER_CLIPS[0];
+// ── Section 4 · The six studios ─────────────────────────────────────────
+// `shot` is a dark-mode interface still of the studio it labels.
+type Studio = { tag: string; name: string; benefit: string; shot: string; shotAlt: string };
 
-// Feature strip: three columns, one looping clip each.
-const FEATURE_COLUMNS: Array<{ slot: MotionClipSlot; title: string; copy: string }> = [
+const STUDIOS: Studio[] = [
   {
-    slot: 'feature-consistency',
-    title: 'Character consistency',
-    copy: 'The same face, wardrobe and lighting from the first shot to the last.',
+    tag: 'Characters',
+    name: 'SceneForge',
+    benefit: 'Character-consistent scenes, automatically.',
+    shot: 'https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1791363321293-q7cszf.jpg',
+    shotAlt: 'SceneForge storyboard with a locked character across six scenes',
   },
   {
-    slot: 'feature-script',
-    title: 'Script to video',
-    copy: 'Paste a script and get scenes, voice and cuts timed to every line.',
+    tag: 'Scripts',
+    name: 'Script-to-Video',
+    benefit: 'Your script. Real cinematic shots.',
+    shot: 'https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1791363358483-l4f82h.jpg',
+    shotAlt: 'Script-to-Video editor with a shot list beside the script',
   },
   {
-    slot: 'feature-vfx',
-    title: 'VFX effects',
-    copy: 'Fire, smoke, particles and camera moves dropped onto plain footage.',
+    tag: 'Shorts',
+    name: 'Faceless Content',
+    benefit: 'Viral-ready videos, no face needed.',
+    shot: 'https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1791363398484-nrei5j.jpg',
+    shotAlt: 'Faceless Content editor with a vertical preview and narration timeline',
+  },
+  {
+    tag: 'Commerce',
+    name: 'Product Video',
+    benefit: 'URL in, product video out.',
+    shot: 'https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1791363434232-n7g9ft.jpg',
+    shotAlt: 'Product Video studio parsing a product URL into a shot plan',
+  },
+  {
+    tag: 'Paid',
+    name: 'Ads Studio',
+    benefit: 'Ad creatives that actually convert.',
+    shot: 'https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1791363470504-rzquln.jpg',
+    shotAlt: 'Ads Studio comparing four ad creative variants',
+  },
+  {
+    tag: 'Intel',
+    name: 'Vergeye',
+    benefit: 'Outsmart your competitors before you post.',
+    shot: 'https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1791363514872-2w5o8i.jpg',
+    shotAlt: 'Vergeye competitive intelligence dashboard',
   },
 ];
 
-// How-it-works: alternating text / video rows for the three product steps.
-const WORKFLOW_STEPS: Array<{ slot: MotionClipSlot; title: string; copy: string }> = [
+// ── Section 5 · Pricing ─────────────────────────────────────────────────
+type Plan = {
+  name: string;
+  price: string;
+  period: string;
+  credits: string;
+  features: string[];
+  cta: string;
+  featured: boolean;
+  badge?: string;
+};
+
+const PLANS: Plan[] = [
   {
-    slot: 'step-1',
-    title: 'Describe it',
-    copy: 'Type a brief or paste a script. VidVerge drafts the shot list, the characters and the pacing before a single frame renders.',
+    name: 'Free Trial',
+    price: '$0',
+    period: 'to start',
+    credits: '30 credits',
+    features: ['No card required', 'Every studio unlocked', 'Watermarked export'],
+    cta: 'Start free',
+    featured: false,
   },
   {
-    slot: 'step-2',
-    title: 'Generate and direct',
-    copy: 'Render every scene, then swap an angle, restyle a character or drop in an effect with one plain-language note.',
+    name: 'Creator',
+    price: '$35',
+    period: 'per month',
+    credits: '250 credits',
+    features: ['Credits roll over', 'No watermark', 'Priority rendering'],
+    cta: 'Get Creator',
+    featured: false,
   },
   {
-    slot: 'step-3',
-    title: 'Export and publish',
-    copy: 'Download in every aspect ratio with captions baked in, ready for TikTok, Reels, YouTube and paid placements.',
+    name: 'Pro',
+    price: '$70',
+    period: 'per month',
+    credits: '500 credits',
+    features: ['Credits roll over', 'Fastest render queue', 'Vergeye competitive reports'],
+    cta: 'Get Pro',
+    featured: true,
+    badge: 'Most Popular',
+  },
+  {
+    name: 'Pay-as-you-go',
+    price: '$9',
+    period: 'one-time',
+    credits: '60 credits',
+    features: ['No cap, no subscription', 'Credits never expire', 'Top up any time'],
+    cta: 'Buy credits',
+    featured: false,
   },
 ];
 
-// Results reel: the horizontally scrolling strip of sample outputs.
-const RESULTS_REEL: Array<{ slot: MotionClipSlot; label: string }> = [
-  { slot: 'reel-1', label: 'Product launch' },
-  { slot: 'reel-2', label: 'Explainer' },
-  { slot: 'reel-3', label: 'Trailer' },
-  { slot: 'reel-4', label: 'UGC spot' },
-  { slot: 'reel-5', label: 'Music visual' },
-  { slot: 'reel-6', label: 'Brand film' },
+const PROOF_STATS: Array<{ value: string; label: string }> = [
+  { value: '6', label: 'studios, one login' },
+  { value: '0', label: 'character drift' },
+  { value: '1s', label: 'of video per credit' },
 ];
 
-export default function EmailGate({
-  spaceId,
-  branding,
-  themeTokens,
-}: EmailGateProps) {
+// ── Injected CSS (keyframes, beams, hovers, responsive grids) ───────────
+const GATE_STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@keyframes vvFadeUp { from { opacity:0; transform:translateY(34px); } to { opacity:1; transform:translateY(0); } }
+@keyframes vvPulse { 0%,100% { opacity:.5; } 50% { opacity:1; } }
+@keyframes vvFieldA { 0%,100% { transform:translate3d(-1.4%,-1%,0) scale(1.04); } 50% { transform:translate3d(1.4%,1%,0) scale(1.09); } }
+@keyframes vvFieldB { 0%,100% { transform:translate3d(1.8%,.8%,0) scale(1.08); } 50% { transform:translate3d(-1.8%,-.8%,0) scale(1.03); } }
+@keyframes vvFieldC { 0%,100% { transform:translate3d(0,1.2%,0) scale(1.05); } 50% { transform:translate3d(0,-1.2%,0) scale(1.10); } }
+@keyframes vvBootIn { to { opacity:1; } }
+
+/* Logo light field: the Vidverge "V" itself — swooping amber filaments with a
+   hot core — blown up and drifting slowly behind EVERY section. Fixed to the
+   viewport so it backs the whole page rather than just the hero. */
+.vv-field { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+.vv-field::after {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(1300px 820px at 50% 42%, transparent 0%, rgba(10,10,15,.26) 62%, rgba(10,10,15,.64) 100%);
+}
+.vv-layer { position:absolute; inset:0; width:100%; height:100%; mix-blend-mode:screen; will-change:transform; }
+.vv-field-a { animation:vvFieldA 36s ease-in-out infinite; }
+.vv-field-b { animation:vvFieldB 46s ease-in-out infinite; }
+.vv-field-c { animation:vvFieldC 40s ease-in-out infinite; }
+.vv-bloom {
+  position:absolute; left:50%; top:44%; width:min(1020px, 94vw); height:min(620px, 56vw);
+  transform:translate(-50%,-50%);
+  background:radial-gradient(closest-side, rgba(252,211,77,.17), rgba(245,158,11,.05) 50%, transparent 74%);
+  filter:blur(26px); animation:vvPulse 12s ease-in-out infinite;
+}
+
+/* Session check in flight: fade the loader in a beat late so a cached session
+   resolves straight into the app without flashing a spinner. */
+.vv-boot { opacity:0; animation:vvBootIn .45s ease .18s forwards; }
+
+.vv-reveal { opacity:0; }
+.vv-reveal.vv-in { animation:vvFadeUp .6s cubic-bezier(.16,1,.3,1) forwards; }
+
+.vv-cta { background:${BRAND}; color:${INK}; font-weight:700; border:none; border-radius:12px; cursor:pointer; transition:transform .18s ease, box-shadow .25s ease, filter .18s ease; }
+.vv-cta:hover { transform:translateY(-1px); filter:brightness(1.06); box-shadow:0 12px 34px rgba(245,158,11,.32); }
+.vv-ghost { background:rgba(255,255,255,.03); border:1px solid ${LINE}; color:${TEXT}; border-radius:12px; cursor:pointer; font-weight:600; transition:transform .18s ease, border-color .18s ease, background .18s ease; }
+.vv-ghost:hover { transform:translateY(-1px); border-color:rgba(245,158,11,.45); background:rgba(245,158,11,.07); }
+.vv-navcta { border:1px solid rgba(245,158,11,.35); background:rgba(245,158,11,.1); color:${BRAND_HI}; border-radius:999px; cursor:pointer; font-weight:600; transition:transform .18s ease, background .18s ease; }
+.vv-navcta:hover { transform:translateY(-1px); background:rgba(245,158,11,.18); }
+.vv-navlink { color:${MUTED}; background:none; border:none; cursor:pointer; font-size:13px; font-weight:500; transition:color .18s ease; text-decoration:none; }
+.vv-navlink:hover { color:${TEXT}; }
+.vv-input::placeholder { color:#4B5563; }
+.vv-input:focus { border-color:${BRAND} !important; box-shadow:0 0 0 3px rgba(245,158,11,.2) !important; outline:none; }
+.vv-link { color:${MUTED}; text-decoration:none; transition:color .18s ease; }
+.vv-link:hover { color:${BRAND_HI}; }
+
+.vv-card { background:${CARD}; border:1px solid ${LINE}; border-radius:12px; }
+.vv-studio { transition:transform .22s ease, border-color .22s ease, box-shadow .22s ease; }
+.vv-studio:hover { transform:translateY(-3px); border-color:rgba(245,158,11,.4); box-shadow:0 18px 48px rgba(0,0,0,.55); }
+.vv-tile { transition:transform .22s ease, box-shadow .22s ease; }
+.vv-tile:hover { transform:translateY(-3px); box-shadow:${BRAND_GLOW}; }
+
+.vv-rail { display:flex; gap:18px; overflow-x:auto; scroll-snap-type:x proximity; padding:4px 2px 16px; -webkit-overflow-scrolling:touch; }
+.vv-rail > * { scroll-snap-align:start; flex:0 0 auto; }
+.vv-rail::-webkit-scrollbar { height:6px; }
+.vv-rail::-webkit-scrollbar-track { background:rgba(255,255,255,.04); border-radius:999px; }
+.vv-rail::-webkit-scrollbar-thumb { background:rgba(245,158,11,.35); border-radius:999px; }
+
+.vv-hero { display:grid; grid-template-columns:1.02fr .98fr; gap:56px; align-items:center; }
+.vv-studios { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+.vv-pricing { display:grid; grid-template-columns:repeat(4,1fr); gap:18px; }
+.vv-concierge { display:grid; grid-template-columns:1.5fr .9fr; gap:30px; align-items:center; }
+.vv-proof { display:flex; align-items:center; justify-content:center; gap:34px; flex-wrap:wrap; }
+
+@media (max-width:1024px) {
+  .vv-studios { grid-template-columns:repeat(2,1fr); }
+  .vv-pricing { grid-template-columns:repeat(2,1fr); }
+}
+@media (max-width:860px) {
+  .vv-hero { grid-template-columns:1fr; gap:44px; }
+  .vv-hero-visual { display:none; }
+}
+@media (max-width:768px) {
+  .vv-navlinks { display:none !important; }
+  .vv-studios, .vv-pricing, .vv-concierge { grid-template-columns:1fr; }
+  .vv-proof { gap:18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vv-reveal, .vv-reveal.vv-in { animation:none !important; opacity:1 !important; }
+  .vv-layer, .vv-bloom { animation:none !important; }
+  .vv-boot { animation:none !important; opacity:1 !important; }
+}
+`;
+
+// Scroll-reveal wrapper (fadeInUp) driven by an IntersectionObserver.
+// Module-level so typing in the gate modal never remounts it.
+const Reveal = ({
+  children,
+  reduceMotion,
+  delay = 0,
+  style,
+}: {
+  children: React.ReactNode;
+  reduceMotion: boolean;
+  delay?: number;
+  style?: React.CSSProperties;
+}) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (reduceMotion) { setShown(true); return; }
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) { setShown(true); io.disconnect(); break; }
+      }
+    }, { threshold: 0.12 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [reduceMotion]);
+  return (
+    <div ref={ref} className={`vv-reveal${shown ? ' vv-in' : ''}`} style={{ animationDelay: `${delay}s`, ...style }}>
+      {children}
+    </div>
+  );
+};
+
+// The logo used as an ambient light rig. Each layer redraws the mark’s
+// swooping "V" filaments at page scale — a soft blurred halo beneath a thin
+// hot core, which is how the logo itself is built — and drifts on its own slow
+// cycle. Pure SVG + CSS: no animation library, no 3D.
+type FieldLayer = { d: string; w: number; blur: number; glow: number; core: number; drift: string };
+
+const FIELD_LAYERS: FieldLayer[] = [
+  { d: 'M -160 236 C 420 242, 574 352, 720 566 C 866 352, 1020 242, 1600 236', w: 2, blur: 7, glow: 0.13, core: 0.17, drift: 'vv-field-c' },
+  { d: 'M -160 292 C 404 298, 560 418, 720 648 C 880 418, 1036 298, 1600 292', w: 3, blur: 11, glow: 0.15, core: 0.2, drift: 'vv-field-a' },
+  { d: 'M -160 350 C 388 356, 548 486, 720 734 C 892 486, 1052 356, 1600 350', w: 2.2, blur: 9, glow: 0.11, core: 0.14, drift: 'vv-field-b' },
+  { d: 'M -160 410 C 372 416, 534 556, 720 822 C 906 556, 1068 416, 1600 410', w: 1.6, blur: 8, glow: 0.08, core: 0.1, drift: 'vv-field-a' },
+];
+
+const LightField = () => (
+  <div className="vv-field" aria-hidden>
+    <div className="vv-bloom" />
+    {FIELD_LAYERS.map((layer, index) => (
+      <svg
+        key={layer.d}
+        className={`vv-layer ${layer.drift}`}
+        viewBox="0 0 1440 900"
+        preserveAspectRatio="xMidYMid slice"
+        style={{ animationDelay: `${index * -7}s` }}
+      >
+        <defs>
+          <linearGradient id={`vvFieldGrad${index}`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#F59E0B" stopOpacity="0" />
+            <stop offset="20%" stopColor="#F59E0B" stopOpacity="0.55" />
+            <stop offset="50%" stopColor="#22D3EE" stopOpacity="1" />
+            <stop offset="80%" stopColor="#FCD34D" stopOpacity="0.55" />
+            <stop offset="100%" stopColor="#F59E0B" stopOpacity="0" />
+          </linearGradient>
+          <filter id={`vvFieldBlur${index}`} x="-10%" y="-45%" width="120%" height="190%">
+            <feGaussianBlur stdDeviation={layer.blur} />
+          </filter>
+        </defs>
+        <path
+          d={layer.d}
+          fill="none"
+          strokeLinecap="round"
+          stroke={`url(#vvFieldGrad${index})`}
+          strokeWidth={layer.w * 6}
+          opacity={layer.glow}
+          filter={`url(#vvFieldBlur${index})`}
+        />
+        <path
+          d={layer.d}
+          fill="none"
+          strokeLinecap="round"
+          stroke={`url(#vvFieldGrad${index})`}
+          strokeWidth={layer.w}
+          opacity={layer.core}
+        />
+      </svg>
+    ))}
+  </div>
+);
+
+/**
+ * Viewport-gated looping video. The `src` is only attached once the element
+ * nears the viewport, so nothing below the fold downloads on first paint, and
+ * playback pauses again as soon as the tile scrolls away.
+ */
+const ViewportVideo = ({
+  src,
+  reduceMotion,
+  style,
+}: {
+  src: string;
+  reduceMotion: boolean;
+  style?: React.CSSProperties;
+}) => {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const ref = useRef<HTMLVideoElement | null>(null);
+  const [armed, setArmed] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) setArmed(true);
+        if (reduceMotion) continue;
+        const el = ref.current;
+        if (!el) continue;
+        if (entry.intersectionRatio >= 0.25) {
+          void el.play().catch(() => {});
+        } else {
+          el.pause();
+        }
+      }
+    }, { threshold: [0, 0.25], rootMargin: '280px 0px' });
+    io.observe(host);
+    return () => io.disconnect();
+  }, [reduceMotion]);
+
+  return (
+    <div ref={hostRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <video
+        ref={ref}
+        src={armed ? src : undefined}
+        autoPlay={!reduceMotion}
+        muted
+        loop
+        playsInline
+        preload="none"
+        disablePictureInPicture
+        onLoadedData={() => setReady(true)}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          display: 'block',
+          background: BG_DEEP,
+          ...style,
+        }}
+      />
+      {/* Branded wait between a tile arming and its first decoded frame. */}
+      {armed && !ready && (
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
+          <VergeLoader size={76} label="Loading clip" />
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Dark device frame shared by every clip on the page.
+const VideoFrame = ({
+  src,
+  reduceMotion,
+  width,
+  aspect,
+}: {
+  src: string;
+  reduceMotion: boolean;
+  width: number | string;
+  aspect: string;
+}) => (
+  <div
+    className="vv-tile"
+    style={{
+      width,
+      maxWidth: '100%',
+      aspectRatio: aspect,
+      borderRadius: 20,
+      overflow: 'hidden',
+      background: BG_DEEP,
+      border: `1px solid ${LINE}`,
+      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.02), 0 20px 46px rgba(0,0,0,.5)',
+    }}
+  >
+    <ViewportVideo src={src} reduceMotion={reduceMotion} />
+  </div>
+);
+
+export default function EmailGate({ spaceId, branding }: EmailGateProps) {
   const { sessionId, setSessionId, subscriptionReady, updateSubscription } = useSpaceRuntime();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -342,80 +695,35 @@ export default function EmailGate({
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [pendingWorkspaceId, setPendingWorkspaceId] = useState<string | null>(null);
   const [marketingConsent, setMarketingConsent] = useState(false);
-  const [showcaseVideos, setShowcaseVideos] = useState<ShowcaseVideo[]>(SEED_VIDEOS);
-  // Reduced-motion visitors get poster stills: the placeholder clips in the
-  // motion sections autoplay only while this is false.
+  // Reduced-motion visitors get still frames: looping clips and beams stop.
   const [reduceMotion, setReduceMotion] = useState(false);
+  // Gate modal: opened by the nav, pricing and concierge CTAs. The hero keeps
+  // the signup form inline, so the modal is a second entry point, not the only one.
+  const [gateOpen, setGateOpen] = useState(false);
+  const [gateMode, setGateMode] = useState<'start' | 'concierge'>('start');
+  const [scrolled, setScrolled] = useState(false);
 
-  // Signed-out landing presentation refs (no bearing on authentication).
-  const videoWallRef = useRef<HTMLElement | null>(null);
-  const emailInputRef = useRef<HTMLInputElement | null>(null);
-  const bottomCtaRef = useRef<HTMLDivElement | null>(null);
-  const bottomEmailInputRef = useRef<HTMLInputElement | null>(null);
-  // One <video> handle per wall tile / capability strip, so hovering a card
-  // starts exactly that clip and clicking it can go fullscreen.
-  const videoWallRefs = useRef<Array<HTMLVideoElement | null>>(Array(6).fill(null));
-  const capabilityRefs = useRef<Array<HTMLVideoElement | null>>(Array(6).fill(null));
+  // Presentation refs (no bearing on authentication).
+  const heroEmailInputRef = useRef<HTMLInputElement | null>(null);
+  const modalEmailInputRef = useRef<HTMLInputElement | null>(null);
 
   // Get workspaceId from window context
-  const workspaceId = (window as any).__WORKSPACE_ID__ || null;
-  const gdprEnabled = !!(window as any).__GDPR_ENABLED__;
-  const guestModeEnabled = !!(window as any).__GUEST_MODE_ENABLED__;
-  const rawSocialProviders = (window as any).__SOCIAL_PROVIDERS__;
-  const socialProviders: string[] = Array.isArray(rawSocialProviders) ? rawSocialProviders : [];
+  const workspaceId = audosWindow().__WORKSPACE_ID__ || null;
+  const gdprEnabled = !!audosWindow().__GDPR_ENABLED__;
+  const guestModeEnabled = !!audosWindow().__GUEST_MODE_ENABLED__;
+  const rawSocialProviders = audosWindow().__SOCIAL_PROVIDERS__;
+  const socialProviders: string[] = Array.isArray(rawSocialProviders)
+    ? rawSocialProviders.filter((provider): provider is string => typeof provider === 'string')
+    : [];
 
   useEffect(() => {
     storeAttribution();
     checkExistingSession();
   }, [spaceId]);
 
-  // The server function exposes only founder-approved saved_videos rows. Keep
-  // the complete seed reel unless all six public showcase slots are available.
-  useEffect(() => {
-    let cancelled = false;
-    setShowcaseVideos(SEED_VIDEOS);
-
-    const loadShowcase = async () => {
-      try {
-        const response = await fetch(
-          `/api/hooks/execute/${encodeURIComponent(spaceId)}/public-video-showcase`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'omit',
-            body: '{}',
-          },
-        );
-        if (!response.ok) return;
-
-        const payload: unknown = await response.json();
-        const rows = isRecord(payload) && Array.isArray(payload.videos) ? payload.videos : [];
-        const videos: ShowcaseVideo[] = [];
-
-        for (const row of rows) {
-          if (!isRecord(row) || typeof row.url !== 'string' || !row.url.startsWith('https://')) continue;
-          videos.push({
-            url: row.url,
-            label: typeof row.label === 'string' && row.label.trim() ? row.label : 'Made with VidVerge',
-            category: typeof row.category === 'string' && row.category.trim() ? row.category : 'video',
-          });
-        }
-
-        if (!cancelled && videos.length >= SEED_VIDEOS.length) {
-          setShowcaseVideos(videos.slice(0, SEED_VIDEOS.length));
-        }
-      } catch (error) {
-        console.warn('[EmailGate] Public showcase unavailable; using the seed reel.', error);
-      }
-    };
-
-    void loadShowcase();
-    return () => { cancelled = true; };
-  }, [spaceId]);
-
   // `autoPlay` ignores prefers-reduced-motion, so the preference is tracked
-  // here and the motion-section clips read it. Older Safari lacks
-  // addEventListener on MediaQueryList, hence the guarded calls.
+  // here and every clip reads it. Older Safari lacks addEventListener on
+  // MediaQueryList, hence the guarded calls.
   useEffect(() => {
     let media: MediaQueryList | null = null;
     try {
@@ -435,6 +743,24 @@ export default function EmailGate({
       } catch {}
     };
   }, []);
+
+  // Frost the nav once the visitor scrolls past the first slice of the hero.
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 40);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Close the gate modal on Escape.
+  useEffect(() => {
+    if (!gateOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setGateOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [gateOpen]);
 
   // SpaceRuntime clears subscription state for email-less sessions. Restore the
   // intentional workspace-wide Pro entitlement after that initialization pass.
@@ -476,17 +802,15 @@ export default function EmailGate({
     const sessionKey = `space_session_${spaceId}`;
     try {
       const existingSession = localStorage.getItem(sessionKey);
-      const parsed = existingSession ? JSON.parse(existingSession) : null;
-      const storedSessionId = isRecord(parsed)
-        ? parsed.workspaceSessionId || parsed.sessionId || parsed.id
+      const parsed: unknown = existingSession ? JSON.parse(existingSession) : null;
+      const session = isRecord(parsed) ? parsed : null;
+      const storedSessionId = session
+        ? [session.workspaceSessionId, session.sessionId, session.id].find(
+            (value): value is string => typeof value === 'string' && value.length > 0,
+          ) ?? null
         : null;
-      const session = parsed as any;
 
-      if (
-        typeof storedSessionId === 'string' &&
-        storedSessionId.startsWith('wses_') &&
-        session.verified === true
-      ) {
+      if (storedSessionId && storedSessionId.startsWith('wses_') && session?.verified === true) {
         acceptDataSession(storedSessionId);
         setSessionId(storedSessionId);
         setStep('complete');
@@ -494,10 +818,7 @@ export default function EmailGate({
       }
 
       // Guest sessions don’t need OTP, so allow those too.
-      if (
-        typeof storedSessionId === 'string' &&
-        storedSessionId.startsWith('guest_')
-      ) {
+      if (storedSessionId && storedSessionId.startsWith('guest_')) {
         acceptDataSession(storedSessionId);
         setSessionId(storedSessionId);
         setStep('complete');
@@ -600,8 +921,9 @@ export default function EmailGate({
         setPendingSessionId(provisionalSessionToken);
         setPendingWorkspaceId(resolvedWorkspaceId);
 
-        if (typeof (window as any).fbq === 'function' && (window as any).__META_PIXEL_ID__) {
-          (window as any).fbq('init', (window as any).__META_PIXEL_ID__, { em: normalizedEmail.toLowerCase().trim() });
+        const metaPixelId = audosWindow().__META_PIXEL_ID__;
+        if (typeof audosWindow().fbq === 'function' && metaPixelId) {
+          audosWindow().fbq?.('init', metaPixelId, { em: normalizedEmail.toLowerCase().trim() });
         }
         fireLeadEventWithRetry(normalizedEmail);
 
@@ -640,6 +962,7 @@ export default function EmailGate({
                 : "We had trouble delivering your last code to this address. We’re trying again - also check your spam folder, or try a different email.")
             : ''
         );
+        setGateOpen(false);
         setStep('code');
       } else {
         setError('Email verification is unavailable because the workspace identity is missing.');
@@ -712,6 +1035,7 @@ export default function EmailGate({
         (typeof verifyBody.workspaceSessionId === 'string' && verifyBody.workspaceSessionId.startsWith('wses_')
           ? verifyBody.workspaceSessionId
           : undefined);
+
       await completeVerifiedSession(canonicalSessionId);
     } catch (err) {
       console.error('[EmailGate] Network error in handleCodeSubmit:', err);
@@ -788,8 +1112,8 @@ export default function EmailGate({
     try {
       const existingSession = localStorage.getItem(sessionKey);
       if (existingSession) {
-        const parsed = JSON.parse(existingSession);
-        if (parsed.metadata) verifiedMetadata = parsed.metadata;
+        const parsed: unknown = JSON.parse(existingSession);
+        if (isRecord(parsed) && isRecord(parsed.metadata)) verifiedMetadata = parsed.metadata;
       }
     } catch {}
     const session = {
@@ -861,7 +1185,7 @@ export default function EmailGate({
   // signed-in space opens.
   const completeGateEntry = () => {
     try {
-      if (typeof window !== 'undefined' && (window as any).__AUDOS_FORCE_VISITOR__ === true) {
+      if (typeof window !== 'undefined' && audosWindow().__AUDOS_FORCE_VISITOR__ === true) {
         const url = new URL(window.location.href);
         url.searchParams.delete('as');
         window.location.replace(url.toString());
@@ -900,7 +1224,7 @@ export default function EmailGate({
   function getAttrCookie(): Record<string, string> | null {
     try {
       const raw = localStorage.getItem('audos_attribution');
-      return raw ? JSON.parse(raw) : null;
+      return raw ? (JSON.parse(raw) as Record<string, string>) : null;
     } catch {
       return null;
     }
@@ -977,7 +1301,7 @@ export default function EmailGate({
     const conversionId = `lead_${spaceId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     const tryFireFbq = (): boolean => {
-      const trackMeta = (window as any).__audosTrackMetaEvent;
+      const trackMeta = audosWindow().__audosTrackMetaEvent;
       if (typeof trackMeta === 'function') {
         const eventId = trackMeta('Lead', {
           content_name: 'Email Capture',
@@ -988,11 +1312,12 @@ export default function EmailGate({
           return true;
         }
       }
-      if (typeof (window as any).fbq === 'function') {
-        const pixelId = (window as any).__META_PIXEL_ID__;
+      const fbq = audosWindow().fbq;
+      if (typeof fbq === 'function') {
+        const pixelId = audosWindow().__META_PIXEL_ID__;
         if (!pixelId) return false;
         const eventId = `meta_lead_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-        (window as any).fbq('trackSingle', String(pixelId), 'Lead', {
+        fbq('trackSingle', String(pixelId), 'Lead', {
           content_name: 'Email Capture',
           content_category: 'space',
         }, {
@@ -1033,8 +1358,8 @@ export default function EmailGate({
     // rdt('init', …, { email, externalId }) propagates advanced matching for
     // the subsequent Lead event (Reddit "Step 3: Set up match keys").
     try {
-      const rdt = (window as any).rdt;
-      const pixelId = (window as any).__REDDIT_PIXEL_ID__;
+      const rdt = audosWindow().rdt;
+      const pixelId = audosWindow().__REDDIT_PIXEL_ID__;
       if (typeof rdt === 'function') {
         if (pixelId) {
           rdt('init', pixelId, { email: normalizedEmail, externalId: getVisitorId() });
@@ -1096,267 +1421,169 @@ export default function EmailGate({
     return Object.keys(merged).length > 0 ? merged : null;
   };
 
-  // ── Prismatic Refraction palette ───────────────────────────────────────
-  // The landing / gate deliberately uses a fixed dark-glass palette (rather
-  // than the per-space light tokens) so it reads like a high-end video tool.
-  // The OTP screen below shares these tokens so both states match.
-  const brandName = branding?.name || 'VidVerge';
-  const tagline = branding?.tagline || 'Create. Transform. Publish.';
+  // ── Presentation ────────────────────────────────────────────────────────
+  const brandName = branding?.name || 'Vidverge';
+  const tagline = branding?.tagline || 'The end-to-end intelligent video platform';
   const logoUrl = branding?.logoUrl || 'https://storage.googleapis.com/audos-images/attachments/general/c0902809-6dc4-4e0c-b04e-1f60e01b31e6.png';
 
-  const FONT = "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-  const bodyFontStack = FONT;
-  const headingFontStack = FONT;
-
-  const panelColor = colorWithAlpha('#FFFFFF', 0.04);
-  const borderColor = PRISM_BORDER;
-  const textPrimary = PRISM_TEXT;
-  const textMuted = PRISM_TEXT_SECONDARY;
-  const textSubtle = PRISM_TEXT_MUTED;
-
-  // Injected CSS for the things inline styles cannot express: keyframes, the
-  // spectral edge glow on hover, focus rings, and the responsive grids.
-  // rlo-* rules dress the OTP screen; prism-* rules dress the landing page.
-  const RLO_STYLES = `
-@keyframes rloBrandDrift { 0%,100%{transform:translate(-50%,-52%) scale(1) rotate(0deg);opacity:.07;} 50%{transform:translate(-46%,-48%) scale(1.05) rotate(2deg);opacity:.13;} }
-.rlo-cta { transition: transform .2s ease, box-shadow .3s ease, filter .2s ease; }
-.rlo-cta:hover { transform: translateY(-2px); filter: brightness(1.06); box-shadow: 0 0 40px rgba(144,96,255,0.45); }
-.rlo-input::placeholder { color: rgba(255,255,255,0.36); }
-.rlo-input:focus { border-color: rgba(144,96,255,0.7) !important; box-shadow: 0 0 0 3px rgba(144,96,255,0.22) !important; outline: none; }
-@keyframes prismShift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-@keyframes prismaticEdge {
-  0%,100% { box-shadow: 0 0 0 1.5px rgba(255,96,144,0.7), 0 0 28px rgba(255,96,144,0.22); }
-  16.6%   { box-shadow: 0 0 0 1.5px rgba(255,144,96,0.7), 0 0 28px rgba(255,144,96,0.22); }
-  33.3%   { box-shadow: 0 0 0 1.5px rgba(255,208,96,0.7), 0 0 28px rgba(255,208,96,0.22); }
-  50%     { box-shadow: 0 0 0 1.5px rgba(96,255,160,0.7), 0 0 28px rgba(96,255,160,0.22); }
-  66.6%   { box-shadow: 0 0 0 1.5px rgba(96,192,255,0.7), 0 0 28px rgba(96,192,255,0.22); }
-  83.3%   { box-shadow: 0 0 0 1.5px rgba(144,96,255,0.7), 0 0 28px rgba(144,96,255,0.22); }
-}
-@keyframes prismFadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
-@keyframes prismGlow { 0%,100% { opacity:.18; } 50% { opacity:.32; } }
-.prism-fade { animation: prismFadeUp .9s cubic-bezier(.16,1,.3,1) both; }
-.prism-glow { animation: prismGlow 7s ease-in-out infinite; }
-.prism-btn {
-  background: linear-gradient(135deg, #ff6090, #9060ff);
-  background-size: 200% 200%;
-  animation: prismShift 5s ease infinite;
-  transition: transform .2s ease, box-shadow .25s ease;
-}
-.prism-btn:hover { transform: translateY(-2px); box-shadow: 0 0 40px rgba(144,96,255,0.55), 0 12px 32px rgba(255,96,144,0.35); }
-.prism-ghost {
-  background: transparent;
-  border: 1px solid rgba(255,255,255,0.22);
-  transition: background .2s ease, border-color .2s ease;
-}
-.prism-ghost:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.44); }
-.prism-card { transition: transform .3s ease; }
-.prism-card:hover { transform: translateY(-5px) scale(1.015); }
-.prism-video-card { position: relative; overflow: hidden; border-radius: 12px; cursor: pointer; transition: transform .35s cubic-bezier(.16,1,.3,1); }
-.prism-video-card:hover, .prism-video-card:focus-visible { transform: scale(1.04); animation: prismaticEdge 3s linear infinite; outline: none; z-index: 3; }
-.prism-video-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(6,6,15,0.82) 0%, transparent 55%); opacity: 0; transition: opacity .3s ease; display: flex; flex-direction: column; justify-content: flex-end; padding: 16px; }
-.prism-video-card:hover .prism-video-overlay, .prism-video-card:focus-visible .prism-video-overlay { opacity: 1; }
-.prism-input::placeholder { color: rgba(255,255,255,0.36); }
-.prism-input:focus { border-color: rgba(144,96,255,0.7) !important; box-shadow: 0 0 0 3px rgba(144,96,255,0.22) !important; outline: none; }
-.prism-label-text {
-  background: linear-gradient(135deg, #ff6090, #ff9060, #ffd060, #60ffa0, #60c0ff, #9060ff);
-  background-size: 300% 300%;
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-  animation: prismShift 8s ease infinite;
-}
-.prism-link { transition: color .2s ease; }
-.prism-link:hover { color: #ffffff; }
-.prism-wall { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.prism-strip { display: flex; flex-direction: row; gap: 48px; align-items: center; position: relative; }
-.prism-strip-reverse { flex-direction: row-reverse; }
-.prism-strip::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, #ff6090, #9060ff); }
-.prism-strip-media { width: 40%; flex-shrink: 0; }
-.prism-strip-text { width: 60%; }
-.prism-form-row { display: flex; align-items: stretch; gap: 12px; }
-.prism-form-row > input { flex: 1 1 auto; min-width: 0; }
-.prism-motion-clip { width: 100%; height: 100%; object-fit: cover; display: block; }
-.prism-feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-.prism-step { display: flex; flex-direction: row; gap: 56px; align-items: center; }
-.prism-step-reverse { flex-direction: row-reverse; }
-.prism-step-media, .prism-step-text { width: 50%; flex-shrink: 0; min-width: 0; }
-.prism-reel { display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 4px 24px 20px; }
-.prism-reel::-webkit-scrollbar { display: none; }
-.prism-reel-item { position: relative; flex: 0 0 min(72vw, 300px); aspect-ratio: 9 / 16; scroll-snap-align: center; border-radius: 14px; overflow: hidden; background: #0d0d1a; border: 1px solid rgba(255,255,255,0.06); }
-@media (max-width: 900px) {
-  .prism-wall { grid-template-columns: repeat(2, 1fr); }
-  .prism-strip, .prism-strip-reverse { flex-direction: column; gap: 20px; }
-  .prism-strip-media, .prism-strip-text { width: 100%; }
-  .prism-feature-grid { grid-template-columns: 1fr; }
-  .prism-step, .prism-step-reverse { flex-direction: column; gap: 24px; }
-  .prism-step-media, .prism-step-text { width: 100%; }
-}
-@media (max-width: 600px) { .prism-wall { grid-template-columns: 1fr; } .prism-form-row { flex-direction: column; } }
-@media (prefers-reduced-motion: reduce) {
-  .prism-fade, .prism-btn, .prism-label-text, .prism-glow, .rlo-brand-motion { animation: none !important; }
-  .prism-video-card:hover, .prism-video-card:focus-visible, .prism-card:hover { transform: none; animation: none !important; }
-}
-`;
-
-  // Brand logo mark
-  const BrandMark = ({ size = 40 }: { size?: number }) => {
-    if (logoUrl) {
-      return (
-        <img
-          src={logoUrl}
-          alt={brandName}
-          style={{ width: size * 1.4, height: size, objectFit: 'cover', objectPosition: 'center', mixBlendMode: 'screen', filter: 'drop-shadow(0 0 16px rgba(144,96,255,0.45))' }}
-        />
-      );
-    }
-    return (
-      <div
+  const BrandLogo = ({ size = 32 }: { size?: number }) =>
+    logoUrl ? (
+      <img
+        src={logoUrl}
+        alt={brandName}
         style={{
           width: size,
           height: size,
-          borderRadius: size * 0.28,
-          background: PRISM_GRADIENT,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#06060f',
-          fontWeight: 800,
-          fontSize: size * 0.42,
-          fontFamily: FONT,
-          flexShrink: 0,
-          boxShadow: PRISM_EDGE_GLOW,
+          objectFit: 'contain',
+          display: 'block',
+          filter: 'drop-shadow(0 0 10px rgba(245,158,11,0.55))',
         }}
-      >
-        {brandName.charAt(0).toUpperCase()}
-      </div>
+      />
+    ) : (
+      <div
+        aria-hidden
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 8,
+          background: `linear-gradient(135deg, ${BRAND}, ${BRAND_HI})`,
+          boxShadow: BRAND_GLOW,
+        }}
+      />
     );
-  };
 
-  if (step === 'loading' || step === 'complete') {
+  if (step === 'complete') {
     return null;
   }
 
-  // OTP Code verification screen
+  // Session check in flight. `.vv-boot` holds the loader back for a beat, so a
+  // cached session resolves into the app without flashing a spinner.
+  if (step === 'loading') {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ fontFamily: FONT, background: BG, color: TEXT, position: 'relative' }}
+      >
+        <style>{GATE_STYLES}</style>
+        <LightField />
+        <div className="vv-boot" style={{ position: 'relative', zIndex: 2 }}>
+          <VergeLoader size={190} caption="Warming up the studio" />
+        </div>
+      </div>
+    );
+  }
+
+  // OTP code verification screen
   if (step === 'code') {
     return (
       <div
-        className="min-h-screen flex flex-col overflow-y-auto"
-        style={{ fontFamily: bodyFontStack, background: `radial-gradient(900px 520px at 50% -10%, rgba(144,96,255,0.12), transparent 62%), radial-gradient(760px 480px at 8% 108%, rgba(255,96,144,0.08), transparent 64%), ${PRISM_CANVAS}` }}
+        className="min-h-screen flex flex-col items-center justify-center overflow-y-auto"
+        style={{ fontFamily: FONT, background: BG, color: TEXT, padding: '48px 20px', position: 'relative' }}
       >
-        <style>{RLO_STYLES}</style>
-        {/* Animated brand-icon motion background — fixed, behind all content,
-            pointer-events off so it can never trap a tap or cause scroll. */}
-        <div aria-hidden style={{ position: 'fixed', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}>
-          <img
-            className="rlo-brand-motion"
-            src={logoUrl}
-            alt=""
-            style={{ position: 'absolute', left: '50%', top: '50%', width: 'min(56vmax, 900px)', height: 'min(56vmax, 900px)', objectFit: 'contain', transform: 'translate(-50%,-52%)', mixBlendMode: 'screen', opacity: 0.12, animation: 'rloBrandDrift 24s ease-in-out infinite', willChange: 'transform, opacity' }}
-          />
-        </div>
-        <div className="flex-1 flex items-center justify-center px-6 py-12" style={{ position: 'relative', zIndex: 1 }}>
-          <div className="w-full max-w-sm">
-            <div className="text-center mb-10">
-              <div className="flex justify-center mb-4">
-                <BrandMark size={48} />
-              </div>
-              <h1 className="text-2xl font-semibold tracking-tight" style={{ color: textPrimary, fontFamily: headingFontStack }}>
-                Check your inbox
-              </h1>
-              <p className="mt-2 text-sm" style={{ color: textMuted }}>
-                We sent a 4-digit code to<br />
-                <span className="font-medium" style={{ color: textPrimary }}>{email}</span>
-              </p>
-              <p className="mt-3 text-xs" style={{ color: textSubtle }}>
-                can’t find it? Check your spam or junk folder.
-              </p>
+        <style>{GATE_STYLES}</style>
+        <LightField />
+        <div style={{ width: '100%', maxWidth: 420, position: 'relative', zIndex: 2 }}>
+          <div style={{ textAlign: 'center', marginBottom: 32 }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+              <BrandLogo size={38} />
             </div>
+            <h1 style={{ margin: '0 0 10px', fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', color: TEXT }}>
+              Check your inbox
+            </h1>
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: MUTED }}>
+              We sent a 4-digit code to<br />
+              <span style={{ color: BRAND_HI, fontWeight: 600 }}>{email}</span>
+            </p>
+            <p style={{ margin: '10px 0 0', fontSize: 12.5, color: DIM }}>
+              can’t find it? Check your spam or junk folder.
+            </p>
+          </div>
 
-            <form onSubmit={handleCodeSubmit} className="space-y-5">
-              <div>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={4}
-                  value={code}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, '');
-                    setCode(val);
-                    setError('');
-                  }}
-                  placeholder="0000"
-                  className="w-full px-4 py-3.5 text-center text-2xl tracking-[0.5em] font-mono rounded-xl focus:outline-none transition-all rlo-input"
-                  style={{
-                    background: panelColor,
-                    backdropFilter: 'blur(16px)',
-                    WebkitBackdropFilter: 'blur(16px)',
-                    border: `1px solid ${error ? 'rgba(255,96,144,0.6)' : borderColor}`,
-                    color: textPrimary,
-                  }}
-                  disabled={loading}
-                  autoFocus
-                  data-testid="input-code"
-                />
-                {error && (
-                  <p className="mt-2 text-xs" style={{ color: '#ff8fae' }} data-testid="text-error">
-                    {error}
-                  </p>
-                )}
-              </div>
+          <div style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 12, padding: '28px 24px' }}>
+            <form onSubmit={handleCodeSubmit}>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={4}
+                value={code}
+                onChange={(e) => { setCode(e.target.value.replace(/\D/g, '')); setError(''); }}
+                placeholder="0000"
+                className="vv-input"
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '16px',
+                  textAlign: 'center',
+                  fontSize: 28,
+                  letterSpacing: '0.5em',
+                  fontFamily: MONO,
+                  borderRadius: 12,
+                  background: BG_DEEP,
+                  border: `1px solid ${error ? '#dc2626' : LINE}`,
+                  color: TEXT,
+                }}
+                disabled={loading}
+                autoFocus
+                data-testid="input-code"
+              />
+              {error && (
+                <p style={{ margin: '10px 0 0', fontSize: 13, color: '#f87171' }} data-testid="text-error">{error}</p>
+              )}
 
               <button
                 type="submit"
                 disabled={loading || code.length !== 4}
-                className="w-full py-3.5 rounded-xl font-semibold text-base transition-all rlo-cta"
+                className="vv-cta"
                 style={{
-                  background: loading || code.length !== 4 ? 'rgba(240,240,244,0.14)' : PRISM_GRADIENT,
-                  color: loading || code.length !== 4 ? textSubtle : '#06060f',
-                  border: 'none',
+                  width: '100%',
+                  marginTop: 18,
+                  padding: '15px',
+                  fontSize: 15,
+                  opacity: loading || code.length !== 4 ? 0.5 : 1,
                   cursor: loading || code.length !== 4 ? 'not-allowed' : 'pointer',
-                  boxShadow: loading || code.length !== 4 ? 'none' : PRISM_EDGE_GLOW,
                 }}
                 data-testid="button-verify"
               >
-                {loading ? 'Verifying...' : 'Verify Code'}
+                {loading ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                    <VergeLoader size={30} tone="ink" label="Verifying your code" />
+                    Verifying…
+                  </span>
+                ) : (
+                  'Verify code'
+                )}
               </button>
             </form>
 
             {deliveryNotice && (
               <div
-                className="mt-4 rounded-xl px-4 py-3 text-sm"
-                style={{
-                  background: 'rgba(255,217,61,0.08)',
-                  border: '1px solid rgba(255,217,61,0.22)',
-                  color: '#FFD93D',
-                }}
+                style={{ marginTop: 16, borderRadius: 12, padding: '12px 14px', fontSize: 13, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', color: BRAND_HI }}
                 data-testid="text-delivery-notice"
               >
                 {deliveryNotice}
               </div>
             )}
 
-            <div className="text-center mt-6 space-x-4">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 20 }}>
               <button
                 onClick={handleResendCode}
                 disabled={resendCooldown > 0 || loading}
-                className="text-sm transition-colors"
-                style={{ color: resendCooldown > 0 ? textSubtle : textPrimary }}
+                style={{ background: 'none', border: 'none', fontSize: 13, cursor: resendCooldown > 0 ? 'default' : 'pointer', color: resendCooldown > 0 ? DIM : BRAND }}
               >
                 {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend code'}
               </button>
-              <span style={{ color: textSubtle }}>|</span>
+              <span style={{ color: LINE }}>|</span>
               <button
                 onClick={() => { setStep('email'); setCode(''); setError(''); setDeliveryNotice(''); }}
-                className="text-sm transition-colors"
-                style={{ color: textMuted }}
+                style={{ background: 'none', border: 'none', fontSize: 13, cursor: 'pointer', color: MUTED }}
               >
                 Change email
               </button>
             </div>
           </div>
-        </div>
 
-        <div className="pb-8 text-center">
-          <p className="text-xs" style={{ color: textSubtle }}>
+          <p style={{ textAlign: 'center', marginTop: 20, fontSize: 12, color: DIM }}>
             Your data is private and secure
           </p>
         </div>
@@ -1364,141 +1591,106 @@ export default function EmailGate({
     );
   }
 
-  // ── Prismatic Refraction signed-out landing ─────────────────────────────
-  // A void-dark canvas, translucent glass surfaces, and spectral edge glows:
-  // light bending through a prism. Presentation only — every CTA routes into
-  // the untouched email / OTP flow above.
-  const scrollToGate = () => {
-    try {
-      bottomCtaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } catch {}
+  // ── Landing page helpers ────────────────────────────────────────────────
+  const openGate = (mode: 'start' | 'concierge' = 'start') => {
+    setError('');
+    setGateMode(mode);
+    setGateOpen(true);
     window.setTimeout(() => {
-      try {
-        bottomEmailInputRef.current?.focus({ preventScroll: true });
-      } catch {}
-    }, 600);
+      try { modalEmailInputRef.current?.focus(); } catch {}
+    }, 60);
+  };
+  const closeGate = () => setGateOpen(false);
+
+  const scrollToId = (id: string) => {
+    try { document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
   };
 
-  const scrollToWall = () => {
-    try {
-      videoWallRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch {}
+  const focusHeroEmail = () => {
+    scrollToId('start');
+    window.setTimeout(() => {
+      try { heroEmailInputRef.current?.focus(); } catch {}
+    }, 420);
   };
 
-  const previewPlay = (el: HTMLVideoElement | null) => {
-    if (!el) return;
-    try {
-      const played = el.play();
-      if (played && typeof played.catch === 'function') played.catch(() => {});
-    } catch {}
-  };
-
-  const previewStop = (el: HTMLVideoElement | null) => {
-    if (!el) return;
-    try {
-      el.pause();
-      el.currentTime = 0;
-    } catch {}
-  };
-
-  // iOS Safari only exposes fullscreen on the video element itself, so try
-  // every vendor entry point and stay silent when none of them is allowed.
-  const openFullscreen = (el: HTMLVideoElement | null) => {
-    if (!el) return;
-    const candidate = el as any;
-    const request =
-      candidate.requestFullscreen || candidate.webkitRequestFullscreen || candidate.webkitEnterFullscreen;
-    if (typeof request !== 'function') return;
-    try {
-      previewPlay(el);
-      const result = request.call(el);
-      if (result && typeof result.catch === 'function') result.catch(() => {});
-    } catch {}
-  };
-
-  const wordmarkStyle = {
-    fontSize: 14,
-    fontWeight: 800,
-    letterSpacing: '0.22em',
-    textTransform: 'uppercase' as const,
-    color: textPrimary,
-  };
-
-  // One form, rendered twice: the hero copy is primary and the bottom-CTA
-  // copy is what every "Start Creating" button scrolls to. Both submit
-  // through the same untouched handleEmailSubmit.
-  const renderEmailForm = (variant: 'hero' | 'bottom') => {
-    const isBottom = variant === 'bottom';
-    const suffix = isBottom ? '-bottom' : '';
+  // The signup form itself — untouched submit path, rendered inline in the
+  // hero and again inside the modal that the lower CTAs open.
+  const renderEmailForm = (variant: 'hero' | 'modal') => {
+    const isModal = variant === 'modal';
+    const suffix = isModal ? '-modal' : '';
 
     return (
-      <form onSubmit={handleEmailSubmit} style={{ width: '100%', maxWidth: 540, margin: '0 auto' }}>
-        <div className="prism-form-row">
+      <form onSubmit={handleEmailSubmit} style={{ width: '100%' }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <input
-            ref={isBottom ? bottomEmailInputRef : emailInputRef}
+            ref={isModal ? modalEmailInputRef : heroEmailInputRef}
             type="email"
             value={email}
             onChange={(e) => { setEmail(e.target.value); setError(''); }}
             placeholder="you@email.com"
-            className="prism-input"
+            className="vv-input"
             disabled={loading}
             autoComplete="email"
             data-testid={`input-email${suffix}`}
             style={{
-              padding: '16px 18px',
+              flex: '1 1 220px',
+              minWidth: 0,
+              boxSizing: 'border-box',
+              padding: '15px 16px',
               fontSize: 16,
               borderRadius: 12,
-              background: 'rgba(255,255,255,0.05)',
-              border: `1px solid ${error ? 'rgba(255,96,144,0.6)' : 'rgba(255,255,255,0.12)'}`,
-              color: textPrimary,
+              background: BG_DEEP,
+              border: `1px solid ${error ? '#dc2626' : LINE}`,
+              color: TEXT,
               outline: 'none',
-              fontFamily: bodyFontStack,
+              fontFamily: FONT,
             }}
           />
           <button
             type="submit"
             disabled={loading}
-            className="prism-btn"
+            className="vv-cta"
             data-testid={`button-get-started${suffix}`}
             style={{
-              padding: '16px 28px',
-              fontSize: 15,
-              fontWeight: 700,
-              letterSpacing: '0.03em',
-              borderRadius: 12,
+              flex: isModal ? '1 1 100%' : '0 0 auto',
+              padding: '15px 26px',
+              fontSize: 16,
               whiteSpace: 'nowrap',
-              border: 'none',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              color: PRISM_TEXT,
               opacity: loading ? 0.65 : 1,
+              cursor: loading ? 'not-allowed' : 'pointer',
+              boxShadow: BRAND_GLOW,
             }}
           >
-            {loading ? 'Sending…' : 'Start Free →'}
+            {loading ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                <VergeLoader size={30} tone="ink" label="Sending your code" />
+                Sending…
+              </span>
+            ) : (
+              'Start Free →'
+            )}
           </button>
         </div>
 
         {error && (
-          <p
-            style={{ marginTop: 12, fontSize: 13, color: '#ff8fae', textAlign: 'center' }}
-            data-testid={`text-error${suffix}`}
-          >
+          <p style={{ margin: '10px 0 0', fontSize: 13, color: '#f87171' }} data-testid={`text-error${suffix}`}>
             {error}
           </p>
         )}
 
         {gdprEnabled && (
-          <div style={{ marginTop: 16, textAlign: 'left' }}>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 12.5, color: textMuted, lineHeight: 1.6, cursor: 'pointer' }}>
+          <div style={{ marginTop: 14, textAlign: 'left' }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 12.5, color: MUTED, lineHeight: 1.6, cursor: 'pointer' }}>
               <input
                 type="checkbox"
                 checked={marketingConsent}
                 onChange={(e) => setMarketingConsent(e.target.checked)}
-                style={{ marginTop: 3, width: 16, height: 16, accentColor: '#9060ff', flexShrink: 0 }}
+                style={{ marginTop: 3, width: 16, height: 16, accentColor: BRAND, flexShrink: 0 }}
                 data-testid={`checkbox-consent${suffix}`}
               />
               <span>
                 I agree to receive marketing emails and accept the{' '}
-                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="prism-link" style={{ color: textPrimary, textDecoration: 'underline' }}>
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="vv-link" style={{ color: BRAND_HI, textDecoration: 'underline' }}>
                   privacy policy
                 </a>
                 . Unsubscribe anytime.
@@ -1507,28 +1699,19 @@ export default function EmailGate({
           </div>
         )}
 
-        <p style={{ margin: '18px 0 0', fontSize: 11.5, letterSpacing: '0.14em', textTransform: 'uppercase', fontFamily: PRISM_MONO, color: textSubtle, textAlign: 'center' }}>
+        <p style={{ margin: '14px 0 0', fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', fontFamily: MONO, color: DIM }}>
           No credit card · 30 free credits · Instant access
         </p>
 
         {(socialProviders.length > 0 || guestModeEnabled) && (
-          <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
             {socialProviders.map((provider) => (
               <button
                 key={provider}
                 type="button"
                 onClick={() => handleSocialLogin(provider)}
-                className="prism-ghost"
-                style={{
-                  width: '100%',
-                  padding: '13px 18px',
-                  fontSize: 14,
-                  fontWeight: 600,
-                  borderRadius: 12,
-                  color: textMuted,
-                  cursor: 'pointer',
-                  textTransform: 'capitalize',
-                }}
+                className="vv-ghost"
+                style={{ width: '100%', padding: '12px 16px', fontSize: 14, textTransform: 'capitalize' }}
               >
                 Continue with {provider}
               </button>
@@ -1537,8 +1720,8 @@ export default function EmailGate({
               <button
                 type="button"
                 onClick={handleGuestMode}
-                className="prism-link"
-                style={{ background: 'none', border: 'none', color: textSubtle, fontSize: 13, cursor: 'pointer', marginTop: 2 }}
+                className="vv-link"
+                style={{ background: 'none', border: 'none', fontSize: 13, cursor: 'pointer', marginTop: 2, alignSelf: 'flex-start' }}
               >
                 Continue as guest
               </button>
@@ -1549,806 +1732,576 @@ export default function EmailGate({
     );
   };
 
-  // ── Motion sections ─────────────────────────────────────────────────────
-  // Five autoplay-video blocks between the capability strips and the bottom
-  // gate. Every clip is a PLACEHOLDER_CLIPS slot; muted + playsInline is what
-  // lets iOS Safari and Chrome start them unattended, and `reduceMotion`
-  // turns each one into its poster still.
-  const renderMotionClip = (slot: MotionClipSlot, style?: React.CSSProperties) => {
-    const clip = clipFor(slot);
-    return (
-      <video
-        className="prism-motion-clip"
-        src={clip.url}
-        poster={clip.poster}
-        autoPlay={!reduceMotion}
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        aria-hidden
-        tabIndex={-1}
-        style={style}
-      />
-    );
-  };
-
-  const sectionLabelStyle = {
-    display: 'block',
-    marginBottom: 16,
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: '0.22em',
-    textTransform: 'uppercase' as const,
-  };
-
-  const sectionHeadingStyle = {
-    margin: '0 0 12px',
-    fontFamily: headingFontStack,
-    fontSize: 'clamp(32px, 5vw, 48px)',
-    fontWeight: 800,
-    letterSpacing: '-0.03em',
-    lineHeight: 1.1,
-    color: textPrimary,
-  };
-
-  const renderMotionHero = () => (
-    <section style={{ position: 'relative', minHeight: '72vh', overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
-      <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-        {renderMotionClip('hero')}
-      </div>
-      <div
-        aria-hidden
-        style={{
-          position: 'absolute',
-          inset: 0,
-          zIndex: 1,
-          background:
-            'linear-gradient(to bottom, rgba(6,6,15,0.97) 0%, rgba(6,6,15,0.55) 35%, rgba(6,6,15,0.6) 65%, rgba(6,6,15,0.97) 100%)',
-        }}
-      />
-      <div
-        style={{
-          position: 'relative',
-          zIndex: 2,
-          width: '100%',
-          maxWidth: 900,
-          margin: '0 auto',
-          padding: '96px 24px',
-          textAlign: 'center',
-        }}
-      >
-        <span className="prism-label-text" style={sectionLabelStyle}>
-          Direct the whole thing
-        </span>
-        <h2
-          style={{
-            margin: '0 0 18px',
-            fontFamily: headingFontStack,
-            fontSize: 'clamp(40px, 7vw, 72px)',
-            fontWeight: 900,
-            letterSpacing: '-0.04em',
-            lineHeight: 0.98,
-            color: textPrimary,
-          }}
-        >
-          Every frame, on your terms.
-        </h2>
-        <p style={{ margin: '0 auto 32px', maxWidth: 560, fontSize: 18, lineHeight: 1.6, color: textMuted }}>
-          Characters that stay in character, scripts that cut themselves, effects that land on the first render.
-        </p>
-        <button
-          type="button"
-          onClick={scrollToGate}
-          className="prism-btn"
-          data-testid="button-motion-hero-start"
-          style={{
-            padding: '15px 32px',
-            borderRadius: 999,
-            fontSize: 15,
-            fontWeight: 700,
-            letterSpacing: '0.03em',
-            border: 'none',
-            cursor: 'pointer',
-            color: PRISM_TEXT,
-          }}
-        >
-          Start Creating
-        </button>
-      </div>
-    </section>
+  const eyebrow = (text: string, style?: React.CSSProperties) => (
+    <span style={{ display: 'inline-block', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.24em', textTransform: 'uppercase', color: BRAND, fontFamily: MONO, ...style }}>
+      {text}
+    </span>
   );
 
-  const renderFeatureStrip = () => (
-    <section style={{ padding: '80px 24px' }}>
-      <div style={{ maxWidth: 1180, margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', marginBottom: 48 }}>
-          <span className="prism-label-text" style={sectionLabelStyle}>
-            Built for the hard parts
-          </span>
-          <h2 style={sectionHeadingStyle}>Three things other tools get wrong.</h2>
-        </div>
-
-        <div className="prism-feature-grid">
-          {FEATURE_COLUMNS.map((feature) => (
-            <div
-              key={feature.slot}
-              className="prism-card"
-              style={{
-                borderRadius: 16,
-                overflow: 'hidden',
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.06)',
-              }}
-            >
-              <div style={{ aspectRatio: '4 / 3', background: '#0d0d1a' }}>
-                {renderMotionClip(feature.slot)}
-              </div>
-              <div style={{ padding: '22px 24px 26px' }}>
-                <h3
-                  style={{
-                    margin: '0 0 8px',
-                    fontFamily: headingFontStack,
-                    fontSize: 19,
-                    fontWeight: 700,
-                    letterSpacing: '-0.01em',
-                    color: textPrimary,
-                  }}
-                >
-                  {feature.title}
-                </h3>
-                <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: textMuted }}>{feature.copy}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-
-  const renderHowItWorks = () => (
-    <section style={{ padding: '80px 24px' }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', marginBottom: 56 }}>
-          <span className="prism-label-text" style={sectionLabelStyle}>
-            How it works
-          </span>
-          <h2 style={sectionHeadingStyle}>Brief in. Video out.</h2>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 64 }}>
-          {WORKFLOW_STEPS.map((workflowStep, i) => (
-            <div
-              key={workflowStep.slot}
-              className={`prism-step${i % 2 === 1 ? ' prism-step-reverse' : ''}`}
-            >
-              <div
-                className="prism-step-media"
-                style={{
-                  borderRadius: 16,
-                  overflow: 'hidden',
-                  aspectRatio: '16 / 10',
-                  background: '#0d0d1a',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                  boxShadow: PRISM_EDGE_GLOW,
-                }}
-              >
-                {renderMotionClip(workflowStep.slot)}
-              </div>
-
-              <div className="prism-step-text">
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 40,
-                    height: 40,
-                    borderRadius: 12,
-                    marginBottom: 18,
-                    background: PRISM_GRADIENT,
-                    color: PRISM_CANVAS,
-                    fontFamily: PRISM_MONO,
-                    fontSize: 14,
-                    fontWeight: 800,
-                  }}
-                >
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-                <h3
-                  style={{
-                    margin: '0 0 12px',
-                    fontFamily: headingFontStack,
-                    fontSize: 'clamp(24px, 3.2vw, 32px)',
-                    fontWeight: 800,
-                    letterSpacing: '-0.025em',
-                    lineHeight: 1.1,
-                    color: textPrimary,
-                  }}
-                >
-                  {workflowStep.title}
-                </h3>
-                <p style={{ margin: 0, fontSize: 16, lineHeight: 1.65, color: textMuted }}>{workflowStep.copy}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-
-  const renderResultsReel = () => (
-    <section style={{ padding: '80px 0' }}>
-      <div style={{ maxWidth: 1180, margin: '0 auto 36px', padding: '0 24px', textAlign: 'center' }}>
-        <span className="prism-label-text" style={sectionLabelStyle}>
-          Results reel
-        </span>
-        <h2 style={sectionHeadingStyle}>Straight out of the render queue.</h2>
-        <p style={{ margin: 0, fontSize: 17, lineHeight: 1.6, color: textMuted }}>
-          Untouched exports. Scroll sideways.
-        </p>
-      </div>
-
-      <div className="prism-reel" aria-label="Sample VidVerge outputs">
-        {RESULTS_REEL.map((item) => (
-          <div key={item.slot} className="prism-reel-item">
-            {renderMotionClip(item.slot)}
-            <div
-              style={{
-                position: 'absolute',
-                left: 12,
-                bottom: 12,
-                padding: '5px 10px',
-                borderRadius: 999,
-                background: 'rgba(6,6,15,0.7)',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                fontSize: 9,
-                fontWeight: 600,
-                letterSpacing: '0.16em',
-                textTransform: 'uppercase',
-                fontFamily: PRISM_MONO,
-                color: 'rgba(255,255,255,0.75)',
-              }}
-            >
-              {item.label}
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-
-  const renderFinalCta = () => (
-    <section style={{ position: 'relative', overflow: 'hidden', padding: '140px 24px', background: PRISM_CANVAS }}>
-      <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, opacity: 0.55 }}>
-        {renderMotionClip('final-cta', { filter: 'saturate(0.7) blur(2px)', transform: 'scale(1.06)' })}
-      </div>
-      <div
-        aria-hidden
-        style={{
-          position: 'absolute',
-          inset: 0,
-          zIndex: 1,
-          background: `radial-gradient(ellipse at center, rgba(6,6,15,0.35) 0%, rgba(6,6,15,0.92) 70%, ${PRISM_CANVAS} 100%)`,
-        }}
-      />
-      <div style={{ position: 'relative', zIndex: 2, maxWidth: 760, margin: '0 auto', textAlign: 'center' }}>
-        <h2
-          style={{
-            margin: '0 0 16px',
-            fontFamily: headingFontStack,
-            fontSize: 'clamp(36px, 6vw, 64px)',
-            fontWeight: 900,
-            letterSpacing: '-0.04em',
-            lineHeight: 1,
-            color: textPrimary,
-          }}
-        >
-          Your first video is one brief away.
-        </h2>
-        <p style={{ margin: '0 auto 36px', maxWidth: 520, fontSize: 17, lineHeight: 1.6, color: textMuted }}>
-          Join the creators already shipping with VidVerge. Early access is free.
-        </p>
-        <button
-          type="button"
-          onClick={scrollToGate}
-          className="prism-btn"
-          data-testid="button-get-early-access"
-          style={{
-            padding: '17px 40px',
-            borderRadius: 999,
-            fontSize: 16,
-            fontWeight: 700,
-            letterSpacing: '0.03em',
-            border: 'none',
-            cursor: 'pointer',
-            color: PRISM_TEXT,
-            boxShadow: PRISM_EDGE_GLOW,
-          }}
-        >
-          Get Early Access
-        </button>
-      </div>
-    </section>
+  const sectionTitle = (text: string, style?: React.CSSProperties) => (
+    <h2 style={{ margin: 0, fontSize: 'clamp(30px, 4vw, 50px)', fontWeight: 800, letterSpacing: '-0.045em', lineHeight: 1.03, color: TEXT, ...style }}>
+      {text}
+    </h2>
   );
 
   return (
-    <div
-      className="min-h-screen"
-      style={{ fontFamily: bodyFontStack, background: PRISM_CANVAS, color: textPrimary }}
-    >
-      <style>{RLO_STYLES}</style>
+    <div style={{ fontFamily: FONT, background: BG, color: TEXT, minHeight: '100vh', overflowX: 'hidden', position: 'relative' }}>
+      <style>{GATE_STYLES}</style>
 
-      {/* ===== 1 · STICKY NAV ===== */}
+      {/* ===== LOGO LIGHT FIELD — fixed behind every section of the page ===== */}
+      <LightField />
+
+      {/* ===== 1 · NAV ===== */}
       <nav
         style={{
-          position: 'sticky',
+          position: 'fixed',
           top: 0,
-          zIndex: 100,
-          height: 64,
+          left: 0,
+          right: 0,
+          zIndex: 40,
+          height: 68,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 16,
           padding: '0 24px',
-          background: 'rgba(6,6,15,0.85)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          background: scrolled ? 'rgba(10,10,15,.88)' : 'linear-gradient(180deg, rgba(10,10,15,.9), transparent)',
+          borderBottom: scrolled ? `1px solid ${LINE}` : '1px solid transparent',
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
+          transition: 'background .25s ease, border-color .25s ease',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <BrandMark size={28} />
-          <span style={wordmarkStyle}>{brandName}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <BrandLogo size={30} />
+          <span style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.03em', color: TEXT }}>{brandName}</span>
+        </div>
+        <div className="vv-navlinks" style={{ display: 'flex', alignItems: 'center', gap: 26 }}>
+          <button type="button" className="vv-navlink" onClick={() => scrollToId('showcase')}>Showcase</button>
+          <button type="button" className="vv-navlink" onClick={() => scrollToId('studios')}>Studios</button>
+          <button type="button" className="vv-navlink" onClick={() => scrollToId('pricing')}>Pricing</button>
         </div>
         <button
           type="button"
-          onClick={scrollToGate}
-          className="prism-btn"
+          onClick={() => openGate('start')}
+          className="vv-navcta"
           data-testid="button-nav-start"
-          style={{
-            padding: '10px 20px',
-            borderRadius: 999,
-            fontSize: 13,
-            fontWeight: 700,
-            letterSpacing: '0.02em',
-            whiteSpace: 'nowrap',
-            border: 'none',
-            cursor: 'pointer',
-            color: PRISM_TEXT,
-          }}
+          style={{ padding: '9px 18px', fontSize: 13 }}
         >
-          Start Creating
+          Start Free
         </button>
       </nav>
 
-      {/* ===== 2 · HERO ===== */}
-      <section style={{ position: 'relative', minHeight: '100vh', overflow: 'hidden', display: 'flex' }}>
-        <video
-          src={HERO_VIDEO_URL}
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          aria-hidden
-          tabIndex={-1}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }}
-        />
-        <div
-          aria-hidden
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 1,
-            background:
-              'linear-gradient(to bottom, rgba(6,6,15,0.35) 0%, rgba(6,6,15,0.55) 50%, rgba(6,6,15,0.97) 100%)',
-          }}
-        />
-
-        <div
-          style={{
-            position: 'relative',
-            zIndex: 2,
-            width: '100%',
-            maxWidth: 980,
-            margin: '0 auto',
-            padding: '120px 24px 100px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            textAlign: 'center',
-          }}
-        >
-          <div className="prism-fade" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 30 }}>
-            <BrandMark size={36} />
-            <span style={{ ...wordmarkStyle, fontSize: 16 }}>{brandName}</span>
-          </div>
-
-          <h1
-            className="prism-fade"
-            style={{
-              margin: '0 0 18px',
-              fontFamily: headingFontStack,
-              fontWeight: 900,
-              letterSpacing: '-0.045em',
-              lineHeight: 0.92,
-              fontSize: 'clamp(64px, 11vw, 104px)',
-              color: textPrimary,
-            }}
-          >
-            {brandName.toUpperCase()}
-          </h1>
-
-          {/* Fixed three-beat line, not `tagline` — the brand tagline is a
-              full sentence and reads as noise at this letter-spacing. */}
-          <p
-            className="prism-fade"
-            style={{
-              margin: '0 0 20px',
-              fontSize: 18,
-              fontWeight: 300,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'rgba(255,255,255,0.72)',
-            }}
-          >
-            Create. Transform. Publish.
-          </p>
-
-          <p
-            className="prism-fade"
-            style={{ margin: '0 auto', maxWidth: 540, fontSize: 18, lineHeight: 1.6, color: textMuted }}
-          >
-            AI-powered video tools for turning ideas into scroll-stopping videos.
-          </p>
-
-          <div
-            className="prism-fade"
-            style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'center', margin: '36px 0 40px' }}
-          >
-            <button
-              type="button"
-              onClick={scrollToGate}
-              className="prism-btn"
-              data-testid="button-start-creating"
-              style={{
-                padding: '15px 32px',
-                borderRadius: 999,
-                fontSize: 15,
-                fontWeight: 700,
-                letterSpacing: '0.03em',
-                border: 'none',
-                cursor: 'pointer',
-                color: PRISM_TEXT,
-              }}
-            >
-              Start Creating
-            </button>
-            <button
-              type="button"
-              onClick={scrollToWall}
-              className="prism-ghost"
-              data-testid="button-watch-video"
-              style={{
-                padding: '15px 30px',
-                borderRadius: 999,
-                fontSize: 15,
-                fontWeight: 600,
-                color: textPrimary,
-                cursor: 'pointer',
-              }}
-            >
-              Explore Videos ↓
-            </button>
-          </div>
-
-          <div className="prism-fade" style={{ width: '100%' }}>
-            {renderEmailForm('hero')}
-          </div>
-        </div>
-
-        {/* Refracted light spilling out of the bottom edge of the hero. */}
-        <div
-          aria-hidden
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 3,
-            height: 4,
-            opacity: 0.3,
-            background: PRISM_GRADIENT,
-          }}
-        />
-      </section>
-
-      {/* ===== 3 · MADE WITH VIDVERGE ===== */}
-      <section id="video-wall" ref={videoWallRef} style={{ padding: '96px 24px' }}>
-        <div style={{ maxWidth: 1180, margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: 56 }}>
-            <span
-              className="prism-label-text"
-              style={{
-                display: 'block',
-                marginBottom: 16,
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.22em',
-                textTransform: 'uppercase',
-              }}
-            >
-              Made with VidVerge
-            </span>
-            <h2
-              style={{
-                margin: '0 0 12px',
-                fontFamily: headingFontStack,
-                fontSize: 'clamp(36px, 6vw, 56px)',
-                fontWeight: 800,
-                letterSpacing: '-0.03em',
-                lineHeight: 1.05,
-                color: textPrimary,
-              }}
-            >
-              {'Don\u2019t take our word for it.'}
-            </h2>
-            <p style={{ margin: 0, fontSize: 19, lineHeight: 1.6, color: textMuted }}>
-              Look at what VidVerge makes.
-            </p>
-          </div>
-
-          <div className="prism-wall">
-            {showcaseVideos.map((item, i) => (
-              <div
-                key={item.url}
-                className="prism-video-card"
-                role="button"
-                tabIndex={0}
-                aria-label={`Play ${item.label}`}
-                onMouseEnter={() => previewPlay(videoWallRefs.current[i])}
-                onMouseLeave={() => previewStop(videoWallRefs.current[i])}
-                onFocus={() => previewPlay(videoWallRefs.current[i])}
-                onBlur={() => previewStop(videoWallRefs.current[i])}
-                onClick={() => openFullscreen(videoWallRefs.current[i])}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openFullscreen(videoWallRefs.current[i]);
-                  }
-                }}
+      {/* ===== 2 · HERO (signup form lives inside) ===== */}
+      <section id="start" style={{ position: 'relative', zIndex: 2, padding: '136px 0 86px' }}>
+        <div style={{ maxWidth: CONTAINER, margin: '0 auto', padding: '0 24px' }} className="vv-hero">
+          <div>
+            <Reveal reduceMotion={reduceMotion}>
+              <span
                 style={{
-                  aspectRatio: '16 / 9',
-                  background: '#0d0d1a',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '6px 13px',
+                  borderRadius: 999,
+                  border: '1px solid rgba(245,158,11,.3)',
+                  background: 'rgba(245,158,11,.07)',
+                  marginBottom: 24,
+                  fontSize: 11.5,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  fontFamily: MONO,
+                  color: BRAND_HI,
                 }}
               >
-                <video
-                  ref={(el) => { videoWallRefs.current[i] = el; }}
-                  src={item.url}
-                  muted
-                  loop
-                  playsInline
-                  preload="none"
-                  tabIndex={-1}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                />
+                <span style={{ width: 6, height: 6, borderRadius: 999, background: BRAND, boxShadow: BRAND_GLOW }} />
+                The end-to-end intelligent video platform
+              </span>
 
-                <div className="prism-video-overlay">
-                  <p
-                    style={{
-                      margin: '0 0 6px',
-                      fontSize: 11,
-                      letterSpacing: '0.18em',
-                      textTransform: 'uppercase',
-                      fontFamily: PRISM_MONO,
-                      color: 'rgba(255,255,255,0.55)',
-                    }}
-                  >
-                    Created with VidVerge
-                  </p>
-                  <span className="prism-label-text" style={{ fontSize: 13, fontWeight: 700 }}>Try this →</span>
-                </div>
+              <h1
+                style={{
+                  margin: '0 0 18px',
+                  fontSize: 'clamp(42px, 6vw, 74px)',
+                  fontWeight: 800,
+                  letterSpacing: '-0.055em',
+                  lineHeight: 0.98,
+                  color: TEXT,
+                }}
+              >
+                Own the Channel.<br />
+                <span style={{ color: BRAND_HI }}>Not Just the Clip.</span>
+              </h1>
 
+              <p style={{ margin: '0 0 14px', fontSize: 'clamp(17px, 2vw, 21px)', fontWeight: 600, color: TEXT, letterSpacing: '-0.015em' }}>
+                Six AI studios. One pipeline. Zero character drift.
+              </p>
+              <p style={{ margin: '0 0 30px', fontSize: 15.5, lineHeight: 1.65, color: MUTED, maxWidth: 520 }}>
+                Idea to a character-consistent, publish-ready video — script, scenes, voice, edit and
+                export — without ever opening another tool.
+              </p>
+            </Reveal>
+
+            <Reveal reduceMotion={reduceMotion} delay={0.08}>
+              <div style={{ maxWidth: 520 }}>{renderEmailForm('hero')}</div>
+            </Reveal>
+          </div>
+
+          {/* Hero visual: a finished Vidverge render, not a mockup. */}
+          <Reveal reduceMotion={reduceMotion} delay={0.14} style={{ position: 'relative' }}>
+            <div className="vv-hero-visual" style={{ position: 'relative' }}>
+              <div
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  inset: '-14% -8%',
+                  background: 'radial-gradient(closest-side, rgba(245,158,11,.22), transparent 72%)',
+                  filter: 'blur(14px)',
+                  pointerEvents: 'none',
+                }}
+              />
+              <div style={{ position: 'relative' }}>
+                <VideoFrame src={HERO_VIDEO.url} reduceMotion={reduceMotion} width="100%" aspect={HERO_VIDEO.ratio} />
                 <div
                   style={{
                     position: 'absolute',
-                    top: 10,
-                    left: 10,
-                    padding: '4px 10px',
-                    borderRadius: 999,
-                    background: 'rgba(6,6,15,0.7)',
-                    backdropFilter: 'blur(8px)',
-                    WebkitBackdropFilter: 'blur(8px)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    fontSize: 9,
-                    fontWeight: 600,
-                    letterSpacing: '0.16em',
-                    textTransform: 'uppercase',
-                    fontFamily: PRISM_MONO,
-                    color: 'rgba(255,255,255,0.75)',
+                    right: -18,
+                    bottom: -56,
+                    width: 172,
+                    borderRadius: 20,
+                    overflow: 'hidden',
+                    border: `1px solid ${LINE}`,
+                    boxShadow: '0 22px 50px rgba(0,0,0,.62)',
+                    background: BG_DEEP,
                   }}
                 >
-                  {item.label}
+                  <div style={{ aspectRatio: HERO_INSET.ratio }}>
+                    <ViewportVideo src={HERO_INSET.url} reduceMotion={reduceMotion} />
+                  </div>
                 </div>
+                <span
+                  style={{
+                    position: 'absolute',
+                    left: 16,
+                    bottom: 16,
+                    padding: '6px 12px',
+                    borderRadius: 999,
+                    background: 'rgba(10,10,15,.78)',
+                    border: '1px solid rgba(245,158,11,.35)',
+                    color: BRAND_HI,
+                    fontSize: 11,
+                    fontFamily: MONO,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Rendered in Vidverge
+                </span>
               </div>
-            ))}
-          </div>
+            </div>
+          </Reveal>
         </div>
       </section>
 
-      {/* ===== 4 · CAPABILITIES ===== */}
-      <section style={{ padding: '80px 24px' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-          <h2
-            style={{
-              margin: '0 0 56px',
-              textAlign: 'center',
-              fontFamily: headingFontStack,
-              fontSize: 'clamp(32px, 5vw, 48px)',
-              fontWeight: 800,
-              letterSpacing: '-0.03em',
-              lineHeight: 1.1,
-              color: textPrimary,
-            }}
-          >
-            One App. Every Kind of Video.
-          </h2>
+      {/* ===== 3 · SOCIAL PROOF ===== */}
+      <section style={{ position: 'relative', zIndex: 2, padding: '26px 0 10px' }}>
+        <div style={{ maxWidth: CONTAINER, margin: '0 auto', padding: '0 24px' }}>
+          <Reveal reduceMotion={reduceMotion}>
+            <div className="vv-proof">
+              <span style={{ fontSize: 13, color: MUTED, letterSpacing: '0.02em' }}>
+                <span style={{ color: BRAND, fontWeight: 700 }}>★★★★★</span>&nbsp;&nbsp;Trusted by 200+ creators
+              </span>
+              {PROOF_STATS.map((stat) => (
+                <span key={stat.label} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7, fontSize: 13, color: DIM }}>
+                  <span style={{ fontSize: 17, fontWeight: 800, color: TEXT }}>{stat.value}</span>
+                  {stat.label}
+                </span>
+              ))}
+            </div>
+          </Reveal>
+        </div>
+      </section>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            {PRISM_STRIPS.map((cap, i) => (
-              <div
-                key={cap.label}
-                className={`prism-card prism-strip${i % 2 === 1 ? ' prism-strip-reverse' : ''}`}
-                onMouseEnter={() => previewPlay(capabilityRefs.current[i])}
-                onMouseLeave={() => previewStop(capabilityRefs.current[i])}
-                style={{
-                  padding: '28px 32px',
-                  borderRadius: 16,
-                  overflow: 'hidden',
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                }}
-              >
-                <div
-                  className="prism-strip-media"
-                  style={{ borderRadius: 10, overflow: 'hidden', aspectRatio: '16 / 9', background: '#0d0d1a' }}
-                >
-                  <video
-                    ref={(el) => { capabilityRefs.current[i] = el; }}
-                    src={cap.url}
-                    muted
-                    loop
-                    playsInline
-                    preload="none"
-                    tabIndex={-1}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                  />
+      {/* ===== 4 · VIDEO GALLERY (real finished renders) ===== */}
+      <section id="showcase" style={{ position: 'relative', zIndex: 2, padding: '96px 0 40px' }}>
+        <div style={{ maxWidth: CONTAINER, margin: '0 auto', padding: '0 24px' }}>
+          <Reveal reduceMotion={reduceMotion}>
+            {eyebrow('The output', { marginBottom: 16 })}
+            {sectionTitle('What Creators Are Making With Vidverge')}
+            <p style={{ margin: '16px 0 0', fontSize: 15, lineHeight: 1.65, color: MUTED, maxWidth: 620 }}>
+              Every clip below came out of a Vidverge studio end to end — no external editor, no
+              stitching, no stock filler.
+            </p>
+          </Reveal>
+
+          {GALLERY.map((section, sectionIndex) => (
+            <div key={section.app} style={{ marginTop: sectionIndex === 0 ? 44 : 52 }}>
+              <Reveal reduceMotion={reduceMotion}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', marginBottom: 18 }}>
+                  <h3 style={{ margin: 0, fontSize: 19, fontWeight: 700, letterSpacing: '-0.02em', color: TEXT }}>
+                    {section.app}
+                  </h3>
+                  <span style={{ fontSize: 13, color: DIM }}>{section.blurb}</span>
                 </div>
+              </Reveal>
 
-                <div className="prism-strip-text">
+              <div className="vv-rail">
+                {section.items.map((item, index) => (
+                  <Reveal key={item.url} reduceMotion={reduceMotion} delay={0.05 * index}>
+                    <div style={{ width: item.railWidth, maxWidth: '84vw' }}>
+                      <VideoFrame
+                        src={item.url}
+                        reduceMotion={reduceMotion}
+                        width="100%"
+                        aspect={item.ratio}
+                      />
+                      <div
+                        className="vv-card"
+                        style={{ marginTop: 10, padding: '12px 14px' }}
+                      >
+                        <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', fontFamily: MONO, color: BRAND, marginBottom: 5 }}>
+                          {section.app}
+                        </div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, lineHeight: 1.35 }}>{item.title}</div>
+                      </div>
+                    </div>
+                  </Reveal>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ===== 5 · THE SIX STUDIOS ===== */}
+      <section id="studios" style={{ position: 'relative', zIndex: 2, padding: '96px 0' }}>
+        <div style={{ maxWidth: CONTAINER, margin: '0 auto', padding: '0 24px' }}>
+          <Reveal reduceMotion={reduceMotion}>
+            {eyebrow('The platform', { marginBottom: 16 })}
+            {sectionTitle('Six studios. One pipeline.')}
+            <p style={{ margin: '16px 0 42px', fontSize: 15, lineHeight: 1.65, color: MUTED, maxWidth: 620 }}>
+              Each studio is a finished product on its own. Together they are the only place a channel
+              goes from idea to published without leaving the tab.
+            </p>
+          </Reveal>
+
+          <div className="vv-studios">
+            {STUDIOS.map((studio, index) => (
+              <Reveal key={studio.name} reduceMotion={reduceMotion} delay={0.05 * index} style={{ height: '100%' }}>
+                <div
+                  className="vv-card vv-studio"
+                  style={{ height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', padding: 18 }}
+                >
                   <span
-                    className="prism-label-text"
                     style={{
-                      display: 'block',
-                      marginBottom: 10,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      letterSpacing: '0.18em',
+                      alignSelf: 'flex-start',
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      border: '1px solid rgba(245,158,11,.3)',
+                      background: 'rgba(245,158,11,.07)',
+                      color: BRAND_HI,
+                      fontSize: 10,
+                      fontFamily: MONO,
+                      letterSpacing: '0.14em',
                       textTransform: 'uppercase',
                     }}
                   >
-                    {cap.label}
+                    {studio.tag}
                   </span>
-                  <p style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 600, color: textPrimary }}>{cap.desc}</p>
-                  <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: textMuted }}>{cap.detail}</p>
+                  <h3 style={{ margin: '14px 0 6px', fontSize: 20, fontWeight: 700, letterSpacing: '-0.025em', color: TEXT }}>
+                    {studio.name}
+                  </h3>
+                  <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.55, color: MUTED }}>{studio.benefit}</p>
+
+                  <div
+                    style={{
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      border: `1px solid ${LINE}`,
+                      background: BG_DEEP,
+                      aspectRatio: '4 / 3',
+                      marginBottom: 16,
+                    }}
+                  >
+                    <img
+                      src={studio.shot}
+                      alt={studio.shotAlt}
+                      loading="lazy"
+                      decoding="async"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => openGate('start')}
+                    className="vv-link"
+                    data-testid={`button-try-${index}`}
+                    style={{
+                      marginTop: 'auto',
+                      alignSelf: 'flex-start',
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      color: BRAND,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Try it →
+                  </button>
                 </div>
-              </div>
+              </Reveal>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ===== 5 · MOTION HERO ===== */}
-      {renderMotionHero()}
+      {/* ===== 6 · PRICING ===== */}
+      <section id="pricing" style={{ position: 'relative', zIndex: 2, padding: '40px 0 96px' }}>
+        <div style={{ maxWidth: CONTAINER, margin: '0 auto', padding: '0 24px' }}>
+          <Reveal reduceMotion={reduceMotion}>
+            {eyebrow('Pricing', { marginBottom: 16 })}
+            {sectionTitle('Start free. Scale when it ships.')}
+            <p style={{ margin: '16px 0 44px', fontSize: 15, lineHeight: 1.65, color: MUTED, maxWidth: 620 }}>
+              1 credit = 1 second of video. Credits never expire on paid plans, and unused subscription
+              credits roll over.
+            </p>
+          </Reveal>
 
-      {/* ===== 6 · FEATURE STRIP ===== */}
-      {renderFeatureStrip()}
-
-      {/* ===== 7 · HOW IT WORKS ===== */}
-      {renderHowItWorks()}
-
-      {/* ===== 8 · RESULTS REEL ===== */}
-      {renderResultsReel()}
-
-      {/* ===== 9 · FINAL CTA ===== */}
-      {renderFinalCta()}
-
-      {/* ===== 10 · BOTTOM CTA ===== */}
-      <section style={{ position: 'relative', padding: '80px 24px' }}>
-        <div
-          aria-hidden
-          className="prism-glow"
-          style={{
-            position: 'absolute',
-            left: '50%',
-            top: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: 'min(90vw, 760px)',
-            height: 'min(60vw, 460px)',
-            borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(144,96,255,0.45), transparent 68%)',
-            filter: 'blur(80px)',
-            pointerEvents: 'none',
-            zIndex: 0,
-          }}
-        />
-
-        <div
-          ref={bottomCtaRef}
-          style={{
-            position: 'relative',
-            zIndex: 1,
-            maxWidth: 640,
-            margin: '0 auto',
-            padding: '48px 40px',
-            borderRadius: 24,
-            textAlign: 'center',
-            background: 'rgba(255,255,255,0.04)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            boxShadow: PRISM_EDGE_GLOW,
-          }}
-        >
-          <h2
-            style={{
-              margin: '0 0 10px',
-              fontFamily: headingFontStack,
-              fontSize: 'clamp(28px, 4vw, 40px)',
-              fontWeight: 800,
-              letterSpacing: '-0.03em',
-              lineHeight: 1.1,
-              color: textPrimary,
-            }}
-          >
-            Start creating for free.
-          </h2>
-          <p style={{ margin: '0 0 28px', fontSize: 15, color: textMuted }}>
-            No credit card required. First video on us.
-          </p>
-
-          {renderEmailForm('bottom')}
+          <div className="vv-pricing">
+            {PLANS.map((plan, index) => (
+              <Reveal key={plan.name} reduceMotion={reduceMotion} delay={0.05 * index} style={{ height: '100%' }}>
+                <div
+                  style={{
+                    position: 'relative',
+                    height: '100%',
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    padding: 26,
+                    borderRadius: 12,
+                    background: plan.featured ? 'rgba(245,158,11,.06)' : CARD,
+                    border: plan.featured ? '1px solid rgba(245,158,11,.45)' : `1px solid ${LINE}`,
+                    boxShadow: plan.featured ? BRAND_GLOW : 'none',
+                  }}
+                >
+                  {plan.badge && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: -11,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        padding: '4px 13px',
+                        borderRadius: 999,
+                        background: BRAND,
+                        color: INK,
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {plan.badge}
+                    </span>
+                  )}
+                  <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 700, color: TEXT }}>{plan.name}</h3>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+                    <span style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-0.04em', color: plan.featured ? BRAND_HI : TEXT }}>
+                      {plan.price}
+                    </span>
+                    <span style={{ fontSize: 12.5, color: DIM }}>{plan.period}</span>
+                  </div>
+                  <p style={{ margin: '8px 0 20px', fontSize: 12.5, fontFamily: MONO, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND }}>
+                    {plan.credits}
+                  </p>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 22px', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                    {plan.features.map((feature) => (
+                      <li key={feature} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, color: MUTED }}>
+                        <span style={{ color: BRAND, fontWeight: 800, lineHeight: 1.4 }}>✓</span>
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={() => openGate('start')}
+                    className={plan.featured ? 'vv-cta' : 'vv-ghost'}
+                    data-testid={`button-plan-${index}`}
+                    style={{ width: '100%', padding: '12px 16px', fontSize: 14 }}
+                  >
+                    {plan.cta}
+                  </button>
+                </div>
+              </Reveal>
+            ))}
+          </div>
         </div>
       </section>
 
-      {/* ===== 11 · FOOTER ===== */}
-      <footer
-        style={{
-          borderTop: '1px solid rgba(255,255,255,0.06)',
-          padding: '32px 24px 48px',
-          textAlign: 'center',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 12 }}>
-          <BrandMark size={22} />
-          <span style={wordmarkStyle}>{brandName}</span>
+      {/* ===== 7 · CONCIERGE — Coming Soon placeholder ===== */}
+      {/* Coming Soon — Concierge. The done-for-you service is not live yet and
+          deliberately advertises no per-video price; the button only opens the
+          email gate so interest is captured as a waitlist. */}
+      <section style={{ position: 'relative', zIndex: 2, padding: '0 0 96px' }}>
+        <div style={{ maxWidth: CONTAINER, margin: '0 auto', padding: '0 24px' }}>
+          <Reveal reduceMotion={reduceMotion}>
+            <div
+              className="vv-concierge"
+              style={{
+                padding: 'clamp(26px, 4vw, 44px)',
+                borderRadius: 12,
+                background: 'linear-gradient(120deg, rgba(245,158,11,.13), rgba(245,158,11,.04) 48%, rgba(17,17,24,.9))',
+                border: '1px solid rgba(245,158,11,.4)',
+                boxShadow: BRAND_GLOW,
+              }}
+            >
+              <div>
+                <span style={{ fontSize: 10.5, fontFamily: MONO, letterSpacing: '0.2em', textTransform: 'uppercase', color: BRAND }}>
+                  Coming soon — Concierge
+                </span>
+                <h2 style={{ margin: '12px 0 12px', fontSize: 'clamp(26px, 3.4vw, 40px)', fontWeight: 800, letterSpacing: '-0.04em', lineHeight: 1.05, color: TEXT }}>
+                  🎬 We Make Your Video For You
+                </h2>
+                <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.6, color: '#E5E7EB', maxWidth: 560 }}>
+                  “Send us your idea. We’ll handle everything — script, characters, editing, delivery.”
+                </p>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'stretch' }}>
+                <button
+                  type="button"
+                  onClick={() => openGate('concierge')}
+                  className="vv-cta"
+                  data-testid="button-concierge-waitlist"
+                  style={{ padding: '15px 24px', fontSize: 15 }}
+                >
+                  Join the Waitlist
+                </button>
+                <span style={{ fontSize: 11.5, color: DIM, textAlign: 'center' }}>
+                  Limited slots when it opens
+                </span>
+              </div>
+            </div>
+          </Reveal>
         </div>
+      </section>
 
-        <p style={{ margin: '0 0 10px', fontSize: 13, color: textMuted }}>{tagline}</p>
+      {/* ===== FINAL CTA ===== */}
+      <section style={{ position: 'relative', zIndex: 2, padding: '0 0 96px' }}>
+        <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 24px', textAlign: 'center' }}>
+          <Reveal reduceMotion={reduceMotion}>
+            <h2 style={{ margin: '0 0 14px', fontSize: 'clamp(28px, 4vw, 46px)', fontWeight: 800, letterSpacing: '-0.045em', lineHeight: 1.03, color: TEXT }}>
+              Ship your first consistent video today.
+            </h2>
+            <p style={{ margin: '0 0 24px', fontSize: 15, lineHeight: 1.65, color: MUTED }}>
+              30 free credits. No card. Every studio unlocked from the first minute.
+            </p>
+            <button type="button" onClick={focusHeroEmail} className="vv-cta" data-testid="button-final-cta" style={{ padding: '15px 30px', fontSize: 15, boxShadow: BRAND_GLOW }}>
+              Start Free →
+            </button>
+          </Reveal>
+        </div>
+      </section>
 
-        <p style={{ margin: 0, fontSize: 12, letterSpacing: '0.08em', fontFamily: PRISM_MONO, color: textSubtle }}>
-          © 2026 {brandName}. All rights reserved. ·{' '}
-          <a href="/privacy" target="_blank" rel="noopener noreferrer" className="prism-link" style={{ color: 'inherit', textDecoration: 'none' }}>Privacy</a>
-          {' · '}
-          <a href="/terms" target="_blank" rel="noopener noreferrer" className="prism-link" style={{ color: 'inherit', textDecoration: 'none' }}>Terms</a>
-        </p>
+      {/* ===== 8 · FOOTER ===== */}
+      <footer style={{ position: 'relative', zIndex: 2, borderTop: `1px solid ${LINE}`, padding: '34px 0 44px' }}>
+        <div
+          style={{
+            maxWidth: CONTAINER,
+            margin: '0 auto',
+            padding: '0 24px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 18,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <BrandLogo size={24} />
+            <span style={{ fontSize: 13, color: DIM }}>© 2026 {brandName} · {tagline}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="vv-navlink">Privacy</a>
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="vv-navlink">Terms</a>
+            <a href="https://x.com/vidverge" target="_blank" rel="noopener noreferrer" className="vv-navlink">Twitter / X</a>
+          </div>
+        </div>
       </footer>
+
+      {/* ===== EMAIL GATE MODAL (second entry point for the same signup form) ===== */}
+      {gateOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          data-testid="email-gate-modal"
+          onClick={closeGate}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+            background: 'rgba(0,0,0,.78)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              width: '100%',
+              maxWidth: 440,
+              padding: 32,
+              borderRadius: 12,
+              background: CARD,
+              border: '1px solid rgba(245,158,11,.3)',
+              boxShadow: '0 30px 80px rgba(0,0,0,.65)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={closeGate}
+              aria-label="Close"
+              data-testid="button-close-gate"
+              style={{
+                position: 'absolute',
+                top: 14,
+                right: 14,
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                border: `1px solid ${LINE}`,
+                background: 'transparent',
+                color: MUTED,
+                fontSize: 18,
+                lineHeight: 1,
+                cursor: 'pointer',
+              }}
+            >
+              ×
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <BrandLogo size={28} />
+              <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.03em', color: TEXT }}>{brandName}</span>
+            </div>
+            <h2 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 800, letterSpacing: '-0.03em', color: TEXT }}>
+              {gateMode === 'concierge' ? 'Join the concierge waitlist' : 'Start free'}
+            </h2>
+            <p style={{ margin: '0 0 20px', fontSize: 14, lineHeight: 1.55, color: MUTED }}>
+              {gateMode === 'concierge'
+                ? 'Leave your email and we’ll reach out when done-for-you videos open up.'
+                : 'Enter your email and your 30 free credits are ready in seconds.'}
+            </p>
+            {renderEmailForm('modal')}
+          </div>
+        </div>
+      )}
     </div>
   );
-
 }

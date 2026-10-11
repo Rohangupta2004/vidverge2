@@ -102,17 +102,17 @@ export function buildChecklist(
 export function SveOptimizationCard({ items }: { items: ChecklistItem[] }) {
   const done = items.filter((i) => i.done).length;
   const score = Math.round((done / Math.max(1, items.length)) * 100);
-  const hue = score >= 80 ? '#34D399' : score >= 50 ? '#FBBF24' : '#F87171';
+  const hue = score >= 80 ? '#166534' : score >= 50 ? '#B45309' : '#991B1B';
 
   return (
     <Card title="Optimization Tips" icon={<Check size={14} />}>
       <div className="sve-score">
         <div
           className="sve-score-ring"
-          style={{ background: 'conic-gradient(' + hue + ' ' + score + '%, #20202C ' + score + '% 100%)' }}
+          style={{ background: 'conic-gradient(' + hue + ' ' + score + '%, rgba(180,120,0,0.16) ' + score + '% 100%)' }}
         >
           <span style={{
-            position: 'absolute', inset: 4, borderRadius: '50%', background: '#13131B',
+            position: 'absolute', inset: 4, borderRadius: '50%', background: '#FFFFFF',
             display: 'grid', placeItems: 'center', fontSize: 10,
           }}>{score}</span>
         </div>
@@ -157,7 +157,7 @@ export function SveSuggestionsCard(props: SuggestionsProps) {
       {props.thumbs.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + Math.min(5, props.thumbs.length) + ',1fr)', gap: 4, marginBottom: 10 }}>
           {props.thumbs.slice(0, 5).map((src, i) => (
-            <img key={i} src={src} alt={'Sampled frame ' + (i + 1)} style={{ width: '100%', aspectRatio: '9/16', objectFit: 'cover', borderRadius: 5, border: '1px solid #262636' }} />
+            <img key={i} src={src} alt={'Sampled frame ' + (i + 1)} style={{ width: '100%', aspectRatio: '9/16', objectFit: 'cover', borderRadius: 5, border: '1px solid rgba(180,120,0,0.14)' }} />
           ))}
         </div>
       )}

@@ -4,6 +4,7 @@
 // server-side, so no key ever reaches this bundle.
 import { WORKSPACE_ID } from './supabase';
 import { avatarView, voiceView, type AvatarView, type VoiceView } from './heygenCatalog';
+import { gesturePayload, withGestureFallback, type GestureDirection } from './beatPurpose';
 
 export type { AvatarView, VoiceView };
 
@@ -262,6 +263,13 @@ export interface VideoRequest {
   audioUrl?: string;
   /** HeyGen's own id for the same audio, when the account registers assets. */
   audioAssetId?: string;
+  /**
+   * How the presenter should DELIVER this beat (lib/beatPurpose): a hook is
+   * expressive, a transition is still. Omit it for a whole-film master, where
+   * there is no single beat to perform — the per-beat direction belongs on the
+   * per-scene renders, which is where the beats actually are.
+   */
+  gesture?: GestureDirection | null;
 }
 
 export type HeyGenApiVersion = 'v3' | 'v2';
@@ -347,17 +355,21 @@ async function createAudioDrivenVideo(request: VideoRequest): Promise<CreatedVid
     : request.backgroundMode === 'color'
       ? { type: 'color', value: request.backgroundColor }
       : null;
-  const created = await heygen('v2/video/generate', {
+  // The gesture fields are attempted and, if HeyGen refuses them on this
+  // account, dropped once and remembered — a beat's delivery is worth asking
+  // for, and never worth losing a paid render over.
+  const created = await withGestureFallback((withGesture) => heygen('v2/video/generate', {
     method: 'POST',
     body: JSON.stringify({
       video_inputs: [{
         character: { type: 'avatar', avatar_id: request.avatarId, avatar_style: 'normal' },
         voice: audioAssetId ? { type: 'audio', audio_asset_id: audioAssetId } : { type: 'audio', audio_url: audioUrl },
         ...(background ? { background } : {}),
+        ...(withGesture ? gesturePayload(request.gesture) : {}),
       }],
       dimension: dimensionFor(request.aspectRatio, request.resolution),
     }),
-  });
+  }));
   const videoId = created?.data?.video_id || created?.video_id;
   if (!videoId) throw new HeyGenError('HeyGen accepted the audio-driven request but did not return a video id.');
   return { videoId: String(videoId), engine: null, apiVersion: 'v2' };
@@ -380,7 +392,7 @@ export async function createAvatarVideo(request: VideoRequest): Promise<CreatedV
     : request.backgroundMode === 'color'
       ? { type: 'color', value: request.backgroundColor }
       : null;
-  const body = {
+  const bodyFor = (withGesture: boolean) => ({
     type: 'avatar',
     avatar_id: request.avatarId,
     engine: { type: engine },
@@ -394,8 +406,11 @@ export async function createAvatarVideo(request: VideoRequest): Promise<CreatedV
     fit: 'cover',
     ...(background ? { background } : {}),
     output_format: 'mp4',
-  };
-  const created = await heygen('v3/videos', { method: 'POST', body: JSON.stringify(body) });
+    // v3 rejects unknown fields outright, so the gesture direction is offered
+    // and withdrawn once if this account will not take it.
+    ...(withGesture ? gesturePayload(request.gesture) : {}),
+  });
+  const created = await withGestureFallback((withGesture) => heygen('v3/videos', { method: 'POST', body: JSON.stringify(bodyFor(withGesture)) }));
   const videoId = created?.data?.video_id || created?.video_id;
   if (!videoId) throw new HeyGenError('HeyGen accepted the request but did not return a video id.');
   return { videoId: String(videoId), engine, apiVersion: 'v3' };

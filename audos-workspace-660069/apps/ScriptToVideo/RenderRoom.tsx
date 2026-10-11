@@ -9,12 +9,13 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowRight, Check, Circle, CircleDot,
-  Loader2, Play, RefreshCw, SkipForward, Sparkles, UserRound, Wand2, Zap,
+  AlertTriangle, ArrowRight, Check, Circle, CircleDot, Layers, Lock,
+  Play, RefreshCw, SkipForward, Sparkles, UserRound, Wand2, Zap,
 } from 'lucide-react';
 import { Film, FilmScene, T } from './api';
 import { audioReady, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
 import { videoEngine } from '../../lib/videoEngines';
+import VergeLoader from '../../components/VergeLoader';
 
 const DONE = new Set(['completed', 'skipped']);
 
@@ -32,11 +33,18 @@ function statusMeta(s: FilmScene): { word: string; color: string; icon: any } {
   switch (String(s.status)) {
     case 'completed': return { word: 'Completed', color: T.done, icon: <Check size={13} /> };
     case 'ready': return { word: 'Ready to generate', color: T.live, icon: <CircleDot size={13} /> };
-    case 'generating': return { word: 'Generating', color: T.live, icon: <Loader2 size={13} className="animate-spin" /> };
+    case 'generating': return { word: 'Generating', color: T.live, icon: <VergeLoader size={30} label="Generating" /> };
     case 'failed': return { word: 'Failed', color: T.fault, icon: <AlertTriangle size={13} /> };
     case 'skipped': return { word: 'Skipped', color: T.dim, icon: <SkipForward size={13} /> };
     default: return { word: 'Waiting', color: T.dim, icon: <Circle size={12} /> };
   }
+}
+
+/** The length this clip is requested at: the plan's own figure when the film
+ * has one (that is what segmentation decided), the scene row otherwise. */
+function sceneSeconds(film: Film, scene: FilmScene): number {
+  const planned = (Array.isArray(film.plan?.scenes) ? film.plan!.scenes! : []).find((p) => p.scene_key === scene.scene_key);
+  return Math.round(Number(planned?.duration_s || scene.duration_s) || 6);
 }
 
 function referenceLabel(s: FilmScene, scenes: FilmScene[]): string {
@@ -72,6 +80,10 @@ export default function RenderRoom(props: {
   redoingId: number | null;
   onUseCharRef: (scene: FilmScene) => void;
   onSkip: (scene: FilmScene) => void;
+  /** Fire every prepared scene at once (multi-generate). */
+  onGenerateAll: () => void;
+  /** Style Lock, toggled mid-production. */
+  onToggleStyleLock: (on: boolean) => void;
 }) {
   const { film, note, busy, auto, autoPost } = props;
   const scenes = [...(Array.isArray(props.scenes) ? props.scenes : [])].sort((a, b) => a.idx - b.idx);
@@ -81,6 +93,11 @@ export default function RenderRoom(props: {
   const active = scenes.find((s) => !DONE.has(String(s.status))) || null;
   const allDone = scenes.length > 0 && scenes.every((s) => DONE.has(String(s.status)));
   const assembling = film.status === 'assembling';
+  // Multi-generate: every scene whose prompt is prepared and waiting.
+  const readyToFire = scenes.filter((s) => s.status === 'ready' && String(s.prompt || '').trim());
+  const batchRunning = busy || !!generating;
+  const styleLocked = film.style_lock === true;
+  const totalSeconds = scenes.reduce((n, s) => n + sceneSeconds(film, s), 0);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   useEffect(() => { setSelectedId(active ? active.id : (scenes[scenes.length - 1]?.id ?? null)); }, [active?.id, scenes.length]);
@@ -96,7 +113,7 @@ export default function RenderRoom(props: {
           <div style={{ color: T.muted, fontSize: 11.5, marginTop: 4 }}>{completed.length} of {scenes.length} clips completed</div>
           {generating ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: T.live, fontSize: 11.5, fontWeight: 700, marginTop: 4 }}>
-              <Loader2 size={11} className="animate-spin" /> Generating scene {generating.idx + 1}/{scenes.length}
+              <VergeLoader size={28} label="Generating" /> Generating scene {generating.idx + 1}/{scenes.length}
             </div>
           ) : null}
           <div style={{ marginTop: 8, height: 4, background: T.raised, borderRadius: 2, overflow: 'hidden' }}>
@@ -112,10 +129,12 @@ export default function RenderRoom(props: {
                 key={s.id}
                 className="s2v-row"
                 onClick={() => setSelectedId(s.id)}
-                style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', background: isSel ? 'rgba(255,255,255,0.05)' : 'transparent', border: `1px solid ${isSel ? T.dim : 'transparent'}`, borderRadius: 10, padding: '9px 10px', cursor: 'pointer', marginBottom: 2 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', background: isSel ? 'rgba(180,120,0,0.08)' : 'transparent', border: `1px solid ${isSel ? T.dim : 'transparent'}`, borderRadius: 10, padding: '9px 10px', cursor: 'pointer', marginBottom: 2 }}
               >
                 <span style={{ color: meta.color, display: 'flex', flexShrink: 0 }}>{meta.icon}</span>
-                <span style={{ color: isSel ? T.bone : T.muted, fontFamily: T.mono, fontSize: 12, flexShrink: 0 }}>Scene {String(s.idx + 1).padStart(2, '0')}</span>
+                <span style={{ color: isSel ? T.bone : T.muted, fontFamily: T.mono, fontSize: 12, flexShrink: 0 }}>
+                  Scene {String(s.idx + 1).padStart(2, '0')} <span style={{ color: T.live, fontWeight: 700 }}>· {sceneSeconds(film, s)}s</span>
+                </span>
                 <span style={{ color: meta.color, fontSize: 11.5, marginLeft: 'auto', whiteSpace: 'nowrap' }}>{meta.word}</span>
               </button>
             );
@@ -145,15 +164,46 @@ export default function RenderRoom(props: {
       {/* —— Active scene panel —— */}
       <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, padding: '18px 22px 28px' }}>
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
+          {/* Film-level facts and controls: how long the cut runs, whether the
+              look is locked, and — when several prompts are waiting — the one
+              button that renders them all at once. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+            <span style={{ color: T.bone, fontSize: 13, fontWeight: 700, fontFamily: T.mono }}>
+              Total: ~{totalSeconds}s <span style={{ color: T.muted, fontWeight: 500, fontFamily: T.sans }}>across {scenes.length} scene{scenes.length === 1 ? '' : 's'}</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={styleLocked}
+              disabled={busy}
+              title="Locks the visual style after the first scene so every clip matches the same look, palette and lighting. Prompts already written keep their text — regenerate a scene's prompt to apply the lock to it."
+              onClick={() => props.onToggleStyleLock(!styleLocked)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: styleLocked ? 'rgba(200,146,10,0.14)' : 'transparent', border: `1px solid ${styleLocked ? T.live : T.dim}`, color: styleLocked ? T.live : T.muted, borderRadius: 999, padding: '5px 12px', fontSize: 11.5, fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}
+            >
+              <Lock size={11} /> Style Lock {styleLocked ? 'on' : 'off'}
+            </button>
+            {readyToFire.length >= 2 ? (
+              <button
+                className="s2v-lift"
+                disabled={batchRunning}
+                title="Render every prepared scene at the same time instead of one after another. Each scene keeps its own prompt and references; one that fails fails alone."
+                onClick={props.onGenerateAll}
+                style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, background: batchRunning ? T.raised : T.live, color: batchRunning ? T.dim : '#1A1205', border: 'none', borderRadius: 9, padding: '8px 15px', fontSize: 12.5, fontWeight: 700, cursor: batchRunning ? 'default' : 'pointer' }}
+              >
+                <Layers size={13} /> {batchRunning ? 'Generating…' : `Generate All Ready (${readyToFire.length})`}
+              </button>
+            ) : null}
+          </div>
+
           {/* Persisted pipeline stage, collapsed so the active scene remains the focus. */}
-          <details style={{ marginBottom: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${T.raised}`, borderRadius: 10, padding: '9px 12px' }}>
+          <details style={{ marginBottom: 10, background: 'rgba(180,120,0,0.06)', border: `1px solid ${T.raised}`, borderRadius: 10, padding: '9px 12px' }}>
             <summary style={{ cursor: 'pointer', color: generating || assembling ? T.live : T.muted, fontSize: 12.5, fontWeight: 700, listStylePosition: 'inside' }}>
               Production status — {note || film.stage_note || (active ? 'Waiting for the next scene' : 'Waiting for you')}
             </summary>
             <div style={{ marginTop: 9 }}><GenerationStates film={film} scenes={scenes} /></div>
           </details>
           {film.error ? (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, margin: '6px 0 10px', background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '9px 13px' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, margin: '6px 0 10px', background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.25)', borderRadius: 9, padding: '9px 13px' }}>
               <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{customerError(film.error)}</span>
             </div>
           ) : null}
@@ -162,7 +212,7 @@ export default function RenderRoom(props: {
               listed here with their real reason and a retry that touches only
               them, while every other clip keeps its progress. */}
           {failedScenes.length ? (
-            <div style={{ marginTop: 6, marginBottom: 10, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.3)', borderRadius: 12, padding: '13px 15px' }}>
+            <div style={{ marginTop: 6, marginBottom: 10, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.3)', borderRadius: 12, padding: '13px 15px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <AlertTriangle size={14} color={T.fault} style={{ flexShrink: 0 }} />
                 <span style={{ color: T.fault, fontSize: 13, fontWeight: 700 }}>
@@ -288,7 +338,7 @@ function GenerationStates({ film, scenes }: { film: Film; scenes: FilmScene[] })
       {rows.map((r) => (
         <div key={r.key} className="s2v-row" style={{ display: 'flex', alignItems: 'center', gap: 7, borderRadius: 7, padding: '3px 5px' }}>
           <span style={{ color: r.state === 'done' ? T.done : r.state === 'active' ? T.live : r.state === 'failed' ? T.fault : T.dim, display: 'flex', flexShrink: 0 }}>
-            {r.state === 'done' ? <Check size={11} /> : r.state === 'active' ? <Loader2 size={11} className="animate-spin" /> : r.state === 'failed' ? <AlertTriangle size={11} /> : <Circle size={10} />}
+            {r.state === 'done' ? <Check size={11} /> : r.state === 'active' ? <VergeLoader size={26} label={r.label} /> : r.state === 'failed' ? <AlertTriangle size={11} /> : <Circle size={10} />}
           </span>
           <span style={{ color: r.state === 'todo' ? T.dim : r.state === 'failed' ? T.fault : T.muted, fontSize: 11, minWidth: 0, flex: 1 }}>{r.label}</span>
           <span style={{ color: r.state === 'failed' ? T.fault : r.state === 'active' ? T.live : T.dim, fontSize: 9.5, fontFamily: T.mono, textTransform: 'uppercase' }}>{statusWord(r.state)}</span>
@@ -333,9 +383,11 @@ function ScenePanel(props: {
   const activeGlow = isActive && !DONE.has(String(s.status));
 
   return (
-    <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '18px 20px', marginTop: 6, boxShadow: activeGlow ? '0 0 0 2px #f59e0b, 0 0 20px rgba(245,158,11,0.3)' : 'none', transition: 'box-shadow 0.3s ease' }}>
+    <div style={{ background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 16, padding: '18px 20px', marginTop: 6, boxShadow: activeGlow ? '0 0 0 2px #C8920A, 0 0 20px rgba(200,146,10,0.3)' : 'none', transition: 'box-shadow 0.3s ease' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <span style={{ color: T.bone, fontSize: 17, fontWeight: 800, letterSpacing: 0.5, fontFamily: T.mono }}>SCENE {String(s.idx + 1).padStart(2, '0')}</span>
+        <span style={{ color: T.bone, fontSize: 17, fontWeight: 800, letterSpacing: 0.5, fontFamily: T.mono }}>
+          SCENE {String(s.idx + 1).padStart(2, '0')} <span style={{ color: T.live }}>· {sceneSeconds(film, s)}s</span>
+        </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: meta.color, fontSize: 11.5, fontWeight: 700, border: `1px solid ${meta.color}`, borderRadius: 999, padding: '2px 10px' }}>{meta.icon} {meta.word}</span>
       </div>
 
@@ -377,7 +429,7 @@ function ScenePanel(props: {
       {s.prompt ? (
         <div style={{ marginTop: 14 }}>
           <div style={{ color: T.dim, fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Prompt</div>
-          <div style={{ background: '#0E0E11', border: `1px solid ${T.dim}`, borderRadius: 9, padding: '12px 14px', color: T.bone, fontSize: 12, lineHeight: 1.65, fontFamily: T.mono, maxHeight: 210, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{s.prompt}</div>
+          <div style={{ background: '#FFFAEB', border: `1px solid ${T.dim}`, borderRadius: 9, padding: '12px 14px', color: T.bone, fontSize: 12, lineHeight: 1.65, fontFamily: T.mono, maxHeight: 210, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{s.prompt}</div>
         </div>
       ) : s.status === 'waiting' ? (
         <div style={{ color: T.dim, fontSize: 12.5, marginTop: 14 }}>
@@ -388,14 +440,14 @@ function ScenePanel(props: {
       {/* Skeleton shimmer while the clip renders (pure CSS keyframes). */}
       {s.status === 'generating' ? (
         <div style={{ marginTop: 14 }}>
-          <div className="lb-shimmer" style={{ width: film.aspect_ratio === '9:16' ? 200 : 380, height: film.aspect_ratio === '9:16' ? 300 : 214, borderRadius: 12 }} />
-          <div className="lb-shimmer" style={{ width: 260, height: 12, marginTop: 10 }} />
-          <div className="lb-shimmer" style={{ width: 180, height: 12, marginTop: 6 }} />
+          <div style={{ width: film.aspect_ratio === '9:16' ? 200 : 380, height: film.aspect_ratio === '9:16' ? 300 : 214, borderRadius: 12, background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.10)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <VergeLoader size={film.aspect_ratio === '9:16' ? 120 : 160} caption={`Rendering scene ${s.idx + 1} of ${scenes.length}`} />
+          </div>
         </div>
       ) : null}
 
       {s.status === 'failed' && s.error ? (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, marginTop: 14, background: 'rgba(226,114,111,0.08)', border: '1px solid rgba(226,114,111,0.25)', borderRadius: 9, padding: '9px 13px' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, marginTop: 14, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.25)', borderRadius: 9, padding: '9px 13px' }}>
           <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{customerError(s.error)}</span>
         </div>
       ) : null}
@@ -403,7 +455,7 @@ function ScenePanel(props: {
       {/* Completed clip playback + final frame */}
       {s.status === 'completed' && s.asset_url ? (
         <div style={{ display: 'flex', gap: 12, marginTop: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <video key={s.asset_url} src={s.asset_url} controls preload="metadata" style={{ maxWidth: film.aspect_ratio === '9:16' ? 200 : 380, maxHeight: 300, borderRadius: 10, background: '#000', border: '1px solid rgba(255,255,255,0.06)' }} />
+          <video key={s.asset_url} src={s.asset_url} controls preload="metadata" style={{ maxWidth: film.aspect_ratio === '9:16' ? 200 : 380, maxHeight: 300, borderRadius: 10, background: '#000', border: '1px solid rgba(180,120,0,0.10)' }} />
           {s.keyframe_url ? (
             <div>
               <img src={s.keyframe_url} alt="" style={{ width: film.aspect_ratio === '9:16' ? 110 : 190, borderRadius: 8, border: `1px solid ${T.dim}`, display: 'block' }} />
@@ -423,7 +475,7 @@ function ScenePanel(props: {
             className="s2v-lift"
             disabled={working}
             onClick={() => props.onGenerate(s)}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, background: working ? T.raised : T.live, color: working ? T.dim : '#1A1205', border: 'none', borderRadius: 10, padding: '12px 26px', fontSize: 14, fontWeight: 700, cursor: working ? 'default' : 'pointer', boxShadow: working ? 'none' : '0 2px 12px rgba(245,158,11,0.25)' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, background: working ? T.raised : T.live, color: working ? T.dim : '#1A1205', border: 'none', borderRadius: 10, padding: '12px 26px', fontSize: 14, fontWeight: 700, cursor: working ? 'default' : 'pointer', boxShadow: working ? 'none' : '0 2px 12px rgba(200,146,10,0.25)' }}
           >
             <Play size={15} /> Generate Video
           </button>
@@ -435,7 +487,7 @@ function ScenePanel(props: {
         ) : null}
         {s.status === 'generating' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: T.live, fontSize: 13, fontWeight: 600, padding: '11px 4px' }}>
-            <Loader2 size={15} className="animate-spin" /> Generating scene {s.idx + 1}/{scenes.length} — the clip, its real duration and its final frame land automatically…
+            <VergeLoader size={36} label="Generating" /> Generating scene {s.idx + 1}/{scenes.length} — the clip, its real duration and its final frame land automatically…
           </div>
         ) : null}
         {s.status === 'failed' ? (
@@ -461,7 +513,7 @@ function ScenePanel(props: {
         ) : null}
         {s.status === 'completed' && props.redoingId === s.id ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: T.live, fontSize: 12.5, fontWeight: 600, padding: '10px 4px' }}>
-            <Loader2 size={14} className="animate-spin" /> Redoing — the director is writing a fresh prompt, then the clip re-renders. Other scenes are untouched.
+            <VergeLoader size={34} label="Redoing this scene" /> Redoing — the director is writing a fresh prompt, then the clip re-renders. Other scenes are untouched.
           </div>
         ) : s.status === 'completed' && !working ? (
           <button className="s2v-ghost" disabled={props.redoingId != null} onClick={() => props.onRedo(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 9, padding: '9px 15px', fontSize: 12, cursor: props.redoingId != null ? 'default' : 'pointer', opacity: props.redoingId != null ? 0.5 : 1 }} title="Opus writes a fresh prompt and the clip re-renders in place. Other scenes are untouched.">

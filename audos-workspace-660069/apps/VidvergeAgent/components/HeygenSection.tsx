@@ -3,7 +3,7 @@ import { ChevronDown } from 'lucide-react';
 
 const HEYGEN_CSS = `
 .vv-skeleton {
-  background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+  background: linear-gradient(90deg, rgba(180,120,0,0.06), rgba(180,120,0,0.14), rgba(180,120,0,0.06));
   background-size: 220% 100%;
   animation: vv-skeleton 1.4s ease-in-out infinite;
 }
@@ -34,7 +34,7 @@ export default function HeygenSection({ title, summary, icon, open, onToggle, ch
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.03]"
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[rgba(180,120,0,0.06)]"
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--vv-gold)_14%,transparent)] text-[var(--vv-gold)]">
           {icon}
@@ -42,8 +42,8 @@ export default function HeygenSection({ title, summary, icon, open, onToggle, ch
 
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className="truncate text-[13px] text-white/90">{title}</span>
-            <span className="shrink-0 rounded-full border border-[var(--vv-border)] px-1.5 py-[1px] text-[9px] uppercase tracking-[0.18em] text-white/35">
+            <span className="truncate text-[13px] text-[#1A1000]">{title}</span>
+            <span className="shrink-0 rounded-full border border-[var(--vv-border)] px-1.5 py-[1px] text-[9px] uppercase tracking-[0.18em] text-[#7A6030]">
               Optional
             </span>
           </span>
@@ -52,7 +52,7 @@ export default function HeygenSection({ title, summary, icon, open, onToggle, ch
 
         <ChevronDown
           size={15}
-          className={`shrink-0 text-white/35 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`shrink-0 text-[#7A6030] transition-transform ${open ? 'rotate-180' : ''}`}
         />
       </button>
 

@@ -375,7 +375,7 @@ function CardLayer(props) {
   if (a <= 0.001) return null;
 
   const rise = (1 - easeOut(clamp01((t - num(c.start, 0)) / 0.45))) * 44;
-  const accent = c.color || '#A855F7';
+  const accent = c.color || '#F59E0B';
 
   if (c.kind === 'lower') {
     return (

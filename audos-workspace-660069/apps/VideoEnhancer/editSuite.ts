@@ -24,25 +24,25 @@ function msg(e: unknown): string { return e instanceof Error ? e.message : Strin
 export function clamp(v: number, lo: number, hi: number): number { return Math.min(hi, Math.max(lo, v)); }
 
 // ---------------------------------------------------------------------------
-// Shared editor palette (deep dark base, vibrant accents)
+// Shared editor palette (light warm base, deep warm accents)
 // ---------------------------------------------------------------------------
 
 export const P = {
-  bg: '#06080F',
-  panel: '#0D1120',
-  panelSoft: '#111730',
-  card: '#0F1426',
-  border: 'rgba(140,155,255,0.15)',
-  borderSoft: 'rgba(140,155,255,0.08)',
-  text: '#F2F4FF',
-  sub: '#AAB2D4',
-  muted: '#6E7697',
-  blue: '#3D8BFF',
-  amber: '#FFB224',
-  coral: '#FF6B6B',
-  mint: '#34E0B0',
-  violet: '#A78BFA',
-  cyan: '#22D3EE',
+  bg: '#FFFDF4',
+  panel: '#FFFFFF',
+  panelSoft: '#FFFAEB',
+  card: '#FFFFFF',
+  border: 'rgba(180,120,0,0.14)',
+  borderSoft: 'rgba(180,120,0,0.08)',
+  text: '#1A1000',
+  sub: '#3D2800',
+  muted: '#7A6030',
+  blue: '#1D4ED8',
+  amber: '#C8920A',
+  coral: '#991B1B',
+  mint: '#166534',
+  violet: '#C8920A',
+  cyan: '#B4720A',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ export function drawBackdropFrame(ctx: CanvasRenderingContext2D, W: number, H: n
   const g = ctx.createLinearGradient(0, 0, W, H);
   g.addColorStop(0, '#101A30');
   g.addColorStop(0.55, '#0A0F1E');
-  g.addColorStop(1, '#1B1340');
+  g.addColorStop(1, '#402F13');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
   const glow = ctx.createRadialGradient(W / 2, H * 0.35, Math.min(W, H) * 0.1, W / 2, H * 0.4, Math.max(W, H) * 0.7);

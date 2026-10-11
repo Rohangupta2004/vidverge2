@@ -26,10 +26,11 @@ import type { AudioConfig, SceneAudio } from './studioConfig';
 import { MAX_SEGMENTS, speakSegments } from './elevenLabs';
 import { HeyGenError, createAvatarVideo, fetchVideoStatus } from './heygenStudio';
 import { registerAudioAsset } from './heygenApi';
+import { gestureForScene } from './beatPurpose';
 import type { TimelineSegment } from '../remotion/AssemblyComp';
 
 const sec = (value: unknown) => { const n = Number(value); return Number.isFinite(n) && n > 0 ? n : 0; };
-const MAX_LINE_CHARS = 2000;
+const MAX_LINE_CHARS = 10000;
 
 // ——— What each scene says ———
 
@@ -143,7 +144,10 @@ export async function narrateScenes(scenes: Scene[], project: Project | null | u
   const pending = scenesNeedingVoice(scenes, project, audio).slice(0, MAX_SEGMENTS);
   if (!pending.length) return audio.scenes;
   const lines = pending.map((scene) => lineFor(scene, project, rows, audio).trim());
-  const spoken = await speakSegments(lines, audio.voice_id, audio.voice_settings);
+  // The film's language picks the ElevenLabs model for EVERY line in the batch,
+  // not just the first: a Hindi film whose scene 4 was read by the English
+  // model is the bug this carries (lib/elevenLabs.getElevenLabsModel).
+  const spoken = await speakSegments(lines, audio.voice_id, audio.voice_settings, { language: project?.language });
   const stamp = new Date().toISOString();
   const next: Record<string, SceneAudio> = { ...audio.scenes };
   pending.forEach((scene, index) => {
@@ -195,12 +199,24 @@ export interface LipsyncOutcome {
   failed: number;
 }
 
-async function renderOneLipsync(entry: SceneAudio, avatarId: string, options: LipsyncOptions): Promise<SceneAudio> {
+async function renderOneLipsync(entry: SceneAudio, scene: Scene, avatarId: string, options: LipsyncOptions, position: { index: number; total: number }): Promise<SceneAudio> {
   // Best effort, exactly as the Avatar Studio does it: an account with an
   // asset registry gets a real audio_asset_id, everyone else sends the
   // public URL. Both bypass HeyGen's TTS.
   const audioAssetId = await registerAudioAsset(entry.audio_url, 'audio/mpeg');
+  // PER-BEAT DELIVERY. This is the one HeyGen path that renders a single beat,
+  // so it is where the editorial purpose becomes a performance: the hook opens
+  // expressively, a transition stays still, and nothing is hardcoded across the
+  // film (lib/beatPurpose).
+  const gesture = gestureForScene(scene, {
+    index: position.index,
+    total: position.total,
+    specKind: String((scene.spec as any)?.kind || ''),
+    visualKind: scene.visual_kind || '',
+    text: entry.spoken_text || scene.description || '',
+  });
   const created = await createAvatarVideo({
+    gesture,
     avatarId,
     voiceId: '',
     script: entry.spoken_text,
@@ -250,6 +266,9 @@ export async function lipsyncScenes(scenes: Scene[], project: Project | null | u
   const next: Record<string, SceneAudio> = { ...audio.scenes };
   const outcome: LipsyncOutcome = { scenes: next, unavailable: '', rendered: 0, failed: 0 };
   const avatarId = String(audio.lipsync_avatar_id || '').trim();
+  // Story order, so a scene's position in the FILM (first beat hooks, last beat
+  // asks) can inform how the presenter delivers it.
+  const ordered = voicedScenes(scenes);
   const pending = scenesNeedingLipsync(scenes, project, audio);
   if (!avatarId || !pending.length) return outcome;
   const noKey = options.unconfiguredNote || HEYGEN_UNCONFIGURED_NOTE;
@@ -266,7 +285,8 @@ export async function lipsyncScenes(scenes: Scene[], project: Project | null | u
       if (!scene || outcome.unavailable || options.signal?.aborted) return;
       const entry = next[scene.id];
       try {
-        settle(scene.id, await renderOneLipsync(entry, avatarId, options));
+        const index = ordered.findIndex((row) => row.id === scene.id);
+        settle(scene.id, await renderOneLipsync(entry, scene, avatarId, options, { index: index < 0 ? 0 : index, total: ordered.length }));
         outcome.rendered += 1;
       } catch (e: any) {
         if (e instanceof HeyGenError && e.missingCredential) {

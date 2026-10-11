@@ -10,7 +10,7 @@ import { useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { LB, LB_TRACKS, MotionGraphic, NleCaption, NleClip, clipStartOnTimeline, clipTimelineLength, fmtTimecode } from './nleCore';
 
-const GRAPHICS_COLOR = '#a855f7';
+const GRAPHICS_COLOR = '#C8920A';
 
 const TRACK_H = 44;
 const RULER_H = 22;
@@ -117,7 +117,7 @@ export default function NleTimeline(props: {
   }
 
   const labelCol = { width: 74, flexShrink: 0, display: 'flex', alignItems: 'center', paddingLeft: 12, color: LB.textMuted, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' as const };
-  const lane = { position: 'relative' as const, flex: 1, height: TRACK_H, borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' };
+  const lane = { position: 'relative' as const, flex: 1, height: TRACK_H, borderRadius: 8, background: 'rgba(180,120,0,0.04)', border: '1px solid rgba(180,120,0,0.12)' };
 
   const captionStart = captions.length ? Math.min(...captions.map((c) => c.start)) + props.captionOffset : 0;
   const captionEnd = captions.length ? Math.max(...captions.map((c) => c.end)) + props.captionOffset : 0;
@@ -167,10 +167,10 @@ export default function NleTimeline(props: {
                   title={`${c.label} · ${c.in.toFixed(1)}s–${c.out.toFixed(1)}s · ${c.speed}×`}
                   style={{
                     position: 'absolute', left: pct(start), width: `calc(${pct(len)} - 2px)`, top: 4, bottom: 4,
-                    background: c.kind === 'broll' ? 'rgba(99,102,241,0.55)' : LB_TRACKS.video,
+                    background: c.kind === 'broll' ? 'rgba(200,146,10,0.9)' : LB_TRACKS.video,
                     borderRadius: 8, cursor: 'grab', overflow: 'hidden',
-                    border: selected ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.18)',
-                    boxShadow: selected ? '0 0 12px rgba(245,158,11,0.35)' : 'none',
+                    border: selected ? '2px solid #C8920A' : '1px solid rgba(180,120,0,0.28)',
+                    boxShadow: selected ? '0 0 12px rgba(200,146,10,0.4)' : 'none',
                     opacity: isDragging ? 0.75 : 1,
                     zIndex: isDragging ? 3 : 1,
                     display: 'flex', alignItems: 'center',
@@ -209,10 +209,10 @@ export default function NleTimeline(props: {
                   style={{
                     position: 'absolute', left: pct(g.start), width: `calc(${pct(Math.max(0.4, g.duration))} - 2px)`, top: 4, bottom: 4,
                     background: GRAPHICS_COLOR, borderRadius: 8, cursor: 'grab', overflow: 'hidden',
-                    border: selected ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.18)',
-                    boxShadow: selected ? '0 0 12px rgba(245,158,11,0.35)' : 'none',
+                    border: selected ? '2px solid #C8920A' : '1px solid rgba(180,120,0,0.28)',
+                    boxShadow: selected ? '0 0 12px rgba(200,146,10,0.4)' : 'none',
                     display: 'flex', alignItems: 'center', paddingLeft: 8,
-                    color: '#2a1042', fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontFamily: 'system-ui, sans-serif',
+                    color: '#42300f', fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontFamily: 'system-ui, sans-serif',
                   }}
                 >
                   ✦ {g.text || g.kind}

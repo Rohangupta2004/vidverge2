@@ -156,7 +156,7 @@ export function HelpTip({ text }: { text: string }) {
           aria-hidden
           style={{
             width: 17, height: 17, borderRadius: 999, lineHeight: 1,
-            border: '1px solid rgba(255,255,255,0.26)', color: 'rgba(255,255,255,0.62)',
+            border: '1px solid rgba(180,120,0,0.28)', color: '#7A6030',
             fontSize: 11, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
@@ -169,9 +169,9 @@ export function HelpTip({ text }: { text: string }) {
           style={{
             position: 'fixed', top: at.top - 10, left: clampedLeft, transform: 'translate(-50%, -100%)',
             zIndex: 2000, maxWidth: 250, padding: '8px 11px', borderRadius: 10,
-            background: '#1A1A1A', border: '1px solid #2A2A2A', color: '#FFFFFF',
+            background: '#FFFFFF', border: '1px solid rgba(180,120,0,0.14)', color: '#1A1000',
             fontSize: 12.5, lineHeight: 1.5, fontWeight: 500, pointerEvents: 'none',
-            boxShadow: '0 12px 30px rgba(0,0,0,0.6)', textAlign: 'left',
+            boxShadow: '0 12px 30px rgba(120,80,0,0.16)', textAlign: 'left',
             fontFamily: "'Inter', system-ui, sans-serif",
           }}
         >
@@ -219,7 +219,7 @@ export function Toggle({ on, onChange, label, help }: {
           background: on ? 'var(--space-brand-primary-600)' : 'var(--space-surface-panel-strong)',
           border: '1px solid var(--space-border-default)', flexShrink: 0,
         }}>
-          <span style={{ position: 'absolute', top: 2, left: on ? 18 : 2, width: 16, height: 16, borderRadius: 999, background: '#fff', transition: 'left 0.15s' }} />
+          <span style={{ position: 'absolute', top: 2, left: on ? 18 : 2, width: 16, height: 16, borderRadius: 999, background: on ? '#FFFFFF' : '#C8920A', transition: 'left 0.15s' }} />
         </span>
         {label}
       </button>

@@ -39,7 +39,7 @@ export default function CreditBalance({ variant = 'chrome', className = '' }: Cr
         title={title}
         className={`flex items-center gap-1 px-2 py-1.5 rounded-xl text-[11px] font-bold transition-all ${className}`}
         style={{
-          color: low ? '#180f02' : 'var(--space-text-brand)',
+          color: low ? '#ffffff' : 'var(--space-text-brand)',
           background: low ? 'var(--space-brand-primary)' : 'var(--space-surface-accent-soft)',
         }}
         data-testid="button-credit-balance-mobile"
@@ -57,17 +57,17 @@ export default function CreditBalance({ variant = 'chrome', className = '' }: Cr
       title={title}
       className={`flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold transition-all hover:scale-105 ${className}`}
       style={{
-        color: '#fff',
-        background: 'linear-gradient(90deg, #10141f 0%, #0b0e16 100%)',
-        border: low ? '1px solid rgba(245,158,11,0.6)' : '1px solid rgba(148,163,184,0.28)',
-        boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+        color: 'var(--space-text-primary)',
+        background: 'linear-gradient(90deg, #FFFFFF 0%, #FFF6DD 100%)',
+        border: low ? '1px solid rgba(180,83,9,0.55)' : '1px solid rgba(180,120,0,0.18)',
+        boxShadow: '0 6px 18px rgba(120,80,0,0.12)',
       }}
       data-testid="button-credit-balance"
       data-credit-balance={credits.balance}
     >
-      <Coins className="w-4 h-4" style={{ color: low ? '#f59e0b' : '#fbbf24' }} />
+      <Coins className="w-4 h-4" style={{ color: low ? '#B45309' : '#C8920A' }} />
       {formatCredits(credits.balance)}
-      <span style={{ color: '#94a3b8', fontWeight: 500 }}>{low ? 'left — top up' : 'credits'}</span>
+      <span style={{ color: 'var(--space-text-muted)', fontWeight: 500 }}>{low ? 'left — top up' : 'credits'}</span>
     </button>
   );
 }

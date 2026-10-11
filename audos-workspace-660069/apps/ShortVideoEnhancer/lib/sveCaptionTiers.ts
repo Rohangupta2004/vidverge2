@@ -148,11 +148,11 @@ export const TIER_LABELS: Record<CaptionTier, string> = {
 
 /** The swatch each tier is drawn with in the editor and on the timeline. */
 export const TIER_COLORS: Record<CaptionTier, string> = {
-  clean: '#9CA3AF',
-  kinetic: '#3B82F6',
-  cinematic: '#A855F7',
-  beat: '#F43F5E',
-  ui: '#22D3EE',
+  clean: '#7A6030',
+  kinetic: '#1D4ED8',
+  cinematic: '#C8920A',
+  beat: '#BE185D',
+  ui: '#8A5A00',
 };
 
 export const CAPTION_TIER_OPTIONS: { id: CaptionTier; label: string; hint: string }[] = [

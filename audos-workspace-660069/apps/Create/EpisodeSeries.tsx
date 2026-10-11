@@ -119,17 +119,17 @@ function Pill({
     tone === 'good' ? T.success : tone === 'bad' ? T.danger : tone === 'busy' ? T.accentFg : T.muted;
   const border =
     tone === 'good'
-      ? 'rgba(74,222,128,0.32)'
+      ? 'rgba(22,101,52,0.32)'
       : tone === 'bad'
-        ? 'rgba(239,68,68,0.3)'
+        ? 'rgba(153,27,27,0.3)'
         : tone === 'busy'
           ? T.accentBorder
           : T.border;
   const background =
     tone === 'good'
-      ? 'rgba(74,222,128,0.08)'
+      ? 'rgba(22,101,52,0.08)'
       : tone === 'bad'
-        ? 'rgba(239,68,68,0.07)'
+        ? 'rgba(153,27,27,0.07)'
         : tone === 'busy'
           ? T.accentSoft
           : 'transparent';
@@ -225,7 +225,7 @@ function ClipDots({ ep }: { ep: EpisodeState }) {
                     ? T.danger
                     : busy
                       ? T.accentFg
-                      : 'rgba(255,255,255,0.16)',
+                      : 'rgba(180,120,0,0.25)',
             }}
           />
         );
@@ -351,8 +351,8 @@ function EpisodeCard({
             color: ep.status === 'done' ? '#fff' : T.sub,
             background:
               ep.status === 'done'
-                ? 'linear-gradient(135deg, #8b5cf6, #7c3aed)'
-                : 'rgba(255,255,255,0.06)',
+                ? 'linear-gradient(135deg, #E8B737, #C8920A)'
+                : 'rgba(180,120,0,0.1)',
           }}
         >
           {ep.index}
@@ -643,7 +643,7 @@ function BriefScreen({
                 padding: '8px 10px',
                 borderRadius: 999,
                 border: `1px solid ${T.border}`,
-                background: 'rgba(255,255,255,0.03)',
+                background: 'rgba(180,120,0,0.05)',
                 color: T.text,
                 fontSize: 13,
                 fontFamily: 'inherit',
@@ -726,7 +726,7 @@ function BriefScreen({
                   width: 44,
                   height: 44,
                   borderRadius: 10,
-                  background: 'rgba(255,255,255,0.06)',
+                  background: 'rgba(180,120,0,0.1)',
                 }}
               >
                 <Users size={17} color={T.muted} />

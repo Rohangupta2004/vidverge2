@@ -3,6 +3,10 @@ import { WORKSPACE_ID, updateProject, type Project, type WordTimestamp } from '.
 import { sleep } from '../lib/proxy';
 import { approximateWordTimestamps } from '../agents/orchestrator';
 import { sortAvatars } from '../lib/heygenCatalog';
+import { createAvatarVideo } from '../lib/heygenStudio';
+import { registerAudioAsset } from '../lib/heygenApi';
+import { narrateForAvatar, pipelineFor, wordTimestampsFromBeats, type Narration } from '../lib/voicePipeline';
+import type { VoiceSettings } from '../lib/elevenLabs';
 
 const base = `/api/workspaces/${WORKSPACE_ID}/provider-credentials/heygen/proxy`;
 const refreshHook = '/api/hooks/execute/workspace-660069/sceneforge-refresh-heygen-url-secure';
@@ -91,6 +95,71 @@ async function wordsFromSubtitle(url?: string): Promise<WordTimestamp[]> {
     return words;
   } catch { return []; }
 }
+
+// ——— Which status route owns a render ———
+// An ElevenLabs-voiced master is created through `POST v2/video/generate` and
+// exists ONLY on `v1/video_status.get`; a HeyGen-TTS master is created through
+// `POST v3/videos` and exists only on `v3/videos/:id`. The route is known at
+// submit time, but not after a reload, so an unknown render probes once and
+// the answer is remembered for the rest of the session.
+type StatusRoute = 'v3' | 'v1';
+const statusRoutes = new Map<string, StatusRoute>();
+
+function statusPath(videoId: string, route: StatusRoute): string {
+  const id = encodeURIComponent(videoId);
+  return route === 'v1' ? `v1/video_status.get?video_id=${id}` : `v3/videos/${id}`;
+}
+
+async function readRenderStatus(videoId: string, route?: StatusRoute): Promise<any> {
+  const known = route || statusRoutes.get(videoId);
+  if (known) {
+    const payload = await heygen(statusPath(videoId, known));
+    statusRoutes.set(videoId, known);
+    return payload?.data || payload || {};
+  }
+  try {
+    const payload = await heygen(statusPath(videoId, 'v3'));
+    statusRoutes.set(videoId, 'v3');
+    return payload?.data || payload || {};
+  } catch (e) {
+    // A transient failure says nothing about which route owns this render, so
+    // it is re-thrown for the poll loop's miss counter rather than read as
+    // "this must be a v2 render".
+    const message = String((e as any)?.message || e);
+    if (/(^|\D)(429|5\d\d)(\D|$)|network|timed?\s*out|timeout|fetch/i.test(message)) throw e;
+    const payload = await heygen(statusPath(videoId, 'v1'));
+    statusRoutes.set(videoId, 'v1');
+    return payload?.data || payload || {};
+  }
+}
+
+// v3 names a failure with failure_code/failure_message; v1 nests the same
+// thing under an `error` object. Both shapes are read so neither route loses
+// the reason a paid render died.
+function renderFailureCode(video: any): string {
+  const nested = video?.error && typeof video.error === 'object' ? video.error : null;
+  return String(video?.failure_code || nested?.code || '');
+}
+function renderFailureMessage(video: any): string {
+  const nested = video?.error && typeof video.error === 'object' ? video.error : null;
+  return String(video?.failure_message || nested?.message || nested?.detail || (typeof video?.error === 'string' ? video.error : '') || '');
+}
+
+/**
+ * Persist the render id the moment it exists: this is paid work, and the id
+ * is what lets a reload resume the poll instead of losing the render. A
+ * failed write is RETRIED instead of silently swallowed — a tab closed during
+ * the hour-long poll used to strand the project at avatar_render with no id
+ * and nothing to resume.
+ */
+async function persistRenderId(projectId: string, videoId: string, report: (message: string) => void) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try { await updateProject(projectId, { heygen_video_id: videoId }); return; }
+    catch { await sleep(1500 * (attempt + 1)); }
+  }
+  report('HeyGen is rendering — the render id could not be saved yet, so keep this tab open until the avatar video finishes.');
+}
+
 // ——— Live catalog (avatars + voices) ———
 // The whole catalog is paged out of the API rather than truncated at one
 // page, so the picker never hides avatars or voices that actually exist —
@@ -195,7 +264,15 @@ async function fetchWholeCatalog(path: string, limit: number, onProgress?: (item
   // The 80-page ceiling was reached with a next_token still in hand.
   return { items: all, complete: !token };
 }
-export interface HeyGenOptions { avatar_id: string; voice_id: string; engine?: string; resolution: '720p' | '1080p' | '4k'; aspect_ratio: '16:9' | '9:16'; fit: 'cover' | 'contain'; background: { type: 'color' | 'image'; value?: string; url?: string }; voice_settings: { speed: number; pitch?: number; emotion?: string }; captions: boolean; caption_style?: Record<string, unknown>; gestures: boolean; gesture_style?: string; pose?: string; expression?: string; camera?: string; output_format?: 'mp4' | 'webm'; advanced?: Record<string, unknown> }
+export interface HeyGenOptions { avatar_id: string; voice_id: string; engine?: string; resolution: '720p' | '1080p' | '4k'; aspect_ratio: '16:9' | '9:16'; fit: 'cover' | 'contain'; background: { type: 'color' | 'image'; value?: string; url?: string }; voice_settings: { speed: number; pitch?: number; emotion?: string }; captions: boolean; caption_style?: Record<string, unknown>; gestures: boolean; gesture_style?: string; pose?: string; expression?: string; camera?: string; output_format?: 'mp4' | 'webm'; advanced?: Record<string, unknown>;
+  /** Overrides the workspace voice pipeline for this one render (lib/voicePipeline). */
+  voice_engine?: 'elevenlabs' | 'heygen' | 'upload';
+  /** The public URL of a custom uploaded audio file to lip-sync against (voice_engine: 'upload'). */
+  upload_audio_url?: string;
+  /** The ElevenLabs voice to narrate with; resolved from the workspace when absent. */
+  eleven_voice_id?: string;
+  eleven_voice_settings?: VoiceSettings;
+}
 export function useHeyGen() {
   // Cache-first state: a cached catalog paints on the very first render (no
   // skeleton flash at all) and the fetch effect below is skipped entirely.
@@ -237,26 +314,133 @@ export function useHeyGen() {
   // status failure (dropped connection, 5xx) is tolerated for a while instead
   // of abandoning a paid render mid-flight, and the ceiling is an hour so a
   // long script's avatar master is waited out rather than timed out.
-  const pollUntilReady = useCallback(async (videoId: string, project: Project) => {
+  const pollUntilReady = useCallback(async (videoId: string, project: Project, route?: StatusRoute, narration?: Narration | null) => {
     let misses = 0;
     for (let i = 0; i < 240; i += 1) {
       setProgress(`HeyGen is rendering · ${i * 15}s`);
       await sleep(15000);
       let video: any = null;
-      try { const status = await heygen(`v3/videos/${encodeURIComponent(videoId)}`); video = status.data || status; misses = 0; }
+      try { video = await readRenderStatus(videoId, route); misses = 0; }
       catch (e) { misses += 1; if (misses >= 6) throw e; continue; }
-      if (video.status === 'completed') {
-        const duration = Number(video.duration || project.estimated_duration_sec || project.target_length_sec);
-        const subtitleWords = await wordsFromSubtitle(video.subtitle_url || video.caption_url);
-        const words: WordTimestamp[] = Array.isArray(video.word_timestamps) && video.word_timestamps.length ? video.word_timestamps : subtitleWords.length ? subtitleWords : approximateWordTimestamps(project.script || '', duration);
+      const state = String(video.status || '').toLowerCase();
+      if (state === 'completed') {
+        if (!video.video_url) throw new HeyGenRenderError('HeyGen finished this render but returned no video link. Press "Generate Avatar Video" to submit it again.', 'no_output_url');
+        const duration = Number(video.duration) || (narration ? narration.durationMs / 1000 : 0) || Number(project.estimated_duration_sec || project.target_length_sec);
+        // The ElevenLabs narration this master was spoken from already knows
+        // where every beat starts and ends, measured rather than estimated —
+        // and an audio-driven v2 render carries no subtitle track at all, so
+        // this is also the only accurate source of timings on that path.
+        const beatWords = narration ? wordTimestampsFromBeats(narration.beats, duration) : [];
+        const subtitleWords = beatWords.length ? [] : await wordsFromSubtitle(video.subtitle_url || video.caption_url);
+        const words: WordTimestamp[] = beatWords.length ? beatWords
+          : Array.isArray(video.word_timestamps) && video.word_timestamps.length ? video.word_timestamps
+            : subtitleWords.length ? subtitleWords
+              : approximateWordTimestamps(project.script || '', duration);
         setProgress('Avatar video ready');
-        return { videoId, videoUrl: video.video_url, duration, words, raw: video };
+        return { videoId, videoUrl: String(video.video_url), duration, words, raw: video };
       }
-      if (video.status === 'failed') throw new HeyGenRenderError(describeRenderFailure(String(video.failure_code || ''), String(video.failure_message || '')), String(video.failure_code || 'render_failed'));
+      if (state === 'failed') throw new HeyGenRenderError(describeRenderFailure(renderFailureCode(video), renderFailureMessage(video)), renderFailureCode(video) || 'render_failed');
     }
     throw new Error('HeyGen render timed out. Reopen this project to resume the render.');
   }, []);
   const generate = useCallback(async (project: Project, options: HeyGenOptions) => {
+    // ——— UPLOAD PATH — user's own audio drives the avatar lips directly ———
+    // No TTS (ElevenLabs or HeyGen) is involved. The uploaded file is already
+    // on public workspace storage; we register it as an asset and hand the URL
+    // straight to HeyGen's audio-driven v2 render.
+    if (options.voice_engine === 'upload') {
+      const audioUrl = String(options.upload_audio_url || '').trim();
+      if (!audioUrl) throw new Error('Upload a voice audio file before generating.');
+      setProgress('Handing your custom voice to HeyGen');
+      const audioAssetId = await registerAudioAsset(audioUrl, 'audio/mpeg').catch(() => '');
+      setProgress('Submitting lip-sync render');
+      const created = await createAvatarVideo({
+        avatarId: options.avatar_id,
+        voiceId: '',
+        script: project.script || '',
+        speed: 1,
+        resolution: options.resolution === '720p' ? '720p' : '1080p',
+        aspectRatio: options.aspect_ratio,
+        backgroundMode: options.background.type === 'image' && options.background.url ? 'image' : 'color',
+        backgroundColor: options.background.value || '#0f172a',
+        backgroundImageUrl: options.background.url || '',
+        audioUrl,
+        audioAssetId,
+      });
+      const route: StatusRoute = created.apiVersion === 'v2' ? 'v1' : 'v3';
+      statusRoutes.set(created.videoId, route);
+      await persistRenderId(project.id, created.videoId, setProgress);
+      setProgress('HeyGen is lip-syncing the avatar to your custom voice');
+      return pollUntilReady(created.videoId, project, route, null);
+    }
+
+    // VOICE FIRST. On the default pipeline the script is narrated by
+    // ElevenLabs before HeyGen is asked for anything, and that finished track
+    // is what drives the avatar's mouth — HeyGen's own text-to-speech is never
+    // invoked. A narration that cannot be produced is a logged warning, not a
+    // failed render: the HeyGen voice path below still ships the film.
+    let narration: Narration | null = null;
+    if (pipelineFor(options.voice_engine) === 'elevenlabs_heygen') {
+      try {
+        narration = await narrateForAvatar({
+          script: project.script || '',
+          voiceId: options.eleven_voice_id,
+          settings: options.eleven_voice_settings,
+          // The film's language picks the ElevenLabs model, so a Hindi script
+          // narrates on the multilingual model rather than the English one.
+          language: project.language,
+          onStage: setProgress,
+        });
+      } catch (e) {
+        console.warn('[SceneForge] The ElevenLabs narration failed — this master falls back to HeyGen text-to-speech.', e);
+        setProgress('ElevenLabs was unavailable — rendering with the HeyGen voice instead');
+      }
+    }
+
+    if (narration) {
+      const track = narration;
+      // ONLY the submission is guarded. A render that HeyGen accepts and then
+      // fails must surface as that failure — retrying it here as a HeyGen-TTS
+      // render would silently bill the customer for a second master.
+      let created: Awaited<ReturnType<typeof createAvatarVideo>> | null = null;
+      try {
+        setProgress('Handing the narration to HeyGen');
+        // Best effort: an account with an asset registry gets a real
+        // audio_asset_id, everyone else sends the public URL. Both bypass
+        // HeyGen's TTS, so an account without the registry loses nothing.
+        const audioAssetId = await registerAudioAsset(narration.audioUrl, narration.contentType);
+        created = await createAvatarVideo({
+          avatarId: options.avatar_id,
+          voiceId: '',
+          script: project.script || '',
+          speed: 1,
+          // v2 takes a pixel dimension rather than a resolution name, and has
+          // no 4K tier — anything above 720p renders at 1080p.
+          resolution: options.resolution === '720p' ? '720p' : '1080p',
+          aspectRatio: options.aspect_ratio,
+          backgroundMode: options.background.type === 'image' && options.background.url ? 'image' : 'color',
+          backgroundColor: options.background.value || '#0f172a',
+          backgroundImageUrl: options.background.url || '',
+          audioUrl: narration.audioUrl,
+          audioAssetId,
+        });
+      } catch (e) {
+        // HeyGen refused the audio-driven request — a look missing from its v2
+        // catalog, or an audio URL it would not fetch. The narration is
+        // already paid for and stays on workspace storage, but the film still
+        // has to ship, so this falls through to HeyGen's own voice.
+        console.warn('[SceneForge] HeyGen would not render against the ElevenLabs track — falling back to its own text-to-speech.', e);
+        setProgress('HeyGen could not use the ElevenLabs track — rendering with the HeyGen voice instead');
+      }
+      if (created) {
+        const route: StatusRoute = created.apiVersion === 'v2' ? 'v1' : 'v3';
+        statusRoutes.set(created.videoId, route);
+        await persistRenderId(project.id, created.videoId, setProgress);
+        setProgress(`HeyGen is lip-syncing the avatar to the ElevenLabs narration${track.segmented ? ` · ${track.beats.length} beats` : ''}`);
+        return pollUntilReady(created.videoId, project, route, track);
+      }
+    }
+
     // Pre-validation is ADVISORY. A failed look-detail read or a voice-detail
     // 404 used to throw HERE — before any submission — which silently stranded
     // the project at avatar_render with no heygen_video_id and no paid render.
@@ -316,18 +500,9 @@ export function useHeyGen() {
       }
     }
     const videoId = created.data?.video_id; if (!videoId) throw new Error('HeyGen did not return a video id.');
-    // Persisted the moment it exists: this is paid work, and the id is what
-    // lets a reload resume the poll instead of losing the render. A failed
-    // write is RETRIED instead of silently swallowed — the old .catch(() =>
-    // undefined) meant a tab close during the hour-long poll stranded the
-    // project at avatar_render with no id and nothing to resume.
-    let persisted = false;
-    for (let attempt = 0; attempt < 3 && !persisted; attempt += 1) {
-      try { await updateProject(project.id, { heygen_video_id: videoId }); persisted = true; }
-      catch { await sleep(1500 * (attempt + 1)); }
-    }
-    if (!persisted) setProgress('HeyGen is rendering — the render id could not be saved yet, so keep this tab open until the avatar video finishes.');
-    return pollUntilReady(videoId, project);
+    statusRoutes.set(String(videoId), 'v3');
+    await persistRenderId(project.id, String(videoId), setProgress);
+    return pollUntilReady(String(videoId), project, 'v3', null);
   }, [pollUntilReady]);
   /** Reattach to a render that was submitted before a reload or tab close. */
   const resume = useCallback(async (project: Project) => {

@@ -531,7 +531,7 @@ export default function ScriptToVideo() {
               {shots.map((u, i) => (
                 <span key={u} style={{ position: 'relative', display: 'inline-block' }}>
                   <img src={u} alt={`Screenshot ${i + 1}`} style={{ width: 72, height: 46, objectFit: 'cover', borderRadius: 7, border: `1px solid ${S.border}` }} />
-                  <span style={{ position: 'absolute', bottom: 3, left: 4, padding: '0 5px', borderRadius: 6, fontSize: 9.5, fontWeight: 800, color: '#fff', background: 'rgba(4,8,18,0.72)' }}>{i + 1}</span>
+                  <span style={{ position: 'absolute', bottom: 3, left: 4, padding: '0 5px', borderRadius: 6, fontSize: 9.5, fontWeight: 800, color: '#fff', background: 'rgba(26,16,0,0.72)' }}>{i + 1}</span>
                   <button type="button" aria-label={`Remove screenshot ${i + 1}`} onClick={() => { setShots((cur) => cur.filter((x) => x !== u)); setSegments(null); }}
                     style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, padding: 0, borderRadius: 999, border: 'none', background: S.danger, color: '#fff', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                     <X size={9} />

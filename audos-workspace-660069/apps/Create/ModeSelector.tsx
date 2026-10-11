@@ -137,11 +137,11 @@ export default function ModeSelector({
                     ? `1px solid ${T.accentBorder}`
                     : `1px solid ${T.border}`,
                 background: selected
-                  ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 60%, #1d4ed8 100%)'
+                  ? 'linear-gradient(135deg, #E8B737 0%, #C8920A 60%, #B4720A 100%)'
                   : isAuto
                     ? T.accentSoft
                     : 'transparent',
-                boxShadow: selected ? '0 8px 24px -12px rgba(37,99,235,0.8)' : 'none',
+                boxShadow: selected ? '0 8px 24px -12px rgba(200,146,10,0.5)' : 'none',
                 transition: 'all .16s ease',
               }}
             >
@@ -177,9 +177,9 @@ export default function ModeSelector({
               color: sportsSelected ? '#fff' : T.sub,
               border: sportsSelected ? `1px solid ${T.accentBorder}` : `1px solid ${T.border}`,
               background: sportsSelected
-                ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 60%, #1d4ed8 100%)'
+                ? 'linear-gradient(135deg, #E8B737 0%, #C8920A 60%, #B4720A 100%)'
                 : 'transparent',
-              boxShadow: sportsSelected ? '0 8px 24px -12px rgba(37,99,235,0.8)' : 'none',
+              boxShadow: sportsSelected ? '0 8px 24px -12px rgba(200,146,10,0.5)' : 'none',
               transition: 'all .16s ease',
             }}
           >

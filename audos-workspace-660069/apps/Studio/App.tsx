@@ -41,7 +41,7 @@ const inputStyle: React.CSSProperties = {
   padding: '11px 13px',
   borderRadius: 11,
   border: '1px solid var(--space-border-default)',
-  background: 'rgba(255,255,255,0.04)',
+  background: 'rgba(180,120,0,0.06)',
   color: 'var(--space-text-primary)',
   fontSize: 13.5,
   outline: 'none',
@@ -154,7 +154,7 @@ export default function App() {
         {/* Header */}
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, var(--space-brand-primary-600), var(--space-brand-primary-700))', boxShadow: '0 8px 24px rgba(124,58,237,0.4)' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, var(--space-brand-primary-600), var(--space-brand-primary-700))', boxShadow: '0 8px 24px rgba(200,146,10,0.4)' }}>
               <Clapperboard size={19} color="#fff" />
             </span>
             <div>
@@ -482,7 +482,7 @@ export default function App() {
                     cursor: canGenerate ? 'pointer' : 'not-allowed',
                     opacity: canGenerate ? 1 : 0.45,
                     background: 'linear-gradient(90deg, var(--space-brand-primary-600), var(--space-brand-primary-500))',
-                    boxShadow: canGenerate ? '0 10px 30px rgba(124,58,237,0.4)' : 'none',
+                    boxShadow: canGenerate ? '0 10px 30px rgba(200,146,10,0.4)' : 'none',
                   }}
                   data-testid="button-generate"
                 >

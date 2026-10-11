@@ -30,7 +30,7 @@ export const INGEST_RULES = {
   minFiles: 2,
   maxFiles: 12,
   briefMinChars: 40,
-  briefMaxChars: 600,
+  briefMaxChars: 10000,
   acceptedTypes: ['image/png', 'image/jpeg'],
 } as const;
 

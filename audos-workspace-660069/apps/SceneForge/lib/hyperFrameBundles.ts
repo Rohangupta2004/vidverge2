@@ -1,4 +1,11 @@
-// The four HyperFrames motion-graphic bundles, authored as HTML/CSS/JS.
+// The HyperFrames motion-graphic bundles, authored as HTML/CSS/JS.
+//
+// Seven of them: the editor's four original cards, plus the three PRODUCT
+// primitives SceneForge's own pipeline needs — a step sequence, a UI highlight
+// and a comparison table. Those three exist because product graphic beats are
+// now rendered by HeyGen as overlay clips rather than drawn as separate Remotion
+// layers (lib/productGraphics), and a feature card and a stat counter could not
+// express a process, an annotated screenshot or an A-vs-B table.
 //
 // HOW HYPERFRAMES WORKS, AND WHY THESE BUNDLES LOOK LIKE THIS. A HyperFrame
 // is a zipped web page that HeyGen loads in a headless browser and records as
@@ -71,8 +78,8 @@ const RUNTIME_JS = [
   '  };',
   '  window.applyBrand = function (vars) {',
   '    var root = document.documentElement.style;',
-  '    root.setProperty("--primary", vars.primary || "#6366f1");',
-  '    root.setProperty("--accent", vars.accent || "#8b5cf6");',
+  '    root.setProperty("--primary", vars.primary || "#f59e0b");',
+  '    root.setProperty("--accent", vars.accent || "#d97706");',
   '    root.setProperty("--bg", vars.background || "#0b1022");',
   '    root.setProperty("--fg", vars.text || "#ffffff");',
   '    root.setProperty("--font", vars.font || "Inter, system-ui, -apple-system, Segoe UI, sans-serif");',
@@ -212,7 +219,7 @@ const FEATURE: FrameTemplate = {
       '  var vars = window.readVariables({',
       '    headline: "Everything in one pass",',
       '    bullet1: "", bullet2: "", bullet3: "",',
-      '    primary: "#6366f1", accent: "#8b5cf6", background: "#0b1022", text: "#ffffff"',
+      '    primary: "#f59e0b", accent: "#d97706", background: "#0b1022", text: "#ffffff"',
       '  });',
       '  window.applyBrand(vars);',
       '  window.mountLogo(vars);',
@@ -273,7 +280,7 @@ const STAT: FrameTemplate = {
       '(function () {',
       '  var vars = window.readVariables({',
       '    stat: "10,000", label: "videos shipped this month", prefix: "", suffix: "",',
-      '    primary: "#6366f1", accent: "#8b5cf6", background: "#0b1022", text: "#ffffff"',
+      '    primary: "#f59e0b", accent: "#d97706", background: "#0b1022", text: "#ffffff"',
       '  });',
       '  window.applyBrand(vars);',
       '  window.mountLogo(vars);',
@@ -352,7 +359,7 @@ const CTA: FrameTemplate = {
       '(function () {',
       '  var vars = window.readVariables({',
       '    product: "SceneForge", tagline: "", cta: "Start free", url: "",',
-      '    primary: "#6366f1", accent: "#8b5cf6", background: "#0b1022", text: "#ffffff"',
+      '    primary: "#f59e0b", accent: "#d97706", background: "#0b1022", text: "#ffffff"',
       '  });',
       '  window.applyBrand(vars);',
       '  window.mountLogo(vars);',
@@ -411,7 +418,7 @@ const QUOTE: FrameTemplate = {
       '(function () {',
       '  var vars = window.readVariables({',
       '    quote: "", author: "", role: "",',
-      '    primary: "#6366f1", accent: "#8b5cf6", background: "#0b1022", text: "#ffffff"',
+      '    primary: "#f59e0b", accent: "#d97706", background: "#0b1022", text: "#ffffff"',
       '  });',
       '  window.applyBrand(vars);',
       '  window.mountLogo(vars);',
@@ -426,7 +433,269 @@ const QUOTE: FrameTemplate = {
   ),
 };
 
-export const FRAME_TEMPLATES: FrameTemplate[] = [FEATURE, STAT, CTA, QUOTE];
+// ——— Step Sequence: a process, revealed one step at a time ———
+//
+// The product primitive behind a flowchart beat. Each step reveals in order with
+// its connector drawing in behind it, so the viewer reads the process as a
+// sequence rather than meeting a finished diagram all at once.
+
+const STEPS: FrameTemplate = {
+  id: 'step-sequence',
+  name: 'Step Sequence',
+  blurb: 'Up to five numbered steps revealing in order, joined by a drawn rail.',
+  defaultDuration: 6,
+  fields: [
+    { key: 'headline', label: 'Headline', placeholder: 'How it works' },
+    { key: 'step1', label: 'Step 1', placeholder: 'Write the brief' },
+    { key: 'step2', label: 'Step 2', placeholder: 'Approve the storyboard' },
+    { key: 'step3', label: 'Step 3', placeholder: 'Render in one pass' },
+    { key: 'step4', label: 'Step 4 (optional)', placeholder: '' },
+    { key: 'step5', label: 'Step 5 (optional)', placeholder: '' },
+  ],
+  entries: page(
+    'Step Sequence',
+    [
+      '<div class="stage filled">',
+      '  <div class="card">',
+      '    <div id="logo"></div>',
+      '    <div class="rule in" style="animation-delay:.05s"></div>',
+      '    <h1 id="headline" class="in" style="animation-delay:.14s"></h1>',
+      '    <ol id="steps"></ol>',
+      '  </div>',
+      '</div>',
+    ].join('\n'),
+    [
+      'h1 { font-size: 5.6vmin; line-height: 1.1; letter-spacing: -.02em; margin: 4% 0 0; font-weight: 800; }',
+      'ol { list-style: none; margin: 6% 0 0; padding: 0; display: grid; gap: 3%; position: relative; }',
+      'li { position: relative; display: flex; align-items: center; gap: 3.4%; font-size: 3.4vmin; line-height: 1.34;',
+      '  opacity: 0; animation: rise .5s cubic-bezier(.2,.85,.3,1) forwards; }',
+      '.num { flex: 0 0 auto; display: flex; align-items: center; justify-content: center;',
+      '  height: 7.2vmin; width: 7.2vmin; border-radius: 99px; font-size: 3.1vmin; font-weight: 900; color: #fff;',
+      '  background: linear-gradient(135deg, var(--primary), var(--accent));',
+      '  box-shadow: 0 10px 28px color-mix(in srgb, var(--primary) 45%, transparent); }',
+      // The rail is drawn per-step rather than as one spine, so a step that was
+      // left blank never leaves a connector hanging in mid-air.
+      '.rail { position: absolute; left: 3.6vmin; top: -3%; height: 3%; width: 3px; border-radius: 99px;',
+      '  background: color-mix(in srgb, var(--primary) 55%, transparent); transform-origin: top;',
+      '  transform: scaleY(0); animation: drawRail .4s ease-out forwards; }',
+      '@keyframes drawRail { to { transform: scaleY(1); } }',
+    ].join('\n'),
+    [
+      '(function () {',
+      '  var vars = window.readVariables({',
+      '    headline: "How it works",',
+      '    step1: "", step2: "", step3: "", step4: "", step5: "",',
+      '    primary: "#f59e0b", accent: "#d97706", background: "#0b1022", text: "#ffffff"',
+      '  });',
+      '  window.applyBrand(vars);',
+      '  window.mountLogo(vars);',
+      '  document.getElementById("headline").textContent = vars.headline || "";',
+      '  var list = document.getElementById("steps");',
+      '  var filled = ["step1", "step2", "step3", "step4", "step5"]',
+      '    .map(function (key) { return (vars[key] || "").trim(); })',
+      '    .filter(function (text) { return text; });',
+      '  filled.forEach(function (text, index) {',
+      '    var li = document.createElement("li");',
+      '    li.style.animationDelay = (0.34 + index * 0.42) + "s";',
+      '    if (index > 0) {',
+      '      var rail = document.createElement("span");',
+      '      rail.className = "rail";',
+      '      rail.style.animationDelay = (0.2 + index * 0.42) + "s";',
+      '      li.appendChild(rail);',
+      '    }',
+      '    var num = document.createElement("span");',
+      '    num.className = "num";',
+      '    num.textContent = String(index + 1);',
+      '    var label = document.createElement("span");',
+      '    label.textContent = text;',
+      '    li.appendChild(num);',
+      '    li.appendChild(label);',
+      '    list.appendChild(li);',
+      '  });',
+      '  window.signalReady();',
+      '})();',
+      '',
+    ].join('\n'),
+  ),
+};
+
+// ——— UI Highlight: a screenshot, zoomed, with the part that matters marked ———
+//
+// The product primitive behind an annotated-image beat. The screenshot pushes in
+// slowly while a highlight box wipes across the region the narration is talking
+// about and a label arrives beside it — the two things a Remotion overlay kept
+// getting wrong, because the box and the image were composited separately and
+// drifted apart.
+
+const UI_HIGHLIGHT: FrameTemplate = {
+  id: 'ui-highlight',
+  name: 'UI Highlight',
+  blurb: 'A product screenshot zooming in, with one region highlighted and labelled.',
+  defaultDuration: 5,
+  fields: [
+    { key: 'image', label: 'Screenshot URL', placeholder: 'https://\u2026/product.png' },
+    { key: 'label', label: 'What to point at', placeholder: 'One click to render' },
+    { key: 'detail', label: 'Supporting line (optional)', placeholder: 'No timeline, no exports.' },
+    { key: 'focusX', label: 'Highlight centre X, 0\u2013100', placeholder: '50' },
+    { key: 'focusY', label: 'Highlight centre Y, 0\u2013100', placeholder: '52' },
+  ],
+  entries: page(
+    'UI Highlight',
+    [
+      '<div class="stage filled">',
+      '  <div class="shot">',
+      '    <div id="logo"></div>',
+      '    <img id="image" alt="">',
+      '    <span id="box"></span>',
+      '    <div id="callout">',
+      '      <div id="label"></div>',
+      '      <div id="detail"></div>',
+      '    </div>',
+      '  </div>',
+      '</div>',
+    ].join('\n'),
+    [
+      '.shot { position: relative; width: 100%; height: 100%; border-radius: 24px; overflow: hidden;',
+      '  border: 1px solid color-mix(in srgb, var(--primary) 38%, transparent);',
+      '  box-shadow: 0 40px 120px rgba(0,0,0,.5); background: color-mix(in srgb, var(--bg) 92%, transparent); }',
+      '#image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;',
+      '  transform: scale(1.02); animation: pushIn 5s ease-out forwards; }',
+      '@keyframes pushIn { to { transform: scale(1.14); } }',
+      '#box { position: absolute; height: 18%; width: 34%; border-radius: 14px;',
+      '  border: 3px solid var(--accent); box-shadow: 0 0 0 9999px rgba(4,6,18,.46), 0 14px 40px rgba(0,0,0,.4);',
+      '  clip-path: inset(0 100% 0 0); animation: wipeBox .62s cubic-bezier(.2,.85,.3,1) .7s forwards; }',
+      '@keyframes wipeBox { to { clip-path: inset(0 0 0 0); } }',
+      '#callout { position: absolute; left: 6%; right: 6%; bottom: 6%; padding: 3.4% 4%; border-radius: 18px;',
+      '  background: color-mix(in srgb, var(--bg) 86%, transparent);',
+      '  border: 1px solid color-mix(in srgb, var(--primary) 42%, transparent);',
+      '  opacity: 0; animation: rise .55s cubic-bezier(.2,.85,.3,1) 1.15s forwards; }',
+      '#label { font-size: 4vmin; font-weight: 800; letter-spacing: -.015em; }',
+      '#detail { margin-top: 1.4%; font-size: 2.9vmin; line-height: 1.38; color: color-mix(in srgb, var(--fg) 74%, transparent); }',
+    ].join('\n'),
+    [
+      '(function () {',
+      '  var vars = window.readVariables({',
+      '    image: "", label: "", detail: "", focusX: "50", focusY: "52",',
+      '    primary: "#f59e0b", accent: "#d97706", background: "#0b1022", text: "#ffffff"',
+      '  });',
+      '  window.applyBrand(vars);',
+      '  window.mountLogo(vars);',
+      '  var image = document.getElementById("image");',
+      '  var box = document.getElementById("box");',
+      '  // Without a screenshot there is nothing to highlight, so the frame drops',
+      '  // to the branded panel rather than recording a broken image icon.',
+      '  if ((vars.image || "").trim()) image.src = vars.image; else { image.remove(); box.remove(); }',
+      '  function pct(value, fallback) {',
+      '    var parsed = parseFloat(value);',
+      '    return isFinite(parsed) ? Math.max(6, Math.min(94, parsed)) : fallback;',
+      '  }',
+      '  if (box.parentNode) {',
+      '    // The box is positioned by its CENTRE, which is how the caller thinks',
+      '    // about it, and clamped so it can never hang off the frame.',
+      '    var cx = pct(vars.focusX, 50);',
+      '    var cy = pct(vars.focusY, 52);',
+      '    box.style.left = Math.max(2, Math.min(64, cx - 17)) + "%";',
+      '    box.style.top = Math.max(2, Math.min(74, cy - 9)) + "%";',
+      '  }',
+      '  var label = document.getElementById("label");',
+      '  var detail = document.getElementById("detail");',
+      '  if ((vars.label || "").trim()) label.textContent = vars.label; else label.remove();',
+      '  if ((vars.detail || "").trim()) detail.textContent = vars.detail; else detail.remove();',
+      '  if (!label.parentNode && !detail.parentNode) document.getElementById("callout").remove();',
+      '  window.signalReady();',
+      '})();',
+      '',
+    ].join('\n'),
+  ),
+};
+
+// ——— Comparison Table: two sides, revealed against each other ———
+//
+// The product primitive behind a comparison beat. The two columns arrive from
+// opposite edges and their rows reveal in pairs, so the viewer reads the
+// contrast row by row instead of being handed a finished table.
+
+const COMPARE: FrameTemplate = {
+  id: 'comparison-table',
+  name: 'Comparison Table',
+  blurb: 'Two labelled columns with up to four rows each, revealed in pairs.',
+  defaultDuration: 6,
+  fields: [
+    { key: 'leftTitle', label: 'Left column', placeholder: 'By hand' },
+    { key: 'rightTitle', label: 'Right column', placeholder: 'With SceneForge' },
+    { key: 'left1', label: 'Left row 1', placeholder: 'Three days per video' },
+    { key: 'right1', label: 'Right row 1', placeholder: 'One afternoon' },
+    { key: 'left2', label: 'Left row 2', placeholder: '' },
+    { key: 'right2', label: 'Right row 2', placeholder: '' },
+    { key: 'left3', label: 'Left row 3', placeholder: '' },
+    { key: 'right3', label: 'Right row 3', placeholder: '' },
+    { key: 'left4', label: 'Left row 4', placeholder: '' },
+    { key: 'right4', label: 'Right row 4', placeholder: '' },
+  ],
+  entries: page(
+    'Comparison Table',
+    [
+      '<div class="stage filled">',
+      '  <div class="card">',
+      '    <div id="logo"></div>',
+      '    <div class="cols">',
+      '      <div class="col left"><div class="head" id="leftTitle"></div><ul id="leftRows"></ul></div>',
+      '      <div class="col right"><div class="head" id="rightTitle"></div><ul id="rightRows"></ul></div>',
+      '    </div>',
+      '  </div>',
+      '</div>',
+    ].join('\n'),
+    [
+      '.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4%; align-items: start; }',
+      '.col { padding: 5% 5.5%; border-radius: 20px; opacity: 0; }',
+      '.col.left { background: color-mix(in srgb, var(--fg) 7%, transparent);',
+      '  border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);',
+      '  animation: slideFromLeft .6s cubic-bezier(.2,.85,.3,1) .12s forwards; }',
+      '.col.right { background: color-mix(in srgb, var(--primary) 16%, transparent);',
+      '  border: 1px solid color-mix(in srgb, var(--accent) 52%, transparent);',
+      '  animation: slideFromRight .6s cubic-bezier(.2,.85,.3,1) .3s forwards; }',
+      '@keyframes slideFromLeft { from { opacity: 0; transform: translateX(-22px); } to { opacity: 1; transform: none; } }',
+      '@keyframes slideFromRight { from { opacity: 0; transform: translateX(22px); } to { opacity: 1; transform: none; } }',
+      '.head { font-size: 3.6vmin; font-weight: 800; letter-spacing: -.01em; padding-bottom: 5%;',
+      '  border-bottom: 1px solid color-mix(in srgb, var(--fg) 18%, transparent); }',
+      '.col.right .head { color: var(--accent); }',
+      'ul { list-style: none; margin: 5% 0 0; padding: 0; display: grid; gap: 4%; }',
+      'li { font-size: 2.9vmin; line-height: 1.36; opacity: 0;',
+      '  animation: rise .48s cubic-bezier(.2,.85,.3,1) forwards; }',
+    ].join('\n'),
+    [
+      '(function () {',
+      '  var vars = window.readVariables({',
+      '    leftTitle: "", rightTitle: "",',
+      '    left1: "", right1: "", left2: "", right2: "", left3: "", right3: "", left4: "", right4: "",',
+      '    primary: "#f59e0b", accent: "#d97706", background: "#0b1022", text: "#ffffff"',
+      '  });',
+      '  window.applyBrand(vars);',
+      '  window.mountLogo(vars);',
+      '  document.getElementById("leftTitle").textContent = vars.leftTitle || "";',
+      '  document.getElementById("rightTitle").textContent = vars.rightTitle || "";',
+      '  // Rows reveal in PAIRS: row 2 on the right lands with row 2 on the left,',
+      '  // which is what makes the frame read as a comparison rather than as two',
+      '  // unrelated lists that happen to share a card.',
+      '  ["left", "right"].forEach(function (side) {',
+      '    var list = document.getElementById(side + "Rows");',
+      '    [1, 2, 3, 4].forEach(function (row) {',
+      '      var text = (vars[side + row] || "").trim();',
+      '      if (!text) return;',
+      '      var li = document.createElement("li");',
+      '      li.style.animationDelay = (0.62 + (row - 1) * 0.34 + (side === "right" ? 0.1 : 0)) + "s";',
+      '      li.textContent = text;',
+      '      list.appendChild(li);',
+      '    });',
+      '  });',
+      '  window.signalReady();',
+      '})();',
+      '',
+    ].join('\n'),
+  ),
+};
+
+export const FRAME_TEMPLATES: FrameTemplate[] = [FEATURE, STAT, CTA, QUOTE, STEPS, UI_HIGHLIGHT, COMPARE];
 
 export function frameTemplate(id: CardTemplateId): FrameTemplate {
   return FRAME_TEMPLATES.find((template) => template.id === id) || FEATURE;

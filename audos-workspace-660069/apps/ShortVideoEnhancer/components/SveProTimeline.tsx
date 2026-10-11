@@ -224,7 +224,7 @@ export default function SveProTimeline(props: SveTimelineProps) {
       >
         {collapsed ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Timeline
       </button>
-      <span className="vp-mono" style={{ fontSize: 11.5, color: '#E4E4E4', fontWeight: 700 }}>{timecode(currentTime)}</span>
+      <span className="vp-mono" style={{ fontSize: 11.5, color: '#1A1000', fontWeight: 700 }}>{timecode(currentTime)}</span>
       <span className="vp-mono" style={{ fontSize: 10.5, color: PRO.text3 }}>/ {timecode(duration)}</span>
       {doc.bpm ? (
         <span className="vp-badge run" title="Measured tempo">{Math.round(doc.bpm)} BPM</span>
@@ -333,7 +333,7 @@ export default function SveProTimeline(props: SveTimelineProps) {
                   ...span(0, duration),
                   background: doc.audio.original > 0
                     ? 'linear-gradient(180deg,#0F6F52,#0A4B38)'
-                    : 'repeating-linear-gradient(45deg,#1b1b1b,#1b1b1b 5px,#232323 5px,#232323 10px)',
+                    : 'repeating-linear-gradient(45deg,rgba(180,120,0,0.10),rgba(180,120,0,0.10) 5px,rgba(180,120,0,0.18) 5px,rgba(180,120,0,0.18) 10px)',
                   cursor: 'default',
                 }}
                 title={`Original audio at ${doc.audio.original}%`}
@@ -343,7 +343,7 @@ export default function SveProTimeline(props: SveTimelineProps) {
               {doc.music.url ? (
                 <div
                   className="vp-clip"
-                  style={{ ...span(0, duration), top: 'auto', bottom: 2, height: 10, background: 'linear-gradient(90deg,#4C1D95,#7C3AED)', cursor: 'default' }}
+                  style={{ ...span(0, duration), top: 'auto', bottom: 2, height: 10, background: 'linear-gradient(90deg,#C8920A,#E8B737)', cursor: 'default' }}
                   title={`Music bed at ${doc.audio.music}%`}
                 >
                   {doc.music.peaks.length ? (
@@ -383,8 +383,8 @@ export default function SveProTimeline(props: SveTimelineProps) {
                     top: 4,
                     bottom: 14,
                     ...span(s.start, s.end),
-                    background: 'rgba(0,0,0,0.55)',
-                    border: '1px dashed rgba(255,255,255,0.22)',
+                    background: 'rgba(26,16,0,0.35)',
+                    border: '1px dashed rgba(255,255,255,0.3)',
                     borderRadius: 4,
                     pointerEvents: 'none',
                   }}
@@ -406,7 +406,7 @@ export default function SveProTimeline(props: SveTimelineProps) {
                     ...span(cue.start, cue.end),
                     background: doc.captionsEnabled
                       ? 'linear-gradient(180deg,' + tint + ',color-mix(in srgb,' + tint + ' 52%,#0B0B0B))'
-                      : 'repeating-linear-gradient(45deg,#2a2a2a,#2a2a2a 5px,#1d1d1d 5px,#1d1d1d 10px)',
+                      : 'repeating-linear-gradient(45deg,rgba(180,120,0,0.10),rgba(180,120,0,0.10) 5px,rgba(180,120,0,0.18) 5px,rgba(180,120,0,0.18) 10px)',
                   }}
                   title={TIER_LABELS[cue.tier || 'clean'] + ' \u00b7 ' + cue.words.map((w) => w.text).join(' ')}
                   onClick={() => props.onSeek(cue.start + 0.01)}
@@ -418,7 +418,7 @@ export default function SveProTimeline(props: SveTimelineProps) {
                 <span
                   // Sticky, not absolute: the lane scroller follows the playhead, and an
                   // absolute label scrolls away with it and shows up cut off on the left.
-                  style={{ position: 'sticky', left: 8, display: 'inline-block', marginLeft: 8, lineHeight: '34px', fontSize: 10.5, color: '#5A5A5A', whiteSpace: 'nowrap', pointerEvents: 'none' }}
+                  style={{ position: 'sticky', left: 8, display: 'inline-block', marginLeft: 8, lineHeight: '34px', fontSize: 10.5, color: '#7A6030', whiteSpace: 'nowrap', pointerEvents: 'none' }}
                 >
                   No captions yet — generate them in the Text tab
                 </span>

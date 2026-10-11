@@ -148,49 +148,52 @@ interface ToolIdentity {
 }
 
 const TOOL_IDENTITIES: Record<string, ToolIdentity> = {
+  // ACCENTS ARE A RAMP, NOT A RAINBOW. Every value below is a stop on the
+  // brand's amber-to-cyan arc, so eight cards stay tellable apart without any
+  // of them falling outside the palette. Do not reintroduce a free hue here.
   'product-video': {
-    accent: '#3b82f6',
+    accent: '#f59e0b',
     tagline: 'SaaS launch videos & cinematic product films — paste your URL, pick a script, get the film.',
     Art: LensArt,
   },
   'video-enhancer': {
-    accent: '#2dd4bf',
+    accent: '#22d3ee',
     tagline: 'Drop in footage and get a cut plan in minutes — transcript editing, reframing, captions, overlays and export, all in one editor.',
     Art: EnhanceArt,
   },
   'script-to-video': {
-    accent: '#8b5cf6',
+    accent: '#fcd34d',
     tagline: 'Paste a script and an AI director turns every scene into film.',
     Art: ScriptArt,
   },
   sceneforge: {
-    accent: '#f59e0b',
+    accent: '#06b6d4',
     tagline: 'Talking-head studio with documentary-style motion graphics.',
     Art: ClapperArt,
   },
   'ads-studio': {
-    accent: '#f43f5e',
+    accent: '#fbbf24',
     tagline: 'Give a product URL — an AI creative director researches, scripts, shoots and cuts the ad.',
     Art: AdsArt,
   },
   motionverger: {
-    accent: '#22c55e',
+    accent: '#38bdf8',
     tagline: 'Your SaaS launch video — URL in, a 40-second kinetic launch film out, in your brand.',
     Art: LaunchArt,
   },
   'faceless-content': {
-    accent: '#3b82f6',
+    accent: '#fcd34d',
     tagline: 'A topic in, a finished faceless video out — researched, scripted, filmed and cut.',
     Art: FacelessArt,
   },
   phantom: {
-    accent: '#e879f9',
+    accent: '#2dd4bf',
     tagline: 'Paste your own URL — it finds your real competitors, compares you side by side, and makes the positioning video.',
     Art: RadarArt,
   },
 };
 
-const DEFAULT_IDENTITY: ToolIdentity = { accent: '#3b82f6', Art: LensArt };
+const DEFAULT_IDENTITY: ToolIdentity = { accent: '#f59e0b', Art: LensArt };
 
 function getIdentity(appId: string): ToolIdentity {
   return TOOL_IDENTITIES[appId] || DEFAULT_IDENTITY;
@@ -286,12 +289,12 @@ const LAUNCHER_CSS = `
 .vv-ray {
   position: absolute; left: -20%; width: 140%; height: 300px;
   filter: blur(64px); opacity: 0.4;
-  background: linear-gradient(90deg, transparent, rgba(59,130,246,0.16), rgba(45,212,191,0.10), transparent);
+  background: linear-gradient(90deg, transparent, rgba(245,158,11,0.18), rgba(34,211,238,0.12), transparent);
 }
 .vv-ray-a { top: -8%; transform: rotate(-14deg); animation: vv-drift-a 26s ease-in-out infinite alternate; }
 .vv-ray-b {
   bottom: -12%; transform: rotate(10deg);
-  background: linear-gradient(90deg, transparent, rgba(139,92,246,0.12), rgba(59,130,246,0.10), transparent);
+  background: linear-gradient(90deg, transparent, rgba(245,158,11,0.14), rgba(6,182,212,0.10), transparent);
   animation: vv-drift-b 32s ease-in-out infinite alternate;
 }
 @keyframes vv-drift-a { from { transform: rotate(-14deg) translateX(-3%); } to { transform: rotate(-10deg) translateX(3%); } }
@@ -299,19 +302,19 @@ const LAUNCHER_CSS = `
 .vv-orb { position: absolute; border-radius: 9999px; filter: blur(70px); }
 .vv-orb-a {
   width: 380px; height: 380px; top: 8%; right: -6%;
-  background: radial-gradient(circle, rgba(37,99,235,0.20), transparent 70%);
+  background: radial-gradient(circle, rgba(245,158,11,0.22), transparent 70%);
   animation: vv-orb-a 24s ease-in-out infinite alternate;
 }
 .vv-orb-b {
   width: 320px; height: 320px; bottom: -4%; left: -4%;
-  background: radial-gradient(circle, rgba(245,158,11,0.10), transparent 70%);
+  background: radial-gradient(circle, rgba(6,182,212,0.14), transparent 70%);
   animation: vv-orb-b 30s ease-in-out infinite alternate;
 }
 @keyframes vv-orb-a { from { transform: translate(0, 0) scale(1); } to { transform: translate(-30px, 26px) scale(1.08); } }
 @keyframes vv-orb-b { from { transform: translate(0, 0) scale(1); } to { transform: translate(24px, -20px) scale(1.06); } }
 .vv-mote {
   position: absolute; bottom: 6%; border-radius: 9999px;
-  background: rgba(147,197,253,0.55); filter: blur(0.5px);
+  background: rgba(252,211,77,0.55); filter: blur(0.5px);
   opacity: 0; animation: vv-mote 16s linear infinite;
 }
 @keyframes vv-mote {
@@ -335,7 +338,7 @@ const LAUNCHER_CSS = `
 
 /* ===== Brand title shimmer + entrance ===== */
 .vv-title-shimmer {
-  background: linear-gradient(100deg, #f8fafc 24%, #93c5fd 40%, #5eead4 50%, #f8fafc 64%);
+  background: linear-gradient(100deg, #fffaf1 24%, #fcd34d 40%, #22d3ee 50%, #fffaf1 64%);
   background-size: 220% 100%;
   -webkit-background-clip: text; background-clip: text;
   color: transparent; -webkit-text-fill-color: transparent;
@@ -349,15 +352,15 @@ const LAUNCHER_CSS = `
   position: relative; z-index: 1; isolation: isolate; overflow: hidden;
   border-radius: 22px; text-align: left; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  border: 1px solid color-mix(in srgb, var(--vv-accent) 26%, rgba(148,163,184,0.14));
+  border: 1px solid color-mix(in srgb, var(--vv-accent) 26%, rgba(245,158,11,0.18));
   background:
     linear-gradient(155deg,
-      color-mix(in srgb, var(--vv-accent) 13%, rgba(16,24,42,0.92)) 0%,
-      rgba(13,20,36,0.94) 46%,
-      rgba(9,13,26,0.96) 100%);
+      color-mix(in srgb, var(--vv-accent) 13%, rgba(17,17,32,0.92)) 0%,
+      rgba(13,13,20,0.94) 46%,
+      rgba(5,5,8,0.96) 100%);
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.05),
-    0 18px 40px -18px rgba(2,6,18,0.9),
+    0 18px 40px -18px rgba(0,0,0,0.9),
     0 8px 24px -12px color-mix(in srgb, var(--vv-accent) 26%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -371,10 +374,10 @@ const LAUNCHER_CSS = `
 }
 .vv-card:hover, .vv-card:focus-visible {
   transform: translateY(-6px) scale(1.015);
-  border-color: color-mix(in srgb, var(--vv-accent) 55%, rgba(148,163,184,0.2));
+  border-color: color-mix(in srgb, var(--vv-accent) 55%, rgba(245,158,11,0.3));
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.07),
-    0 30px 60px -20px rgba(2,6,18,0.95),
+    0 30px 60px -20px rgba(0,0,0,0.95),
     0 12px 42px -10px color-mix(in srgb, var(--vv-accent) 38%, transparent);
 }
 .vv-card:active { transform: translateY(-2px) scale(0.99); }
@@ -412,11 +415,11 @@ const LAUNCHER_CSS = `
 }
 .vv-card-title {
   margin: 0 0 6px; font-size: 1.05rem; font-weight: 700;
-  letter-spacing: -0.01em; color: var(--space-text-primary, #F8FAFC);
+  letter-spacing: -0.01em; color: var(--space-text-primary, #fffaf1);
 }
 .vv-card-desc {
   margin: 0; font-size: 0.8rem; line-height: 1.5;
-  color: var(--space-text-secondary, #CBD5E1);
+  color: var(--space-text-secondary, #e6d9c9);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 
@@ -424,7 +427,7 @@ const LAUNCHER_CSS = `
 .vv-icon-tile {
   position: relative; width: 76px; height: 76px; border-radius: 20px; margin-bottom: 18px;
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--vv-accent) 30%, rgba(10,15,30,0.9)), rgba(8,12,24,0.92) 70%);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--vv-accent) 30%, rgba(17,17,32,0.9)), rgba(5,5,8,0.92) 70%);
   border: 1px solid color-mix(in srgb, var(--vv-accent) 35%, transparent);
   box-shadow:
     0 10px 24px -10px color-mix(in srgb, var(--vv-accent) 45%, transparent),
@@ -475,7 +478,7 @@ const LAUNCHER_CSS = `
 /* ===== Product Video: camera lens ===== */
 .vv-lens-ring {
   position: absolute; inset: -4px; border-radius: 9999px;
-  background: conic-gradient(from 0deg, rgba(147,197,253,0), rgba(147,197,253,0.6), rgba(45,212,191,0.35), rgba(147,197,253,0));
+  background: conic-gradient(from 0deg, rgba(252,211,77,0), rgba(252,211,77,0.6), rgba(34,211,238,0.35), rgba(252,211,77,0));
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
   animation: vv-spin 9s linear infinite;
@@ -483,17 +486,17 @@ const LAUNCHER_CSS = `
 @keyframes vv-spin { to { transform: rotate(360deg); } }
 .vv-lens-glass {
   position: absolute; inset: 0; border-radius: 9999px; overflow: hidden;
-  background: radial-gradient(circle at 34% 30%, #7db4ff 0%, #2f6fe0 22%, #14264d 58%, #070d1d 100%);
+  background: radial-gradient(circle at 34% 30%, #fcd34d 0%, #f59e0b 22%, #664a2a 58%, #0a0a14 100%);
   box-shadow:
-    inset 0 0 0 2px rgba(148,197,253,0.28),
+    inset 0 0 0 2px rgba(252,211,77,0.28),
     inset 0 -6px 10px rgba(0,0,0,0.55),
-    0 4px 14px rgba(37,99,235,0.35);
+    0 4px 14px rgba(245,158,11,0.35);
 }
 .vv-lens-iris {
   position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px;
   border-radius: 9999px;
-  background: radial-gradient(circle at 40% 35%, #0ea5e9 0%, #082044 55%, #01060f 100%);
-  box-shadow: 0 0 10px rgba(56,189,248,0.5);
+  background: radial-gradient(circle at 40% 35%, #fcd34d 0%, #4d381f 55%, #050508 100%);
+  box-shadow: 0 0 10px rgba(252,211,77,0.5);
   animation: vv-iris 5.5s ease-in-out infinite;
 }
 @keyframes vv-iris { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.22); } }
@@ -512,7 +515,7 @@ const LAUNCHER_CSS = `
 /* ===== Video Enhancer: shimmer + sparkles ===== */
 .vv-enhance-aura {
   position: absolute; inset: -10px; border-radius: 18px; z-index: -1;
-  background: radial-gradient(circle, rgba(45,212,191,0.30), transparent 65%);
+  background: radial-gradient(circle, rgba(34,211,238,0.30), transparent 65%);
   animation: vv-pulse 4s ease-in-out infinite;
 }
 @keyframes vv-pulse {
@@ -521,20 +524,20 @@ const LAUNCHER_CSS = `
 }
 .vv-enhance-frame {
   position: absolute; inset: 9px 3px; border-radius: 10px; overflow: hidden;
-  background: linear-gradient(150deg, rgba(20,184,166,0.28), rgba(8,20,34,0.9) 60%);
-  border: 1.5px solid rgba(94,234,212,0.55);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.15), 0 4px 12px rgba(20,184,166,0.28);
+  background: linear-gradient(150deg, rgba(6,182,212,0.28), rgba(5,5,8,0.9) 60%);
+  border: 1.5px solid rgba(34,211,238,0.55);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.15), 0 4px 12px rgba(6,182,212,0.28);
 }
 .vv-enhance-scan {
   position: absolute; top: -20%; bottom: -20%; left: -40%; width: 34%;
   transform: skewX(-16deg);
-  background: linear-gradient(90deg, transparent, rgba(153,246,228,0.5), transparent);
+  background: linear-gradient(90deg, transparent, rgba(165,243,252,0.5), transparent);
   animation: vv-scan 3.4s ease-in-out infinite;
 }
 @keyframes vv-scan { 0%, 15% { left: -40%; } 60%, 100% { left: 115%; } }
 .vv-spark {
-  position: absolute; color: #ccfbf1;
-  filter: drop-shadow(0 0 6px rgba(45,212,191,0.8));
+  position: absolute; color: #cffafe;
+  filter: drop-shadow(0 0 6px rgba(34,211,238,0.8));
   animation: vv-twinkle 2.6s ease-in-out infinite;
 }
 .vv-spark-a { width: 16px; height: 16px; top: -6px; right: -4px; }
@@ -550,7 +553,7 @@ const LAUNCHER_CSS = `
 .vv-script-lines { display: flex; flex-direction: column; gap: 5px; width: 18px; flex-shrink: 0; }
 .vv-script-line {
   display: block; height: 3px; border-radius: 2px;
-  background: linear-gradient(90deg, #c4b5fd, #8b5cf6);
+  background: linear-gradient(90deg, #fcd34d, #f59e0b);
   animation: vv-line 3s ease-in-out infinite;
 }
 .vv-script-line:nth-child(2) { width: 78%; animation-delay: 0.35s; }
@@ -564,26 +567,26 @@ const LAUNCHER_CSS = `
 .vv-script-frame {
   position: relative; width: 26px; height: 20px; border-radius: 5px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(150deg, rgba(139,92,246,0.4), rgba(15,10,32,0.95));
-  border: 1.5px solid rgba(196,181,253,0.6);
+  background: linear-gradient(150deg, rgba(245,158,11,0.4), rgba(32,22,10,0.95));
+  border: 1.5px solid rgba(252,211,77,0.6);
   animation: vv-frame-glow 3s ease-in-out infinite;
 }
 @keyframes vv-frame-glow {
-  0%, 100% { box-shadow: 0 0 8px rgba(139,92,246,0.3); }
-  48% { box-shadow: 0 0 16px rgba(167,139,250,0.75); }
+  0%, 100% { box-shadow: 0 0 8px rgba(245,158,11,0.3); }
+  48% { box-shadow: 0 0 16px rgba(252,211,77,0.75); }
 }
 .vv-script-play {
   width: 0; height: 0; margin-left: 2px;
-  border-left: 7px solid #ede9fe;
+  border-left: 7px solid #fef3c7;
   border-top: 4.5px solid transparent;
   border-bottom: 4.5px solid transparent;
-  filter: drop-shadow(0 0 4px rgba(196,181,253,0.8));
+  filter: drop-shadow(0 0 4px rgba(252,211,77,0.8));
 }
 
 /* ===== SceneForge: clapper board + film strip ===== */
 .vv-clap-top {
   position: absolute; left: 2px; right: 6px; top: 7px; height: 10px; border-radius: 3px;
-  background: repeating-linear-gradient(115deg, #fbbf24 0 7px, #171310 7px 14px);
+  background: repeating-linear-gradient(115deg, #22d3ee 0 7px, #0a0a14 7px 14px);
   transform-origin: 0% 100%;
   box-shadow: 0 2px 6px rgba(0,0,0,0.5);
   animation: vv-clap 4.6s ease-in-out infinite;
@@ -597,23 +600,23 @@ const LAUNCHER_CSS = `
 .vv-clap-body {
   position: absolute; left: 2px; right: 6px; top: 18px; bottom: 3px; overflow: hidden;
   border-radius: 4px 4px 6px 6px;
-  background: linear-gradient(165deg, #2a2f3e, #12151f 70%);
-  border: 1px solid rgba(251,191,36,0.35);
+  background: linear-gradient(165deg, #17172b, #0d0d14 70%);
+  border: 1px solid rgba(34,211,238,0.35);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 10px rgba(0,0,0,0.45);
 }
 .vv-clap-strip {
   position: absolute; left: 4px; right: 4px; bottom: 4px; height: 7px; border-radius: 2px;
   opacity: 0.85;
-  background: repeating-linear-gradient(90deg, rgba(251,191,36,0.85) 0 4px, rgba(18,21,31,0.9) 4px 8px);
+  background: repeating-linear-gradient(90deg, rgba(34,211,238,0.85) 0 4px, rgba(13,13,20,0.9) 4px 8px);
   animation: vv-filmroll 2.4s linear infinite;
 }
 @keyframes vv-filmroll { to { background-position: 16px 0; } }
 
 /* ===== Ads Studio: pulsing target + orbiting spark ===== */
 .vv-art-ads { display: flex; align-items: center; justify-content: center; }
-.vv-ads-ring { position: absolute; border-radius: 9999px; border: 1.5px solid rgba(251,113,133,0.55); }
+.vv-ads-ring { position: absolute; border-radius: 9999px; border: 1.5px solid rgba(251,191,36,0.55); }
 .vv-ads-ring-outer { inset: 2px; animation: vv-ads-pulse 3.2s ease-in-out infinite; }
-.vv-ads-ring-mid { inset: 11px; border-color: rgba(253,164,175,0.6); animation: vv-ads-pulse 3.2s ease-in-out infinite; animation-delay: 0.5s; }
+.vv-ads-ring-mid { inset: 11px; border-color: rgba(252,211,77,0.6); animation: vv-ads-pulse 3.2s ease-in-out infinite; animation-delay: 0.5s; }
 @keyframes vv-ads-pulse {
   0%, 100% { transform: scale(1); opacity: 0.55; }
   50% { transform: scale(1.08); opacity: 1; }
@@ -621,33 +624,33 @@ const LAUNCHER_CSS = `
 .vv-ads-core {
   position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px;
   border-radius: 9999px;
-  background: radial-gradient(circle at 38% 32%, #fda4af 0%, #f43f5e 55%, #7f1d1d 100%);
-  box-shadow: 0 0 12px rgba(244,63,94,0.7);
+  background: radial-gradient(circle at 38% 32%, #fde68a 0%, #fbbf24 55%, #78350f 100%);
+  box-shadow: 0 0 12px rgba(251,191,36,0.7);
   animation: vv-ads-pulse 3.2s ease-in-out infinite; animation-delay: 1s;
 }
 .vv-ads-orbit { position: absolute; inset: -2px; animation: vv-spin 7s linear infinite; }
 .vv-ads-sat {
   position: absolute; top: -2px; left: 50%; width: 6px; height: 6px; margin-left: -3px;
-  border-radius: 9999px; background: #fecdd3;
-  box-shadow: 0 0 8px rgba(253,164,175,0.9);
+  border-radius: 9999px; background: #fde68a;
+  box-shadow: 0 0 8px rgba(252,211,77,0.9);
 }
 
 /* ===== MotionVerger: rising launch bolt ===== */
 .vv-art-launch { display: flex; align-items: center; justify-content: center; }
 .vv-launch-bolt {
-  position: relative; width: 30px; height: 30px; color: #bbf7d0;
-  filter: drop-shadow(0 0 9px rgba(34,197,94,0.85));
+  position: relative; width: 30px; height: 30px; color: #bae6fd;
+  filter: drop-shadow(0 0 9px rgba(56,189,248,0.85));
   animation: vv-launch-rise 3s ease-in-out infinite;
 }
 @keyframes vv-launch-rise { 0%, 100% { transform: translateY(3px); } 50% { transform: translateY(-4px); } }
 .vv-launch-glow {
   position: absolute; inset: 4px; border-radius: 9999px;
-  background: radial-gradient(circle, rgba(34,197,94,0.38), transparent 70%);
+  background: radial-gradient(circle, rgba(56,189,248,0.38), transparent 70%);
   animation: vv-ads-pulse 3s ease-in-out infinite;
 }
 .vv-launch-streak {
   position: absolute; width: 2px; height: 12px; border-radius: 2px;
-  background: rgba(187,247,208,0.8);
+  background: rgba(186,230,253,0.8);
   animation: vv-launch-streak 2.2s linear infinite;
 }
 .vv-launch-streak-a { left: 9px; animation-delay: 0s; }
@@ -662,9 +665,9 @@ const LAUNCHER_CSS = `
 .vv-art-faceless { display: flex; align-items: center; justify-content: center; }
 .vv-faceless-frame {
   position: absolute; inset: 6px 2px; border-radius: 8px; overflow: hidden;
-  border: 1.5px solid rgba(147,197,253,0.55);
-  background: linear-gradient(160deg, rgba(59,130,246,0.30), rgba(5,10,24,0.95) 70%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 4px 12px rgba(59,130,246,0.30);
+  border: 1.5px solid rgba(253,230,138,0.55);
+  background: linear-gradient(160deg, rgba(252,211,77,0.30), rgba(5,5,8,0.95) 70%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 4px 12px rgba(252,211,77,0.30);
 }
 .vv-faceless-wave {
   position: absolute; left: 7px; right: 7px; bottom: 9px; height: 20px;
@@ -672,13 +675,13 @@ const LAUNCHER_CSS = `
 }
 .vv-faceless-bar {
   width: 3px; border-radius: 2px; height: 30%;
-  background: linear-gradient(180deg, #bfdbfe, #3b82f6);
+  background: linear-gradient(180deg, #fde68a, #fcd34d);
   animation: vv-faceless-bar 1.6s ease-in-out infinite;
 }
 @keyframes vv-faceless-bar { 0%, 100% { height: 22%; } 50% { height: 100%; } }
 .vv-faceless-scan {
   position: absolute; left: 0; right: 0; top: -32%; height: 32%;
-  background: linear-gradient(180deg, transparent, rgba(147,197,253,0.32), transparent);
+  background: linear-gradient(180deg, transparent, rgba(253,230,138,0.32), transparent);
   animation: vv-faceless-scan 3.6s ease-in-out infinite;
 }
 @keyframes vv-faceless-scan { 0%, 12% { top: -32%; } 62%, 100% { top: 108%; } }

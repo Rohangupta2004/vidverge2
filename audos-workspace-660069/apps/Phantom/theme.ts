@@ -4,10 +4,10 @@
  * Two deliberate differences from the rest of the space, both of them product
  * decisions rather than drift:
  *
- *   1. The canvas is a literal premium dark (#111) instead of the shell's
- *      --space-surface-* variables, because Vergeye is a research surface the
- *      customer exports screenshots out of and the export has to look the same
- *      everywhere it is pasted.
+ *   1. The canvas is a literal hex of the Vidverge dark-cosmic ground rather
+ *      than the shell's --space-surface-* variables, because Vergeye is a
+ *      research surface the customer exports screenshots out of and the export
+ *      has to look the same everywhere it is pasted.
  *   2. The accent is DATA, not a token. It is read off the customer's own
  *      website in Screen 1 and threaded through every surface from there, so
  *      the comparison table and the generated video wear their brand, not ours.
@@ -21,24 +21,24 @@
  * that survives the capture.
  */
 
-export const INK = '#111111';
-export const INK_DEEP = '#0c0c0e';
-export const PANEL = '#17171b';
-export const CARD = '#1a1a20';
-export const CARD_HI = '#212128';
-export const LINE = 'rgba(255,255,255,0.08)';
-export const LINE_HI = 'rgba(255,255,255,0.17)';
-export const TEXT = '#f5f5f7';
-export const TEXT_DIM = '#c4c4ce';
-export const TEXT_MUTED = '#8b8b99';
-export const DANGER = '#f87171';
-export const SUCCESS = '#4ade80';
-export const WARN = '#fbbf24';
+export const INK = '#FFFDF4';
+export const INK_DEEP = '#FFFAEB';
+export const PANEL = '#FFF3D6';
+export const CARD = '#FFFFFF';
+export const CARD_HI = '#FFFAEB';
+export const LINE = 'rgba(180,120,0,0.14)';
+export const LINE_HI = 'rgba(180,120,0,0.36)';
+export const TEXT = '#1A1000';
+export const TEXT_DIM = '#3D2800';
+export const TEXT_MUTED = '#7A6030';
+export const DANGER = '#991B1B';
+export const SUCCESS = '#166534';
+export const WARN = '#B45309';
 
 export const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
 /** The workspace's own brand primary, so a fresh Vergeye matches the shell. */
-export const DEFAULT_ACCENT = '#f59e0b';
+export const DEFAULT_ACCENT = '#C8920A';
 
 export function normalizeHex(value: unknown): string {
   const raw = String(value == null ? '' : value).trim().toLowerCase();
@@ -101,7 +101,7 @@ export function tileColor(name: unknown): string {
   const text = String(name == null ? '' : name);
   let hash = 0;
   for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) % 360;
-  const palette = ['#60a5fa', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '#f87171', '#22d3ee', '#c084fc'];
+  const palette = ['#1D4ED8', '#C8920A', '#9D2667', '#166534', '#B4720A', '#991B1B', '#8A5A00', '#B45309'];
   return palette[hash % palette.length];
 }
 
@@ -126,9 +126,10 @@ export const SPIN_CSS = `
 .vergeye-app button, .vergeye-app a { transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, opacity 0.16s ease; }
 .vergeye-app button:active:not(:disabled) { transform: scale(0.975); }
 .vergeye-app input:focus, .vergeye-app textarea:focus { outline: none; }
-.vergeye-scroll::-webkit-scrollbar { height: 9px; width: 9px; }
-.vergeye-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.16); border-radius: 999px; }
-.vergeye-scroll::-webkit-scrollbar-track { background: transparent; }
+.vergeye-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+.vergeye-scroll::-webkit-scrollbar-thumb { background: rgba(200,146,10,0.4); border-radius: 999px; }
+.vergeye-scroll::-webkit-scrollbar-thumb:hover { background: rgba(200,146,10,0.7); }
+.vergeye-scroll::-webkit-scrollbar-track { background: #FFF3D6; }
 @media (prefers-reduced-motion: reduce) {
   .vergeye-app *, .vergeye-app *::before, .vergeye-app *::after { animation: none !important; transition-duration: 0.01ms !important; }
 }
@@ -136,6 +137,5 @@ export const SPIN_CSS = `
   .vergeye-crumbs { overflow-x: auto; }
   .vergeye-hero-input { flex-direction: column !important; align-items: stretch !important; }
   .vergeye-two-col { grid-template-columns: 1fr !important; }
-  .vergeye-pad { padding: 18px 14px 56px !important; }
 }
 `;

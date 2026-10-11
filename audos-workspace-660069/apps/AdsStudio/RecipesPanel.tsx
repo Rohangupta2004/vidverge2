@@ -42,7 +42,7 @@ const RECIPES_CSS = `
 .rx-rise { animation: rx-rise .36s cubic-bezier(.22,.9,.3,1) both; }
 .rx-skeleton { animation: rx-pulse 1.5s ease-in-out infinite; }
 .rx-card { transition: transform .22s cubic-bezier(.22,.9,.3,1), box-shadow .22s ease, border-color .22s ease; }
-.rx-card:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(0,0,0,.4); }
+.rx-card:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(120,80,0,.12); }
 .rx-tab { transition: color .22s ease; }
 .rx-tab:active { transform: scale(.97); }
 @media (prefers-reduced-motion: reduce) {
@@ -136,7 +136,7 @@ function SavedVideos({ onUseVideo }: { onUseVideo: RecipesPanelProps['onUseVideo
 
       {error ? (
         <div className="rx-rise" style={{ ...card, borderColor: T.bad, marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 10, background: 'rgba(244,63,94,.14)', flexShrink: 0 }}><AlertTriangle size={16} color={T.bad} /></span>
+          <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 10, background: 'rgba(153,27,27,.1)', flexShrink: 0 }}><AlertTriangle size={16} color={T.bad} /></span>
           <span style={{ minWidth: 0, flex: 1 }}>
             <span style={{ display: 'block', color: T.ink, fontSize: 14, fontWeight: 700 }}>The video library could not be read</span>
             <span style={{ display: 'block', marginTop: 4, color: T.muted, fontSize: 13, lineHeight: 1.55 }}>{error}</span>

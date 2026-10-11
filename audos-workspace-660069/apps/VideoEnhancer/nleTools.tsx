@@ -34,9 +34,9 @@ function Pill(props: { active: boolean; disabled?: boolean; onClick: () => void;
       title={props.title}
       className="nle-btn"
       style={{
-        background: props.active ? LB.accent : 'rgba(255,255,255,0.05)',
+        background: props.active ? LB.accent : 'rgba(180,120,0,0.06)',
         color: props.active ? '#241503' : LB.textSecondary,
-        border: props.active ? '1px solid transparent' : '1px solid rgba(255,255,255,0.1)',
+        border: props.active ? '1px solid transparent' : '1px solid rgba(180,120,0,0.14)',
         borderRadius: 999, padding: '6px 12px', fontSize: 12, fontWeight: 650, cursor: 'pointer',
       }}
     >
@@ -81,7 +81,7 @@ function ToolButton(props: { emoji: string; label: string; hint: string; busy?: 
       onClick={props.onClick}
       disabled={props.busy || props.disabled}
       className="nle-btn"
-      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: props.accent ? 'rgba(245,158,11,0.12)' : 'rgba(255,255,255,0.05)', border: props.accent ? '1px solid rgba(245,158,11,0.4)' : '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '10px 12px', cursor: props.disabled ? 'default' : 'pointer', opacity: props.disabled ? 0.5 : 1 }}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: props.accent ? 'rgba(200,146,10,0.12)' : 'rgba(180,120,0,0.06)', border: props.accent ? '1px solid rgba(200,146,10,0.4)' : '1px solid rgba(180,120,0,0.14)', borderRadius: 10, padding: '10px 12px', cursor: props.disabled ? 'default' : 'pointer', opacity: props.disabled ? 0.5 : 1 }}
     >
       <span style={{ fontSize: 16 }}>{props.emoji}</span>
       <span style={{ minWidth: 0 }}>
@@ -189,7 +189,7 @@ export function AiToolsPanel(props: {
                 className="nle-input"
                 style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
               />
-              <button className="nle-btn" disabled={!transcript.trim() || !props.hasFootage} onClick={() => props.onCaptions(transcript)} style={{ marginTop: 6, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: LB.textSecondary, borderRadius: 8, padding: '7px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>
+              <button className="nle-btn" disabled={!transcript.trim() || !props.hasFootage} onClick={() => props.onCaptions(transcript)} style={{ marginTop: 6, background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.14)', color: LB.textSecondary, borderRadius: 8, padding: '7px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>
                 Estimate captions from pasted text
               </button>
             </div>
@@ -227,12 +227,12 @@ export function AiToolsPanel(props: {
         <div style={{ marginTop: 12, background: LB.bgDeep, border: LB.border, borderRadius: 10, padding: '10px 12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ color: LB.textPrimary, fontSize: 12, fontWeight: 600 }}>{a.subject || 'Frame analyzed'}</span>
-            {a.mood ? <span style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: LB.accent, borderRadius: 999, padding: '2px 10px', fontSize: 10.5, fontWeight: 700 }}>{a.mood}</span> : null}
+            {a.mood ? <span style={{ background: 'rgba(200,146,10,0.14)', border: '1px solid rgba(200,146,10,0.4)', color: LB.accent, borderRadius: 999, padding: '2px 10px', fontSize: 10.5, fontWeight: 700 }}>{a.mood}</span> : null}
           </div>
           {a.dominantColors.length ? (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center' }}>
               {a.dominantColors.map((cHex, i) => (
-                <span key={i} title={cHex} style={{ width: 20, height: 20, borderRadius: 6, background: cHex, border: '1px solid rgba(255,255,255,0.25)' }} />
+                <span key={i} title={cHex} style={{ width: 20, height: 20, borderRadius: 6, background: cHex, border: '1px solid rgba(180,120,0,0.28)' }} />
               ))}
               <span style={{ color: LB.textMuted, fontSize: 10.5, marginLeft: 4 }}>{a.lightingStyle}{a.backgroundType ? ` · ${a.backgroundType}` : ''}</span>
             </div>
@@ -249,7 +249,7 @@ export function AiToolsPanel(props: {
                       className="nle-btn"
                       onClick={() => props.onApplySuggestion(s)}
                       title={done ? 'Applied — click again to re-apply' : 'One click applies this fix to the edit'}
-                      style={{ background: done ? 'rgba(74,222,128,0.12)' : 'rgba(245,158,11,0.10)', border: done ? '1px solid rgba(74,222,128,0.4)' : '1px solid rgba(245,158,11,0.35)', color: done ? '#4ade80' : '#fcd34d', borderRadius: 999, padding: '4px 11px', fontSize: 10.5, cursor: 'pointer', textAlign: 'left' }}
+                      style={{ background: done ? 'rgba(22,101,52,0.12)' : 'rgba(200,146,10,0.10)', border: done ? '1px solid rgba(22,101,52,0.4)' : '1px solid rgba(200,146,10,0.35)', color: done ? '#166534' : '#B4720A', borderRadius: 999, padding: '4px 11px', fontSize: 10.5, cursor: 'pointer', textAlign: 'left' }}
                     >
                       {done ? '✓ ' : '⚡ '}{s}
                     </button>
@@ -322,7 +322,7 @@ export function PropertiesPanel(props: {
               <Pill key={p} active={g.position === p} onClick={() => props.onGraphicChange(g.id, { position: p })}>{p}</Pill>
             ))}
           </div>
-          <button className="nle-btn" onClick={() => props.onGraphicDelete(g.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 12, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.35)', color: '#f87171', borderRadius: 8, padding: '7px 13px', fontSize: 11.5, fontWeight: 650, cursor: 'pointer' }}>
+          <button className="nle-btn" onClick={() => props.onGraphicDelete(g.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 12, background: 'rgba(153,27,27,0.09)', border: '1px solid rgba(153,27,27,0.35)', color: '#991B1B', borderRadius: 8, padding: '7px 13px', fontSize: 11.5, fontWeight: 650, cursor: 'pointer' }}>
             <Trash2 size={12} /> Remove graphic
           </button>
         </>
@@ -330,10 +330,10 @@ export function PropertiesPanel(props: {
         <>
           {/* —— selected CLIP —— */}
           <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-            <button className="nle-btn" disabled={!props.canSplit} onClick={props.onSplit} title="Cut the selected clip in two at the playhead" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: LB.accent, borderRadius: 8, padding: '7px 13px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
+            <button className="nle-btn" disabled={!props.canSplit} onClick={props.onSplit} title="Cut the selected clip in two at the playhead" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(200,146,10,0.12)', border: '1px solid rgba(200,146,10,0.4)', color: LB.accent, borderRadius: 8, padding: '7px 13px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
               <Scissors size={12} /> Split at playhead
             </button>
-            <button className="nle-btn" onClick={() => props.onDeleteClip(c.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.35)', color: '#f87171', borderRadius: 8, padding: '7px 13px', fontSize: 11.5, fontWeight: 650, cursor: 'pointer' }}>
+            <button className="nle-btn" onClick={() => props.onDeleteClip(c.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(153,27,27,0.09)', border: '1px solid rgba(153,27,27,0.35)', color: '#991B1B', borderRadius: 8, padding: '7px 13px', fontSize: 11.5, fontWeight: 650, cursor: 'pointer' }}>
               <Trash2 size={12} /> Delete clip
             </button>
           </div>
@@ -426,7 +426,7 @@ export function PropertiesPanel(props: {
           className="nle-btn"
           disabled={musicPrompt.trim().length < 10 || props.musicGenBusy}
           onClick={() => props.onGenerateMusic(musicPrompt.trim())}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.4)', color: '#34d399', borderRadius: 8, padding: '7px 13px', fontSize: 11.5, fontWeight: 650, cursor: 'pointer' }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6, background: 'rgba(22,101,52,0.12)', border: '1px solid rgba(22,101,52,0.4)', color: '#166534', borderRadius: 8, padding: '7px 13px', fontSize: 11.5, fontWeight: 650, cursor: 'pointer' }}
         >
           {props.musicGenBusy ? <Loader2 size={12} className="animate-spin" /> : <Clapperboard size={12} />} Generate with ElevenLabs
         </button>

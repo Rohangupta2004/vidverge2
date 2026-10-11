@@ -404,7 +404,7 @@ export default function MotionPreview({
     return (
       <div
         ref={boxRef}
-        style={{ width: '100%', aspectRatio: `${ratio}`, borderRadius: 16, background: '#0A0F1E', border: '1px solid rgba(255,255,255,0.08)' }}
+        style={{ width: '100%', aspectRatio: `${ratio}`, borderRadius: 16, background: '#FFFAEB', border: '1px solid rgba(180,120,0,0.14)' }}
       />
     );
   }
@@ -427,7 +427,7 @@ export default function MotionPreview({
           borderRadius: 16,
           overflow: 'hidden',
           background: plan.brand.background,
-          border: '1px solid rgba(255,255,255,0.1)',
+          border: '1px solid rgba(180,120,0,0.14)',
           fontFamily: plan.brand.font,
         }}
         data-testid="motion-preview"
@@ -481,7 +481,7 @@ export default function MotionPreview({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: 'rgba(4,10,20,0.55)',
+              background: 'rgba(26,16,0,0.55)',
               backdropFilter: 'blur(2px)',
               color: '#fff',
               fontSize: 14,
@@ -512,9 +512,9 @@ export default function MotionPreview({
             height: 40,
             flexShrink: 0,
             borderRadius: 10,
-            border: '1px solid rgba(255,255,255,0.16)',
-            background: 'rgba(255,255,255,0.05)',
-            color: '#fff',
+            border: '1px solid rgba(180,120,0,0.36)',
+            background: 'rgba(180,120,0,0.06)',
+            color: '#1A1000',
             cursor: 'pointer',
           }}
         >
@@ -534,7 +534,7 @@ export default function MotionPreview({
           data-testid="motion-preview-scrub"
           style={{ flex: 1, accentColor: plan.brand.primary || '#2563eb' }}
         />
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', minWidth: 74, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ fontSize: 12, color: '#7A6030', minWidth: 74, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
           {time.toFixed(1)}s / {duration.toFixed(0)}s
         </span>
       </div>

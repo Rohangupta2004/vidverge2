@@ -218,7 +218,7 @@ export default function App() {
               {toolsOpen ? (
                 <>
                   <div onClick={() => setToolsOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
-                  <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 41, minWidth: 300, background: 'var(--space-surface-panel-strong)', border: '1px solid var(--space-border-default)', borderRadius: 12, padding: 6, boxShadow: '0 18px 44px rgba(0,0,0,0.45)' }}>
+                  <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 41, minWidth: 300, background: 'var(--space-surface-panel-strong)', border: '1px solid var(--space-border-default)', borderRadius: 12, padding: 6, boxShadow: '0 18px 44px rgba(120,80,0,0.12)' }}>
                     <div style={{ padding: '7px 12px 5px', fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--space-text-muted)' }}>Workflow tools</div>
                     {STUDIO_TOOLS.map((t) => {
                       const Icon = t.icon;

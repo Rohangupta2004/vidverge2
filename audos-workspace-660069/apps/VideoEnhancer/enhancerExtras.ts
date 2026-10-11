@@ -453,7 +453,7 @@ export function drawWaveform(
     const bucket = Math.min(peaks.length - 1, Math.floor((x / w) * peaks.length));
     const amp = Math.max(0.02, Math.min(1, peaks[bucket] * 1.6));
     const bh = Math.max(1, amp * (h - 6));
-    ctx.fillStyle = inCut(tt) ? 'rgba(248,113,113,0.85)' : 'rgba(96,165,250,0.85)';
+    ctx.fillStyle = inCut(tt) ? 'rgba(153,27,27,0.85)' : 'rgba(29,78,216,0.85)';
     ctx.fillRect(x, mid - bh / 2, 1, bh);
   }
 }

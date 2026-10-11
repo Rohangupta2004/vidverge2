@@ -14,9 +14,11 @@
  *   · a phone layout: scrollable tabs, full-width preview, and a bottom-sheet
  *     drawer instead of a side panel
  *
- * Design tokens live in VE below (dark #0F0F0F canvas, #1A1A1A cards, #2A2A2A
- * borders, violet #7C3AED accent, Inter 14px, 12px cards / 8px buttons, 44px
- * minimum tap target) and every surface in this file reads from them.
+ * Design tokens live in VE below and mirror the shared Vidverge warm-gold
+ * palette (components/theme.ts): #FFFDF4 canvas, #FFFFFF cards, gold
+ * hairline borders, #C8920A accent with a deep-gold secondary, Inter 14px, 16px
+ * cards / 8px buttons, 44px minimum tap target. Every surface here reads from
+ * them.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
@@ -32,24 +34,27 @@ import type { StudioPreset } from './studioPresets';
 // ---------------------------------------------------------------------------
 
 export const VE = {
-  bg: '#0F0F0F',
-  card: '#1A1A1A',
-  cardSoft: '#141414',
-  border: '#2A2A2A',
-  accent: '#7C3AED',
-  accentHover: '#8B5CF6',
-  accentSoft: 'rgba(124,58,237,0.16)',
-  accentLine: 'rgba(124,58,237,0.45)',
-  text: '#FFFFFF',
-  textSecondary: 'rgba(255,255,255,0.72)',
-  textMuted: 'rgba(255,255,255,0.46)',
-  good: '#22C55E',
-  goodSoft: 'rgba(34,197,94,0.14)',
-  bad: '#F87171',
-  badSoft: 'rgba(248,113,113,0.12)',
+  bg: '#FFFDF4',
+  card: '#FFFFFF',
+  cardSoft: '#FFFAEB',
+  border: 'rgba(180,120,0,0.14)',
+  borderHover: 'rgba(180,120,0,0.36)',
+  accent: '#C8920A',
+  accentHover: '#E8B737',
+  accentSoft: 'rgba(200,146,10,0.12)',
+  accentLine: 'rgba(200,146,10,0.45)',
+  cyan: '#B4720A',
+  cyanBright: '#E0A33A',
+  text: '#1A1000',
+  textSecondary: '#3D2800',
+  textMuted: '#7A6030',
+  good: '#166534',
+  goodSoft: 'rgba(22,101,52,0.12)',
+  bad: '#991B1B',
+  badSoft: 'rgba(153,27,27,0.12)',
   font: "'Inter', system-ui, -apple-system, sans-serif",
   size: 14,
-  radiusCard: 12,
+  radiusCard: 16,
   radiusBtn: 8,
   tap: 44,
 } as const;
@@ -59,8 +64,10 @@ export const tapTarget: CSSProperties = { minHeight: VE.tap, minWidth: VE.tap };
 
 export const vePrimary: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-  background: VE.accent, color: '#FFFFFF', border: 'none', borderRadius: VE.radiusBtn,
+  background: `linear-gradient(135deg, ${VE.accent} 0%, ${VE.cyan} 100%)`,
+  color: '#FFFFFF', border: 'none', borderRadius: VE.radiusBtn,
   padding: '0 18px', minHeight: VE.tap, fontSize: VE.size, fontWeight: 700,
+  boxShadow: '0 0 24px rgba(200,146,10,0.25)',
   cursor: 'pointer', fontFamily: VE.font,
 };
 
@@ -97,7 +104,7 @@ export const GUIDE_CSS = `
   from { background-position: 0 0, 0 100%, 0 0, 100% 0; }
   to   { background-position: 28px 0, -28px 100%, 0 -28px, 100% 28px; }
 }
-.ve-drop-hot { background-color: rgba(124,58,237,0.10); }
+.ve-drop-hot { background-color: rgba(200,146,10,0.10); }
 .ve-scroll-x { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
 .ve-scroll-x::-webkit-scrollbar { display: none; }
 @keyframes ve-rise { from { transform: translateY(14px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -165,7 +172,7 @@ export function GuidedEmptyState(props: {
         style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 12, minHeight: 300, padding: '36px 20px', textAlign: 'center', cursor: 'pointer',
-          background: hot ? 'rgba(124,58,237,0.10)' : VE.card,
+          background: hot ? 'rgba(200,146,10,0.10)' : VE.card,
         }}
       >
         <span
@@ -187,7 +194,7 @@ export function GuidedEmptyState(props: {
         {active ? (
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 2,
-            background: VE.accentSoft, border: `1px solid ${VE.accentLine}`, color: '#C4B5FD',
+            background: VE.accentSoft, border: `1px solid ${VE.accentLine}`, color: '#B4720A',
             borderRadius: 999, padding: '6px 14px', fontSize: 13, fontWeight: 700,
           }}>
             <Check size={14} /> {active.label} style is ready
@@ -299,7 +306,7 @@ export function StepRail(props: {
               borderRadius: VE.radiusBtn, fontFamily: VE.font, fontSize: 13.5, fontWeight: 700,
               border: `1px solid ${on ? VE.accentLine : 'transparent'}`,
               background: on ? VE.accentSoft : 'transparent',
-              color: on ? '#C4B5FD' : complete ? VE.textSecondary : VE.textMuted,
+              color: on ? '#B4720A' : complete ? VE.textSecondary : VE.textMuted,
             }}
           >
             <span
@@ -307,7 +314,7 @@ export function StepRail(props: {
               style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 width: 22, height: 22, borderRadius: 999, fontSize: 11.5, fontWeight: 800,
-                background: complete ? VE.good : on ? VE.accent : 'rgba(255,255,255,0.08)',
+                background: complete ? VE.good : on ? VE.accent : 'rgba(180,120,0,0.14)',
                 color: complete || on ? '#FFFFFF' : VE.textMuted,
               }}
             >
@@ -337,9 +344,9 @@ export function StepBottomBar(props: {
       style={{
         position: 'sticky', bottom: 0, zIndex: 20, display: 'flex', alignItems: 'center',
         gap: 12, flexWrap: 'wrap', padding: '10px 14px', marginTop: 4,
-        background: 'rgba(15,15,15,0.96)', borderTop: `1px solid ${VE.border}`,
+        background: 'rgba(255,255,255,0.96)', borderTop: `1px solid ${VE.border}`,
         borderRadius: `${VE.radiusCard}px ${VE.radiusCard}px 0 0`,
-        boxShadow: '0 -10px 28px rgba(0,0,0,0.45)', fontFamily: VE.font,
+        boxShadow: '0 -10px 28px rgba(120,80,0,0.14)', fontFamily: VE.font,
       }}
     >
       <span style={{ color: VE.textMuted, fontSize: 12, fontWeight: 700, letterSpacing: '0.04em' }}>
@@ -403,7 +410,7 @@ export function StylePresetRow(props: {
                 borderRadius: 999, fontFamily: VE.font, fontSize: 13.5, fontWeight: 700,
                 border: `1px solid ${on ? VE.accentLine : VE.border}`,
                 background: on ? VE.accentSoft : VE.card,
-                color: on ? '#C4B5FD' : VE.textSecondary,
+                color: on ? '#B4720A' : VE.textSecondary,
               }}
             >
               <span aria-hidden style={{ fontSize: 16 }}>{preset.emoji}</span>
@@ -435,7 +442,7 @@ export function AiSuggestBar(props: {
         background: VE.accentSoft, border: `1px solid ${VE.accentLine}`, fontFamily: VE.font,
       }}
     >
-      <span style={{ color: '#DDD6FE', fontSize: 13.5, lineHeight: 1.5, flex: 1, minWidth: 180 }}>
+      <span style={{ color: '#B4720A', fontSize: 13.5, lineHeight: 1.5, flex: 1, minWidth: 180 }}>
         <span aria-hidden>✨</span> AI suggests: {props.sentence}
       </span>
       <button
@@ -473,8 +480,8 @@ export function UpdatingPill({ show }: { show: boolean }) {
       style={{
         position: 'absolute', top: 10, left: 10, zIndex: 6,
         display: 'inline-flex', alignItems: 'center', gap: 7,
-        background: 'rgba(15,15,15,0.86)', border: `1px solid ${VE.accentLine}`,
-        color: '#DDD6FE', borderRadius: 999, padding: '5px 11px',
+        background: 'rgba(255,255,255,0.9)', border: `1px solid ${VE.accentLine}`,
+        color: '#B4720A', borderRadius: 999, padding: '5px 11px',
         fontSize: 12, fontWeight: 650, fontFamily: VE.font, pointerEvents: 'none',
       }}
     >
@@ -518,7 +525,7 @@ export function ExportProgress(props: { progress: number; etaS: number; stage: s
         </span>
         <span style={{ marginLeft: 'auto', color: VE.textMuted, fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>{pct}%</span>
       </div>
-      <div style={{ height: 10, borderRadius: 999, background: 'rgba(255,255,255,0.07)', overflow: 'hidden', marginTop: 8 }}>
+      <div style={{ height: 10, borderRadius: 999, background: 'rgba(180,120,0,0.14)', overflow: 'hidden', marginTop: 8 }}>
         <div
           className="vs-progress"
           style={{ width: `${pct}%`, height: '100%', background: VE.accent, borderRadius: 999, transition: 'width .8s ease' }}
@@ -539,10 +546,10 @@ export function ExportReady(props: {
       className="ve-rise"
       style={{
         marginTop: 12, padding: 16, borderRadius: VE.radiusCard, fontFamily: VE.font,
-        background: VE.goodSoft, border: `1px solid rgba(34,197,94,0.4)`,
+        background: VE.goodSoft, border: `1px solid rgba(22,101,52,0.4)`,
       }}
     >
-      <div style={{ color: '#86EFAC', fontSize: 19, fontWeight: 800, letterSpacing: '-0.01em' }}>
+      <div style={{ color: '#166534', fontSize: 19, fontWeight: 800, letterSpacing: '-0.01em' }}>
         <span aria-hidden>✅</span> Video Ready!
       </div>
       <div style={{ color: VE.textSecondary, fontSize: 13, lineHeight: 1.55, marginTop: 5 }}>
@@ -603,7 +610,7 @@ export function BottomSheet(props: {
       aria-modal="true"
       aria-label={props.title}
       onClick={props.onClose}
-      style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(26,16,0,0.35)', display: 'flex', alignItems: 'flex-end' }}
     >
       <div
         className="ve-sheet"
@@ -730,8 +737,8 @@ export function ToastStack(props: { toasts: StudioToast[]; onDismiss: (id: strin
           style={{
             display: 'flex', alignItems: 'center', gap: 10, padding: '10px 10px 10px 14px',
             borderRadius: VE.radiusCard, background: VE.card,
-            border: `1px solid ${toast.tone === 'bad' ? 'rgba(248,113,113,0.45)' : toast.tone === 'good' ? 'rgba(34,197,94,0.45)' : VE.border}`,
-            boxShadow: '0 14px 34px rgba(0,0,0,0.55)',
+            border: `1px solid ${toast.tone === 'bad' ? 'rgba(153,27,27,0.45)' : toast.tone === 'good' ? 'rgba(22,101,52,0.45)' : VE.border}`,
+            boxShadow: '0 14px 34px rgba(120,80,0,0.16)',
           }}
         >
           {toast.tone === 'bad' ? <AlertCircle size={16} color={VE.bad} style={{ flexShrink: 0 }} /> : null}
@@ -744,7 +751,7 @@ export function ToastStack(props: { toasts: StudioToast[]; onDismiss: (id: strin
               onClick={() => { toast.onAction?.(); props.onDismiss(toast.id); }}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6, background: 'transparent',
-                border: 'none', color: '#C4B5FD', fontWeight: 800, fontSize: 13.5,
+                border: 'none', color: '#B4720A', fontWeight: 800, fontSize: 13.5,
                 cursor: 'pointer', minHeight: 40, padding: '0 10px', fontFamily: VE.font,
               }}
             >
@@ -774,13 +781,13 @@ export function FriendlyError(props: { message: string; onRetry?: () => void; on
       style={{
         display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
         padding: '10px 10px 10px 14px', borderRadius: VE.radiusCard, fontFamily: VE.font,
-        background: VE.badSoft, border: '1px solid rgba(248,113,113,0.38)',
+        background: VE.badSoft, border: '1px solid rgba(153,27,27,0.38)',
       }}
     >
       <AlertCircle size={16} color={VE.bad} style={{ flexShrink: 0 }} />
-      <span style={{ flex: 1, minWidth: 180, color: '#FCA5A5', fontSize: 13.5, lineHeight: 1.55 }}>{props.message}</span>
+      <span style={{ flex: 1, minWidth: 180, color: '#991B1B', fontSize: 13.5, lineHeight: 1.55 }}>{props.message}</span>
       {props.onRetry ? (
-        <button type="button" className="ve-tap" onClick={props.onRetry} style={{ ...veGhost, minHeight: 40, color: '#FCA5A5', borderColor: 'rgba(248,113,113,0.4)' }}>
+        <button type="button" className="ve-tap" onClick={props.onRetry} style={{ ...veGhost, minHeight: 40, color: '#991B1B', borderColor: 'rgba(153,27,27,0.4)' }}>
           Try again
         </button>
       ) : null}
@@ -789,7 +796,7 @@ export function FriendlyError(props: { message: string; onRetry?: () => void; on
         className="ve-tap"
         aria-label="Dismiss"
         onClick={props.onDismiss}
-        style={{ background: 'transparent', border: 'none', color: '#FCA5A5', cursor: 'pointer', minHeight: 40, minWidth: 36, padding: 0 }}
+        style={{ background: 'transparent', border: 'none', color: '#991B1B', cursor: 'pointer', minHeight: 40, minWidth: 36, padding: 0 }}
       >
         <X size={15} />
       </button>

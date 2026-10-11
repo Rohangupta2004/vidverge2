@@ -27,18 +27,17 @@
  * proxy, and the final render runs server-side in the veh-render hook from the
  * same descriptors the preview used.
  *
- * The SceneForge and Vidverge Agent handoff contracts are preserved, and the
- * merged Product Video suite still lives behind the second mode tab.
+ * The SceneForge and Vidverge Agent handoff contracts are preserved. This app
+ * is now one focused professional editor; Product Video is not embedded here.
  */
 import { Component, Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  AlertCircle, Download, Loader2, Maximize, Pause, Play, Redo2, Rocket,
+  AlertCircle, Download, Loader2, Maximize, Pause, Play, Redo2,
   Scissors, Sparkles, Undo2, UploadCloud, Volume2, X,
 } from 'lucide-react';
 import { LB_SHIMMER_CSS } from '../../components/LightBeam';
-import ProductSuiteHeader from '../../components/ProductSuiteHeader';
-import ProductStudioApp from '../ProductStudio/App';
+import AppShell from '../../components/ui/AppShell';
 import RunwayStudio from '../../components/RunwayStudio';
 import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
 import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
@@ -51,13 +50,13 @@ import { fetchVideoAsFile, uploadVideo, workspaceToken } from './enhancerCore';
 import {
   ASPECTS, AspectId, Adjust, BrollSlot, CameraShake, CaptionSettings,
   ChromaKeyState, CropRect, EditCard, EditDoc, GradeId, LB, MAX_UPLOAD_BYTES,
-  MusicStyleId, Overlay, ResolutionId, ReframeState, SpeedRamp, STUDIO_FONTS_URL, StudioClip,
+  MusicStyleId, Overlay, RESOLUTIONS, ResolutionId, ReframeState, SpeedRamp, STUDIO_FONTS_URL, StudioClip,
   SubjectProfile, TextLayer, TransitionId, TRANSITIONS, VfxState, VideoOverlay, VisualEffectId,
   WordToken, ZoomCut, aspectRatio, buildSrt, captionsFromWords, clampN,
   clipLength, clipMotion, clipStart, cutSourceRanges, defaultChroma, defaultVfx, emptyDoc, fmtTimecode,
-  locate, mergeRanges, motionActive, newClip, newId, newOverlay, newTextLayer,
+  locate, mergeRanges, newClip, newId, newOverlay, newTextLayer,
   newVideoOverlay, outputDims, restoreSourceRanges, serialiseDoc,
-  sourceToTimeline, splitClipAt, timelineDuration, vfxActive,
+  sourceToTimeline, splitClipAt, timelineDuration,
 } from './studioModel';
 import { analyseAudio, fillerIds, removeWords, restoreWords, transcribeForStudio, type AudioAnalysis } from './studioTranscript';
 import {
@@ -66,7 +65,6 @@ import {
 } from './studioAgent';
 import { captureThumb, detectSubjectTrack, lowActionRegions, trackOverlaySubject } from './studioVision';
 import StudioStage from './studioStage';
-import StudioTimeline from './studioTimeline';
 import { BrollPanel, ChatPanel, CutPlanPanel, TranscriptPanel, type ChatMessage } from './studioPanels';
 import {
   ClipInspector, ExportInspector, LookInspector, OverlayInspector,
@@ -83,16 +81,14 @@ import {
 } from './studioPhase2';
 import { AiMusicPanel, ClipManagerPanel, StickyExportBar } from './studioPhase2Panels';
 import {
-  AiSuggestBar, FriendlyError, GUIDE_CSS, GuidedEmptyState, RailHost, STUDIO_STEPS,
-  StepBottomBar, StepRail, StylePresetRow, ToastStack, UpdatingPill, VE, copyLink,
+  FriendlyError, GUIDE_CSS, STUDIO_STEPS, ToastStack, VE, copyLink,
   useIsMobile, usePreviewPulse, useToasts, vePrimary,
 } from './studioGuide';
 import type { StepId } from './studioGuide';
 import {
-  SAMPLE_USES, STYLE_PRESETS, applyPreset, suggestedPreset, suggestionSentence,
+  STYLE_PRESETS, applyPreset,
 } from './studioPresets';
 import type { StudioPreset } from './studioPresets';
-import { HelpTip } from './uiControls';
 import { Clapperboard, Diamond } from 'lucide-react';
 import { WORKSPACE_UUID, clipFilterCss, keyframeAt } from './studioModel';
 import { PRO_CSS, PRO_FONTS_URL, type RunState } from './proUi';
@@ -145,20 +141,43 @@ const STUDIO_CSS = `
 .vs-btn, .ve-btn { transition: filter .15s ease, background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease; }
 .vs-btn:hover:not(:disabled), .ve-btn:hover:not(:disabled) { filter: brightness(1.15); }
 .vs-btn:disabled, .ve-btn:disabled { opacity: .5; cursor: default; }
-.vs-input:focus, .ve-input:focus { outline: none; border-color: rgba(245,158,11,0.55) !important; box-shadow: 0 0 0 3px rgba(245,158,11,0.12); }
+.vs-input:focus, .ve-input:focus { outline: none; border-color: rgba(200,146,10,0.55) !important; box-shadow: 0 0 0 3px rgba(200,146,10,0.18); }
 @keyframes vs-progress { 0% { background-position: 0 0; } 100% { background-position: 28px 0; } }
 .vs-progress { background-image: linear-gradient(45deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%, transparent); background-size: 28px 28px; animation: vs-progress .9s linear infinite; }
 .vs-rail::-webkit-scrollbar { width: 8px; }
-.vs-rail::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 8px; }
+.vs-rail::-webkit-scrollbar-thumb { background: rgba(180,120,0,0.22); border-radius: 8px; }
 ${LB_SHIMMER_CSS}
 ${GUIDE_CSS}
 /* Resizable timeline: the bottom grid row follows --ve-tl-h (auto when unset or collapsed). */
-.vp-root .vp-body { grid-template-rows: minmax(0, 1fr) var(--ve-tl-h, auto); }
+.vp-root .vp-body { grid-template-rows: minmax(0, 1fr) var(--ve-tl-h, auto); grid-template-columns: minmax(0, 1fr) !important; }
+.vp-root .vp-stagecol { grid-column: 1; grid-row: 1; min-height: 0; }
+.vp-root .vp-tl { grid-column: 1; grid-row: 2; }
+.vp-root .vp-side { display: none; }
+.vp-root .vp-side.open { display: flex; position: fixed; z-index: 82; top: 68px; right: 16px; bottom: 16px; width: min(460px, calc(100vw - 32px)); min-height: 0; border: 1px solid rgba(200,146,10,.24); border-radius: 18px; background: rgba(255,255,255,.96); backdrop-filter: blur(22px); box-shadow: 0 28px 90px rgba(120,80,0,.18),0 0 46px rgba(200,146,10,.08); overflow: hidden; }
+.vp-root .vp-drawerhead { flex:0 0 auto; display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(180,120,0,.14); background:linear-gradient(135deg,rgba(200,146,10,.12),rgba(255,255,255,.96)); }
+.vp-root .vp-drawerhead > span { display:grid; gap:2px; min-width:0; }
+.vp-root .vp-drawerhead b { color:#1A1000; font-size:13px; letter-spacing:.01em; }
+.vp-root .vp-drawerhead small { color:#7A6030; font-size:10.5px; }
+.vp-root .vp-drawerhead button { margin-left:auto; }
+.vp-root .vp-toolstack { display:flex; flex-direction:column; gap:0; border:1px solid rgba(180,120,0,.14); border-radius:12px; background:rgba(180,120,0,.04); overflow:visible; }
+.vp-root .vp-toolstack-head { display:flex; align-items:center; padding:10px 12px; border-bottom:1px solid rgba(180,120,0,.14); background:rgba(200,146,10,.07); }
+.vp-root .vp-toolstack-head span { display:grid; gap:2px; }
+.vp-root .vp-toolstack-head b { color:#B4720A; font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+.vp-root .vp-toolstack-head small { color:#7A6030; font-size:10px; }
+.vp-root .vp-toolstack-body { padding:10px; display:flex; flex-direction:column; gap:10px; }
+.vp-root .vp-aiimage { display:flex; flex-direction:column; padding:12px; border-radius:12px; border:1px solid rgba(200,146,10,.3); background:linear-gradient(145deg,rgba(200,146,10,.12),rgba(255,255,255,.9)); box-shadow:inset 0 1px 0 rgba(180,120,0,.06); }
+.vp-root .vp-aiimage-head { display:flex; align-items:center; gap:10px; margin-bottom:11px; }
+.vp-root .vp-aiimage-head span { display:grid; gap:2px; }
+.vp-root .vp-aiimage-head b { color:#B4720A; font-size:12px; }
+.vp-root .vp-aiimage-head small { color:#7A6030; font-size:10px; }
+.vp-root .vp-aiimage-head button { margin-left:auto; }
+.vp-root .vp-aiimage .vp-btn { margin-top:11px; }
+.vp-root .vp-drawerback { position: fixed; inset: 0; z-index: 81; border: 0; background: rgba(26,16,0,.35); backdrop-filter: blur(3px); cursor: default; }
 .vp-root .vp-body > .vp-stagecol, .vp-root .vp-body > .vp-side { min-height: 0; }
 .vp-root .vp-tl { min-height: 0; }
 .vp-root .vp-tl-grip { flex: 0 0 auto; height: 6px; cursor: ns-resize; touch-action: none; background: transparent; transition: background .15s ease; }
-.vp-root .vp-tl-grip:hover, .vp-root .vp-tl-grip[data-dragging="true"] { background: rgba(124,58,237,0.55); }
-@media (max-width: 900px) { .vp-root .vp-body { grid-template-rows: auto auto auto; } .vp-root .vp-tl-grip { display: none; } }
+.vp-root .vp-tl-grip:hover, .vp-root .vp-tl-grip[data-dragging="true"] { background: rgba(200,146,10,0.55); }
+@media (max-width: 900px) { .vp-root .vp-body { grid-template-rows: minmax(320px,1fr) auto; } .vp-root .vp-tl-grip { display: none; } .vp-root .vp-side.open { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: min(74vh, 680px); border-radius: 20px 20px 14px 14px; } }
 /* Icons in rails and track labels: never squeeze the icon or clip it off the left edge. */
 .vp-root .vp-trkhead { flex-basis: auto; width: auto; min-width: 76px; }
 .vp-root .vp-trkhead b { white-space: nowrap; }
@@ -303,6 +322,8 @@ function VideoStudio() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stageWrapRef = useRef<HTMLDivElement | null>(null);
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const toolsButtonRef = useRef<HTMLButtonElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const activeIndexRef = useRef(0);
   useEffect(() => { activeIndexRef.current = activeIndex; }, [activeIndex]);
@@ -314,6 +335,7 @@ function VideoStudio() {
   useEffect(() => { playingRef.current = isPlaying; }, [isPlaying]);
   const [volume, setVolume] = useState(1);
   const [playWithEffects, setPlayWithEffects] = useState(true);
+  const [previewFit, setPreviewFit] = useState<'fit' | 'fill'>('fit');
   const pendingSeek = useRef<number | null>(null);
   const mainAudioContextRef = useRef<AudioContext | null>(null);
   const mainGainRef = useRef<GainNode | null>(null);
@@ -374,14 +396,34 @@ function VideoStudio() {
   const isMobile = useIsMobile();
   const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
   const [step, setStep] = useState<StepId>('trim');
-  const [stepsTicked, setStepsTicked] = useState<Record<StepId, boolean>>({
-    trim: false, effects: false, captions: false, music: false, export: false,
-  });
   const [presetId, setPresetId] = useState('');
-  const [sampleId, setSampleId] = useState('');
-  const [suggestDismissed, setSuggestDismissed] = useState(false);
-  const [suggestApplied, setSuggestApplied] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  useEffect(() => {
+    if (!sheetOpen) return;
+    const drawer = drawerRef.current;
+    const opener = toolsButtonRef.current;
+    const frame = window.requestAnimationFrame(() => drawer?.focus());
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSheetOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !drawer) return;
+      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])'));
+      if (!focusable.length) { event.preventDefault(); drawer.focus(); return; }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === drawer)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === drawer)) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('keydown', onKey);
+      window.requestAnimationFrame(() => opener?.focus());
+    };
+  }, [sheetOpen]);
 
   // ---- effects sidebar -----------------------------------------------------
   const [fxTab, setFxTab] = useState<EffectsTabId>('overlays');
@@ -393,6 +435,11 @@ function VideoStudio() {
   const [omniProgress, setOmniProgress] = useState(0);
   const [omniError, setOmniError] = useState('');
   const [omniNote, setOmniNote] = useState('');
+  const [aiImageOpen, setAiImageOpen] = useState(false);
+  const [aiImagePrompt, setAiImagePrompt] = useState('');
+  const [aiImageModel, setAiImageModel] = useState<'gemini-3.1-flash-image' | 'dall-e-3'>('gemini-3.1-flash-image');
+  const [aiImageAt, setAiImageAt] = useState(0);
+  const [aiImageBusy, setAiImageBusy] = useState(false);
   const [captionsBusy, setCaptionsBusy] = useState(false);
   const [captionNote, setCaptionNote] = useState('');
   const captionRowRef = useRef<number | null>(null);
@@ -425,7 +472,6 @@ function VideoStudio() {
   const [proTab, setProTab] = useState<ProTabId>('effects');
   const [agentOpen, setAgentOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [tlCollapsed, setTlCollapsed] = useState(false);
   const [tlZoom, setTlZoom] = useState(1);
   // Timeline height in px; 0 means "auto" (the natural height of the tracks).
@@ -705,7 +751,7 @@ function VideoStudio() {
     }
   }, [brief, patch]);
 
-  const handleFile = useCallback(async (file: File | null) => {
+  const handleFile = useCallback(async (file: File | null, analyse = true) => {
     if (!file) return;
     if (!file.type.startsWith('video/')) { setError('That file is not a video — try an MP4, MOV or WebM.'); return; }
     if (file.size > MAX_UPLOAD_BYTES) { setError('That video is bigger than 500 MB. Try a shorter clip.'); return; }
@@ -734,9 +780,21 @@ function VideoStudio() {
       }
     })();
 
-    void captureThumb(localUrl, 1, 320).then((t) => { if (aliveRef.current) setThumbUrl(t); });
-    void runPipeline(clip, file);
+    void captureThumb(localUrl, 1, 320).then((t) => { if (aliveRef.current && analyse) setThumbUrl(t); });
+    if (analyse) void runPipeline(clip, file);
   }, [addClip, patch, runPipeline, runSubjectAnalysis]);
+
+  const handleFiles = useCallback(async (files: File[]) => {
+    const videos = files.filter((file) => file.type.startsWith('video/'));
+    if (files.length && !videos.length) {
+      setError('Choose one or more MP4, MOV or WebM video files.');
+      return;
+    }
+    const analyseFirst = docRef.current.clips.length === 0;
+    for (let index = 0; index < videos.length; index += 1) {
+      await handleFile(videos[index], analyseFirst && index === 0);
+    }
+  }, [handleFile]);
 
   const replan = useCallback(async () => {
     const first = docRef.current.clips[0];
@@ -821,7 +879,9 @@ function VideoStudio() {
   }, []);
 
   useEffect(() => {
-    const active = doc.videoOverlays.find((o) => !o.muted && o.duckMain && playhead >= o.start && playhead <= o.end) || null;
+    const active = playWithEffects
+      ? doc.videoOverlays.find((o) => !o.muted && o.duckMain && playhead >= o.start && playhead < o.end) || null
+      : null;
     const target = Math.max(0, Math.min(1, volume * (active ? active.duckVolume : 1)));
     const gain = mainGainRef.current;
     const context = mainAudioContextRef.current;
@@ -835,7 +895,7 @@ function VideoStudio() {
     } else if (!gain && videoRef.current) {
       videoRef.current.volume = target;
     }
-  }, [doc.videoOverlays, playhead, volume]);
+  }, [doc.videoOverlays, playWithEffects, playhead, volume]);
 
   useEffect(() => () => {
     try { void mainAudioContextRef.current?.close(); } catch { /* already closed */ }
@@ -1446,8 +1506,14 @@ function VideoStudio() {
     }
   }, [commit, detecting, patch]);
 
-  const addOverlayFromUrl = useCallback((url: string, label: string) => {
-    const overlay = newOverlay(url, label, Math.max(2, timelineDuration(docRef.current.clips)));
+  const addOverlayFromUrl = useCallback((url: string, label: string, at?: number) => {
+    const durationNow = Math.max(2, timelineDuration(docRef.current.clips));
+    const overlay = newOverlay(url, label, durationNow);
+    if (typeof at === 'number') {
+      overlay.alwaysOn = false;
+      overlay.start = clampN(at, 0, Math.max(0, durationNow - 0.2));
+      overlay.end = Math.min(durationNow, Math.max(overlay.start + 0.2, overlay.start + 5));
+    }
     commit((cur) => ({ ...cur, overlays: [...cur.overlays, overlay] }));
     setSelectedOverlayId(overlay.id);
     // The server render cannot inspect the image file, so its natural aspect
@@ -1460,6 +1526,37 @@ function VideoStudio() {
     };
     img.src = url;
   }, [commit, patch]);
+
+  const generateImageAt = useCallback(async (at: number) => {
+    const prompt = aiImagePrompt.trim();
+    if (!prompt || aiImageBusy) return;
+    const model = aiImageModel;
+    setAiImageBusy(true);
+    setNote(`Generating with ${model === 'dall-e-3' ? 'DALL-E 3' : 'Gemini 3.1 Flash Image'}…`);
+    setError('');
+    try {
+      const generated = await callHook('vv-image-generate', {
+        prompt,
+        aspect: model === 'dall-e-3' && docRef.current.aspect === '4:5' ? '9:16' : docRef.current.aspect,
+        model,
+        quality: 'hd',
+      });
+      if (!generated?.success || !generated?.imageUrl) {
+        throw new Error(String(generated?.error || 'The image generator could not create this visual.'));
+      }
+      const durableUrl = String(generated.imageUrl);
+      addOverlayFromUrl(durableUrl, `AI image · ${prompt.slice(0, 28)}`, at);
+      const fallback = generated.fellBackFrom ? ` · ${generated.modelUsed || 'managed fallback'}` : '';
+      setNote(`AI image ready on the overlay track${fallback}.`);
+      setAiImageOpen(false);
+      setAiImagePrompt('');
+    } catch (e) {
+      setNote('');
+      setError(msg(e));
+    } finally {
+      if (aliveRef.current) setAiImageBusy(false);
+    }
+  }, [addOverlayFromUrl, aiImageBusy, aiImageModel, aiImagePrompt]);
 
   const addOverlayFile = useCallback(async (file: File) => {
     const local = URL.createObjectURL(file);
@@ -1804,6 +1901,39 @@ function VideoStudio() {
   // =========================================================================
   // Chroma key, motion and VFX
   // =========================================================================
+
+  const onTimelineInsert = useCallback((kind: 'aiVideo' | 'aiImage' | 'overlay' | 'motion' | 'cut', time: number) => {
+    seek(time);
+    playheadRef.current = time;
+    if (kind === 'cut') {
+      window.requestAnimationFrame(() => onSplit());
+      return;
+    }
+    setSheetOpen(true);
+    if (kind === 'aiImage') {
+      setAiImageAt(time);
+      setAiImageOpen(true);
+      setProTab('effects');
+      setFxTab('overlays');
+      const nearby = docRef.current.words.filter((word) => word.end >= time - 3 && word.start <= time + 4).map((word) => word.text).join(' ');
+      if (nearby && !aiImagePrompt.trim()) setAiImagePrompt(`Editorial visual illustrating: ${nearby}`);
+      return;
+    }
+    setAiImageOpen(false);
+    if (kind === 'aiVideo') {
+      setProTab('effects');
+      setFxTab('overlays');
+      const nearby = docRef.current.words.filter((word) => word.end >= time - 3 && word.start <= time + 4).map((word) => word.text).join(' ');
+      if (nearby) setOmniPrompt(nearby);
+      setOmniNote('Choose a real configured model, refine the prompt, then Generate. The clip lands at this playhead.');
+    } else if (kind === 'overlay') {
+      setProTab('effects');
+      setFxTab('overlays');
+    } else {
+      setProTab('motion');
+      setFxTab('motion');
+    }
+  }, [aiImagePrompt, onSplit, seek]);
 
   const onChroma = useCallback((p: Partial<ChromaKeyState>) => {
     patch((cur) => ({ ...cur, chroma: { ...cur.chroma, ...p } }));
@@ -2294,7 +2424,7 @@ function VideoStudio() {
       const res = await fetch('/proxy/openai/v1/audio/speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
-        body: JSON.stringify({ model: 'tts-1', voice, input: text.slice(0, 3800), response_format: 'mp3' }),
+        body: JSON.stringify({ model: 'tts-1', voice, input: text.slice(0, 4096), response_format: 'mp3' }),
       });
       if (!res.ok) throw new Error(`the speech service answered HTTP ${res.status}`);
       const blob = await res.blob();
@@ -2477,8 +2607,8 @@ function VideoStudio() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-      if (typing) return;
+      const interactive = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.tagName === 'BUTTON' || target.isContentEditable);
+      if (interactive) return;
       const meta = e.metaKey || e.ctrlKey;
       if (meta && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -2509,6 +2639,9 @@ function VideoStudio() {
   const runProExport = useCallback(async () => {
     setClientResults([]);
     if (exportSpec.format === 'mp4') {
+      const synced = { ...docRef.current, resolution: exportSpec.resolution };
+      docRef.current = synced;
+      setDoc(synced);
       setExportAspects(exportSpec.aspects);
       await onExport(exportSpec.aspects);
       return;
@@ -2652,42 +2785,12 @@ function VideoStudio() {
   // The guided flow — steps, presets, suggestion, preview feedback
   // =========================================================================
 
-  /**
-   * A step ticks itself green when the WORK is done, not when the tab was
-   * opened — and pressing Next ticks it too, because “I looked and I am happy”
-   * is a legitimate way to finish a step.
-   */
-  const stepDone = useMemo<Record<StepId, boolean>>(() => ({
-    trim: stepsTicked.trim || clips.length > 0,
-    effects: stepsTicked.effects
-      || doc.grade !== 'none'
-      || doc.globalEffects.length > 0
-      || vfxActive(doc.vfx)
-      || doc.videoOverlays.length > 0
-      || clips.some((c) => c.effects.length > 0 || motionActive(clipMotion(c))),
-    captions: stepsTicked.captions || doc.captions.length > 0,
-    music: stepsTicked.music || Boolean(doc.musicUrl) || doc.musicBedId !== 'none',
-    export: exportResults.length > 0,
-  }), [
-    clips, doc.captions.length, doc.globalEffects.length, doc.grade, doc.musicBedId,
-    doc.musicUrl, doc.vfx, doc.videoOverlays.length, exportResults.length, stepsTicked,
-  ]);
-
-  const stepIndex = Math.max(0, STUDIO_STEPS.findIndex((s) => s.id === step));
-  const currentStep = STUDIO_STEPS[stepIndex];
-
   const selectStep = useCallback((id: StepId) => {
     const found = STUDIO_STEPS.find((s) => s.id === id);
     setStep(id);
     if (found) setFxTab(found.tab as EffectsTabId);
     if (isMobile) setSheetOpen(true);
   }, [isMobile]);
-
-  const goNext = useCallback(() => {
-    setStepsTicked((ticked) => ({ ...ticked, [step]: true }));
-    const i = STUDIO_STEPS.findIndex((s) => s.id === step);
-    selectStep(STUDIO_STEPS[Math.min(i + 1, STUDIO_STEPS.length - 1)].id);
-  }, [selectStep, step]);
 
   /** Keep the rail honest when someone drives the sidebar tabs directly. */
   const onFxTab = useCallback((tab: EffectsTabId) => {
@@ -2703,17 +2806,6 @@ function VideoStudio() {
     setPresetId(preset.id);
     pushToast({ message: `${preset.label} style applied`, tone: 'good' });
   }, [commit, pushToast]);
-
-  /** An empty-state card: choose the look now, drop the footage in after. */
-  const pickSampleUse = useCallback((preset: StudioPreset) => {
-    patch((cur) => applyPreset(cur, preset));
-    setSampleId(preset.id);
-    if (preset.aspect) setExportAspects([preset.aspect]);
-  }, [patch]);
-
-  const suggestion = useMemo(() => suggestedPreset(subjectProfile), [subjectProfile]);
-  const suggestionText = useMemo(() => suggestionSentence(suggestion, subjectProfile), [subjectProfile, suggestion]);
-  const showSuggest = hasFootage && !suggestDismissed;
 
   const shareLink = useCallback(async (url: string) => {
     const copied = await copyLink(url);
@@ -2736,14 +2828,6 @@ function VideoStudio() {
     (doc.clips || []).map((c) => [c.effects, c.adjust, c.crop, c.motion, c.opacity]),
   ]), [doc]);
   const previewUpdating = usePreviewPulse(previewSignature);
-
-  const gridStyle: CSSProperties = isMobile
-    ? { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12 }
-    : { display: 'grid', gridTemplateColumns: 'minmax(300px, 340px) minmax(0, 1fr) minmax(290px, 330px)', gap: 12, alignItems: 'start' };
-
-  const leftRailStyle: CSSProperties = isMobile
-    ? { display: 'grid', gap: 12 }
-    : { display: 'grid', gap: 12, maxHeight: 'calc(100vh - 150px)', overflowY: 'auto', paddingRight: 2 };
 
   /**
    * The render service gives up at ten minutes. Per-pixel work (the key, the
@@ -2794,27 +2878,38 @@ function VideoStudio() {
         <button type="button" className="vp-ico" title="Redo (Shift+Cmd+Z)" disabled={!historyDepth.redo} onClick={redo}>
           <Redo2 size={14} />
         </button>
-        {busy ? <Loader2 size={14} className="vp-spin" color="#A78BFA" /> : null}
+        {busy ? <Loader2 size={14} className="vp-spin" color="#C8920A" /> : null}
         <span className="vp-headgap" />
         <span
           className="vp-note"
           title={saveState === 'failed' ? 'Autosave failed — it keeps retrying in the background' : 'Autosaves every 30 seconds'}
-          style={{ whiteSpace: 'nowrap', color: saveState === 'failed' ? '#FCA5A5' : undefined }}
+          style={{ whiteSpace: 'nowrap', color: saveState === 'failed' ? '#991B1B' : undefined }}
         >
           {saveState === 'saving' ? 'Saving…'
             : saveState === 'retrying' ? 'Retrying save…'
               : saveState === 'failed' ? 'Save failed'
                 : savedAt ? `Saved ${fmtTimecode((Date.now() - savedAt) / 1000)} ago` : 'Autosave on'}
         </span>
-        <label className="vp-btn" title="Add footage to the timeline">
-          <UploadCloud size={14} /> {hasFootage ? 'Add' : 'Upload'}
+        <label className="vp-btn" title="Add one or more clips to the timeline">
+          <UploadCloud size={14} /> {hasFootage ? 'Add clips' : 'Upload'}
           <input
             type="file"
             accept="video/*"
+            multiple
             style={{ display: 'none' }}
-            onChange={(e) => { void handleFile(e.target.files?.[0] || null); e.target.value = ''; }}
+            onChange={(e) => { void handleFiles(Array.from(e.target.files || [])); e.target.value = ''; }}
           />
         </label>
+        <button
+          ref={toolsButtonRef}
+          type="button"
+          className={`vp-btn${sheetOpen ? ' on' : ''}`}
+          aria-expanded={sheetOpen}
+          title="Open contextual editing controls"
+          onClick={() => setSheetOpen((open) => !open)}
+        >
+          <Diamond size={13} /> Tools
+        </button>
         <button
           type="button"
           className={`vp-btn${agentOpen ? ' on' : ''}`}
@@ -2913,12 +3008,12 @@ function VideoStudio() {
             className="vp-stage"
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); void handleFile(e.dataTransfer.files?.[0] || null); }}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); void handleFiles(Array.from(e.dataTransfer.files || [])); }}
           >
             {!hasFootage ? (
               <label className={`vp-drop${dragOver ? ' hot' : ''}`} style={{ cursor: 'pointer', display: 'block' }}>
-                <span style={{ display: 'inline-grid', placeItems: 'center', width: 62, height: 62, borderRadius: 14, background: 'rgba(124,58,237,0.14)', border: '1px solid rgba(124,58,237,0.42)' }}>
-                  <UploadCloud size={28} color="#A78BFA" />
+                <span style={{ display: 'inline-grid', placeItems: 'center', width: 62, height: 62, borderRadius: 14, background: 'rgba(200,146,10,0.14)', border: '1px solid rgba(200,146,10,0.42)' }}>
+                  <UploadCloud size={28} color="#C8920A" />
                 </span>
                 <h3>Drop your footage here</h3>
                 <p>
@@ -2926,13 +3021,14 @@ function VideoStudio() {
                   new clip.
                 </p>
                 <span className="vp-btn primary" style={{ pointerEvents: 'none' }}>
-                  <UploadCloud size={14} /> Choose a file
+                  <UploadCloud size={14} /> Choose clips
                 </span>
                 <input
                   type="file"
                   accept="video/*"
+                  multiple
                   style={{ display: 'none' }}
-                  onChange={(e) => { void handleFile(e.target.files?.[0] || null); e.target.value = ''; }}
+                  onChange={(e) => { void handleFiles(Array.from(e.target.files || [])); e.target.value = ''; }}
                 />
               </label>
             ) : (
@@ -2947,11 +3043,35 @@ function VideoStudio() {
                       onClick={() => commit((cur) => ({ ...cur, aspect: a.id }))}
                       style={{
                         cursor: 'pointer',
-                        borderColor: doc.aspect === a.id ? 'rgba(124,58,237,0.75)' : undefined,
-                        color: doc.aspect === a.id ? '#C4B5FD' : undefined,
+                        borderColor: doc.aspect === a.id ? 'rgba(245,162,10,0.75)' : undefined,
+                        color: doc.aspect === a.id ? '#FDE68A' : undefined,
                       }}
                     >
                       {a.label}
+                    </button>
+                  ))}
+                  <span className="vp-divider" style={{ height: 18 }} />
+                  {(['fit', 'fill'] as const).map((mode) => (
+                    <button key={mode} type="button" className="vp-chip" onClick={() => setPreviewFit(mode)} style={{ cursor: 'pointer', color: previewFit === mode ? '#FDE68A' : undefined, borderColor: previewFit === mode ? 'rgba(245,162,10,0.75)' : undefined }}>
+                      {mode === 'fit' ? 'Fit' : 'Fill'}
+                    </button>
+                  ))}
+                  <span className="vp-divider" style={{ height: 18 }} />
+                  {RESOLUTIONS.map((resolution) => (
+                    <button
+                      key={resolution.id}
+                      type="button"
+                      className="vp-chip"
+                      disabled={!resolution.available}
+                      title={resolution.available ? `Export at ${resolution.label}` : `${resolution.label} is not available on the current renderer`}
+                      onClick={() => {
+                        if (!resolution.available) return;
+                        commit((cur) => ({ ...cur, resolution: resolution.id }));
+                        setExportSpec((spec) => ({ ...spec, resolution: resolution.id }));
+                      }}
+                      style={{ cursor: resolution.available ? 'pointer' : 'not-allowed', opacity: resolution.available ? 1 : 0.38, color: doc.resolution === resolution.id ? '#FDE68A' : undefined, borderColor: doc.resolution === resolution.id ? 'rgba(245,162,10,0.75)' : undefined }}
+                    >
+                      {resolution.label}
                     </button>
                   ))}
                   <span className="vp-headgap" />
@@ -2962,7 +3082,7 @@ function VideoStudio() {
                     type="button"
                     className="vp-chip"
                     title="Show filters and captions while the preview plays"
-                    style={{ cursor: 'pointer', color: playWithEffects ? '#C4B5FD' : undefined }}
+                    style={{ cursor: 'pointer', color: playWithEffects ? '#FDE68A' : undefined }}
                     onClick={() => setPlayWithEffects((on) => !on)}
                   >
                     FX {playWithEffects ? 'on' : 'off'}
@@ -2999,8 +3119,12 @@ function VideoStudio() {
                     onPickBroll={setSelectedBrollId}
                     onPickText={setSelectedTextId}
                     onMoveOverlay={(id, x, y) => patch((cur) => ({ ...cur, overlays: cur.overlays.map((o) => (o.id === id ? { ...o, x, y } : o)) }))}
+                    onResizeOverlay={(id, width) => patch((cur) => ({ ...cur, overlays: cur.overlays.map((o) => (o.id === id ? { ...o, w: width } : o)) }))}
+                    onOverlayTransformStart={checkpoint}
                     onMoveText={(id, x, y) => patch((cur) => ({ ...cur, textLayers: cur.textLayers.map((l) => (l.id === id ? { ...l, x, y } : l)) }))}
+                    onTextTransformStart={checkpoint}
                     onTogglePlay={togglePlay}
+                    previewFit={previewFit}
                   />
                   {compareAB && activeClip ? (
                     <div style={{ position: 'absolute', inset: 0, zIndex: 6, pointerEvents: 'none', clipPath: 'inset(0 50% 0 0)', overflow: 'hidden' }}>
@@ -3010,7 +3134,7 @@ function VideoStudio() {
                         muted
                         playsInline
                         ref={(node) => { if (node) { try { node.currentTime = sourceT; } catch { /* not seekable yet */ } } }}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }}
+                        style={{ width: '100%', height: '100%', objectFit: previewFit === 'fit' ? 'contain' : 'cover', background: '#000' }}
                       />
                       <span className="vp-chip" style={{ position: 'absolute', left: 8, top: 8 }}>BEFORE</span>
                     </div>
@@ -3077,7 +3201,7 @@ function VideoStudio() {
                       <span
                         key={overlay.id}
                         title={`B-roll at ${fmtTimecode(overlay.start)}`}
-                        style={{ position: 'absolute', left: `${Math.max(0, Math.min(100, (overlay.start / Math.max(0.1, duration)) * 100))}%`, top: 2, width: 5, height: 5, marginLeft: -2.5, borderRadius: '50%', background: '#22c55e', pointerEvents: 'none' }}
+                        style={{ position: 'absolute', left: `${Math.max(0, Math.min(100, (overlay.start / Math.max(0.1, duration)) * 100))}%`, top: 2, width: 5, height: 5, marginLeft: -2.5, borderRadius: '50%', background: '#166534', pointerEvents: 'none' }}
                       />
                     ))}
                   </div>
@@ -3113,6 +3237,8 @@ function VideoStudio() {
           onTrim={onTrim}
           onBeforeEdit={checkpoint}
           onSplit={onSplit}
+          onSplitAt={(time) => { seek(time); playheadRef.current = time; window.requestAnimationFrame(() => onSplit()); }}
+          onInsert={onTimelineInsert}
           onDuplicate={duplicateClip}
           onDelete={deleteClip}
           onRipple={rippleTrim}
@@ -3121,8 +3247,13 @@ function VideoStudio() {
           onMoveText={(id, start) => patch((cur) => ({ ...cur, textLayers: cur.textLayers.map((l) => (l.id === id ? { ...l, end: start + (l.end - l.start), start } : l)) }))}
         />
 
-        <aside className="vp-side">
-          <div className="vp-tabs" role="tablist" aria-label="Editor controls">
+        {sheetOpen ? <button type="button" className="vp-drawerback" aria-label="Close editing controls" onClick={() => setSheetOpen(false)} /> : null}
+        <aside ref={drawerRef} className={`vp-side${sheetOpen ? ' open' : ''}`} role="dialog" aria-modal="true" aria-label="Contextual editing controls" tabIndex={-1}>
+          <div className="vp-drawerhead">
+            <span><b>Editing controls</b><small>Playhead {fmtTimecode(playhead, true)} · changes preview instantly</small></span>
+            <button type="button" className="vp-ico sm" aria-label="Close editing controls" onClick={() => setSheetOpen(false)}><X size={13} /></button>
+          </div>
+          <div className="vp-tabs" role="tablist" aria-label="Quick editing controls">
             {PRO_TABS.map((t) => (
               <button
                 key={t.id}
@@ -3178,17 +3309,28 @@ function VideoStudio() {
 
             <AgentStrip onOpen={() => setAgentOpen(true)} pending={pendingCount} />
 
-            <details
-              className="vp-sec"
-              open={moreOpen}
-              onToggle={(e) => setMoreOpen((e.currentTarget as HTMLDetailsElement).open)}
-            >
-              <summary className="vp-sechead" style={{ cursor: 'pointer' }}>
-                <h4>All studio tools</h4>
-                <span className="vp-hint">Cutaways, reframe, overlays, cue editing, render</span>
-              </summary>
-              <div className="vp-secbody">
-                <div style={{ background: '#1A1A1A', borderRadius: 12, padding: 12, border: '1px solid #2A2A2A' }}>
+            <section className="vp-toolstack">
+              <div className="vp-toolstack-head">
+                <span><b>Layers & effects</b><small>Choose Overlays, Motion, VFX, Captions, Music or Export below</small></span>
+              </div>
+              <div className="vp-toolstack-body">
+                {aiImageOpen ? (
+                  <div className="vp-aiimage">
+                    <div className="vp-aiimage-head"><span><b>Generate AI image</b><small>Inserts at {fmtTimecode(aiImageAt, true)} as a timed overlay</small></span><button type="button" className="vp-ico sm" onClick={() => setAiImageOpen(false)} aria-label="Close AI image generator"><X size={12} /></button></div>
+                    <label className="vp-label">Model</label>
+                    <select className="vp-select" value={aiImageModel} disabled={aiImageBusy} onChange={(e) => setAiImageModel(e.target.value as 'gemini-3.1-flash-image' | 'dall-e-3')}>
+                      <option value="gemini-3.1-flash-image">Gemini 3.1 Flash Image</option>
+                      <option value="dall-e-3">DALL-E 3</option>
+                    </select>
+                    <label className="vp-label" style={{ marginTop: 9 }}>Prompt</label>
+                    <textarea className="vp-area" rows={4} maxLength={10000} value={aiImagePrompt} disabled={aiImageBusy} onChange={(e) => setAiImagePrompt(e.target.value)} placeholder="Describe the visual, subject, lighting and composition…" />
+                    {aiImageModel === 'dall-e-3' && doc.aspect === '4:5' ? <p className="vp-note warn">DALL-E 3 will generate the nearest supported portrait ratio, then the overlay keeps your 4:5 canvas.</p> : null}
+                    <button type="button" className="vp-btn primary block" disabled={aiImageBusy || !aiImagePrompt.trim()} onClick={() => void generateImageAt(aiImageAt)}>
+                      {aiImageBusy ? <Loader2 size={13} className="vp-spin" /> : <Sparkles size={13} />} {aiImageBusy ? 'Generating…' : 'Generate and add to timeline'}
+                    </button>
+                  </div>
+                ) : null}
+                <div style={{ background: '#FFFFFF', borderRadius: 12, padding: 12, border: '1px solid rgba(180,120,0,0.14)' }}>
                 <button
                   type="button"
                   className="vs-btn"
@@ -3209,10 +3351,10 @@ function VideoStudio() {
                       bare
                       modes={['product_swap', 'text_to_video', 'image_to_video']}
                       theme={{
-                        panel: 'rgba(255,255,255,0.05)', card: '#11161f',
-                        line: 'rgba(255,255,255,0.09)', lineStrong: 'rgba(255,255,255,0.17)',
+                        panel: 'rgba(180,120,0,0.06)', card: '#FFFFFF',
+                        line: 'rgba(180,120,0,0.14)', lineStrong: 'rgba(180,120,0,0.28)',
                         ink: LB.textPrimary, soft: LB.textSecondary, muted: LB.textMuted,
-                        accent: LB.accent, onAccent: '#241503', good: '#7FD4B4', bad: '#f87171',
+                        accent: LB.accent, onAccent: '#241503', good: '#166534', bad: '#991B1B',
                         font: "'Inter', system-ui, sans-serif",
                       }}
                       prefill={{ sourceVideo: runwaySource }}
@@ -3303,7 +3445,10 @@ function VideoStudio() {
                     stageNote={exportStage}
                     results={exportResults}
                     error={exportError}
-                    onResolution={(r: ResolutionId) => patch((cur) => ({ ...cur, resolution: r }))}
+                    onResolution={(r: ResolutionId) => {
+                      patch((cur) => ({ ...cur, resolution: r }));
+                      setExportSpec((spec) => ({ ...spec, resolution: r }));
+                    }}
                     onExport={() => void onExport()}
                     onShare={(url: string) => void shareLink(url)}
                     onDownloadSrt={downloadSrt}
@@ -3402,7 +3547,7 @@ function VideoStudio() {
                 onExport={() => setExportOpen(true)}
               />
               </div>
-            </details>
+            </section>
           </div>
         </aside>
       </div>
@@ -3410,7 +3555,10 @@ function VideoStudio() {
       {exportOpen ? (
         <ProExport
           spec={exportSpec}
-          onSpec={(p) => setExportSpec((s) => ({ ...s, ...p }))}
+          onSpec={(p) => {
+            setExportSpec((s) => ({ ...s, ...p }));
+            if (p.resolution) commit((cur) => ({ ...cur, resolution: p.resolution as ResolutionId }));
+          }}
           hasFootage={hasFootage}
           durationS={duration}
           busy={exporting}
@@ -3428,13 +3576,13 @@ function VideoStudio() {
       ) : null}
 
       {confirmClearAll ? (
-        <div role="dialog" aria-modal="true" aria-label="Clear all clips" onClick={() => setConfirmClearAll(false)} style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.72)', padding: 20 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(390px, 92vw)', background: '#1A1A1F', border: '1px solid rgba(255,255,255,0.13)', borderRadius: 14, padding: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+        <div role="dialog" aria-modal="true" aria-label="Clear all clips" onClick={() => setConfirmClearAll(false)} style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(26,16,0,0.35)', padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(390px, 92vw)', background: '#FFFFFF', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 14, padding: 18, boxShadow: '0 20px 60px rgba(120,80,0,0.16)' }}>
             <div style={{ color: VE.text, fontSize: 17, fontWeight: 800 }}>Remove every clip?</div>
             <div style={{ color: VE.textMuted, fontSize: 13, lineHeight: 1.55, marginTop: 7 }}>This takes out all your clips, cutaways and B-roll slots. You can still press Cmd+Z afterwards to bring them back.</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-              <button type="button" className="vs-btn ve-tap" onClick={() => setConfirmClearAll(false)} style={{ padding: '0 18px', minHeight: 44, borderRadius: 8, border: '1px solid #2A2A2A', background: 'transparent', color: VE.textSecondary, fontSize: 14, fontWeight: 650, cursor: 'pointer' }}>Keep them</button>
-              <button type="button" className="vs-btn ve-tap" onClick={clearAllClips} style={{ padding: '0 18px', minHeight: 44, borderRadius: 8, border: '1px solid rgba(248,113,113,0.45)', background: 'rgba(248,113,113,0.16)', color: '#fecaca', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>Yes, clear all</button>
+              <button type="button" className="vs-btn ve-tap" onClick={() => setConfirmClearAll(false)} style={{ padding: '0 18px', minHeight: 44, borderRadius: 8, border: '1px solid rgba(180,120,0,0.14)', background: 'transparent', color: VE.textSecondary, fontSize: 14, fontWeight: 650, cursor: 'pointer' }}>Keep them</button>
+              <button type="button" className="vs-btn ve-tap" onClick={clearAllClips} style={{ padding: '0 18px', minHeight: 44, borderRadius: 8, border: '1px solid rgba(153,27,27,0.45)', background: 'rgba(153,27,27,0.12)', color: '#991B1B', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>Yes, clear all</button>
             </div>
           </div>
         </div>
@@ -3444,15 +3592,15 @@ function VideoStudio() {
       {libraryFor ? (
         <div
           onClick={() => setLibraryFor(null)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(4,7,13,0.78)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(26,16,0,0.35)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ width: 'min(820px, 94vw)', maxHeight: '82vh', overflowY: 'auto', background: '#0d1117', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, padding: 18 }}
+            style={{ width: 'min(820px, 94vw)', maxHeight: '82vh', overflowY: 'auto', background: '#FFFFFF', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 14, padding: 18 }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}>
               <span style={{ color: LB.textPrimary, fontSize: 14, fontWeight: 700 }}>Pick a clip from your library</span>
-              {subjectProfile ? <span style={{ color: '#c4b5fd', fontSize: 10.5, background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.35)', borderRadius: 999, padding: '3px 8px' }}>Ranked for {subjectProfile.subjectType}</span> : null}
+              {subjectProfile ? <span style={{ color: '#B4720A', fontSize: 10.5, background: 'rgba(200,146,10,0.15)', border: '1px solid rgba(200,146,10,0.35)', borderRadius: 999, padding: '3px 8px' }}>Ranked for {subjectProfile.subjectType}</span> : null}
               <button type="button" className="vs-btn" onClick={() => setLibraryFor(null)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: LB.textMuted, cursor: 'pointer' }}><X size={15} /></button>
             </div>
             {libraryBusy ? (
@@ -3467,7 +3615,7 @@ function VideoStudio() {
                     type="button"
                     className="vs-btn"
                     onClick={() => void useLibraryClip(v.url)}
-                    style={{ textAlign: 'left', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: 8, cursor: 'pointer' }}
+                    style={{ textAlign: 'left', background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 10, padding: 8, cursor: 'pointer' }}
                   >
                     <video src={v.url} muted preload="metadata" style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 7, background: '#000' }} />
                     <div style={{ color: LB.textSecondary, fontSize: 11, marginTop: 6, lineHeight: 1.45, maxHeight: 44, overflow: 'hidden' }}>
@@ -3509,8 +3657,8 @@ class VeBoundary extends Component<{ children?: ReactNode }, { error: Error | nu
     if (this.state.error) {
       return (
         <div style={{ minHeight: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: VE.bg, fontFamily: VE.font }}>
-          <div style={{ maxWidth: 440, textAlign: 'center', background: VE.card, border: '1px solid #2A2A2A', borderRadius: 12, padding: '30px 26px' }}>
-            <AlertCircle size={26} color="#f87171" style={{ margin: '0 auto 10px' }} />
+          <div style={{ maxWidth: 440, textAlign: 'center', background: VE.card, border: `1px solid ${VE.border}`, borderRadius: VE.radiusCard, padding: '30px 26px' }}>
+            <AlertCircle size={26} color={VE.bad} style={{ margin: '0 auto 10px' }} />
             <div style={{ color: VE.text, fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Something went wrong</div>
             <div style={{ color: VE.textSecondary, fontSize: 14, lineHeight: 1.6, marginBottom: 18 }}>
               Your project is saved. Reopen the editor and carry on from where you were.
@@ -3526,55 +3674,21 @@ class VeBoundary extends Component<{ children?: ReactNode }, { error: Error | nu
   }
 }
 
-type StudioMode = 'studio' | 'product';
-
-const MODE_TABS: { id: StudioMode; label: string; icon: typeof Sparkles; blurb: string; testId: string }[] = [
-  { id: 'studio', label: 'Studio', icon: Sparkles, blurb: 'The all-in-one editor: cut plan, transcript, reframe, captions, overlays, export', testId: 've-mode-enhance' },
-  { id: 'product', label: 'Product Video', icon: Rocket, blurb: 'Paste a product URL for a branded video, direct an ad, or open the studio tools', testId: 've-mode-product' },
-];
-
 export default function App() {
-  // Both modes stay mounted (hidden with display, never unmounted) so an
-  // in-flight render, upload or half-typed URL on either side survives a
-  // switch.
-  const [mode, setMode] = useState<StudioMode>('studio');
-  const activeBlurb = MODE_TABS.find((t) => t.id === mode)?.blurb || '';
   return (
-    <VeBoundary>
-      <div style={{ height: '100%', minHeight: 0, background: VE.bg, display: 'flex', flexDirection: 'column', fontFamily: VE.font }}>
-        <div style={{ flexShrink: 0, borderBottom: '1px solid #2A2A2A', background: 'rgba(15,15,15,0.94)' }}>
-          <div className="ve-scroll-x" style={{ maxWidth: 1760, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, padding: '8px 14px' }}>
-            <div role="tablist" aria-label="Video Studio mode" style={{ display: 'inline-flex', gap: 4, padding: 4, borderRadius: 12, border: '1px solid #2A2A2A', background: '#1A1A1A', flexShrink: 0 }}>
-              {MODE_TABS.map((t) => {
-                const Icon = t.icon;
-                const active = mode === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    title={t.blurb}
-                    onClick={() => setMode(t.id)}
-                    className="vs-btn"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '0 16px', minHeight: 40, whiteSpace: 'nowrap', borderRadius: 8, border: 'none', background: active ? VE.accent : 'transparent', color: active ? '#FFFFFF' : VE.textSecondary, cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}
-                    data-testid={t.testId}
-                  >
-                    <Icon size={14} /> {t.label}
-                  </button>
-                );
-              })}
-            </div>
-            <span style={{ color: VE.textMuted, fontSize: 12, fontWeight: 500, minWidth: 0 }}>{activeBlurb}</span>
-          </div>
-        </div>
-        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: mode === 'studio' ? 'flex' : 'none', flexDirection: 'column' }}>
-          <VideoStudio />
-        </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: mode === 'product' ? 'block' : 'none' }}>
-          <ProductStudioApp />
-        </div>
-      </div>
-    </VeBoundary>
+    // The editor fills the whole frame and runs its own scroll panes, so the
+    // shell only supplies the ground and the beam layer behind it.
+    <AppShell
+      title="Video Studio"
+      header={false}
+      watermark={false}
+      scroll={false}
+      maxWidth="full"
+      padding={0}
+    >
+      <VeBoundary>
+        <VideoStudio />
+      </VeBoundary>
+    </AppShell>
   );
 }

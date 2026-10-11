@@ -37,6 +37,8 @@ import VideoIntegrationPicker from '../../components/VideoIntegrationPicker';
 import { loadVideoSelection, saveVideoSelection, type VideoIntegrationId } from '../../lib/videoIntegrations';
 import { omniFallbackMessage } from '../../lib/omniFallback';
 import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
+import AppShell from '../../components/ui/AppShell';
+import VergeMark from '../../components/ui/VergeMark';
 
 // ---------------------------------------------------------------------------
 // Small UI atoms — card, inputStyle, labelStyle, Btn, Tag and Spin live in
@@ -125,7 +127,7 @@ const ADS_RESPONSIVE_CSS = `
 .ads-studio-app input:not([type='checkbox']):not([type='radio']), .ads-studio-app textarea, .ads-studio-app select { box-shadow: 0 0 0 1px ${T.lineStrong}; transition: box-shadow .18s ease, border-color .18s ease, background-color .18s ease; }
 .ads-studio-app input:not([type='checkbox']):not([type='radio']):focus, .ads-studio-app textarea:focus, .ads-studio-app select:focus { outline: none; border-color: ${T.accent} !important; box-shadow: 0 0 0 1px ${T.accent}, 0 0 0 4px color-mix(in srgb, ${T.accent} 18%, transparent); }
 .ads-card { transition: transform .22s cubic-bezier(.22,.9,.3,1), box-shadow .22s ease, border-color .22s ease; }
-.ads-card:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(0,0,0,.38); }
+.ads-card:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(120,80,0,.12); }
 @supports (interpolate-size: allow-keywords) { .ads-studio-app { interpolate-size: allow-keywords; } .ads-studio-app details::details-content { block-size: 0; opacity: 0; overflow: clip; transition: block-size .32s cubic-bezier(.22,.9,.3,1), opacity .22s ease; } .ads-studio-app details[open]::details-content { block-size: auto; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .ads-studio-app *, .ads-studio-app *::before, .ads-studio-app *::after { animation: none !important; transition-duration: 0.01ms !important; } }
 @media (max-width: 767px) {
@@ -813,12 +815,21 @@ export default function AdsStudioApp() {
 
   // ---------------------------------------------------------------- render ----
   return (
-    <div className="ads-studio-app" style={{ display: 'flex', height: '100%', minHeight: 0, background: T.canvas, color: T.ink, fontFamily: T.sans }}>
+    <AppShell
+      title="Ads Studio"
+      header={false}
+      watermark={false}
+      scroll={false}
+      maxWidth="full"
+      padding={0}
+    >
+    <div className="ads-studio-app" style={{ display: 'flex', height: '100%', minHeight: 0, background: 'transparent', color: T.ink, fontFamily: T.sans }}>
       <style>{ADS_RESPONSIVE_CSS}</style>
 
       {/* ---- progress rail ---- */}
       <aside className="ads-rail" style={{ width: 216, flexShrink: 0, borderRight: `1px solid ${T.line}`, padding: '20px 14px', display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
         <div className="ads-rail-brand" style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14, paddingLeft: 6 }}>
+          <VergeMark size={30} />
           <div>
             <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: '-0.01em' }}>Ads Studio</div>
             <div style={{ fontSize: 10.5, color: T.muted }}>Agentic ad engine</div>
@@ -841,7 +852,7 @@ export default function AdsStudioApp() {
             >
               <span style={{
                 width: 22, height: 22, borderRadius: 999, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                background: done ? T.good : active ? T.accent : T.panel, color: done || active ? '#08101F' : T.muted,
+                background: done ? T.good : active ? T.accent : T.panel, color: done || active ? '#ffffff' : T.muted,
                 fontSize: 11, fontWeight: 800, border: `1px solid ${done || active ? 'transparent' : T.line}`,
               }}>{done ? <Check size={13} /> : st.n}</span>
               STEP {st.n}: {st.label.toUpperCase()}
@@ -863,7 +874,7 @@ export default function AdsStudioApp() {
           >
             <span style={{
               width: 22, height: 22, borderRadius: 999, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              background: runwayOpen ? T.highlight : T.panel, color: runwayOpen ? '#08101F' : T.muted,
+              background: runwayOpen ? T.highlight : T.panel, color: runwayOpen ? '#FFFFFF' : T.muted,
               border: `1px solid ${runwayOpen ? 'transparent' : T.line}`,
             }}><Sparkles size={12} /></span>
             RECIPES
@@ -957,7 +968,7 @@ export default function AdsStudioApp() {
               </details>
               <div>
                 <Btn kind="primary" disabled={s.isProcessing || !(s.productUrl.trim() || s.productDescription.trim())} onClick={runResearch}>
-                  {s.isProcessing ? <Spin /> : <Wand2 size={15} />} Start Research <ChevronRight size={15} />
+                  {s.isProcessing ? <Spin label="Starting research" /> : <Wand2 size={15} />} Start Research <ChevronRight size={15} />
                 </Btn>
               </div>
             </div>
@@ -969,10 +980,11 @@ export default function AdsStudioApp() {
           <div style={{ maxWidth: 860 }}>
             <h2 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 800 }}>Product research</h2>
             <p style={{ margin: '0 0 20px', color: T.muted, fontSize: 13.5 }}>Your director read the site (including reviews, testimonials, pricing and about pages where available). Verified details came from the site; inferred details are creative hypotheses. Correct anything before continuing.</p>
-            {s.researchStatus === 'loading' && <div className="ads-rise" style={{ ...card }}><div style={{ display: 'flex', gap: 10, alignItems: 'center', color: T.soft, fontWeight: 700 }}><Spin /> Researching your product…</div><div style={{ display: 'grid', gap: 9, marginTop: 16 }}>{[82, 66, 91, 54].map((width, index) => <span key={index} className="ads-skeleton" style={{ display: 'block', width: `${width}%`, height: 10, borderRadius: 999, background: T.panel }} />)}</div></div>}
+            {s.researchStatus === 'loading' && <div className="ads-rise" style={{ ...card }}><div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0' }}><Spin size={120} caption="Researching your product" /></div></div>}
+            {s.isProcessing && s.researchStatus !== 'loading' && s.currentStep >= 3 && s.currentStep <= 5 && <div className="ads-rise" style={{ ...card, display: 'flex', justifyContent: 'center', padding: '18px 0', marginBottom: 14 }}><Spin size={120} caption={s.currentStep === 3 ? 'Your director is working on your angles' : s.currentStep === 4 ? 'Writing your script' : 'Planning your scenes'} /></div>}
             {s.researchStatus === 'error' && (
-              <div className="ads-rise" style={{ ...card, borderColor: T.bad, background: 'rgba(244,63,94,.09)', display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-                <span style={{ display: 'grid', placeItems: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(244,63,94,.14)', flexShrink: 0 }}><AlertTriangle size={16} color={T.bad} /></span>
+              <div className="ads-rise" style={{ ...card, borderColor: T.bad, background: 'rgba(153,27,27,.07)', display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+                <span style={{ display: 'grid', placeItems: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(153,27,27,.1)', flexShrink: 0 }}><AlertTriangle size={16} color={T.bad} /></span>
                 <div style={{ minWidth: 'min(100%, 220px)', flex: 1 }}><div style={{ color: T.ink, fontWeight: 700, marginBottom: 5 }}>Research failed</div>
                 <div style={{ color: T.soft, fontSize: 13, marginBottom: 12 }}>{customerError(s.researchError)}</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1271,7 +1283,7 @@ export default function AdsStudioApp() {
                     <div style={{ background: '#000', borderRadius: 10, overflow: 'hidden', aspectRatio: s.aspect === '9:16' ? '9/16' : s.aspect === '1:1' ? '1/1' : '16/9', maxHeight: 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {clip?.videoUrl ? (
                         <video src={clip.videoUrl} controls preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                      ) : (status === 'generating' ? <div style={{ display: 'grid', placeItems: 'center', gap: 8, color: T.muted, fontSize: 12 }}><Spin /><span>Filming this clip…</span></div> : <div style={{ display: 'grid', placeItems: 'center', gap: 7, padding: 18, color: T.muted, fontSize: 12, textAlign: 'center' }}><Film size={22} color={T.accent} /><span>Ready for its first take</span></div>)}
+                      ) : (status === 'generating' ? <div style={{ display: 'grid', placeItems: 'center', gap: 8, color: T.muted, fontSize: 12 }}><Spin size={110} caption="Filming this clip" /></div> : <div style={{ display: 'grid', placeItems: 'center', gap: 7, padding: 18, color: T.muted, fontSize: 12, textAlign: 'center' }}><Film size={22} color={T.accent} /><span>Ready for its first take</span></div>)}
                     </div>
                     {clip && clip.issues.length > 0 ? (
                       <div style={{ marginTop: 8, fontSize: 12, color: T.warn }}>{clip.issues.slice(0, 3).map((iss, x) => <div key={x}>• {iss}</div>)}</div>
@@ -1311,8 +1323,8 @@ export default function AdsStudioApp() {
             </div>
 
             {s.assemblyStatus === 'error' && (
-              <div className="ads-rise" style={{ ...card, borderColor: T.bad, background: 'rgba(244,63,94,.09)', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-                <span style={{ display: 'grid', placeItems: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(244,63,94,.14)', flexShrink: 0 }}><AlertTriangle size={16} color={T.bad} /></span><div style={{ minWidth: 'min(100%, 220px)', flex: 1 }}><div style={{ color: T.ink, fontWeight: 700 }}>Assembly failed</div>
+              <div className="ads-rise" style={{ ...card, borderColor: T.bad, background: 'rgba(153,27,27,.07)', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+                <span style={{ display: 'grid', placeItems: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(153,27,27,.1)', flexShrink: 0 }}><AlertTriangle size={16} color={T.bad} /></span><div style={{ minWidth: 'min(100%, 220px)', flex: 1 }}><div style={{ color: T.ink, fontWeight: 700 }}>Assembly failed</div>
                 <div style={{ color: T.soft, fontSize: 13, margin: '6px 0 10px' }}>{customerError(s.assemblyError)}</div>
                 <Btn kind="primary" onClick={runAssembly}><RefreshCw size={14} /> Retry assembly</Btn>
               </div></div>
@@ -1380,7 +1392,7 @@ export default function AdsStudioApp() {
 
             <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <Btn kind="primary" disabled={s.isProcessing || !s.clips.some((c) => c.videoUrl)} onClick={runAssembly}>
-                {s.assemblyStatus === 'assembling' ? <Spin /> : <Wand2 size={15} />} Assemble Final Ad
+                {s.assemblyStatus === 'assembling' ? <Spin label="Assembling your ad" /> : <Wand2 size={15} />} Assemble Final Ad
               </Btn>
               <Btn small onClick={() => setShowLogs(!showLogs)}>{showLogs ? 'Hide' : 'Show'} assembly logs</Btn>
             </div>
@@ -1446,7 +1458,7 @@ export default function AdsStudioApp() {
                             <Btn small disabled={s.isProcessing} onClick={() => buildVariation(hi, bi, ci)}><RefreshCw size={12} /> Retry</Btn>
                           </div>
                         ) : v ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.muted }}><Spin /> building…</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.muted }}><Spin size={44} label="Building the variation" /> building…</div>
                         ) : (
                           <Btn small disabled={s.isProcessing} onClick={() => buildVariation(hi, bi, ci)}><Play size={12} /> Build this variation</Btn>
                         )}
@@ -1473,7 +1485,7 @@ export default function AdsStudioApp() {
             position: 'fixed', right: 20, bottom: 20, zIndex: 60, maxWidth: 380,
             display: 'flex', alignItems: 'flex-start', gap: 9,
             background: T.card, borderRadius: 12, padding: '12px 14px',
-            border: `1px solid ${T.highlight}`, boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
+            border: `1px solid ${T.highlight}`, boxShadow: '0 18px 40px rgba(120,80,0,0.14)',
           }}
           data-testid="ads-engine-toast"
         >
@@ -1493,5 +1505,6 @@ export default function AdsStudioApp() {
         <AgentChatPanel />
       </AgentChatProvider>
     </div>
+    </AppShell>
   );
 }

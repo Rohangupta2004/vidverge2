@@ -35,7 +35,7 @@ export interface MotionTemplate {
   headline: string;
   /** Smaller left-column explanation under the headline. */
   subline: string;
-  /** Accent color, e.g. '#7C3AED'. Drives the pill, cursor glow and highlights. */
+  /** Accent color, e.g. '#D97706'. Drives the pill, cursor glow and highlights. */
   accentColor: string;
   /** Cropped product screenshot shown in the right column. */
   screenshot: string;
@@ -48,8 +48,8 @@ export interface MotionTemplate {
 const SHOTS = 'https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069';
 
 /**
- * THE BUILT-IN TEMPLATES. VidVerge is purple-forward, so the flagship slide
- * leads with the brand purple; the others fan out into amber, teal and rose so
+ * THE BUILT-IN TEMPLATES. VidVerge is amber-forward, so the flagship slide
+ * leads with the brand amber; the others fan out into gold, teal and rose so
  * the showcase reads as a range of looks rather than one repeated card.
  */
 export const MOTION_TEMPLATES: MotionTemplate[] = [
@@ -58,7 +58,7 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     name: 'Brief to Video',
     headline: 'Paste a URL. Get a video.',
     subline: 'Drop a product link and watch VidVerge write, shoot and cut it — no timeline wrangling.',
-    accentColor: '#7C3AED',
+    accentColor: '#D97706',
     screenshot: `${SHOTS}/img-1788427241801-fnlby9.png`,
     bgColor: '#0B0F1E',
     cursorWaypoints: [

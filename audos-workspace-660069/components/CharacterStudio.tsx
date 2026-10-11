@@ -14,7 +14,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Users,
   Upload,
-  Loader2,
   Trash2,
   CheckCircle2,
   Sparkles,
@@ -38,6 +37,7 @@ import {
   uploadImage,
   writeFailureNotice,
 } from '../lib/reelioStudio';
+import VergeLoader from './VergeLoader';
 
 const FONT = "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
@@ -202,28 +202,26 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
   const pad = compact ? 16 : 24;
 
   return (
-    <div style={{ fontFamily: FONT, color: '#fff' }}>
+    <div style={{ fontFamily: FONT, color: '#1A1000' }}>
       <style>{`
-        @keyframes csSpin { to { transform: rotate(360deg); } }
-        .cs-spin { animation: csSpin .9s linear infinite; }
         .cs-btn { transition: transform .16s ease, box-shadow .25s ease, filter .16s ease; }
         .cs-btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
         .cs-card { transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
-        .cs-card:hover { transform: translateY(-3px); border-color: rgba(37,99,235,0.5); }
+        .cs-card:hover { transform: translateY(-3px); border-color: rgba(200,146,10,0.45); }
       `}</style>
 
       {/* New character composer */}
       <div
         style={{
           borderRadius: 18,
-          border: '1px solid rgba(37,99,235,0.28)',
-          background: 'linear-gradient(180deg, rgba(37,99,235,0.10) 0%, rgba(255,255,255,0.02) 100%)',
+          border: '1px solid rgba(180,120,0,0.14)',
+          background: 'linear-gradient(180deg, rgba(200,146,10,0.10) 0%, rgba(180,120,0,0.04) 100%)',
           padding: pad,
           marginBottom: 22,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-          <Sparkles size={16} color="#93c5fd" />
+          <Sparkles size={16} color="#B4720A" />
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Add a character</h3>
         </div>
 
@@ -245,8 +243,8 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                 width: 128,
                 height: 128,
                 borderRadius: 16,
-                border: '1px dashed rgba(255,255,255,0.22)',
-                background: imageUrl ? '#000' : 'rgba(255,255,255,0.04)',
+                border: '1px dashed rgba(180,120,0,0.28)',
+                background: imageUrl ? '#000' : 'rgba(180,120,0,0.06)',
                 cursor: 'pointer',
                 overflow: 'hidden',
                 display: 'flex',
@@ -258,7 +256,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
               title="Upload a reference image"
             >
               {uploading ? (
-                <Loader2 size={22} className="cs-spin" color="#93c5fd" />
+                <VergeLoader size={96} label="Uploading your image" />
               ) : imageUrl ? (
                 <img
                   src={imageUrl}
@@ -266,7 +264,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: '#9ca3af' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: '#7A6030' }}>
                   <Upload size={22} />
                   <span style={{ fontSize: 11, fontWeight: 600 }}>Upload image</span>
                 </div>
@@ -295,8 +293,8 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                 style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
               />
               {describing && (
-                <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 6, color: '#93c5fd', fontSize: 11 }}>
-                  <Loader2 size={13} className="cs-spin" /> describing…
+                <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 6, color: '#B4720A', fontSize: 11 }}>
+                  <VergeLoader size={40} label="Reading your image" /> describing…
                 </div>
               )}
             </div>
@@ -315,7 +313,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
               />
             </div>
             {error && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#f87171', fontSize: 12.5 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#991B1B', fontSize: 12.5 }}>
                 <AlertTriangle size={13} /> {error}
               </div>
             )}
@@ -337,11 +335,11 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                   border: 'none',
                   cursor: saving || uploading ? 'not-allowed' : 'pointer',
                   opacity: saving || uploading ? 0.6 : 1,
-                  background: 'linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%)',
-                  boxShadow: '0 6px 20px rgba(37,99,235,0.35)',
+                  background: 'linear-gradient(90deg, #C8920A 0%, #B4720A 100%)',
+                  boxShadow: '0 6px 20px rgba(200,146,10,0.35)',
                 }}
               >
-                {saving ? <Loader2 size={15} className="cs-spin" /> : <CheckCircle2 size={15} />}
+                {saving ? <VergeLoader size={30} tone="amber" label="Saving your character" /> : <CheckCircle2 size={15} />}
                 Save character
               </button>
               {(name || description || imageUrl) && (
@@ -360,8 +358,8 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
 
       {/* Saved characters */}
       {loading ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '32px 0', color: '#9ca3af' }}>
-          <Loader2 size={18} className="cs-spin" /> <span style={{ fontSize: 14 }}>Loading your characters…</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '32px 0' }}>
+          <VergeLoader size={120} caption="Loading your characters" />
         </div>
       ) : characters.length === 0 ? (
         <div
@@ -373,12 +371,12 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
             textAlign: 'center',
             padding: '36px 20px',
             borderRadius: 16,
-            border: '1px solid rgba(255,255,255,0.08)',
-            background: '#0b0b0f',
-            color: '#9ca3af',
+            border: '1px solid rgba(180,120,0,0.14)',
+            background: '#FFFFFF',
+            color: '#7A6030',
           }}
         >
-          <Users size={26} color="rgba(255,255,255,0.7)" />
+          <Users size={26} color="rgba(180,120,0,0.55)" />
           <p style={{ margin: 0, fontSize: 14, maxWidth: 360 }}>
             No characters yet. Upload a face photo or illustration above and Verger will keep that
             character looking like the same person in every shot.
@@ -403,10 +401,10 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                 className="cs-card"
                 style={{
                   borderRadius: 16,
-                  border: isSel ? '1px solid #2563eb' : '1px solid rgba(255,255,255,0.10)',
-                  background: '#101014',
+                  border: isSel ? '1px solid #C8920A' : '1px solid rgba(180,120,0,0.14)',
+                  background: '#FFFFFF',
                   overflow: 'hidden',
-                  boxShadow: isSel ? '0 0 0 1px #2563eb, 0 14px 40px rgba(37,99,235,0.35)' : 'none',
+                  boxShadow: isSel ? '0 0 0 1px #C8920A, 0 14px 40px rgba(200,146,10,0.28)' : 'none',
                   display: 'flex',
                   flexDirection: 'column',
                 }}
@@ -415,7 +413,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                   {c.image_url ? (
                     <img src={c.image_url} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, #1e3a8a, #0a0a0f)' }}>
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, #C8920A, #E0A33A)' }}>
                       <ImageIcon size={26} color="rgba(255,255,255,0.6)" />
                     </div>
                   )}
@@ -432,8 +430,8 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                         borderRadius: 999,
                         fontSize: 10.5,
                         fontWeight: 700,
-                        color: '#fff',
-                        background: 'rgba(37,99,235,0.9)',
+                        color: '#FFFFFF',
+                        background: 'rgba(200,146,10,0.92)',
                       }}
                     >
                       <CheckCircle2 size={11} /> In use
@@ -452,8 +450,8 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                         borderRadius: 999,
                         fontSize: 10.5,
                         fontWeight: 700,
-                        color: '#0a0a0a',
-                        background: 'rgba(251,191,36,0.95)',
+                        color: '#FFFFFF',
+                        background: 'rgba(180,114,10,0.95)',
                       }}
                     >
                       <Star size={11} /> Video default
@@ -465,19 +463,19 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                     {c.name}
                   </h4>
                   {c.description && (
-                    <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.45, color: '#9ca3af', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.45, color: '#7A6030', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                       {c.description}
                     </p>
                   )}
                   {(c.style || c.environment) && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                       {c.style && (
-                        <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 600, color: '#93c5fd', background: 'rgba(37,99,235,0.14)', border: '1px solid rgba(37,99,235,0.3)' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 600, color: '#B4720A', background: 'rgba(200,146,10,0.12)', border: '1px solid rgba(200,146,10,0.3)' }}>
                           {c.style}
                         </span>
                       )}
                       {c.environment && (
-                        <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 600, color: '#6ee7b7', background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.28)' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 600, color: '#166534', background: 'rgba(22,101,52,0.10)', border: '1px solid rgba(22,101,52,0.26)' }}>
                           {c.environment}
                         </span>
                       )}
@@ -495,9 +493,9 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                         fontSize: 12,
                         fontWeight: 600,
                         cursor: 'pointer',
-                        border: isSel ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(37,99,235,0.5)',
-                        color: isSel ? '#d1d5db' : '#93c5fd',
-                        background: isSel ? 'rgba(255,255,255,0.05)' : 'rgba(37,99,235,0.12)',
+                        border: isSel ? '1px solid rgba(180,120,0,0.36)' : '1px solid rgba(200,146,10,0.45)',
+                        color: isSel ? '#3D2800' : '#B4720A',
+                        background: isSel ? 'rgba(180,120,0,0.06)' : 'rgba(200,146,10,0.12)',
                       }}
                     >
                       {isSel ? 'Selected' : 'Use this'}
@@ -506,7 +504,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                       type="button"
                       onClick={() => void handleDelete(c.id)}
                       title="Delete"
-                      style={{ padding: 7, borderRadius: 9, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#9ca3af' }}
+                      style={{ padding: 7, borderRadius: 9, cursor: 'pointer', border: '1px solid rgba(180,120,0,0.14)', background: 'transparent', color: '#7A6030' }}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -526,9 +524,9 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                       fontSize: 11.5,
                       fontWeight: 600,
                       cursor: 'pointer',
-                      border: isDefault ? '1px solid rgba(251,191,36,0.55)' : '1px solid rgba(255,255,255,0.12)',
-                      color: isDefault ? '#fbbf24' : '#9ca3af',
-                      background: isDefault ? 'rgba(251,191,36,0.1)' : 'transparent',
+                      border: isDefault ? '1px solid rgba(200,146,10,0.45)' : '1px solid rgba(180,120,0,0.14)',
+                      color: isDefault ? '#B4720A' : '#7A6030',
+                      background: isDefault ? 'rgba(200,146,10,0.10)' : 'transparent',
                     }}
                   >
                     <Star size={12} />
@@ -548,9 +546,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.04)',
-  color: '#fff',
+  border: '1px solid rgba(180,120,0,0.14)',
+  background: 'rgba(180,120,0,0.06)',
+  color: '#1A1000',
   fontSize: 13.5,
   outline: 'none',
   fontFamily: FONT,
@@ -562,8 +560,8 @@ const ghostBtnStyle: React.CSSProperties = {
   borderRadius: 12,
   fontSize: 13,
   fontWeight: 500,
-  color: '#9ca3af',
-  border: '1px solid rgba(255,255,255,0.12)',
+  color: '#7A6030',
+  border: '1px solid rgba(180,120,0,0.14)',
   background: 'transparent',
   cursor: 'pointer',
 };

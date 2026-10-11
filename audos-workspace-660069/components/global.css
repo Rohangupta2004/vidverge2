@@ -1,0 +1,109 @@
+/*
+ * Vidverge light warm-gold global stylesheet.
+ *
+ * The space compiler bundles TSX, not CSS, so this file is the readable
+ * reference copy of the rules. The rules that actually ship are injected at
+ * runtime by components/ui/GlobalStyles.tsx, which keeps them identical and
+ * guarantees they load with the app rather than depending on a CSS pipeline.
+ *
+ * One deliberate difference from a plain global stylesheet: the box-sizing /
+ * margin / padding reset is scoped to `.vv-app-shell *` instead of `*`.
+ * A bare universal reset would also strip margins from the OS shell (dock,
+ * agent chat, settings) that is rendered around every app.
+ */
+
+.vv-app-shell,
+.vv-app-shell * {
+  box-sizing: border-box;
+}
+
+.vv-app-shell h1,
+.vv-app-shell h2,
+.vv-app-shell h3,
+.vv-app-shell h4,
+.vv-app-shell p,
+.vv-app-shell figure {
+  margin: 0;
+}
+
+.vv-app-shell {
+  background: #FFFDF4;
+  color: #1A1000;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #fff9e8;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(180, 120, 0, 0.35);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(180, 120, 0, 0.65);
+}
+
+@keyframes beamPulse {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.7;
+  }
+}
+
+@keyframes vvWave {
+  0%,
+  100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes vvSheen {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}

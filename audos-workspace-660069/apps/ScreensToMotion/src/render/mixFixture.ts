@@ -33,7 +33,7 @@ export interface MixFixtureInput {
 const SCREEN_META = [
   { kind: 'dashboard', accent: '#3B82F6', salience: 0.6 },
   { kind: 'list', accent: '#22C55E', salience: 0.65 },
-  { kind: 'detail', accent: '#8B5CF6', salience: 0.9 },
+  { kind: 'detail', accent: '#D97706', salience: 0.9 },
   { kind: 'marketing', accent: '#F59E0B', salience: 0.7 },
 ] as const;
 

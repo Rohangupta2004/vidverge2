@@ -224,7 +224,7 @@ export default function CompositionPreview({ project, scenes }: { project: Proje
           const width = durationSec ? ((segment.frames / FPS) / durationSec) * 100 : 0;
           return <button key={`bar-${segment.sceneId || segment.startFrame}`} title={KIND_LABELS[segment.visualKind || 'text_graphics']} onClick={() => seek(segment.startSec + 0.02)} className="absolute top-0 h-full" style={{ left: `${left}%`, width: `${Math.max(0.5, width)}%`, background: KIND_COLORS[segment.visualKind || 'text_graphics'] }} />;
         })}
-        <div className="pointer-events-none absolute top-0 h-full w-0.5 bg-white" style={{ left: `${durationSec ? Math.min(100, (tSec / durationSec) * 100) : 0}%` }} />
+        <div className="pointer-events-none absolute top-0 h-full w-0.5 bg-[#1A1000]" style={{ left: `${durationSec ? Math.min(100, (tSec / durationSec) * 100) : 0}%` }} />
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {sceneSegments.map((segment, index) => <button key={`chip-${segment.sceneId || index}`} onClick={() => seek(segment.startSec + 0.02)} className="rounded-full border border-[var(--space-border-default)] px-2.5 py-1 text-[11px] font-medium text-[var(--space-text-secondary)] transition-colors hover:border-[var(--space-border-strong)] hover:text-[var(--space-text-primary)]" style={{ borderLeftWidth: 3, borderLeftColor: KIND_COLORS[segment.visualKind || 'text_graphics'] }}>{index + 1} · {fmt(segment.startSec)}</button>)}

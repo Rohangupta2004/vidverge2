@@ -176,7 +176,7 @@ function fieldStyle(): CSSProperties {
     padding: '9px 11px',
     borderRadius: 9,
     border: `1px solid ${T.border}`,
-    background: 'rgba(255,255,255,0.04)',
+    background: '#FFFFFF',
     color: T.text,
     fontSize: 13,
     fontFamily: FONT,
@@ -332,11 +332,11 @@ export default function MotionTemplateShowcase() {
                 cursor: 'pointer',
                 fontFamily: FONT,
                 textAlign: 'left',
-                color: sel ? '#fff' : T.sub,
+                color: sel ? T.text : T.sub,
                 border: `1px solid ${sel ? 'transparent' : T.border}`,
                 background: sel
                   ? `color-mix(in srgb, ${t.accentColor} 22%, transparent)`
-                  : 'rgba(255,255,255,0.02)',
+                  : 'rgba(180,120,0,0.05)',
                 boxShadow: sel ? `inset 0 0 0 1px ${t.accentColor}` : 'none',
                 transition: 'all 0.2s ease',
               }}
@@ -355,7 +355,7 @@ export default function MotionTemplateShowcase() {
           padding: 16,
           borderRadius: 14,
           border: `1px solid ${T.border}`,
-          background: 'rgba(255,255,255,0.02)',
+          background: 'rgba(180,120,0,0.05)',
         }}
         onFocusCapture={() => setEditing(true)}
         onBlurCapture={() => setEditing(false)}

@@ -7,6 +7,7 @@ import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Archive, ArchiveRestore, Clapperboard, MoreVertical, Play, Plus, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { Film, T } from './api';
+import VergeLoader from '../../components/VergeLoader';
 
 export interface LegacyFilm { id: number; title: string; final_url: string | null; created_at: string }
 
@@ -20,13 +21,13 @@ const menuItemStyle: CSSProperties = {
 
 function StatusWord({ f }: { f: Film }) {
   const map: Record<string, { word: string; color: string; bg: string }> = {
-    draft: { word: 'Draft', color: T.muted, bg: 'rgba(119,117,127,0.12)' },
+    draft: { word: 'Draft', color: T.muted, bg: 'rgba(180,120,0,0.10)' },
     planning: { word: 'Planning', color: T.live, bg: 'rgba(232,163,60,0.12)' },
-    plan_ready: { word: 'Plan ready', color: T.bone, bg: 'rgba(237,235,232,0.1)' },
+    plan_ready: { word: 'Plan ready', color: T.bone, bg: 'rgba(180,120,0,0.10)' },
     producing: { word: 'Producing', color: T.live, bg: 'rgba(232,163,60,0.12)' },
     assembling: { word: 'Assembling', color: T.live, bg: 'rgba(232,163,60,0.12)' },
-    ready: { word: 'Ready', color: T.done, bg: 'rgba(127,212,180,0.12)' },
-    error: { word: 'Needs attention', color: T.fault, bg: 'rgba(226,114,111,0.12)' },
+    ready: { word: 'Ready', color: T.done, bg: 'rgba(22,101,52,0.12)' },
+    error: { word: 'Needs attention', color: T.fault, bg: 'rgba(153,27,27,0.12)' },
   };
   const s = map[String(f.status || 'draft')] || map.draft;
   return <span style={{ color: s.color, background: s.bg, fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: '2px 9px' }}>{s.word}</span>;
@@ -75,7 +76,7 @@ export default function Library(props: {
               const v = (e.target as HTMLTextAreaElement).value.trim();
               if (e.key === 'Enter' && !e.shiftKey && v) { e.preventDefault(); onQuickCreate(v); }
             }}
-            style={{ width: '100%', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 12, color: T.bone, fontSize: 14.5, lineHeight: 1.5, padding: '16px 18px', outline: 'none', fontFamily: T.sans, resize: 'vertical', boxShadow: '0 12px 40px rgba(0,0,0,0.3)' }}
+            style={{ width: '100%', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 12, color: T.bone, fontSize: 14.5, lineHeight: 1.5, padding: '16px 18px', outline: 'none', fontFamily: T.sans, resize: 'vertical', boxShadow: '0 12px 40px rgba(120,80,0,0.12)' }}
           />
           <div style={{ color: T.dim, fontSize: 11.5, marginTop: 10 }}>Press Enter to begin · Shift+Enter for a new line</div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 20 }}>
@@ -115,23 +116,15 @@ export default function Library(props: {
               })}
             </div>
           ) : null}
-          <button className="s2v-lift" onClick={onNew} style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.bone, color: T.canvas, border: 'none', borderRadius: 10, padding: '10px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.3)' }}>
+          <button className="s2v-lift" onClick={onNew} style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.bone, color: T.canvas, border: 'none', borderRadius: 10, padding: '10px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 2px 10px rgba(120,80,0,0.12)' }}>
             <Plus size={15} /> New film
           </button>
         </div>
       </div>
 
       {loading && !ordered.length ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '8px 0' }}>
-          {[0, 1, 2].map((i) => (
-            <div key={i} style={{ display: 'flex', gap: 16, alignItems: 'center', padding: '14px 10px' }}>
-              <div style={{ width: 104, height: 58, background: T.raised, borderRadius: 6, opacity: 0.6 }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ width: '45%', height: 13, background: T.raised, borderRadius: 4, opacity: 0.6, marginBottom: 8 }} />
-                <div style={{ width: '25%', height: 10, background: T.raised, borderRadius: 4, opacity: 0.4 }} />
-              </div>
-            </div>
-          ))}
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
+          <VergeLoader size={120} caption="Loading your films" />
         </div>
       ) : null}
 
@@ -148,7 +141,7 @@ export default function Library(props: {
           return (
             <div key={f.id} className="s2v-row" style={{ display: 'flex', alignItems: 'center', gap: 16, width: '100%', borderBottom: `1px solid ${T.raised}`, padding: '14px 10px', position: 'relative' }}>
               <button onClick={() => onOpen(f)} style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 1, minWidth: 0, textAlign: 'left', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}>
-                <div style={{ width: 104, height: 58, background: T.raised, borderRadius: 6, overflow: 'hidden', flexShrink: 0, border: '1px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ width: 104, height: 58, background: T.raised, borderRadius: 6, overflow: 'hidden', flexShrink: 0, border: '1px solid rgba(180,120,0,0.14)' }}>
                   {f.final_thumb_url ? <img src={f.final_thumb_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -180,7 +173,7 @@ export default function Library(props: {
                 {menuId === f.id ? (
                   <>
                     <div onClick={() => setMenuId(null)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
-                    <div style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 41, minWidth: 178, background: T.canvas, border: `1px solid ${T.dim}`, borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.45)', padding: 5 }}>
+                    <div style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 41, minWidth: 178, background: T.canvas, border: `1px solid ${T.dim}`, borderRadius: 10, boxShadow: '0 12px 32px rgba(120,80,0,0.14)', padding: 5 }}>
                       <button className="s2v-menu-item" onClick={() => { setMenuId(null); onArchive(f, !archived); }} style={menuItemStyle}>
                         {archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
                         {archived ? 'Unarchive' : 'Archive'}
@@ -214,10 +207,10 @@ export default function Library(props: {
         ))}
       </div>
       {confirmFilm ? (
-        <div onClick={() => setConfirmId(null)} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(4,7,12,0.6)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 420, background: T.canvas, border: `1px solid ${T.dim}`, borderRadius: 16, padding: '24px 24px 20px', boxShadow: '0 30px 70px rgba(0,0,0,0.5)' }}>
+        <div onClick={() => setConfirmId(null)} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(26,16,0,0.35)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 420, background: T.canvas, border: `1px solid ${T.dim}`, borderRadius: 16, padding: '24px 24px 20px', boxShadow: '0 30px 70px rgba(120,80,0,0.14)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: 'rgba(226,114,111,0.12)', border: '1px solid rgba(226,114,111,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 11, background: 'rgba(153,27,27,0.12)', border: '1px solid rgba(153,27,27,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <Trash2 size={18} color={T.fault} />
               </div>
               <div style={{ color: T.bone, fontSize: 16, fontWeight: 700, letterSpacing: -0.2 }}>Delete this film?</div>
@@ -227,7 +220,7 @@ export default function Library(props: {
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button className="s2v-ghost" onClick={() => setConfirmId(null)} style={{ background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 9, padding: '9px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-              <button className="s2v-lift" onClick={() => { const f = confirmFilm; setConfirmId(null); onDelete(f); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: T.fault, color: '#1A0B0B', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+              <button className="s2v-lift" onClick={() => { const f = confirmFilm; setConfirmId(null); onDelete(f); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: T.fault, color: '#FFFFFF', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                 <Trash2 size={14} /> Delete
               </button>
             </div>

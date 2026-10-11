@@ -14,9 +14,19 @@ export const IDENTITY_LOCK =
   'with physically plausible lighting, shadows, reflections, perspective, scale, ' +
   'occlusion and motion. Do not replace or restyle the person.';
 
-/** Append the deterministic preservation clause to an AI-expanded VFX prompt. */
+export const MAX_VFX_PROMPT_CHARS = 10000;
+
+/**
+ * Append the deterministic preservation clause without ever letting the
+ * provider's 10,000-character ceiling cut that clause off. The returned value
+ * is exactly what the preview shows and what Omni receives.
+ */
 export function buildVfxPrompt(expandedPrompt: string): string {
-  const core = String(expandedPrompt || '').trim();
+  const raw = String(expandedPrompt || '').trim();
+  const maxCore = MAX_VFX_PROMPT_CHARS - IDENTITY_LOCK.length - 2;
+  const sliced = raw.slice(0, maxCore);
+  const boundary = sliced.length < raw.length ? sliced.lastIndexOf(' ') : sliced.length;
+  const core = (boundary > maxCore * 0.6 ? sliced.slice(0, boundary) : sliced).trim();
   return `${core}${/[.!?]$/.test(core) ? '' : '.'} ${IDENTITY_LOCK}`;
 }
 

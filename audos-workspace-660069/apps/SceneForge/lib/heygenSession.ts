@@ -188,11 +188,14 @@ export function resetSession() {
  * rather than sent as '' — `POST v3/video-agents` rejects unknown and empty
  * fields, so an absent brand kit must not appear in the payload at all.
  */
-export function lockedFields(): Record<string, string> {
+export function lockedFields(options: { includeVoice?: boolean } = {}): Record<string, string> {
   const out: Record<string, string> = {};
   if (session.avatarId) out.avatar_id = session.avatarId;
   if (session.avatarLookId && session.avatarLookId !== session.avatarId) out.avatar_look_id = session.avatarLookId;
-  if (session.voiceId) out.voice_id = session.voiceId;
+  // An audio-driven request must carry the finished track INSTEAD OF a
+  // `voice_id`. Sending both asks HeyGen to use two mutually exclusive voice
+  // sources and turns an otherwise valid capability probe into a schema 400.
+  if (options.includeVoice !== false && session.voiceId) out.voice_id = session.voiceId;
   if (session.brandKitId) out.brand_kit_id = session.brandKitId;
   if (session.brandGlossaryId) out.brand_glossary_id = session.brandGlossaryId;
   return out;

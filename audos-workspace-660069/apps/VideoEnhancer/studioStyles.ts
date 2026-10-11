@@ -41,7 +41,7 @@ export interface CaptionStyleSpec {
 }
 
 /**
- * Eight presets. Each one is a different answer to “what should the viewer’s
+ * Fourteen presets. Each one is a different answer to “what should the viewer’s
  * eye do”, not a recolour of the same card.
  */
 export const CAPTION_STYLES: CaptionStyleSpec[] = [
@@ -109,6 +109,54 @@ export const CAPTION_STYLES: CaptionStyleSpec[] = [
     outlineWidth: 2, outlineColor: 'rgba(0,0,0,0.65)', shadow: '0 4px 16px rgba(0,0,0,0.6)',
     letterSpacing: 0.5, lineHeight: 1.15, mode: 'karaoke',
   },
+  {
+    id: 'creator', label: 'Creator Punch', hint: 'Warm social captions with an amber active-word punch',
+    sizeRatio: 0.064, weight: 900, uppercase: true, fontId: 'montserrat',
+    color: '#ffffff', activeColor: '#ffd66e', inactiveColor: '#ffffff',
+    background: 'rgba(6,9,14,0.68)', radius: 18, padX: 28, padY: 13,
+    outlineWidth: 2, outlineColor: '#06090e', shadow: '0 7px 24px rgba(0,0,0,0.7)',
+    letterSpacing: -0.7, lineHeight: 1.08, mode: 'word',
+  },
+  {
+    id: 'newsroom', label: 'Newsroom', hint: 'Broadcast lower-third discipline with timed red emphasis',
+    sizeRatio: 0.043, weight: 800, uppercase: false, fontId: 'inter',
+    color: '#f8fafc', activeColor: '#fb7185', inactiveColor: 'rgba(248,250,252,0.58)',
+    background: 'rgba(8,15,28,0.92)', radius: 3, padX: 26, padY: 12,
+    outlineWidth: 0, outlineColor: '#000000', shadow: '0 3px 14px rgba(0,0,0,0.78)',
+    letterSpacing: 0.25, lineHeight: 1.2, mode: 'karaoke',
+  },
+  {
+    id: 'comic', label: 'Comic Burst', hint: 'Bright outlined words that spring in like a comic panel',
+    sizeRatio: 0.066, weight: 900, uppercase: true, fontId: 'anton',
+    color: '#fff7a8', activeColor: '#ff5ca8', inactiveColor: '#fff7a8',
+    background: 'transparent', radius: 0, padX: 0, padY: 0,
+    outlineWidth: 4, outlineColor: '#27104a', shadow: '5px 6px 0 rgba(39,16,74,0.78)',
+    letterSpacing: 0.3, lineHeight: 1.05, mode: 'word',
+  },
+  {
+    id: 'luxury', label: 'Luxury Gold', hint: 'Editorial serif captions with restrained gold word highlighting',
+    sizeRatio: 0.048, weight: 700, uppercase: false, fontId: 'playfair',
+    color: '#fff9e8', activeColor: '#ffd66e', inactiveColor: 'rgba(255,249,232,0.48)',
+    background: 'rgba(9,8,6,0.62)', radius: 2, padX: 30, padY: 14,
+    outlineWidth: 0, outlineColor: '#000000', shadow: '0 4px 22px rgba(0,0,0,0.8)',
+    letterSpacing: 0.7, lineHeight: 1.24, mode: 'karaoke',
+  },
+  {
+    id: 'gaming', label: 'Gaming HUD', hint: 'Condensed neon captions that energise each spoken word',
+    sizeRatio: 0.058, weight: 800, uppercase: true, fontId: 'oswald',
+    color: '#f0fff8', activeColor: '#4ade80', inactiveColor: 'rgba(240,255,248,0.68)',
+    background: 'rgba(2,12,9,0.58)', radius: 8, padX: 24, padY: 11,
+    outlineWidth: 1, outlineColor: '#052e16', shadow: '0 0 16px #22c55e, 0 0 38px rgba(34,197,94,0.55)',
+    letterSpacing: 1.2, lineHeight: 1.12, mode: 'glow',
+  },
+  {
+    id: 'desi', label: 'Desi Bold', hint: 'Unicode-safe Hindi and Hinglish captions with saffron timing highlights',
+    sizeRatio: 0.058, weight: 800, uppercase: false, fontId: 'notoDevanagari',
+    color: '#ffffff', activeColor: '#ffb21a', inactiveColor: 'rgba(255,255,255,0.5)',
+    background: 'rgba(10,12,16,0.78)', radius: 16, padX: 28, padY: 13,
+    outlineWidth: 1, outlineColor: '#241503', shadow: '0 4px 18px rgba(0,0,0,0.75)',
+    letterSpacing: 0, lineHeight: 1.28, mode: 'karaoke',
+  },
 ];
 
 export function captionStyle(id: CaptionStyleId): CaptionStyleSpec {
@@ -172,7 +220,16 @@ export function captionWordStyle(
       gradient: `linear-gradient(90deg, hsl(${hue} 92% 62%) 0%, hsl(${(hue + 60) % 360} 92% 68%) 50%, hsl(${(hue + 130) % 360} 92% 62%) 100%)`,
     };
   }
-  return { color: spec.color, scale: 1, opacity: 1, shadow: spec.shadow, gradient: null };
+  // Plain editorial presets still animate: every word settles gently from
+  // translucent to fully readable at its measured timestamp.
+  const reveal = clamp01(since / 0.2);
+  return {
+    color: spec.color,
+    scale: spoken ? 0.97 + 0.03 * easeOutCubic(reveal) : 0.97,
+    opacity: spoken ? 0.42 + 0.58 * easeOutCubic(reveal) : 0.28,
+    shadow: spec.shadow,
+    gradient: null,
+  };
 }
 
 // ---------------------------------------------------------------------------

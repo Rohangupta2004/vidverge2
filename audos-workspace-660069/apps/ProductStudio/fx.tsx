@@ -95,7 +95,7 @@ export function Tilt({
   const shadowX = Math.round(-tilt.ry * 1.4);
   const shadowY = Math.round(tilt.rx * 1.4) + (lift ? 16 : 7);
   const shadowBlur = lift ? 30 : 16;
-  const shadowAlpha = lift ? 0.45 : 0.26;
+  const shadowAlpha = lift ? 0.16 : 0.1;
 
   return (
     <div style={{ perspective: 900 }} className={className}>
@@ -120,7 +120,7 @@ export function Tilt({
             : `rotateX(${tilt.rx.toFixed(2)}deg) rotateY(${tilt.ry.toFixed(2)}deg) translateZ(${lift ? 8 : 0}px) scale(${lift ? 1.03 : 1})`,
           transformStyle: 'preserve-3d',
           transition: 'transform 0.15s ease, box-shadow 0.22s ease',
-          boxShadow: disabled ? undefined : `${shadowX}px ${shadowY}px ${shadowBlur}px rgba(2, 6, 18, ${shadowAlpha})`,
+          boxShadow: disabled ? undefined : `${shadowX}px ${shadowY}px ${shadowBlur}px rgba(120, 80, 0, ${shadowAlpha})`,
           willChange: 'transform',
           borderRadius: (style && style.borderRadius) || 14,
           outline: 'none',

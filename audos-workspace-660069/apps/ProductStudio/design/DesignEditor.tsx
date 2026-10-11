@@ -38,10 +38,10 @@ const ANIMS_OUT: AnimOut[] = ['fade', 'slide_left', 'slide_right', 'slide_down',
 const TREATMENTS = Object.keys(TREATMENT_LABEL) as OverlayTreatment[];
 
 const LANE_COLORS: Record<string, string> = {
-  kinetic_type: '#E8A33C', lower_third: '#7FB7D9', stat: '#7FD4B4', bar_chart: '#7FD4B4',
-  decay_chart: '#7FD4B4', list_reveal: '#B387F5', callout: '#FF6B4A', arrow_flow: '#B387F5',
-  icon_badge: '#E8A33C', diagram: '#B387F5', progress: '#7FD4B4', compare: '#7FB7D9',
-  quote_card: '#F26D6D', image_card: '#5EA8FF', broll: '#D98BFF',
+  kinetic_type: '#B4720A', lower_third: '#1D4ED8', stat: '#166534', bar_chart: '#166534',
+  decay_chart: '#166534', list_reveal: '#B45309', callout: '#C8920A', arrow_flow: '#B45309',
+  icon_badge: '#B4720A', diagram: '#B45309', progress: '#166534', compare: '#1D4ED8',
+  quote_card: '#991B1B', image_card: '#1D4ED8', broll: '#8A6400',
 };
 
 interface Props {
@@ -295,7 +295,7 @@ export default function DesignEditor({ project, onBack, applyPatch, onRunDirecti
   ];
 
   const inputStyle: React.CSSProperties = { width: '100%', background: T.canvas, border: `1px solid ${T.line}`, borderRadius: 8, color: T.bone, fontSize: 12, padding: '7px 9px', fontFamily: T.sans };
-  const btn = (primary = false): React.CSSProperties => ({ display: 'inline-flex', alignItems: 'center', gap: 6, background: primary ? T.coral : 'transparent', color: primary ? '#1A0E08' : T.muted, border: primary ? 'none' : `1px solid ${T.line}`, borderRadius: 9, padding: primary ? '9px 16px' : '7px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' });
+  const btn = (primary = false): React.CSSProperties => ({ display: 'inline-flex', alignItems: 'center', gap: 6, background: primary ? T.coral : 'transparent', color: primary ? '#FFFFFF' : T.muted, border: primary ? 'none' : `1px solid ${T.line}`, borderRadius: 9, padding: primary ? '9px 16px' : '7px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' });
   const label = (text: string) => <div style={{ color: T.muted, fontSize: 9.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>{text}</div>;
 
   const qaIssuesOpen = (project.qa?.issues || []).filter((i) => !i.fixed);
@@ -369,9 +369,9 @@ export default function DesignEditor({ project, onBack, applyPatch, onRunDirecti
             {label('Timeline — drag to move, edges to resize, click to inspect')}
             <div style={{ display: 'grid', gridTemplateColumns: '76px 1fr', rowGap: 6, alignItems: 'center' }}>
               <span style={{ color: T.dim, fontSize: 9.5, fontFamily: T.mono }}>VIDEO</span>
-              <div style={{ position: 'relative', height: 22, borderRadius: 6, background: 'rgba(94,168,255,0.2)', border: '1px solid rgba(94,168,255,0.35)', cursor: 'pointer' }}
+              <div style={{ position: 'relative', height: 22, borderRadius: 6, background: 'rgba(29,78,216,0.12)', border: '1px solid rgba(29,78,216,0.3)', cursor: 'pointer' }}
                 onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * duration); }}>
-                <span style={{ position: 'absolute', left: 8, top: 3, color: '#9CC4F5', fontSize: 9.5, fontFamily: T.mono }}>ORIGINAL VIDEO (never modified)</span>
+                <span style={{ position: 'absolute', left: 8, top: 3, color: '#1D4ED8', fontSize: 9.5, fontFamily: T.mono }}>ORIGINAL VIDEO (never modified)</span>
               </div>
 
               <span style={{ color: T.dim, fontSize: 9.5, fontFamily: T.mono }}>GRAPHICS</span>
@@ -388,7 +388,7 @@ export default function DesignEditor({ project, onBack, applyPatch, onRunDirecti
                       onPointerDown={(e) => onBlockDown(e, g, 'move')}
                       onClick={(e) => { e.stopPropagation(); setSelectedId(g.id); seek(tt.start + 0.15); }}
                       title={`${TREATMENT_LABEL[g.treatment] || g.treatment} · ${g.visual_concept || g.narration_ref}`}
-                      style={{ position: 'absolute', left: `${left}%`, width: `${width}%`, top: g.position === 'lower_third' ? 24 : 4, height: 18, borderRadius: 5, background: g.enabled ? `${color}44` : 'rgba(141,139,148,0.15)', border: `1.5px solid ${isSel ? T.coral : g.enabled ? color : T.line}`, cursor: 'grab', overflow: 'hidden' }}
+                      style={{ position: 'absolute', left: `${left}%`, width: `${width}%`, top: g.position === 'lower_third' ? 24 : 4, height: 18, borderRadius: 5, background: g.enabled ? `${color}44` : 'rgba(122,96,48,0.12)', border: `1.5px solid ${isSel ? T.coral : g.enabled ? color : T.line}`, cursor: 'grab', overflow: 'hidden' }}
                       data-testid={`block-graphic-${g.id}`}>
                       <div onPointerDown={(e) => onBlockDown(e, g, 'left')} style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize' }} />
                       <span style={{ display: 'block', padding: '2px 7px', color: g.enabled ? T.bone : T.dim, fontSize: 9, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{TREATMENT_LABEL[g.treatment] || g.treatment}</span>
@@ -403,12 +403,12 @@ export default function DesignEditor({ project, onBack, applyPatch, onRunDirecti
               <div style={{ position: 'relative', height: 16, borderRadius: 5, background: T.canvas, border: `1px solid ${T.line}`, overflow: 'hidden', cursor: 'pointer' }}
                 onClick={() => setShowTranscript((s) => !s)} title="Open the transcript">
                 {(project.transcript?.segments || []).map((s) => (
-                  <div key={s.id} style={{ position: 'absolute', left: `${(s.start / duration) * 100}%`, width: `${Math.max(0.4, ((s.end - s.start) / duration) * 100)}%`, top: 3, bottom: 3, borderRadius: 3, background: 'rgba(232,163,60,0.4)' }} />
+                  <div key={s.id} style={{ position: 'absolute', left: `${(s.start / duration) * 100}%`, width: `${Math.max(0.4, ((s.end - s.start) / duration) * 100)}%`, top: 3, bottom: 3, borderRadius: 3, background: 'rgba(180,83,9,0.35)' }} />
                 ))}
               </div>
 
               <span style={{ color: T.dim, fontSize: 9.5, fontFamily: T.mono }}>AUDIO</span>
-              <div style={{ height: 12, borderRadius: 5, background: 'repeating-linear-gradient(90deg, rgba(127,212,180,0.35) 0 3px, rgba(127,212,180,0.12) 3px 6px)', border: '1px solid rgba(127,212,180,0.25)' }} title="Original audio — carried through untouched" />
+              <div style={{ height: 12, borderRadius: 5, background: 'repeating-linear-gradient(90deg, rgba(22,101,52,0.3) 0 3px, rgba(22,101,52,0.1) 3px 6px)', border: '1px solid rgba(22,101,52,0.25)' }} title="Original audio — carried through untouched" />
             </div>
           </div>
 
@@ -549,7 +549,7 @@ export default function DesignEditor({ project, onBack, applyPatch, onRunDirecti
                   <button type="button" disabled={!!busy} style={btn(true)} onClick={() => void regenOne(selected, false)} data-testid="button-regen-graphic"><RefreshCw size={11} /> Regenerate</button>
                   <button type="button" disabled={!!busy} style={btn()} onClick={() => void regenOne(selected, true)}><Wand2 size={11} /> With note</button>
                   <button type="button" style={btn()} onClick={() => duplicateGraphic(selected)}><Copy size={11} /> Duplicate</button>
-                  <button type="button" style={{ ...btn(), color: T.fault, borderColor: 'rgba(226,114,111,0.4)' }} onClick={() => removeGraphic(selected.id)}><Trash2 size={11} /> Delete</button>
+                  <button type="button" style={{ ...btn(), color: T.fault, borderColor: 'rgba(153,27,27,0.35)' }} onClick={() => removeGraphic(selected.id)}><Trash2 size={11} /> Delete</button>
                 </div>
               </div>
             )}

@@ -131,7 +131,7 @@ export default function PostPanel({ step, videoUrl, onNewVideo }: { step: number
                 setFillerNote('');
               });
             }}
-            className="st-field file:mr-3 file:rounded-lg file:border-0 file:bg-[color-mix(in_srgb,#8b5cf6_22%,transparent)] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
+            className="st-field file:mr-3 file:rounded-lg file:border-0 file:bg-[color-mix(in_srgb,#C8920A_22%,transparent)] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-[#1A1000]"
           />
         </Field>
         <Field label="Or paste an audio URL">

@@ -13,7 +13,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { AlertCircle, Check, Download, Loader2, Pencil, RefreshCw, Sparkles, Upload, X } from 'lucide-react';
+import { AlertCircle, Check, Download, Pencil, RefreshCw, Sparkles, Upload, X } from 'lucide-react';
+import VergeLoader from './VergeLoader';
 import {
   RUNWAY_MODES, catalogRecipeInfo, catalogVideoModelInfo, modeSupported,
   ratioLabel, runwayCapabilities, runwayMode, runwayModeModels, runwayPoll,
@@ -55,17 +56,17 @@ export interface RunwayTheme {
 
 const DEFAULT_THEME: RunwayTheme = {
   bg: 'transparent',
-  panel: 'var(--space-surface-panel, #101623)',
-  card: 'var(--space-surface-card, #0e131f)',
-  line: 'var(--space-border-default, rgba(148,163,184,0.16))',
-  lineStrong: 'var(--space-border-strong, rgba(148,163,184,0.28))',
-  ink: 'var(--space-text-primary, #f1f5f9)',
-  soft: 'var(--space-text-secondary, #cbd5e1)',
-  muted: 'var(--space-text-muted, #94a3b8)',
-  accent: 'var(--space-brand-primary-500, #f59e0b)',
-  onAccent: 'var(--space-text-on-primary, #180f02)',
-  good: 'var(--space-semantic-success-500, #22c55e)',
-  bad: 'var(--space-semantic-danger-500, #ef4444)',
+  panel: 'var(--space-surface-panel, #FFFAEB)',
+  card: 'var(--space-surface-card, #FFFFFF)',
+  line: 'var(--space-border-default, rgba(180,120,0,0.14))',
+  lineStrong: 'var(--space-border-strong, rgba(180,120,0,0.36))',
+  ink: 'var(--space-text-primary, #1A1000)',
+  soft: 'var(--space-text-secondary, #3D2800)',
+  muted: 'var(--space-text-muted, #7A6030)',
+  accent: 'var(--space-brand-primary-500, #C8920A)',
+  onAccent: 'var(--space-text-on-primary, #FFFFFF)',
+  good: 'var(--space-semantic-success-500, #166534)',
+  bad: 'var(--space-semantic-danger-500, #991B1B)',
   font: "'Inter', system-ui, -apple-system, sans-serif",
 };
 
@@ -441,7 +442,7 @@ function MediaField(props: {
             cursor: busy ? 'progress' : 'pointer',
           }}
         >
-          {busy ? <Loader2 size={13} className="rw-spin" /> : <Upload size={13} />}
+          {busy ? <VergeLoader size={28} label="Uploading" /> : <Upload size={13} />}
           {busy ? 'Uploading…' : props.value ? 'Replace' : 'Upload'}
         </button>
         {props.value ? (
@@ -527,8 +528,6 @@ export interface RunwayStudioProps {
 }
 
 const RW_CSS = `
-@keyframes rw-spin { to { transform: rotate(360deg); } }
-.rw-spin { animation: rw-spin 1s linear infinite; }
 .rw-btn { transition: filter .15s ease, opacity .15s ease; }
 .rw-btn:hover:not(:disabled) { filter: brightness(1.12); }
 .rw-btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -824,7 +823,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
       // Runway prices only the models its own catalogue lists, so a refused
       // price check on a roster model is not a dead end — it is the signal to
       // quote Omni Flash instead and keep the customer moving.
-      if (runwayMode(mode).kind === 'video' && isModelRejection(e)) {
+      if (!runwayMode(mode).recipeId && runwayMode(mode).kind === 'video' && isModelRejection(e)) {
         setToast(omniFallbackMessage(chosenModelLabel(mode)));
         setRun(mode, { phase: 'quoted', quote: omniQuote(), error: '', fallback: true });
         return;
@@ -930,7 +929,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
       // A model Runway will not accept hands the shot to Omni Flash. If the
       // stand-in cannot film it either, the customer reads the ORIGINAL
       // refusal — not a second one about a model they never chose.
-      if (!signal.cancelled && runwayMode(id).kind === 'video' && isModelRejection(e)) {
+      if (!signal.cancelled && !runwayMode(id).recipeId && runwayMode(id).kind === 'video' && isModelRejection(e)) {
         setRun(id, { status: `Generating on ${OMNI_FALLBACK_LABEL}…` });
         if (await runOmniFallback(id, signal)) return;
       }
@@ -1002,13 +1001,13 @@ export default function RunwayStudio(props: RunwayStudioProps) {
             color: t.muted, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: t.font,
           }}
         >
-          {opts.busy ? <Loader2 size={11} className="rw-spin" /> : <RefreshCw size={11} />} Regenerate
+          {opts.busy ? <VergeLoader size={26} label="Regenerating" /> : <RefreshCw size={11} />} Regenerate
         </button>
       </div>
       {opts.busy
         ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: t.muted }}>
-            <Loader2 size={13} className="rw-spin" color={t.accent} /> Writing…
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 0' }}>
+            <VergeLoader size={96} caption={`Writing your ${opts.title.toLowerCase()}`} />
           </div>
         )
         : opts.children}
@@ -1038,7 +1037,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
         }}
       >
         {persona.portraitBusy ? (
-          <Loader2 size={18} className="rw-spin" color={t.accent} />
+          <VergeLoader size={100} label="Drawing the portrait" />
         ) : persona.portraitUrl ? (
           <img
             src={persona.portraitUrl}
@@ -1069,7 +1068,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
         }}
         data-testid="persona-portrait-upload"
       >
-        {portraitUploading ? <Loader2 size={11} className="rw-spin" /> : <Upload size={11} />}
+        {portraitUploading ? <VergeLoader size={26} label="Uploading your photo" /> : <Upload size={11} />}
         {portraitUploading ? 'Uploading…' : 'Upload your own'}
       </button>
       <input
@@ -1138,7 +1137,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
           }}
           data-testid="angle-auto-extend"
         >
-          {angleExtendBusy ? <Loader2 size={12} className="rw-spin" /> : <Sparkles size={12} />}
+          {angleExtendBusy ? <VergeLoader size={28} tone="ink" label="Extending your angle" /> : <Sparkles size={12} />}
           {angleExtendBusy ? 'Extending…' : 'Auto-extend'}
         </button>
         <button
@@ -1620,12 +1619,11 @@ export default function RunwayStudio(props: RunwayStudioProps) {
   function renderResult() {
     if (run.phase === 'running') {
       return (
-        <div style={{ ...s.card, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Loader2 size={16} className="rw-spin" color={t.accent} />
-          <span style={{ fontSize: 13, color: t.soft }}>{run.status || 'Generating…'}</span>
+        <div style={{ ...s.card, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <VergeLoader size={120} caption={run.status || 'Generating your video'} />
           <button
             type="button" className="rw-btn" onClick={cancel}
-            style={{ marginLeft: 'auto', background: 'none', border: `1px solid ${t.line}`, borderRadius: 8, padding: '6px 12px', color: t.muted, fontSize: 12, cursor: 'pointer', fontFamily: t.font }}
+            style={{ background: 'none', border: `1px solid ${t.line}`, borderRadius: 8, padding: '6px 12px', color: t.muted, fontSize: 12, cursor: 'pointer', fontFamily: t.font }}
           >
             Stop watching
           </button>
@@ -1705,7 +1703,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
               title="Re-read the live Runway catalogue"
               style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, background: t.panel, border: `1px solid ${t.line}`, borderRadius: 8, padding: '6px 11px', color: t.muted, fontSize: 12, cursor: 'pointer', fontFamily: t.font }}
             >
-              {capsBusy ? <Loader2 size={12} className="rw-spin" /> : <RefreshCw size={12} />} Refresh models
+              {capsBusy ? <VergeLoader size={26} label="Refreshing models" /> : <RefreshCw size={12} />} Refresh models
             </button>
           </div>
           <p style={{ margin: '6px 0 0', fontSize: 13, color: t.muted, lineHeight: 1.55 }}>
@@ -1798,7 +1796,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: t.accent, color: t.onAccent, border: 'none', borderRadius: 9, padding: '10px 18px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: t.font }}
                 data-testid="runway-quote"
               >
-                {run.phase === 'quoting' ? <Loader2 size={14} className="rw-spin" /> : <Sparkles size={14} />}
+                {run.phase === 'quoting' ? <VergeLoader size={30} tone="ink" label="Pricing your generation" /> : <Sparkles size={14} />}
                 {run.phase === 'quoting' ? 'Pricing…' : 'Check price'}
               </button>
             )}
@@ -1838,7 +1836,7 @@ export default function RunwayStudio(props: RunwayStudioProps) {
             display: 'flex', alignItems: 'flex-start', gap: 9,
             background: t.card, borderRadius: 12, padding: '12px 14px',
             border: `1px solid color-mix(in srgb, ${t.accent} 45%, transparent)`,
-            boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
+            boxShadow: '0 18px 40px rgba(120,80,0,0.12)',
           }}
           data-testid="runway-fallback-toast"
         >

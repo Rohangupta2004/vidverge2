@@ -91,7 +91,7 @@ function DebouncedText({ value, maxLength, multiline = false, placeholder, allow
       ) : (
         <input {...shared} onChange={(e) => setV(e.currentTarget.value)} style={inputStyle} />
       )}
-      {saving ? <span aria-hidden="true" style={{ position: 'absolute', top: 8, right: 9, width: 7, height: 7, borderRadius: 999, background: '#fbbf24' }} title="Autosaving…" /> : null}
+      {saving ? <span aria-hidden="true" style={{ position: 'absolute', top: 8, right: 9, width: 7, height: 7, borderRadius: 999, background: '#B45309' }} title="Autosaving…" /> : null}
     </span>
   );
 }
@@ -162,7 +162,7 @@ export default function ControlsPanel({
           <p style={{ margin: 0, fontSize: 12.5, color: S.muted }}>Select a scene in the timeline once the plan exists.</p>
         ) : !sceneEditable ? (
           <div style={{ fontSize: 12.5, color: S.sub, lineHeight: 1.55 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: scene.state === 'ERROR' ? S.danger : scene.state === 'REGENERATING' ? '#fbbf24' : '#94a3b8' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: scene.state === 'ERROR' ? S.danger : scene.state === 'REGENERATING' ? '#B45309' : '#7A6030' }}>
               {scene.state === 'ERROR' ? <AlertTriangle size={10} /> : scene.state === 'REGENERATING' ? <Loader2 size={10} className="rc-spin" /> : <Lock size={10} />} {scene.state}
             </span>
             <p style={{ margin: '8px 0 0' }}>{STATE_EXPLAIN[scene.state as keyof typeof STATE_EXPLAIN]}</p>

@@ -62,10 +62,10 @@ export default function ModelGrid(props: {
               gap: 3,
               textAlign: 'left',
               background: active
-                ? 'linear-gradient(160deg, rgba(245,158,11,0.16), rgba(245,158,11,0.05))'
-                : 'rgba(255,255,255,0.035)',
-              border: `1px solid ${active ? T.live : 'rgba(255,255,255,0.09)'}`,
-              boxShadow: active ? '0 0 0 1px rgba(245,158,11,0.35), 0 8px 24px rgba(0,0,0,0.35)' : 'none',
+                ? 'linear-gradient(160deg, rgba(200,146,10,0.16), rgba(200,146,10,0.05))'
+                : '#FFFFFF',
+              border: `1px solid ${active ? T.live : 'rgba(180,120,0,0.14)'}`,
+              boxShadow: active ? '0 0 0 1px rgba(200,146,10,0.35), 0 8px 24px rgba(120,80,0,0.12)' : 'none',
               borderRadius: 13,
               padding: compact ? '10px 12px' : '12px 14px',
               cursor: clickable ? 'pointer' : 'not-allowed',
@@ -85,7 +85,7 @@ export default function ModelGrid(props: {
                 {locked ? <Lock size={12} color={T.dim} /> : <Check size={13} />}
               </span>
             </div>
-            <div style={{ color: active ? T.bone : '#D6DAE3', fontSize: compact ? 13 : 13.5, fontWeight: 700, letterSpacing: -0.1 }}>
+            <div style={{ color: active ? T.bone : '#3D2800', fontSize: compact ? 13 : 13.5, fontWeight: 700, letterSpacing: -0.1 }}>
               {option.label}
             </div>
             {option.meta ? (

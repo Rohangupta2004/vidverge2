@@ -49,7 +49,7 @@ export const ANGLE_SCRIPT_CSS = `
 @keyframes ras-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .ras-rise { animation: ras-rise .34s cubic-bezier(.22,.9,.3,1) both; }
 .ras-pick { transition: transform .2s cubic-bezier(.22,.9,.3,1), border-color .2s ease, background-color .2s ease, box-shadow .2s ease; }
-.ras-pick:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(0,0,0,.35); }
+.ras-pick:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(120,80,0,.12); }
 .ras-pick:active { transform: scale(.985); }
 @media (prefers-reduced-motion: reduce) {
   .ras-rise { animation: none !important; }
@@ -272,7 +272,7 @@ export default function RecipeAngleScript(props: RecipeAngleScriptProps) {
               </div>
 
               {error ? (
-                <div className="ras-rise" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 14, borderRadius: 12, padding: '12px 14px', background: 'rgba(244,63,94,.1)', border: `1px solid ${T.bad}` }}>
+                <div className="ras-rise" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 14, borderRadius: 12, padding: '12px 14px', background: 'rgba(153,27,27,.08)', border: `1px solid ${T.bad}` }}>
                   <AlertTriangle size={15} color={T.bad} style={{ flexShrink: 0, marginTop: 1 }} />
                   <span style={{ minWidth: 0, flex: 1, color: T.soft, fontSize: 13, lineHeight: 1.55 }}>{error}</span>
                   <Btn small kind="primary" onClick={() => void (chosen ? writeScript(chosen) : analyseAngles())}>Retry</Btn>
@@ -299,7 +299,7 @@ export default function RecipeAngleScript(props: RecipeAngleScriptProps) {
                         onClick={() => { setChosen(angle); setClips([]); }}
                         style={{
                           textAlign: 'left', borderRadius: 12, padding: '12px 14px', cursor: 'pointer',
-                          background: picked ? 'rgba(99,102,241,.1)' : T.panel,
+                          background: picked ? 'rgba(200,146,10,.1)' : T.panel,
                           border: `1px solid ${picked ? T.accent : T.line}`,
                           color: T.ink, fontFamily: T.sans, animationDelay: `${index * 45}ms`,
                         }}

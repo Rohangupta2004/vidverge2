@@ -260,14 +260,14 @@ export async function submitGroupA(params: GroupASubmitParams): Promise<GroupAKi
 
   const body: Record<string, unknown> = {
     model: params.model,
-    prompt: capPromptText(params.prompt, 1000),
+    prompt: capPromptText(params.prompt, 10000),
     aspectRatio: params.aspectRatio || '16:9',
     generateAudio: Boolean(params.generateAudio),
     // The default safety level false-positives on seeded reference frames.
     safetyFilterLevel: 'block_only_high',
   };
   if (params.duration) body.duration = Math.max(4, Math.min(25, Math.round(params.duration)));
-  if (params.negativePrompt) body.negativePrompt = capPromptText(params.negativePrompt, 500);
+  if (params.negativePrompt) body.negativePrompt = capPromptText(params.negativePrompt, 10000);
   if (params.resolution) body.resolution = params.resolution;
   if (params.imageData) body.imageData = params.imageData;
   if (params.referenceImages?.length) body.referenceImages = params.referenceImages.slice(0, 3);
@@ -290,10 +290,13 @@ export async function submitGroupA(params: GroupASubmitParams): Promise<GroupAKi
   const operationId = data && (data.operationId || data.operation_id);
   // The proxy can answer 200 OK with a placeholder error id or status:'failed'
   // when the provider submission itself failed.
-  const failed = String(data?.status || '').toLowerCase() === 'failed';
+  // success:true + operationId (status 'processing') is an accepted async job
+  // that the caller polls; `message` there is progress text, never an error.
+  const failed = data?.success === false || String(data?.status || '').toLowerCase() === 'failed';
   if (typeof operationId !== 'string' || !operationId || failed || /^(veo_video_error_|openrouter_error_)/.test(operationId)) {
     releaseCredits('The provider did not accept the generation');
-    throw new EngineError(String(data?.errorMessage || data?.error || 'The provider did not accept this generation.'), { code: 'provider_rejected', status: res.status });
+    const reason = data?.errorMessage || data?.error || (data?.success === false ? data?.message : '');
+    throw new EngineError(String(reason || 'The provider did not accept this generation.'), { code: 'provider_rejected', status: res.status });
   }
   return {
     operationId,

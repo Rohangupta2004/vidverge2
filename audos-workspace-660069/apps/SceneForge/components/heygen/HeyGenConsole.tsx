@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Clapperboard, History, RefreshCw, Video } from 'lucide-react';
 import { allCapabilities, onCapabilityChange, resetCapabilities } from '../../lib/heygenApi';
+import { SF_FIELD_CSS } from '../../styles/fieldStyles';
 import { lockSummary, useHeyGenSession } from '../../lib/heygenSession';
 import { recentJobs, type JobRow } from '../../lib/sfJobs';
 import AvatarPanel from './AvatarPanel';
@@ -84,7 +85,7 @@ export default function HeyGenConsole({ onBackToQuickRender }: { onBackToQuickRe
   const unavailable = Object.entries(allCapabilities()).filter(([, state]) => state === 'unavailable');
 
   return <div className="sfstudio relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]"
-    style={{ backgroundImage: 'radial-gradient(1100px 520px at 12% -8%, rgba(99,102,241,.20), transparent 62%), radial-gradient(900px 480px at 92% 4%, rgba(139,92,246,.17), transparent 58%), linear-gradient(165deg,#0f172a,#0b1022 52%,#140e2b)' }}>
+    style={{ backgroundImage: 'radial-gradient(1100px 520px at 12% -8%, rgba(200,146,10,.20), transparent 62%), radial-gradient(900px 480px at 92% 4%, rgba(200,146,10,.17), transparent 58%), linear-gradient(165deg,#FFFDF4,#FFFFFF 52%,#FFF3D6)' }}>
     <style>{`
       @keyframes st-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
       @keyframes st-shimmer { 0%, 100% { opacity: .40; } 50% { opacity: .85; } }
@@ -92,16 +93,14 @@ export default function HeyGenConsole({ onBackToQuickRender }: { onBackToQuickRe
       .sfstudio .st-shimmer { animation: st-shimmer 1.4s ease-in-out infinite; }
       .sfstudio button, .sfstudio a { transition: transform .16s cubic-bezier(.22,.9,.3,1), background-color .16s ease, border-color .16s ease, box-shadow .2s ease, opacity .16s ease; }
       .sfstudio button:active:not(:disabled) { transform: scale(.97); }
-      .sfstudio .st-field { width: 100%; border-radius: .75rem; border: 1px solid var(--space-border-default); background: var(--space-surface-panel); padding: .6rem .75rem; font-size: .875rem; color: var(--space-text-primary); outline: none; transition: border-color .18s ease, box-shadow .18s ease; }
-      .sfstudio .st-field::placeholder { color: var(--space-text-muted); }
-      .sfstudio .st-field:focus { border-color: #8b5cf6; box-shadow: 0 0 0 4px rgba(139,92,246,.18); }
+      ${SF_FIELD_CSS}
       .sfstudio .st-scroll::-webkit-scrollbar { width: 8px; }
       .sfstudio .st-scroll::-webkit-scrollbar-thumb { background: var(--space-border-strong); border-radius: 999px; }
       @media (prefers-reduced-motion: reduce) { .sfstudio *, .sfstudio *::before, .sfstudio *::after { animation: none !important; transition-duration: .01ms !important; } }
     `}</style>
 
-    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,#ffffff_8%,transparent)] bg-[color-mix(in_srgb,#0b1022_72%,transparent)] px-4 py-3 backdrop-blur sm:px-6">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_4px_16px_rgba(99,102,241,.45)]" style={{ backgroundImage: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
+    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[color-mix(in_srgb,#FFFFFF_82%,transparent)] px-4 py-3 backdrop-blur sm:px-6">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_4px_16px_rgba(200,146,10,.35)]" style={{ backgroundImage: 'linear-gradient(135deg,#E8B737,#C8920A)' }}>
         <Clapperboard className="h-4 w-4 text-white" />
       </span>
       <div className="min-w-0">
@@ -129,7 +128,7 @@ export default function HeyGenConsole({ onBackToQuickRender }: { onBackToQuickRe
       </div>
     </header>
 
-    {locks.length ? <div className="shrink-0 border-b border-[color-mix(in_srgb,#ffffff_6%,transparent)] bg-[color-mix(in_srgb,#8b5cf6_8%,transparent)] px-4 py-2 sm:px-6">
+    {locks.length ? <div className="shrink-0 border-b border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[color-mix(in_srgb,#C8920A_8%,transparent)] px-4 py-2 sm:px-6">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--space-text-secondary)]">
         <span className="font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">Locked for this session</span>
         {locks.map((entry) => <span key={entry}>{entry}</span>)}

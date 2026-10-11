@@ -18,9 +18,9 @@ import { GhostButton, T } from './ui';
 function StatusPill({ status }: { status: string }) {
   const ready = status === 'completed' || status === 'partial';
   const failed = status === 'failed';
-  const color = ready ? T.success : failed ? T.danger : '#fbbf24';
-  const bg = ready ? 'rgba(74,222,128,0.1)' : failed ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)';
-  const border = ready ? 'rgba(74,222,128,0.28)' : failed ? 'rgba(239,68,68,0.28)' : 'rgba(245,158,11,0.28)';
+  const color = ready ? T.success : failed ? T.danger : '#B45309';
+  const bg = ready ? 'rgba(22,101,52,0.1)' : failed ? 'rgba(153,27,27,0.09)' : 'rgba(180,83,9,0.1)';
+  const border = ready ? 'rgba(22,101,52,0.25)' : failed ? 'rgba(153,27,27,0.25)' : 'rgba(180,83,9,0.25)';
   return (
     <span
       style={{
@@ -177,7 +177,7 @@ export default function MyVideos({ refreshKey }: { refreshKey: number }) {
                       height: 34,
                       borderRadius: 999,
                       border: `1px solid ${T.border}`,
-                      background: 'rgba(255,255,255,0.03)',
+                      background: 'rgba(180,120,0,0.05)',
                       flexShrink: 0,
                     }}
                   >
@@ -216,7 +216,7 @@ export default function MyVideos({ refreshKey }: { refreshKey: number }) {
                       color: T.sub,
                       textDecoration: 'none',
                       border: `1px solid ${T.border}`,
-                      background: 'rgba(255,255,255,0.03)',
+                      background: 'rgba(180,120,0,0.05)',
                     }}
                     data-testid={`link-download-${job.id}`}
                   >

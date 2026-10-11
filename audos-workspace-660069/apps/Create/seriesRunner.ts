@@ -487,7 +487,7 @@ export function stopSeries(): void {
  * honoured without re-planning what has already been rendered.
  */
 export function steerNext(note: string): void {
-  set({ nextSteer: clampText(note, 400) });
+  set({ nextSteer: clampText(note, 5000) });
 }
 
 export function clearSteer(): void {
@@ -543,7 +543,7 @@ export function replanEpisode(index: number, steer?: string): void {
     clips: [],
     status: 'pending',
     error: undefined,
-    steer: typeof steer === 'string' ? clampText(steer, 400) : ep.steer,
+    steer: typeof steer === 'string' ? clampText(steer, 5000) : ep.steer,
   });
 }
 

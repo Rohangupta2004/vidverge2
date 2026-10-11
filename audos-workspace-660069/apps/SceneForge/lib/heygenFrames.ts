@@ -28,8 +28,8 @@ import type { AspectRatio, BrandKit, CardTemplateId } from './motionEditor';
 /** The brand variables every bundle reads, derived from the editor's kit. */
 export function brandVariables(kit: BrandKit): FrameBrandVariables {
   return {
-    primary: kit.primary || '#6366f1',
-    accent: kit.accent || '#8b5cf6',
+    primary: kit.primary || '#f59e0b',
+    accent: kit.accent || '#d97706',
     background: kit.contrast || '#0b1022',
     text: kit.textColor || '#ffffff',
     font: kit.font || 'Inter, system-ui, sans-serif',

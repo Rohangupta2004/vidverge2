@@ -8,6 +8,8 @@ import { fitScriptToAudio, scriptFromText, usableScriptText } from './lib/custom
 import { buildCompositionTsx } from './remotion/buildComposition';
 import type { PipelineStage, ProductIdentity, SaaSProject, SceneAudio, Script, ScreenKey, ScriptAct, StageFailure, StageState, VisualAsset } from './types';
 import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
+import AppShell from '../../components/ui/AppShell';
+import { StatChip } from '../../components/ui/primitives';
 
 const WORKSPACE_ID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
 const STAGES: Array<{ id: PipelineStage; label: string }> = [
@@ -145,7 +147,7 @@ function validateIdentity(raw: any): ProductIdentity {
   return {
     name: String(raw.name).trim().slice(0, 70),
     tagline: String(raw.tagline || '').trim().slice(0, 180),
-    primaryColor: cleanColor(raw.primaryColor, '#7c3aed'),
+    primaryColor: cleanColor(raw.primaryColor, '#d97706'),
     secondaryColor: cleanColor(raw.secondaryColor, '#2563eb'),
     bgColor: cleanColor(raw.bgColor, '#080b1b'),
     features,
@@ -982,36 +984,72 @@ export default function App() {
   });
 
   return (
-    <div style={{ minHeight: '100%', padding: '54px 24px 80px', color: '#f8fafc', fontFamily: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif", background: 'radial-gradient(circle at 18% 0%, rgba(59,130,246,.24), transparent 34%), radial-gradient(circle at 82% 12%, rgba(168,85,247,.24), transparent 34%), linear-gradient(145deg, #060917 0%, #0b1027 46%, #211044 100%)' }}>
+    <AppShell
+      title="SaaS Verger"
+      eyebrow="Product video pipeline"
+      subtitle="Paste any SaaS URL and get a cinematic product video — identity, script, voiceover, UI mockups and render, end to end."
+      maxWidth={940}
+      watermark={false}
+      icon={(
+        <span
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 12,
+            display: 'grid',
+            placeItems: 'center',
+            background: 'linear-gradient(140deg, rgba(200,146,10,0.22) 0%, rgba(224,163,58,0.14) 100%)',
+            border: '1px solid rgba(180,120,0,0.14)',
+            boxShadow: '0 0 18px rgba(200,146,10,0.22)',
+          }}
+        >
+          <Film size={19} color="#C8920A" />
+        </span>
+      )}
+      style={{
+        background: 'radial-gradient(circle at 18% 0%, rgba(200,146,10,.18), transparent 36%), radial-gradient(circle at 82% 12%, rgba(224,163,58,.14), transparent 34%), #FFFDF4',
+      }}
+    >
       <style>{ADVANCED_CSS}</style>
-      <div style={{ maxWidth: 940, margin: '0 auto' }}>
-        {resumable ? <section className="sv-fade-up" style={{ marginBottom: 18, padding: '16px 18px', borderRadius: 18, border: '1px solid rgba(99,102,241,.34)', background: 'rgba(99,102,241,.12)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-          <span style={{ display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 12, background: 'rgba(99,102,241,.2)', flexShrink: 0 }}><RotateCcw size={18} color="#a5b4fc" /></span>
+      <div>
+        {resumable ? <section className="sv-fade-up" style={{ marginBottom: 18, padding: '16px 18px', borderRadius: 18, border: '1px solid rgba(180,120,0,0.36)', background: 'rgba(200,146,10,0.12)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <span style={{ display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 12, background: 'rgba(200,146,10,0.2)', flexShrink: 0 }}><RotateCcw size={18} color="#C8920A" /></span>
           <span style={{ minWidth: 0, flex: 1 }}>
             <span style={{ display: 'block', fontSize: 15, fontWeight: 700 }}>You have a video still in progress</span>
-            <span style={{ display: 'block', marginTop: 3, fontSize: 13, color: '#c7d2fe' }}>{resumable.product_identity?.name || resumable.url} — stopped at {STAGE_LABEL[STAGES.map((stage) => stage.id).find((id) => !['done', 'skipped'].includes(String((resumable.stage_state || {})[id]))) || 'rendering']}. Everything already finished is kept.</span>
+            <span style={{ display: 'block', marginTop: 3, fontSize: 13, color: '#3D2800' }}>{resumable.product_identity?.name || resumable.url} — stopped at {STAGE_LABEL[STAGES.map((stage) => stage.id).find((id) => !['done', 'skipped'].includes(String((resumable.stage_state || {})[id]))) || 'rendering']}. Everything already finished is kept.</span>
           </span>
-          <button type="button" className="sv-press" onClick={() => resumeRun(resumable)} style={{ border: 0, borderRadius: 12, padding: '11px 18px', background: '#4f46e5', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 10px 26px rgba(79,70,229,.36)' }}>Resume</button>
-          <button type="button" className="sv-press sv-ghost" onClick={() => setResumable(null)} style={{ border: 0, borderRadius: 12, padding: '11px 14px', background: 'transparent', color: '#a1a1aa', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Start fresh</button>
+          <button type="button" className="sv-press" onClick={() => resumeRun(resumable)} style={{ border: 0, borderRadius: 12, padding: '11px 18px', background: '#C8920A', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 0 24px rgba(200,146,10,0.3)' }}>Resume</button>
+          <button type="button" className="sv-press sv-ghost" onClick={() => setResumable(null)} style={{ border: 0, borderRadius: 12, padding: '11px 14px', background: 'transparent', color: '#7A6030', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Start fresh</button>
         </section> : null}
-        <header style={{ textAlign: 'center', marginBottom: 38 }}>
-          <div style={{ width: 64, height: 64, margin: '0 auto 18px', borderRadius: 20, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, #3b82f6, #a855f7)', boxShadow: '0 18px 55px rgba(124,58,237,.4)' }}><Film size={30} /></div>
-          <h1 style={{ margin: 0, fontSize: 'clamp(38px, 6vw, 68px)', lineHeight: 1, letterSpacing: '-.055em', fontWeight: 900 }}>SaaS Verger</h1>
-          <p style={{ margin: '18px auto 0', color: '#b8c2d9', fontSize: 'clamp(17px, 2.3vw, 22px)', lineHeight: 1.5 }}>Paste any SaaS URL. Get a cinematic product video.</p>
-        </header>
+        {/* Where this run stands, read before the intake form below it. */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 22 }}>
+          <StatChip
+            label="Status"
+            value={running ? 'Working' : result?.render_url ? 'Video ready' : finished ? 'Finished' : 'Ready'}
+            icon={<Sparkles size={15} />}
+          />
+          <StatChip label="Product" value={identity?.name || '\u2014'} tone="cyan" icon={<Globe2 size={15} />} />
+          <StatChip label="Screenshots" value={screenshots.length} tone="muted" icon={<Upload size={15} />} />
+          <StatChip
+            label="B-roll"
+            value={String(shots.length) + ' / ' + String(MAX_BROLL)}
+            tone="muted"
+            icon={<Play size={15} />}
+          />
+        </div>
 
-        <section style={{ padding: 24, borderRadius: 28, border: '1px solid rgba(255,255,255,.13)', background: 'rgba(15,23,42,.66)', boxShadow: '0 28px 90px rgba(0,0,0,.34)', backdropFilter: 'blur(22px)' }}>
+        <section style={{ padding: 24, borderRadius: 28, border: '1px solid rgba(180,120,0,0.14)', background: 'rgba(255,255,255,0.78)', boxShadow: '0 28px 90px rgba(120,80,0,0.12)', backdropFilter: 'blur(22px)' }}>
           <div style={{ position: 'relative' }}>
-            <Globe2 size={21} color="#7f8ca8" style={{ position: 'absolute', left: 22, top: 21 }} />
-            <input className="sv-field" value={url} onChange={(event) => setUrl(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') analyzeProduct(); }} disabled={running} placeholder="https://yourproduct.com" aria-label="SaaS product URL" style={{ width: '100%', boxSizing: 'border-box', border: '1px solid rgba(255,255,255,.13)', borderRadius: 999, padding: '20px 24px 20px 58px', background: 'rgba(3,7,18,.72)', color: '#fff', outline: 'none', fontSize: 17 }} />
+            <Globe2 size={21} color="#7A6030" style={{ position: 'absolute', left: 22, top: 21 }} />
+            <input className="sv-field" value={url} onChange={(event) => setUrl(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') analyzeProduct(); }} disabled={running} placeholder="https://yourproduct.com" aria-label="SaaS product URL" style={{ width: '100%', boxSizing: 'border-box', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 999, padding: '20px 24px 20px 58px', background: '#FFFDF4', color: '#1A1000', outline: 'none', fontSize: 17 }} />
           </div>
-          <label style={{ marginTop: 14, padding: '14px 18px', borderRadius: 18, border: '1px dashed rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', gap: 12, cursor: running ? 'default' : 'pointer', color: '#c8d1e5', background: 'rgba(3,7,18,.38)' }}>
-            <Upload size={19} color="#a78bfa" />
+          <label style={{ marginTop: 14, padding: '14px 18px', borderRadius: 18, border: '1px dashed rgba(180,120,0,0.14)', display: 'flex', alignItems: 'center', gap: 12, cursor: running ? 'default' : 'pointer', color: '#3D2800', background: 'rgba(180,120,0,0.06)' }}>
+            <Upload size={19} color="#C8920A" />
             <span style={{ flex: 1, fontSize: 14 }}>{screenshots.length ? `${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'} ready — visual analysis will skip web search` : 'Optional: upload up to 3 screenshots to skip external web search'}</span>
             <input type="file" accept="image/png,image/jpeg,image/webp" multiple disabled={running} onChange={(event) => { const selected = Array.from(event.target.files || []).slice(0, 3); setScreenshots(selected); registerFiles(selected); }} style={{ display: 'none' }} />
-            {screenshots.length ? <button type="button" aria-label="Remove screenshots" onClick={(event) => { event.preventDefault(); setScreenshots([]); }} disabled={running} style={{ border: 0, padding: 4, display: 'grid', placeItems: 'center', borderRadius: 999, color: '#cbd5e1', background: 'rgba(255,255,255,.08)', cursor: 'pointer' }}><X size={15} /></button> : null}
+            {screenshots.length ? <button type="button" aria-label="Remove screenshots" onClick={(event) => { event.preventDefault(); setScreenshots([]); }} disabled={running} style={{ border: 0, padding: 4, display: 'grid', placeItems: 'center', borderRadius: 999, color: '#7A6030', background: 'rgba(180,120,0,0.10)', cursor: 'pointer' }}><X size={15} /></button> : null}
           </label>
-          <button className="sv-press" onClick={analyzeProduct} disabled={running || !url.trim()} style={{ width: '100%', marginTop: 14, border: 0, borderRadius: 999, padding: '18px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: running || !url.trim() ? 'rgba(100,116,139,.34)' : 'linear-gradient(90deg, #2563eb, #7c3aed 54%, #c026d3)', color: '#fff', fontSize: 17, fontWeight: 850, cursor: running ? 'wait' : 'pointer', boxShadow: running ? 'none' : '0 14px 40px rgba(124,58,237,.36)' }}>{running ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}{running ? 'Working...' : 'Analyze Product'}</button>
+          <button className="sv-press" onClick={analyzeProduct} disabled={running || !url.trim()} style={{ width: '100%', marginTop: 14, border: 0, borderRadius: 999, padding: '18px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: running || !url.trim() ? 'rgba(180,120,0,0.14)' : 'linear-gradient(135deg, #C8920A 0%, #B4720A 100%)', color: running || !url.trim() ? '#7A6030' : '#fff', fontSize: 17, fontWeight: 850, cursor: running ? 'wait' : 'pointer', boxShadow: running ? 'none' : '0 14px 40px rgba(200,146,10,.36)' }}>{running ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}{running ? 'Working...' : 'Analyze Product'}</button>
         </section>
 
         <AdvancedInputs
@@ -1029,24 +1067,24 @@ export default function App() {
           onShotRemove={removeShot}
         />
 
-        {draftProject && identity ? <section style={{ marginTop: 20, padding: 24, borderRadius: 24, border: '1px solid rgba(255,255,255,.13)', background: 'rgba(15,23,42,.66)', backdropFilter: 'blur(18px)' }}>
+        {draftProject && identity ? <section style={{ marginTop: 20, padding: 24, borderRadius: 24, border: '1px solid rgba(180,120,0,0.14)', background: 'rgba(255,255,255,0.78)', backdropFilter: 'blur(18px)' }}>
           <div style={{ fontSize: 18, fontWeight: 850 }}>Review product identity</div>
-          <div style={{ marginTop: 5, color: '#8f9bb5', fontSize: 13 }}>Edit anything Claude extracted before the video pipeline continues.</div>
+          <div style={{ marginTop: 5, color: '#7A6030', fontSize: 13 }}>Edit anything Claude extracted before the video pipeline continues.</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 18 }}>
-            <input value={identity.name} onChange={(event) => updateIdentity({ name: event.target.value })} aria-label="Product name" placeholder="Product name" style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,.12)', background: 'rgba(3,7,18,.62)', color: '#fff' }} />
-            <input value={identity.ctaText} onChange={(event) => updateIdentity({ ctaText: event.target.value })} aria-label="Call to action" placeholder="Call to action" style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,.12)', background: 'rgba(3,7,18,.62)', color: '#fff' }} />
+            <input value={identity.name} onChange={(event) => updateIdentity({ name: event.target.value })} aria-label="Product name" placeholder="Product name" style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(180,120,0,0.14)', background: '#FFFFFF', color: '#1A1000' }} />
+            <input value={identity.ctaText} onChange={(event) => updateIdentity({ ctaText: event.target.value })} aria-label="Call to action" placeholder="Call to action" style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(180,120,0,0.14)', background: '#FFFFFF', color: '#1A1000' }} />
           </div>
-          <input value={identity.tagline} onChange={(event) => updateIdentity({ tagline: event.target.value })} aria-label="Tagline" placeholder="Tagline" style={{ width: '100%', boxSizing: 'border-box', marginTop: 12, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,.12)', background: 'rgba(3,7,18,.62)', color: '#fff' }} />
-          <div style={{ display: 'grid', gap: 9, marginTop: 12 }}>{[0, 1, 2].map((index) => <input key={index} value={identity.features[index] || ''} onChange={(event) => updateFeature(index, event.target.value)} aria-label={`Feature ${index + 1}`} placeholder={`Feature ${index + 1}`} style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,.12)', background: 'rgba(3,7,18,.62)', color: '#fff' }} />)}</div>
+          <input value={identity.tagline} onChange={(event) => updateIdentity({ tagline: event.target.value })} aria-label="Tagline" placeholder="Tagline" style={{ width: '100%', boxSizing: 'border-box', marginTop: 12, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(180,120,0,0.14)', background: '#FFFFFF', color: '#1A1000' }} />
+          <div style={{ display: 'grid', gap: 9, marginTop: 12 }}>{[0, 1, 2].map((index) => <input key={index} value={identity.features[index] || ''} onChange={(event) => updateFeature(index, event.target.value)} aria-label={`Feature ${index + 1}`} placeholder={`Feature ${index + 1}`} style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(180,120,0,0.14)', background: '#FFFFFF', color: '#1A1000' }} />)}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-            <select value={identity.tone} onChange={(event) => updateIdentity({ tone: event.target.value as ProductIdentity['tone'] })} aria-label="Brand tone" style={{ flex: 1, minWidth: 180, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,.12)', background: '#080d20', color: '#fff' }}><option value="enterprise">Enterprise</option><option value="startup">Startup</option><option value="creator">Creator</option><option value="dev-tool">Developer tool</option></select>
-            {[['Primary', 'primaryColor'], ['Accent', 'secondaryColor'], ['Background', 'bgColor']].map(([label, key]) => <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#9da9c2', fontSize: 12 }}>{label}<input type="color" value={identity[key as 'primaryColor' | 'secondaryColor' | 'bgColor']} onChange={(event) => updateIdentity({ [key]: event.target.value } as Partial<ProductIdentity>)} /></label>)}
+            <select value={identity.tone} onChange={(event) => updateIdentity({ tone: event.target.value as ProductIdentity['tone'] })} aria-label="Brand tone" style={{ flex: 1, minWidth: 180, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(180,120,0,0.14)', background: '#FFFFFF', color: '#1A1000' }}><option value="enterprise">Enterprise</option><option value="startup">Startup</option><option value="creator">Creator</option><option value="dev-tool">Developer tool</option></select>
+            {[['Primary', 'primaryColor'], ['Accent', 'secondaryColor'], ['Background', 'bgColor']].map(([label, key]) => <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#7A6030', fontSize: 12 }}>{label}<input type="color" value={identity[key as 'primaryColor' | 'secondaryColor' | 'bgColor']} onChange={(event) => updateIdentity({ [key]: event.target.value } as Partial<ProductIdentity>)} /></label>)}
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
-            <button onClick={prepareNarration} disabled={running || scriptBusy || Boolean(narrationScript)} style={{ flex: '1 1 230px', borderRadius: 999, border: '1px solid rgba(255,255,255,.16)', padding: '16px 22px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: 'rgba(255,255,255,.05)', color: '#e2e8f0', fontSize: 15, fontWeight: 800, opacity: running || scriptBusy || narrationScript ? .55 : 1, cursor: running || scriptBusy || narrationScript ? 'default' : 'pointer' }}>{scriptBusy ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} />}{narrationScript ? 'Narration open below' : scriptBusy ? 'Writing narration...' : 'Add narration & visuals'}</button>
-            {narrationScript ? null : <button onClick={continueGeneration} disabled={running} style={{ flex: '1 1 230px', border: 0, borderRadius: 999, padding: '16px 22px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: running ? 'rgba(100,116,139,.34)' : 'linear-gradient(90deg,#2563eb,#9333ea)', color: '#fff', fontSize: 16, fontWeight: 850, cursor: running ? 'wait' : 'pointer' }}>{running ? <Loader2 size={19} className="animate-spin" /> : <Film size={19} />}{running ? 'Creating your video...' : 'Continue to Video'}</button>}
+            <button onClick={prepareNarration} disabled={running || scriptBusy || Boolean(narrationScript)} style={{ flex: '1 1 230px', borderRadius: 999, border: '1px solid rgba(180,120,0,0.14)', padding: '16px 22px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: 'rgba(180,120,0,0.06)', color: '#1A1000', fontSize: 15, fontWeight: 800, opacity: running || scriptBusy || narrationScript ? .55 : 1, cursor: running || scriptBusy || narrationScript ? 'default' : 'pointer' }}>{scriptBusy ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} />}{narrationScript ? 'Narration open below' : scriptBusy ? 'Writing narration...' : 'Add narration & visuals'}</button>
+            {narrationScript ? null : <button onClick={continueGeneration} disabled={running} style={{ flex: '1 1 230px', border: 0, borderRadius: 999, padding: '16px 22px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: running ? 'rgba(180,120,0,0.14)' : 'linear-gradient(135deg,#C8920A,#B4720A)', color: running ? '#7A6030' : '#fff', fontSize: 16, fontWeight: 850, cursor: running ? 'wait' : 'pointer' }}>{running ? <Loader2 size={19} className="animate-spin" /> : <Film size={19} />}{running ? 'Creating your video...' : 'Continue to Video'}</button>}
           </div>
-          <div style={{ marginTop: 10, color: '#7f8ca8', fontSize: 12.5, lineHeight: 1.5 }}>Narration is optional — continue straight to video and the pipeline writes and voices the script on its own.</div>
+          <div style={{ marginTop: 10, color: '#7A6030', fontSize: 12.5, lineHeight: 1.5 }}>Narration is optional — continue straight to video and the pipeline writes and voices the script on its own.</div>
         </section> : null}
 
         {narrationScript && analysis ? <NarrationStudio
@@ -1071,46 +1109,46 @@ export default function App() {
           onContinue={continueGeneration}
         /> : null}
 
-        {(running || error || Object.values(stages).some((state) => state === 'done')) ? <section style={{ marginTop: 20, padding: 24, borderRadius: 24, border: '1px solid rgba(255,255,255,.11)', background: 'rgba(15,23,42,.58)', backdropFilter: 'blur(18px)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#9da9c2', fontSize: 13, marginBottom: 12 }}><span>Autonomous pipeline</span><span>{progress}%</span></div>
-          <div style={{ height: 7, background: 'rgba(255,255,255,.08)', borderRadius: 999, overflow: 'hidden', marginBottom: 22 }}><div style={{ height: '100%', width: `${progress}%`, borderRadius: 999, background: 'linear-gradient(90deg,#3b82f6,#a855f7)', transition: 'width .35s ease' }} /></div>
-          <div style={{ display: 'grid', gap: 10 }}>{STAGES.map((stage, position) => { const state = stages[stage.id]; return <div key={stage.id} className="sv-fade-up" style={{ animationDelay: `${position * 55}ms`, transition: 'background-color .22s ease, color .22s ease', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', borderRadius: 14, background: state === 'active' ? 'rgba(124,58,237,.14)' : 'transparent', color: state === 'done' ? '#d9fbe8' : state === 'skipped' ? '#fde68a' : state === 'error' ? '#fecaca' : state === 'active' ? '#fff' : '#68758f' }}><div style={{ width: 26, height: 26, borderRadius: 999, display: 'grid', placeItems: 'center', background: state === 'done' ? 'rgba(34,197,94,.17)' : state === 'skipped' ? 'rgba(245,158,11,.16)' : state === 'error' ? 'rgba(239,68,68,.18)' : 'rgba(255,255,255,.06)' }}>{state === 'done' ? <Check size={15} color="#4ade80" /> : state === 'skipped' ? <AlertTriangle size={14} color="#fbbf24" /> : state === 'active' ? <Loader2 size={15} className="animate-spin" /> : <span style={{ width: 6, height: 6, borderRadius: 99, background: 'currentColor' }} />}</div><span style={{ fontSize: 15, fontWeight: state === 'active' ? 700 : 550 }}>{state === 'skipped' ? `${STAGE_LABEL[stage.id]} skipped` : stage.label}</span></div>; })}</div>
-          {voiceoverSkip ? <div className="sv-fade-up" style={{ marginTop: 16, padding: '13px 15px', borderRadius: 14, background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.32)', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-            <AlertTriangle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 2 }} />
-            <span style={{ minWidth: 0, flex: 1, fontSize: 13, lineHeight: 1.55, color: '#fde68a' }}>{voiceoverSkip} The video is still being created — it will simply play without audio narration.</span>
+        {(running || error || Object.values(stages).some((state) => state === 'done')) ? <section style={{ marginTop: 20, padding: 24, borderRadius: 24, border: '1px solid rgba(180,120,0,0.14)', background: 'rgba(255,255,255,0.78)', backdropFilter: 'blur(18px)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#7A6030', fontSize: 13, marginBottom: 12 }}><span>Autonomous pipeline</span><span>{progress}%</span></div>
+          <div style={{ height: 7, background: 'rgba(180,120,0,0.10)', borderRadius: 999, overflow: 'hidden', marginBottom: 22 }}><div style={{ height: '100%', width: `${progress}%`, borderRadius: 999, background: 'linear-gradient(90deg,#E8B737,#C8920A)', transition: 'width .35s ease' }} /></div>
+          <div style={{ display: 'grid', gap: 10 }}>{STAGES.map((stage, position) => { const state = stages[stage.id]; return <div key={stage.id} className="sv-fade-up" style={{ animationDelay: `${position * 55}ms`, transition: 'background-color .22s ease, color .22s ease', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', borderRadius: 14, background: state === 'active' ? 'rgba(200,146,10,.14)' : 'transparent', color: state === 'done' ? '#166534' : state === 'skipped' ? '#B45309' : state === 'error' ? '#991B1B' : state === 'active' ? '#1A1000' : '#7A6030' }}><div style={{ width: 26, height: 26, borderRadius: 999, display: 'grid', placeItems: 'center', background: state === 'done' ? 'rgba(22,101,52,.14)' : state === 'skipped' ? 'rgba(200,146,10,.16)' : state === 'error' ? 'rgba(153,27,27,.14)' : 'rgba(180,120,0,0.08)' }}>{state === 'done' ? <Check size={15} color="#166534" /> : state === 'skipped' ? <AlertTriangle size={14} color="#B45309" /> : state === 'active' ? <Loader2 size={15} className="animate-spin" /> : <span style={{ width: 6, height: 6, borderRadius: 99, background: 'currentColor' }} />}</div><span style={{ fontSize: 15, fontWeight: state === 'active' ? 700 : 550 }}>{state === 'skipped' ? `${STAGE_LABEL[stage.id]} skipped` : stage.label}</span></div>; })}</div>
+          {voiceoverSkip ? <div className="sv-fade-up" style={{ marginTop: 16, padding: '13px 15px', borderRadius: 14, background: 'rgba(200,146,10,.1)', border: '1px solid rgba(180,120,0,0.36)', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <AlertTriangle size={15} color="#B45309" style={{ flexShrink: 0, marginTop: 2 }} />
+            <span style={{ minWidth: 0, flex: 1, fontSize: 13, lineHeight: 1.55, color: '#B45309' }}>{voiceoverSkip} The video is still being created — it will simply play without audio narration.</span>
           </div> : null}
-          {error ? <div className="sv-fade-up" style={{ marginTop: 16, padding: '15px 16px', borderRadius: 16, background: 'rgba(244,63,94,.12)', border: '1px solid rgba(244,63,94,.32)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 10, background: 'rgba(244,63,94,.18)', flexShrink: 0 }}><AlertTriangle size={16} color="#fb7185" /></span>
+          {error ? <div className="sv-fade-up" style={{ marginTop: 16, padding: '15px 16px', borderRadius: 16, background: 'rgba(153,27,27,.08)', border: '1px solid rgba(153,27,27,.26)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 10, background: 'rgba(153,27,27,.12)', flexShrink: 0 }}><AlertTriangle size={16} color="#991B1B" /></span>
             <span style={{ minWidth: 0, flex: 1 }}>
-              <span style={{ display: 'block', fontSize: 14.5, fontWeight: 700, color: '#fecdd3' }}>This step could not be completed</span>
-              <span style={{ display: 'block', marginTop: 4, fontSize: 13.5, lineHeight: 1.55, color: '#fda4af' }}>{error}</span>
+              <span style={{ display: 'block', fontSize: 14.5, fontWeight: 700, color: '#991B1B' }}>This step could not be completed</span>
+              <span style={{ display: 'block', marginTop: 4, fontSize: 13.5, lineHeight: 1.55, color: '#991B1B' }}>{error}</span>
             </span>
-            <button type="button" className="sv-press" disabled={running} onClick={() => { if (identity && draftProject) void continueGeneration(); else void analyzeProduct(); }} style={{ flexShrink: 0, border: '1px solid rgba(244,63,94,.4)', borderRadius: 12, padding: '9px 15px', background: 'rgba(244,63,94,.16)', color: '#fecdd3', fontSize: 13.5, fontWeight: 700, cursor: running ? 'default' : 'pointer', opacity: running ? .55 : 1 }}>
+            <button type="button" className="sv-press" disabled={running} onClick={() => { if (identity && draftProject) void continueGeneration(); else void analyzeProduct(); }} style={{ flexShrink: 0, border: '1px solid rgba(153,27,27,.3)', borderRadius: 12, padding: '9px 15px', background: 'rgba(153,27,27,.10)', color: '#991B1B', fontSize: 13.5, fontWeight: 700, cursor: running ? 'default' : 'pointer', opacity: running ? .55 : 1 }}>
               <RotateCcw size={13} style={{ marginRight: 6, verticalAlign: '-2px' }} />Retry
             </button>
           </div> : null}
 
-          {finished ? <div className="sv-fade-up" style={{ marginTop: 16, padding: '15px 16px', borderRadius: 16, background: failures.length ? 'rgba(244,63,94,.08)' : 'rgba(16,185,129,.1)', border: `1px solid ${failures.length ? 'rgba(244,63,94,.26)' : 'rgba(16,185,129,.3)'}` }}>
+          {finished ? <div className="sv-fade-up" style={{ marginTop: 16, padding: '15px 16px', borderRadius: 16, background: failures.length ? 'rgba(153,27,27,.08)' : 'rgba(22,101,52,.10)', border: `1px solid ${failures.length ? 'rgba(153,27,27,.26)' : 'rgba(22,101,52,.28)'}` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span style={{ display: 'grid', placeItems: 'center', width: 30, height: 30, borderRadius: 9, background: failures.length ? 'rgba(244,63,94,.16)' : 'rgba(16,185,129,.18)', flexShrink: 0 }}>
-                {failures.length ? <AlertTriangle size={15} color="#fb7185" /> : <Check size={15} color="#34d399" />}
+              <span style={{ display: 'grid', placeItems: 'center', width: 30, height: 30, borderRadius: 9, background: failures.length ? 'rgba(153,27,27,.12)' : 'rgba(22,101,52,.14)', flexShrink: 0 }}>
+                {failures.length ? <AlertTriangle size={15} color="#991B1B" /> : <Check size={15} color="#166534" />}
               </span>
-              <span style={{ fontSize: 14.5, fontWeight: 700, color: failures.length ? '#fecdd3' : '#a7f3d0' }}>
+              <span style={{ fontSize: 14.5, fontWeight: 700, color: failures.length ? '#991B1B' : '#166534' }}>
                 {succeeded} of {STAGES.length} steps succeeded{failures.length ? `, ${failures.length} failed` : ''}{voiceoverSkip ? ', voiceover skipped' : ''}
               </span>
-              {failures.length ? <button type="button" className="sv-press" disabled={running || !identity || !draftProject} onClick={() => { void continueGeneration(); }} style={{ marginLeft: 'auto', border: 0, borderRadius: 12, padding: '9px 16px', background: '#4f46e5', color: '#fff', fontSize: 13.5, fontWeight: 700, cursor: running || !identity || !draftProject ? 'default' : 'pointer', opacity: running || !identity || !draftProject ? .5 : 1 }}>Retry failed steps</button> : null}
+              {failures.length ? <button type="button" className="sv-press" disabled={running || !identity || !draftProject} onClick={() => { void continueGeneration(); }} style={{ marginLeft: 'auto', border: 0, borderRadius: 12, padding: '9px 16px', background: '#C8920A', color: '#fff', fontSize: 13.5, fontWeight: 700, cursor: running || !identity || !draftProject ? 'default' : 'pointer', opacity: running || !identity || !draftProject ? .5 : 1 }}>Retry failed steps</button> : null}
             </div>
             {failures.length ? <ul style={{ margin: '12px 0 0', padding: '0 0 0 18px', display: 'grid', gap: 6 }}>
-              {failures.map((failure) => <li key={failure.stage} style={{ color: '#fda4af', fontSize: 13, lineHeight: 1.55 }}><strong style={{ color: '#fecdd3' }}>{STAGE_LABEL[failure.stage]}:</strong> {failure.message}</li>)}
+              {failures.map((failure) => <li key={failure.stage} style={{ color: '#991B1B', fontSize: 13, lineHeight: 1.55 }}><strong style={{ color: '#991B1B' }}>{STAGE_LABEL[failure.stage]}:</strong> {failure.message}</li>)}
             </ul> : null}
           </div> : null}
         </section> : null}
 
-        {result?.render_url ? <section style={{ marginTop: 22, padding: 20, borderRadius: 28, border: '1px solid rgba(255,255,255,.14)', background: 'rgba(15,23,42,.72)', boxShadow: '0 30px 90px rgba(0,0,0,.38)', backdropFilter: 'blur(22px)' }}>
-          <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 20, background: '#020617', aspectRatio: '16 / 9' }}><video src={result.render_url} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /><div style={{ position: 'absolute', left: 16, top: 16, display: 'flex', alignItems: 'center', gap: 7, borderRadius: 999, padding: '7px 11px', color: '#dcfce7', background: 'rgba(6,78,59,.74)', backdropFilter: 'blur(12px)', fontSize: 12, fontWeight: 750 }}><Play size={12} fill="currentColor" /> Video ready</div></div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 18, flexWrap: 'wrap' }}><div style={{ minWidth: 0, flex: 1 }}><div style={{ fontSize: 18, fontWeight: 850 }}>{identity?.name || 'Your SaaS product video'}</div><div style={{ marginTop: 5, color: '#8f9bb5', fontSize: 13 }}>{identity?.tagline || 'Cinematic product story, generated end to end.'}</div></div><a href={result.render_url} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 9, minWidth: 180, padding: '13px 20px', borderRadius: 999, color: '#fff', textDecoration: 'none', fontWeight: 800, background: 'linear-gradient(90deg,#2563eb,#9333ea)' }}><Download size={17} /> Download MP4</a></div>
+        {result?.render_url ? <section style={{ marginTop: 22, padding: 20, borderRadius: 28, border: '1px solid rgba(180,120,0,0.14)', background: 'rgba(255,255,255,0.82)', boxShadow: '0 30px 90px rgba(120,80,0,0.12)', backdropFilter: 'blur(22px)' }}>
+          <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 20, background: '#050508', aspectRatio: '16 / 9' }}><video src={result.render_url} controls playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /><div style={{ position: 'absolute', left: 16, top: 16, display: 'flex', alignItems: 'center', gap: 7, borderRadius: 999, padding: '7px 11px', color: '#FFFFFF', background: 'rgba(22,101,52,.74)', backdropFilter: 'blur(12px)', fontSize: 12, fontWeight: 750 }}><Play size={12} fill="currentColor" /> Video ready</div></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 18, flexWrap: 'wrap' }}><div style={{ minWidth: 0, flex: 1 }}><div style={{ fontSize: 18, fontWeight: 850 }}>{identity?.name || 'Your SaaS product video'}</div><div style={{ marginTop: 5, color: '#7A6030', fontSize: 13 }}>{identity?.tagline || 'Cinematic product story, generated end to end.'}</div></div><a href={result.render_url} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 9, minWidth: 180, padding: '13px 20px', borderRadius: 999, color: '#fff', textDecoration: 'none', fontWeight: 800, background: 'linear-gradient(135deg,#C8920A,#B4720A)' }}><Download size={17} /> Download MP4</a></div>
         </section> : null}
       </div>
-    </div>
+    </AppShell>
   );
 }

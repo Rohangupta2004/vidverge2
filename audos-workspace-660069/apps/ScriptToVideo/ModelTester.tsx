@@ -140,10 +140,10 @@ function statusWords(state: string): string {
 }
 
 const STUDIO_CSS = `
-.s2v-studio-glass { background: linear-gradient(170deg, rgba(255,255,255,0.055), rgba(255,255,255,0.02)); border: 1px solid rgba(255,255,255,0.09); backdrop-filter: blur(14px); }
-.s2v-studio-orb { background: conic-gradient(from 140deg, #f59e0b, #7C3AED, #EC4899, #f59e0b); }
+.s2v-studio-glass { background: linear-gradient(170deg, #FFFFFF, rgba(255,255,255,0.72)); border: 1px solid rgba(180,120,0,0.14); backdrop-filter: blur(14px); }
+.s2v-studio-orb { background: conic-gradient(from 140deg, #E8B737, #C8920A, #B4720A, #E8B737); }
 .s2v-studio-send:hover:not(:disabled) { filter: brightness(1.08); }
-.s2v-studio-chip:hover:not(:disabled) { border-color: rgba(245,158,11,0.55) !important; color: #EDEBE8 !important; }
+.s2v-studio-chip:hover:not(:disabled) { border-color: rgba(200,146,10,0.55) !important; color: #1A1000 !important; }
 @keyframes s2v-studio-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .s2v-studio-turn { animation: s2v-studio-in 0.28s ease both; }
 `;
@@ -412,7 +412,7 @@ export default function AgentStudio() {
   const catalogLine = rosterState() === 'loading' ? 'Reading the live Runway catalog\u2026' : rosterNote();
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'radial-gradient(1100px 520px at 50% -10%, rgba(245,158,11,0.09), transparent 70%)' }}>
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'radial-gradient(1100px 520px at 50% -10%, rgba(200,146,10,0.09), transparent 70%)' }}>
       <style>{STUDIO_CSS}</style>
 
       {/* —— Conversation —— */}
@@ -420,7 +420,7 @@ export default function AgentStudio() {
         <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
           {!turns.length ? (
             <div style={{ textAlign: 'center', padding: '26px 0 6px' }}>
-              <div className="s2v-studio-orb" style={{ width: 52, height: 52, borderRadius: '50%', margin: '0 auto 16px', filter: 'blur(0.2px)', boxShadow: '0 0 34px rgba(245,158,11,0.32)' }} />
+              <div className="s2v-studio-orb" style={{ width: 52, height: 52, borderRadius: '50%', margin: '0 auto 16px', filter: 'blur(0.2px)', boxShadow: '0 0 34px rgba(200,146,10,0.32)' }} />
               <div style={{ color: T.bone, fontSize: 25, fontWeight: 750, letterSpacing: -0.55 }}>What should I film for you?</div>
               <div style={{ color: T.muted, fontSize: 13.5, lineHeight: 1.6, maxWidth: 520, margin: '9px auto 0' }}>
                 Describe one shot in plain language. I pick up your chosen Runway model, submit the render, report every step as it really happens, and hand back the finished clip.
@@ -432,7 +432,7 @@ export default function AgentStudio() {
                     type="button"
                     className="s2v-studio-chip"
                     onClick={() => setPrompt(s)}
-                    style={{ textAlign: 'left', background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.08)', color: T.muted, borderRadius: 12, padding: '11px 14px', fontSize: 12.5, lineHeight: 1.5, cursor: 'pointer' }}
+                    style={{ textAlign: 'left', background: '#FFFFFF', border: '1px solid rgba(180,120,0,0.14)', color: T.muted, borderRadius: 12, padding: '11px 14px', fontSize: 12.5, lineHeight: 1.5, cursor: 'pointer' }}
                   >
                     <Sparkles size={12} color={T.live} style={{ display: 'inline', marginRight: 8, verticalAlign: '-1px' }} />
                     {s}
@@ -445,7 +445,7 @@ export default function AgentStudio() {
           {turns.map((turn) => (
             <div key={turn.id} className="s2v-studio-turn" style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               {/* the person */}
-              <div style={{ alignSelf: 'flex-end', maxWidth: '86%', background: '#1B2130', color: '#E7EAF1', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '15px 15px 5px 15px', padding: '11px 14px', fontSize: 13.5, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+              <div style={{ alignSelf: 'flex-end', maxWidth: '86%', background: '#FFF3D6', color: '#1A1000', border: '1px solid rgba(180,120,0,0.14)', borderRadius: '15px 15px 5px 15px', padding: '11px 14px', fontSize: 13.5, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
                 {turn.prompt}
               </div>
 
@@ -469,7 +469,7 @@ export default function AgentStudio() {
                 </div>
 
                 {turn.error ? (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 13, color: turn.status === 'stopped' ? T.muted : T.fault, fontSize: 12.5, lineHeight: 1.55, background: turn.status === 'stopped' ? 'rgba(255,255,255,0.04)' : 'rgba(226,114,111,0.08)', border: `1px solid ${turn.status === 'stopped' ? 'rgba(255,255,255,0.08)' : 'rgba(226,114,111,0.28)'}`, borderRadius: 10, padding: '10px 13px' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 13, color: turn.status === 'stopped' ? T.muted : T.fault, fontSize: 12.5, lineHeight: 1.55, background: turn.status === 'stopped' ? 'rgba(180,120,0,0.06)' : 'rgba(153,27,27,0.08)', border: `1px solid ${turn.status === 'stopped' ? 'rgba(180,120,0,0.14)' : 'rgba(153,27,27,0.24)'}`, borderRadius: 10, padding: '10px 13px' }}>
                     <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} />
                     <span>{turn.error}</span>
                   </div>
@@ -482,7 +482,7 @@ export default function AgentStudio() {
                       src={turn.videoUrl}
                       controls
                       playsInline
-                      style={{ display: 'block', width: '100%', maxHeight: 460, background: '#000', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)' }}
+                      style={{ display: 'block', width: '100%', maxHeight: 460, background: '#000', borderRadius: 12, border: '1px solid rgba(180,120,0,0.14)' }}
                     />
                     <div style={{ display: 'flex', gap: 9, alignItems: 'center', marginTop: 11, flexWrap: 'wrap' }}>
                       <a
@@ -491,7 +491,7 @@ export default function AgentStudio() {
                         download
                         target="_blank"
                         rel="noreferrer"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.live, color: '#1A1205', borderRadius: 10, padding: '10px 18px', fontSize: 12.5, fontWeight: 750, textDecoration: 'none', boxShadow: '0 2px 12px rgba(245,158,11,0.28)' }}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: T.live, color: '#1A1205', borderRadius: 10, padding: '10px 18px', fontSize: 12.5, fontWeight: 750, textDecoration: 'none', boxShadow: '0 2px 12px rgba(200,146,10,0.28)' }}
                       >
                         <Download size={14} /> Download MP4
                       </a>
@@ -513,7 +513,7 @@ export default function AgentStudio() {
       </div>
 
       {/* —— Composer —— */}
-      <div style={{ flexShrink: 0, borderTop: '1px solid rgba(255,255,255,0.07)', background: 'rgba(8,12,20,0.86)', padding: '12px 20px 16px' }}>
+      <div style={{ flexShrink: 0, borderTop: '1px solid rgba(180,120,0,0.14)', background: 'rgba(255,255,255,0.92)', padding: '12px 20px 16px' }}>
         <div style={{ maxWidth: 760, margin: '0 auto' }}>
           {gridOpen ? (
             <div className="s2v-studio-glass" style={{ borderRadius: 16, padding: '14px 15px', marginBottom: 11 }}>
@@ -530,7 +530,7 @@ export default function AgentStudio() {
               </div>
               <ModelGrid options={options} value={model?.id || ''} onChange={setModelId} disabled={generating} />
               {lockedCount && rosterState() === 'live' ? (
-                <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.55, marginTop: 11, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '9px 12px' }}>
+                <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.55, marginTop: 11, background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 10, padding: '9px 12px' }}>
                   {lockedCount} of these {roster.length} models are greyed out because the Audos Runway proxy is not listing them yet — submitting one answers “model must be one of: gen4.5, gen4_turbo”. This grid re-reads the platform catalog every time you open it, so each model unlocks by itself the moment Audos enables it. Nothing here needs another app update.
                 </div>
               ) : null}
@@ -552,14 +552,14 @@ export default function AgentStudio() {
                 type="button"
                 className="s2v-studio-chip"
                 onClick={() => setGridOpen((open) => !open)}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(245,158,11,0.10)', border: `1px solid ${T.live}`, color: T.bone, borderRadius: 999, padding: '7px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(200,146,10,0.10)', border: `1px solid ${T.live}`, color: T.bone, borderRadius: 999, padding: '7px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
               >
                 <Sparkles size={12} color={T.live} />
                 {model?.label || 'Choose a model'}
                 {gridOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
               </button>
 
-              <div style={{ display: 'inline-flex', gap: 4, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 999, padding: 3 }}>
+              <div style={{ display: 'inline-flex', gap: 4, background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 999, padding: 3 }}>
                 {formats.map((f) => (
                   <button
                     key={f.value}
@@ -573,7 +573,7 @@ export default function AgentStudio() {
                 ))}
               </div>
 
-              <div style={{ display: 'inline-flex', gap: 4, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 999, padding: 3 }}>
+              <div style={{ display: 'inline-flex', gap: 4, background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 999, padding: 3 }}>
                 {durations.map((d) => (
                   <button
                     key={d}
@@ -591,7 +591,7 @@ export default function AgentStudio() {
                 <button
                   type="button"
                   onClick={stopRun}
-                  style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.06)', color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 12, padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+                  style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(180,120,0,0.10)', color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 12, padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
                 >
                   <Square size={13} /> Stop watching
                 </button>
@@ -601,7 +601,7 @@ export default function AgentStudio() {
                   className="s2v-studio-send s2v-lift"
                   disabled={!canGenerate}
                   onClick={() => void generate()}
-                  style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, background: canGenerate ? T.live : 'rgba(255,255,255,0.05)', color: canGenerate ? '#1A1205' : T.dim, border: 'none', borderRadius: 12, padding: '10px 20px', fontSize: 13, fontWeight: 800, cursor: canGenerate ? 'pointer' : 'default', boxShadow: canGenerate ? '0 2px 14px rgba(245,158,11,0.3)' : 'none' }}
+                  style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, background: canGenerate ? T.live : 'rgba(180,120,0,0.08)', color: canGenerate ? '#1A1205' : T.dim, border: 'none', borderRadius: 12, padding: '10px 20px', fontSize: 13, fontWeight: 800, cursor: canGenerate ? 'pointer' : 'default', boxShadow: canGenerate ? '0 2px 14px rgba(200,146,10,0.3)' : 'none' }}
                 >
                   <Send size={14} /> Generate video
                 </button>

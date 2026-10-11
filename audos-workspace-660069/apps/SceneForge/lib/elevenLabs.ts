@@ -24,14 +24,74 @@
 //     — one MP3 per segment, in order, each with its MEASURED length. That
 //     is the per-scene primitive: a storyboard of N scenes is one request,
 //     not N, and the durations come back without a browser decode.
-//   * `voiceSettings` accepts exactly four fields. There is NO `model_id` on
-//     this endpoint (only the speech-to-speech endpoint takes a `modelId`),
-//     so none is sent — an undocumented field risks a 400 that costs the
-//     customer a generation. MODEL_NOTE is what the UI tells them instead.
+//   * `voiceSettings` accepts exactly four fields and carries no model. The
+//     MODEL, however, is not optional for a non-English film: ElevenLabs'
+//     English turbo model reads Hindi as mangled phonetics, so the model is
+//     chosen from the language (`getElevenLabsModel`) and sent at the TOP
+//     level of the body, where an unknown key is ordinarily ignored rather
+//     than validated. `postSpeech` below negotiates that once: a rejection
+//     that names the field retries WITHOUT it and the verdict is remembered,
+//     so no customer pays twice to learn the same thing.
 import { uploadFile } from './proxy';
 import { WORKSPACE_ID } from './supabase';
 
-export const MODEL_NOTE = 'Audos runs ElevenLabs\u2019 multilingual model for this endpoint and does not expose a model switch, so the four settings below are the full set of controls it honours.';
+export const MODEL_NOTE = 'Audos does not expose a model switch on this endpoint, so SceneForge chooses the ElevenLabs model from the language: Hindi \u2014 and every other non-English language \u2014 narrates on the multilingual model, English on the faster turbo model. The four settings below are the full set of delivery controls the endpoint honours.';
+
+// ——— Which ElevenLabs model narrates ———
+
+/** The only model that speaks Hindi (and every other non-English language) properly. */
+export const ELEVEN_MULTILINGUAL_MODEL = 'eleven_multilingual_v2';
+/** The fast English model, kept as the English default. */
+export const ELEVEN_ENGLISH_MODEL = 'eleven_turbo_v2';
+
+// The project's `language` column is free text, so it arrives as a code
+// ('hi', 'en-IN'), a name ('Hindi') or the market shorthand ('Hinglish').
+const LANGUAGE_NAMES: Record<string, string> = {
+  english: 'en', hindi: 'hi', hinglish: 'hi', bengali: 'bn', bangla: 'bn', tamil: 'ta', telugu: 'te',
+  marathi: 'mr', punjabi: 'pa', gujarati: 'gu', kannada: 'kn', malayalam: 'ml', urdu: 'ur',
+  spanish: 'es', french: 'fr', german: 'de', portuguese: 'pt', italian: 'it', dutch: 'nl',
+  arabic: 'ar', japanese: 'ja', korean: 'ko', chinese: 'zh', mandarin: 'zh', russian: 'ru',
+  indonesian: 'id', turkish: 'tr', polish: 'pl', vietnamese: 'vi', thai: 'th', filipino: 'fil',
+};
+
+/** The two-letter code behind whatever the project calls its language. */
+export function languageCode(language?: string | null): string {
+  const raw = String(language || '').trim().toLowerCase();
+  if (!raw) return '';
+  const named = LANGUAGE_NAMES[raw];
+  if (named) return named;
+  // 'en-IN', 'hi_IN', 'pt-BR' — the region does not change the model.
+  const code = raw.replace(/_/g, '-').split('-')[0];
+  return /^[a-z]{2,3}$/.test(code) ? code : (LANGUAGE_NAMES[code] || '');
+}
+
+/**
+ * The ElevenLabs model a script in this language must be narrated with.
+ *
+ * Hindi — and anything else that is not English — goes to the multilingual
+ * model; English keeps the faster turbo model. An unknown or empty language is
+ * treated as English, which is what the app defaulted to before this existed.
+ */
+export function getElevenLabsModel(language?: string | null): string {
+  const code = languageCode(language);
+  if (!code || code === 'en') return ELEVEN_ENGLISH_MODEL;
+  return ELEVEN_MULTILINGUAL_MODEL;
+}
+
+// Whether this platform build accepts an explicit model on the voiceover
+// routes. Learned from one real request and remembered for the browser.
+const MODEL_FIELD_KEY = 'sceneforge_eleven_model_field_v1';
+
+function modelFieldSupported(): boolean {
+  try { return window.localStorage.getItem(MODEL_FIELD_KEY) !== 'no'; } catch { return true; }
+}
+function rememberModelFieldSupport(supported: boolean) {
+  try { window.localStorage.setItem(MODEL_FIELD_KEY, supported ? 'yes' : 'no'); } catch { /* private mode — this session still honours it */ }
+}
+/** Forget the verdict, so a platform change is picked up without a reload. */
+export function resetElevenModelFieldSupport() {
+  try { window.localStorage.removeItem(MODEL_FIELD_KEY); } catch { /* ignore */ }
+}
 
 /** Thrown by every call here, carrying the platform's machine-readable code. */
 export class ElevenLabsError extends Error {
@@ -147,6 +207,24 @@ function labelBlob(voice: any): string {
   return Object.values(labels).filter(Boolean).map(String).join(' ');
 }
 
+/**
+ * The voice's own id, whatever the catalog called it.
+ *
+ * ElevenLabs returns `voice_id`; the platform catalog re-exposes it as `id`;
+ * the clone-create response uses `voiceId`. Reading only one of them is how
+ * every voice in the picker ended up with `id: undefined` — unselectable,
+ * unpreviewable, and then silently filtered out of the list, which looked to
+ * the customer like a catalog that had lost their voices.
+ */
+export function elevenVoiceId(voice: any): string {
+  const candidates = [voice?.id, voice?.voice_id, voice?.voiceId, voice?.voice?.voice_id, voice?.voice?.id, voice?.voice?.voiceId];
+  for (const candidate of candidates) {
+    const value = String(candidate ?? '').trim();
+    if (value && value !== 'undefined' && value !== 'null') return value;
+  }
+  return '';
+}
+
 /** Why this voice is Indian, or '' when it is not. Order = authority. */
 export function indianReasonFor(voice: any): string {
   const labels = voice?.labels && typeof voice.labels === 'object' ? voice.labels : {};
@@ -171,10 +249,10 @@ export function elevenVoiceView(voice: any): ElevenVoice {
   const useCase = String(labels.use_case || labels.descriptive || '').trim().replace(/_/g, ' ');
   const reason = indianReasonFor(voice);
   return {
-    id: String(voice?.id ?? voice?.voice_id ?? ''),
+    id: elevenVoiceId(voice),
     // ElevenLabs ships marketing names like "Sarah - Mature, Reassuring".
     // The full string stays searchable; the UI shows the part before the dash.
-    name: String(voice?.name || voice?.id || 'Voice'),
+    name: String(voice?.name || elevenVoiceId(voice) || 'Voice'),
     category: String(voice?.category || '').trim(),
     descriptor: [language, accent ? `${accent} accent` : '', gender, useCase].filter(Boolean).join(' \u00b7 '),
     language,
@@ -195,12 +273,64 @@ export function shortVoiceName(name: string): string {
 
 /** Indian voices first, then this workspace's clones, then alphabetical. */
 export function sortElevenVoices(voices: any[]): ElevenVoice[] {
-  return voices
-    .map(elevenVoiceView)
-    .filter((view) => view.id)
-    .sort((a, b) => Number(b.indian) - Number(a.indian)
-      || Number(b.category === 'cloned') - Number(a.category === 'cloned')
-      || shortVoiceName(a.name).localeCompare(shortVoiceName(b.name)));
+  const views = (Array.isArray(voices) ? voices : []).map(elevenVoiceView);
+  const usable = views.filter((view) => view.id);
+  // A voice with no resolvable id cannot be selected, previewed or narrated
+  // with, so it has to go — but LOUDLY. Dropping them in silence is exactly how
+  // a field-name mismatch emptied this picker without a single console line.
+  if (usable.length < views.length) {
+    console.warn(
+      `[SceneForge] ${views.length - usable.length} of ${views.length} ElevenLabs voices arrived with no usable voice id and were left out of the picker.`,
+      views.filter((view) => !view.id).map((view) => view.raw),
+    );
+  }
+  return usable.sort((a, b) => Number(b.indian) - Number(a.indian)
+    || Number(b.category === 'cloned') - Number(a.category === 'cloned')
+    || shortVoiceName(a.name).localeCompare(shortVoiceName(b.name)));
+}
+
+// ——— Language grouping, for the picker's language filter ———
+
+export type VoiceLanguageGroup = 'en' | 'hi' | 'other';
+
+/** The labelled Hindi voice the platform catalog ships; it leads the Hindi list. */
+export const HINDI_LEAD_VOICE = 'Suman';
+
+const HINDI_WORDS = /(hindi|hinglish)/i;
+const HINDI_LEAD_PATTERN = new RegExp(`\\b${HINDI_LEAD_VOICE}\\b`, 'i');
+
+/** True when ElevenLabs itself labels this voice as a Hindi speaker. */
+export function speaksHindi(voice: ElevenVoice): boolean {
+  if (String(voice.language || '').trim().toLowerCase().startsWith('hi')) return true;
+  if (HINDI_WORDS.test(`${voice.language} ${voice.accent} ${voice.descriptor} ${voice.useCase}`)) return true;
+  return HINDI_LEAD_PATTERN.test(String(voice.name || ''));
+}
+
+/**
+ * Which group the picker's language filter puts this voice in.
+ *
+ * An UNLABELLED voice counts as English: most of the premade catalog carries no
+ * `labels.language` at all, so reading absence as "other" would hide half the
+ * list behind a filter the customer never asked for. Only an explicitly
+ * non-English, non-Hindi label reads as 'other'.
+ *
+ * This is a grouping for ORDERING and an optional filter — never a hard gate.
+ * Every voice in the catalog can narrate Hindi through the multilingual model
+ * (`getElevenLabsModel`), which is why the Hindi view ranks rather than hides.
+ */
+export function voiceLanguageGroup(voice: ElevenVoice): VoiceLanguageGroup {
+  if (speaksHindi(voice)) return 'hi';
+  const label = String(voice.language || '').trim();
+  if (!label || /english/i.test(label) || label.toLowerCase().split(/[-_]/)[0] === 'en') return 'en';
+  return 'other';
+}
+
+/** Hindi ordering: the labelled Hindi lead, then other Hindi labels, then the rest. */
+export function hindiRank(voice: ElevenVoice): number {
+  if (HINDI_LEAD_PATTERN.test(String(voice.name || ''))) return 0;
+  if (speaksHindi(voice)) return 1;
+  if (voice.indian) return 2;
+  return 3;
 }
 
 export interface VoiceCatalog {
@@ -226,7 +356,10 @@ export async function fetchElevenVoices(): Promise<VoiceCatalog> {
       });
       const payload = await response.json().catch(() => ({}));
       if (response.ok && Array.isArray(payload?.voices) && payload.voices.length) {
-        return { voices: sortElevenVoices(payload.voices), includesCloned: true };
+        const voices = sortElevenVoices(payload.voices);
+        // A response whose every entry lost its id is not a usable catalog:
+        // fall through to the public route rather than paint an empty picker.
+        if (voices.length) return { voices, includesCloned: true };
       }
     } catch { /* fall through to the public catalog */ }
   }
@@ -293,7 +426,7 @@ export async function cloneElevenVoice(name: string, files: File[]): Promise<Clo
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.success === false) throw describe(payload, response.status);
-  const voiceId = String(payload?.voice?.voiceId || '');
+  const voiceId = elevenVoiceId(payload?.voice) || elevenVoiceId(payload);
   if (!voiceId) throw new ElevenLabsError('The voice was created, but the service did not return its ID. Refresh the catalog before trying again.');
   return {
     voiceId,
@@ -397,6 +530,60 @@ async function toDurableAudio(payload: any, estimatedDurationMs: number): Promis
   return { url: stored.url, playbackUrl, estimatedDurationMs };
 }
 
+/** Per-request narration choices that are not delivery settings. */
+export interface SpeechOptions {
+  /** The film's language. Chooses the model via `getElevenLabsModel`. */
+  language?: string | null;
+  /** Overrides the language-derived model outright (debugging, A/B). */
+  modelId?: string;
+}
+
+/** The model THIS request narrates with: explicit choice, then the language. */
+export function speechModelId(options: SpeechOptions = {}): string {
+  return String(options.modelId || getElevenLabsModel(options.language) || '');
+}
+
+/**
+ * True when a rejection is the endpoint saying "I do not take a model field"
+ * rather than "this request was wrong". Quota, balance, rate-limit and
+ * credential failures are explicitly NOT this — retrying those without the
+ * model would bill a second attempt for nothing.
+ */
+function isModelFieldRejection(error: ElevenLabsError): boolean {
+  if (error.status !== 400 && error.status !== 422) return false;
+  if (/quota|balance|rate|credential|voice/i.test(error.code || '')) return false;
+  return /model|unexpected|unknown\s+(?:field|key|propert)|additional\s+propert|not\s+allowed|invalid\s+(?:body|request|payload)/i.test(error.message);
+}
+
+/**
+ * POST one voiceover request, negotiating the model field exactly once.
+ *
+ * `body(withModel)` is asked for the payload WITH the model first. A rejection
+ * that names the field retries without it and the verdict is remembered for the
+ * browser, so a platform build that ignores the field costs one extra request
+ * ever rather than one per narration.
+ */
+async function postSpeech(path: string, body: (withModel: boolean) => unknown, token: string): Promise<any> {
+  const wanted = modelFieldSupported();
+  for (let attempt = 0; ; attempt += 1) {
+    const withModel = wanted && attempt === 0;
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
+      body: JSON.stringify(body(withModel)),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload?.success !== false) {
+      if (withModel) rememberModelFieldSupport(true);
+      return payload;
+    }
+    const error = describe(payload, response.status);
+    if (!withModel || !isModelFieldRejection(error)) throw error;
+    rememberModelFieldSupport(false);
+    console.warn('[SceneForge] The voice endpoint refused an explicit ElevenLabs model, so narration falls back to the platform default. A non-English script may lose multilingual pronunciation.', error);
+  }
+}
+
 /**
  * Narrate the script in the chosen voice.
  *
@@ -404,7 +591,7 @@ async function toDurableAudio(payload: any, estimatedDurationMs: number): Promis
  * HeyGen's voice source, so the avatar's lips are driven by the ElevenLabs
  * performance rather than by HeyGen re-reading the text.
  */
-export async function speak(script: string, voiceId: string, settings: VoiceSettings): Promise<Voiceover> {
+export async function speak(script: string, voiceId: string, settings: VoiceSettings, options: SpeechOptions = {}): Promise<Voiceover> {
   const text = String(script || '').trim();
   if (!text) throw new ElevenLabsError('Write the script before generating the voiceover.');
   if (text.length > MAX_SCRIPT_CHARS) {
@@ -414,13 +601,17 @@ export async function speak(script: string, voiceId: string, settings: VoiceSett
   const token = softToken();
   if (!token) throw new ElevenLabsError('Your workspace session is not ready yet. Refresh the page and try again.', 'no_credentials', 401);
 
-  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace())}/audio/voiceover`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
-    body: JSON.stringify({ script: text, voiceId, voiceSettings: clampSettings(settings) }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload?.success === false) throw describe(payload, response.status);
+  const modelId = speechModelId(options);
+  const payload = await postSpeech(
+    `/api/workspaces/${encodeURIComponent(workspace())}/audio/voiceover`,
+    (withModel) => ({
+      script: text,
+      voiceId,
+      voiceSettings: clampSettings(settings),
+      ...(withModel && modelId ? { modelId, model_id: modelId } : {}),
+    }),
+    token,
+  );
   return toDurableAudio(payload, Number(payload?.estimatedDurationMs) || 0);
 }
 
@@ -452,7 +643,7 @@ export interface SpokenSegments {
  * on its own. Blank lines are rejected up front because the service would
  * refuse the whole batch over one empty entry.
  */
-export async function speakSegments(lines: string[], voiceId: string, settings: VoiceSettings): Promise<SpokenSegments> {
+export async function speakSegments(lines: string[], voiceId: string, settings: VoiceSettings, options: SpeechOptions = {}): Promise<SpokenSegments> {
   const texts = (lines || []).map((line) => String(line || '').trim());
   if (!texts.length) throw new ElevenLabsError('There are no lines to narrate yet.');
   const blank = texts.findIndex((text) => !text);
@@ -468,13 +659,21 @@ export async function speakSegments(lines: string[], voiceId: string, settings: 
   const token = softToken();
   if (!token) throw new ElevenLabsError('Your workspace session is not ready yet. Refresh the page and try again.', 'no_credentials', 401);
 
-  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace())}/audio/voiceover/segments`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
-    body: JSON.stringify({ segments: texts.map((text) => ({ text })), voiceId, voiceSettings: clampSettings(settings) }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload?.success === false) throw describe(payload, response.status);
+  // The model is sent BOTH at the top level and on every segment. One batch is
+  // one request, so there is no "first segment" to set it on — but a build that
+  // reads the model per segment would otherwise narrate beat 1 in Hindi and the
+  // rest in English, which is the exact bug this covers.
+  const modelId = speechModelId(options);
+  const payload = await postSpeech(
+    `/api/workspaces/${encodeURIComponent(workspace())}/audio/voiceover/segments`,
+    (withModel) => ({
+      segments: texts.map((text) => ({ text, ...(withModel && modelId ? { modelId, model_id: modelId } : {}) })),
+      voiceId,
+      voiceSettings: clampSettings(settings),
+      ...(withModel && modelId ? { modelId, model_id: modelId } : {}),
+    }),
+    token,
+  );
   const rows: any[] = Array.isArray(payload?.segments) ? payload.segments : [];
   if (rows.length !== texts.length) {
     throw new ElevenLabsError(`The voice service returned ${rows.length} clips for ${texts.length} lines. Try again.`);
@@ -508,12 +707,12 @@ export function hasCachedSample(voiceId: string): boolean {
  * A playable sample URL for a voice: the catalog preview when ElevenLabs
  * provides one, otherwise one billed short generation, cached per session.
  */
-export function previewVoiceSample(voice: Pick<ElevenVoice, 'id' | 'previewUrl'>, settings: VoiceSettings = DEFAULT_VOICE_SETTINGS): Promise<string> {
+export function previewVoiceSample(voice: Pick<ElevenVoice, 'id' | 'previewUrl'>, settings: VoiceSettings = DEFAULT_VOICE_SETTINGS, options: SpeechOptions = {}): Promise<string> {
   if (voice.previewUrl) return Promise.resolve(voice.previewUrl);
   const key = String(voice.id || '');
   const cached = sampleCache.get(key);
   if (cached) return cached;
-  const pending = speak(PREVIEW_SAMPLE_LINE, key, settings).then((spoken) => spoken.url);
+  const pending = speak(PREVIEW_SAMPLE_LINE, key, settings, options).then((spoken) => spoken.url);
   sampleCache.set(key, pending);
   // A failed generation must not poison the cache, or the voice could never be previewed again.
   pending.catch(() => { if (sampleCache.get(key) === pending) sampleCache.delete(key); });

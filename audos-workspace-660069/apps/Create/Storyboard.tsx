@@ -324,7 +324,7 @@ export default function Storyboard({
                     fontSize: 11,
                     fontWeight: 600,
                     color: '#fff',
-                    background: 'rgba(0,0,0,0.62)',
+                    background: 'rgba(26,16,0,0.62)',
                     backdropFilter: 'blur(4px)',
                   }}
                 >
@@ -337,7 +337,7 @@ export default function Storyboard({
                     label="Regenerate this scene image"
                     onClick={() => generateFor(s, true)}
                     disabled={img.status === 'loading' || !(s.description || '').trim()}
-                    style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.18)' }}
+                    style={{ background: 'rgba(26,16,0,0.55)', border: '1px solid rgba(255,255,255,0.28)' }}
                   >
                     {img.status === 'loading' ? <Loader2 size={14} className="rc-spin" /> : <RefreshCw size={14} />}
                   </IconButton>
@@ -383,7 +383,7 @@ export default function Storyboard({
                         padding: '3px 6px',
                         borderRadius: 7,
                         border: `1px solid ${T.border}`,
-                        background: 'rgba(255,255,255,0.04)',
+                        background: 'rgba(180,120,0,0.06)',
                         color: T.sub,
                         fontSize: 12,
                         outline: 'none',
@@ -392,7 +392,7 @@ export default function Storyboard({
                       data-testid={`input-scene-duration-${i + 1}`}
                     >
                       {clipOptionsFor(model).map((seconds) => (
-                        <option key={seconds} value={seconds} style={{ background: '#101014', color: '#f5f5f7' }}>
+                        <option key={seconds} value={seconds} style={{ background: '#FFFFFF', color: '#1A1000' }}>
                           {seconds}s
                         </option>
                       ))}

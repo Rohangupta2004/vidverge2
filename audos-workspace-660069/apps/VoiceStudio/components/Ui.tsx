@@ -1,6 +1,6 @@
 // Voice Studio's UI kit. Colours are applied with inline styles rather than
 // Tailwind arbitrary values so nothing depends on a class string being visible
-// to the compiler, and so the violet accent is declared in exactly one place.
+// to the compiler, and so the amber accent is declared in exactly one place.
 import {
   createContext,
   useCallback,
@@ -16,32 +16,38 @@ import {
 } from 'react';
 import { AlertTriangle, CheckCircle2, Download, Info, Loader2, Pause, Play, Upload, X } from 'lucide-react';
 import { formatClock } from '../lib/runtime';
+import { COLORS } from '../../../components/theme';
 
-/** The app's palette. Surfaces sit on the shell's dark ground; the accent is Voice Studio's own violet. */
+/**
+ * The app's palette, mapped onto the shared Vidverge dark-cosmic tokens in
+ * components/theme.ts so Voice Studio reads as part of the same product family.
+ * `page` stays transparent because the surrounding AppShell paints the ground
+ * and runs the beam layer behind it.
+ */
 export const T = {
-  accent: '#7C3AED',
-  accentBright: '#A78BFA',
-  accentDeep: '#5B21B6',
-  accentSoft: 'rgba(124,58,237,0.14)',
-  accentSofter: 'rgba(124,58,237,0.07)',
-  accentLine: 'rgba(124,58,237,0.38)',
-  glass: 'rgba(18,21,34,0.72)',
-  glassStrong: 'rgba(25,29,46,0.92)',
-  inset: 'rgba(8,10,18,0.6)',
-  border: 'rgba(148,163,184,0.14)',
-  borderStrong: 'rgba(148,163,184,0.26)',
-  text: '#F1F5F9',
-  textSecondary: '#CBD5E1',
-  textMuted: '#94A3B8',
-  success: '#4ADE80',
-  successSoft: 'rgba(74,222,128,0.12)',
-  danger: '#F87171',
-  dangerSoft: 'rgba(248,113,113,0.12)',
-  warning: '#FBBF24',
-  warningSoft: 'rgba(251,191,36,0.12)',
-  page:
-    'radial-gradient(ellipse 70% 55% at 18% -12%, rgba(124,58,237,0.26) 0%, transparent 62%),' +
-    'radial-gradient(ellipse 55% 45% at 92% 2%, rgba(56,189,248,0.10) 0%, transparent 58%), #070912',
+  accent: COLORS.primary,
+  accentBright: COLORS.primaryGlow,
+  accentDeep: '#b45309',
+  accentSoft: 'rgba(200,146,10,0.14)',
+  accentSofter: 'rgba(200,146,10,0.07)',
+  accentLine: COLORS.borderHover,
+  glass: 'rgba(255,255,255,0.78)',
+  glassStrong: 'rgba(255,250,235,0.94)',
+  inset: 'rgba(255,253,244,0.9)',
+  border: COLORS.border,
+  borderStrong: COLORS.borderHover,
+  text: COLORS.text,
+  textSecondary: '#3D2800',
+  textMuted: COLORS.textMuted,
+  success: '#166534',
+  successSoft: 'rgba(22,101,52,0.12)',
+  danger: '#991B1B',
+  dangerSoft: 'rgba(153,27,27,0.12)',
+  warning: '#B45309',
+  warningSoft: 'rgba(180,83,9,0.12)',
+  cyan: COLORS.accent,
+  cyanBright: COLORS.accentGlow,
+  page: 'transparent',
 };
 
 /**
@@ -53,12 +59,12 @@ export function StudioStyles() {
     <style>{`
       .vs-range { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 999px; outline: none; }
       .vs-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%;
-        background: #ffffff; border: 3px solid ${T.accent}; cursor: pointer; box-shadow: 0 2px 10px rgba(124,58,237,0.55); }
+        background: #ffffff; border: 3px solid ${T.accent}; cursor: pointer; box-shadow: 0 2px 10px rgba(200,146,10,0.55); }
       .vs-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #ffffff; border: 3px solid ${T.accent};
-        cursor: pointer; box-shadow: 0 2px 10px rgba(124,58,237,0.55); }
+        cursor: pointer; box-shadow: 0 2px 10px rgba(200,146,10,0.55); }
       .vs-range:disabled::-webkit-slider-thumb { border-color: ${T.borderStrong}; box-shadow: none; cursor: not-allowed; }
       @keyframes vs-shimmer { 0% { background-position: -420px 0; } 100% { background-position: 420px 0; } }
-      .vs-skeleton { background-image: linear-gradient(90deg, rgba(148,163,184,0.06) 0%, rgba(148,163,184,0.16) 50%, rgba(148,163,184,0.06) 100%);
+      .vs-skeleton { background-image: linear-gradient(90deg, rgba(180,120,0,0.06) 0%, rgba(180,120,0,0.14) 50%, rgba(180,120,0,0.06) 100%);
         background-size: 420px 100%; animation: vs-shimmer 1.4s linear infinite; }
       @keyframes vs-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       .vs-rise { animation: vs-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
@@ -67,9 +73,10 @@ export function StudioStyles() {
       @media (prefers-reduced-motion: reduce) {
         .vs-skeleton, .vs-rise, .vs-toast { animation: none !important; }
       }
-      .vs-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
-      .vs-scroll::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.22); border-radius: 999px; }
-      .vs-scroll::-webkit-scrollbar-track { background: transparent; }
+      .vs-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+      .vs-scroll::-webkit-scrollbar-thumb { background: rgba(200,146,10,0.4); border-radius: 999px; }
+      .vs-scroll::-webkit-scrollbar-thumb:hover { background: rgba(200,146,10,0.7); }
+      .vs-scroll::-webkit-scrollbar-track { background: #FFFAEB; }
     `}</style>
   );
 }
@@ -203,9 +210,9 @@ export function TabHeader({
 export function Badge({ children, tone = 'accent' }: { children: ReactNode; tone?: 'accent' | 'success' | 'warning' | 'muted' }) {
   const map = {
     accent: { color: T.accentBright, background: T.accentSoft, border: T.accentLine },
-    success: { color: T.success, background: T.successSoft, border: 'rgba(74,222,128,0.34)' },
-    warning: { color: T.warning, background: T.warningSoft, border: 'rgba(251,191,36,0.34)' },
-    muted: { color: T.textMuted, background: 'rgba(148,163,184,0.1)', border: T.border },
+    success: { color: T.success, background: T.successSoft, border: 'rgba(22,101,52,0.34)' },
+    warning: { color: T.warning, background: T.warningSoft, border: 'rgba(180,83,9,0.34)' },
+    muted: { color: T.textMuted, background: 'rgba(180,120,0,0.08)', border: T.border },
   }[tone];
   return (
     <span
@@ -228,9 +235,9 @@ export function Notice({
 }) {
   const map = {
     info: { color: T.accentBright, background: T.accentSofter, border: T.accentLine, Icon: Info },
-    warning: { color: T.warning, background: T.warningSoft, border: 'rgba(251,191,36,0.34)', Icon: AlertTriangle },
-    error: { color: T.danger, background: T.dangerSoft, border: 'rgba(248,113,113,0.34)', Icon: AlertTriangle },
-    success: { color: T.success, background: T.successSoft, border: 'rgba(74,222,128,0.34)', Icon: CheckCircle2 },
+    warning: { color: T.warning, background: T.warningSoft, border: 'rgba(180,83,9,0.34)', Icon: AlertTriangle },
+    error: { color: T.danger, background: T.dangerSoft, border: 'rgba(153,27,27,0.34)', Icon: AlertTriangle },
+    success: { color: T.success, background: T.successSoft, border: 'rgba(22,101,52,0.34)', Icon: CheckCircle2 },
   }[tone];
   return (
     <div
@@ -364,14 +371,14 @@ export function Select<V extends string>(props: {
         group.key ? (
           <optgroup key={group.key} label={group.key}>
             {group.options.map((option) => (
-              <option key={option.id} value={option.id} style={{ background: '#121522' }}>
+              <option key={option.id} value={option.id} style={{ background: '#FFFFFF' }}>
                 {option.label}
               </option>
             ))}
           </optgroup>
         ) : (
           group.options.map((option) => (
-            <option key={option.id} value={option.id} style={{ background: '#121522' }}>
+            <option key={option.id} value={option.id} style={{ background: '#FFFFFF' }}>
               {option.label}
             </option>
           ))
@@ -413,7 +420,7 @@ export function Slider(props: {
         disabled={props.disabled}
         onChange={(event) => props.onChange(Number(event.target.value))}
         style={{
-          background: `linear-gradient(90deg, ${T.accent} 0%, ${T.accentBright} ${ratio * 100}%, rgba(148,163,184,0.18) ${ratio * 100}%, rgba(148,163,184,0.18) 100%)`,
+          background: `linear-gradient(90deg, ${T.accent} 0%, ${T.accentBright} ${ratio * 100}%, rgba(180,120,0,0.18) ${ratio * 100}%, rgba(180,120,0,0.18) 100%)`,
         }}
       />
       {props.hint ? (
@@ -446,7 +453,7 @@ export function Toggle(props: { label: string; checked: boolean; onChange: (next
       </span>
       <span
         className="relative h-5 w-9 shrink-0 rounded-full transition-colors"
-        style={{ background: props.checked ? T.accent : 'rgba(148,163,184,0.26)' }}
+        style={{ background: props.checked ? T.accent : 'rgba(180,120,0,0.24)' }}
       >
         <span
           className="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all"
@@ -505,7 +512,7 @@ export function PrimaryButton(props: {
       style={{
         background: `linear-gradient(135deg, ${T.accent}, ${T.accentDeep})`,
         color: '#FFFFFF',
-        boxShadow: props.disabled || props.busy ? 'none' : '0 8px 24px rgba(124,58,237,0.32)',
+        boxShadow: props.disabled || props.busy ? 'none' : '0 8px 24px rgba(200,146,10,0.32)',
       }}
     >
       {props.busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : Icon ? <Icon className="h-4 w-4" /> : null}
@@ -635,7 +642,7 @@ export function AudioPlayer({
           onClick={toggle}
           aria-label={playing ? 'Pause' : 'Play'}
           className="grid h-11 w-11 shrink-0 place-items-center rounded-full"
-          style={{ background: T.accent, color: '#FFFFFF', boxShadow: '0 6px 18px rgba(124,58,237,0.4)' }}
+          style={{ background: T.accent, color: '#FFFFFF', boxShadow: '0 6px 18px rgba(200,146,10,0.4)' }}
         >
           {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
         </button>
@@ -655,7 +662,7 @@ export function AudioPlayer({
                 className="flex-1 rounded-sm transition-colors"
                 style={{
                   height: `${Math.round(height * 100)}%`,
-                  background: index / bars.length <= ratio ? T.accentBright : 'rgba(148,163,184,0.22)',
+                  background: index / bars.length <= ratio ? T.accentBright : 'rgba(180,120,0,0.20)',
                 }}
               />
             ))}
@@ -902,7 +909,7 @@ export function ProgressRail({ steps }: { steps: RailStep[] }) {
             <span
               className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold"
               style={{
-                background: step.state === 'pending' ? 'rgba(148,163,184,0.12)' : `${color}22`,
+                background: step.state === 'pending' ? 'rgba(180,120,0,0.10)' : `${color}22`,
                 border: `1px solid ${step.state === 'pending' ? T.border : color}`,
                 color,
               }}
@@ -937,7 +944,7 @@ export function ProgressBar({ ratio, label }: { ratio: number; label?: string })
           <span className="tabular-nums">{pct}%</span>
         </div>
       ) : null}
-      <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'rgba(148,163,184,0.18)' }}>
+      <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'rgba(180,120,0,0.18)' }}>
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${T.accent}, ${T.accentBright})` }}

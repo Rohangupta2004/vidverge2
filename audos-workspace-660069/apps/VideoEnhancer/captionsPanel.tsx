@@ -78,7 +78,7 @@ function SegmentRow({ seg, onToggle, onDelete, onEdit, onSeek }: {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
-          style={{ flex: 1, minWidth: 0, fontSize: 12, color: P.text, background: 'rgba(7,10,18,0.6)', border: '1px solid ' + P.border, borderRadius: 6, padding: '4px 7px', outline: 'none' }}
+          style={{ flex: 1, minWidth: 0, fontSize: 12, color: P.text, background: 'rgba(255,253,244,0.9)', border: '1px solid ' + P.border, borderRadius: 6, padding: '4px 7px', outline: 'none' }}
         />
       ) : (
         <button onClick={onSeek} style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: 12, color: P.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>

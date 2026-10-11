@@ -39,19 +39,19 @@ import { languageLabel } from './studioCaptionKit';
 const rowWrap: CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 };
 const hint: CSSProperties = { color: LB.textMuted, fontSize: 11, lineHeight: 1.55, marginTop: 6 };
 const miniBtn: CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.1)', color: LB.textSecondary, borderRadius: 7,
+  display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(180,120,0,0.06)',
+  border: '1px solid rgba(180,120,0,0.14)', color: LB.textSecondary, borderRadius: 7,
   padding: '5px 10px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
 };
 const primaryBtn: CSSProperties = {
   ...miniBtn, background: LB.accentGradient, color: '#241503', border: 'none', fontWeight: 800,
 };
 const numInput: CSSProperties = {
-  background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7,
+  background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7,
   padding: '5px 7px', color: LB.textPrimary, fontSize: 12, width: '100%', boxSizing: 'border-box',
 };
 const groupTitle: CSSProperties = { color: LB.textSecondary, fontSize: 12, fontWeight: 650 };
-const divider: CSSProperties = { marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' };
+const divider: CSSProperties = { marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' };
 
 function Notice({ tone, children }: { tone: 'info' | 'warn'; children: ReactNode }) {
   const warn = tone === 'warn';
@@ -60,9 +60,9 @@ function Notice({ tone, children }: { tone: 'info' | 'warn'; children: ReactNode
       style={{
         display: 'flex', gap: 7, alignItems: 'flex-start', marginTop: 9, padding: '7px 9px',
         borderRadius: 8, fontSize: 11, lineHeight: 1.55,
-        background: warn ? 'rgba(251,191,36,0.1)' : 'rgba(255,255,255,0.04)',
-        border: `1px solid ${warn ? 'rgba(251,191,36,0.3)' : 'rgba(255,255,255,0.08)'}`,
-        color: warn ? '#fcd34d' : LB.textMuted,
+        background: warn ? 'rgba(180,83,9,0.10)' : 'rgba(180,120,0,0.06)',
+        border: `1px solid ${warn ? 'rgba(180,83,9,0.3)' : 'rgba(180,120,0,0.14)'}`,
+        color: warn ? '#B45309' : LB.textMuted,
       }}
     >
       {warn ? <AlertCircle size={12} style={{ flexShrink: 0, marginTop: 2 }} /> : null}
@@ -119,10 +119,10 @@ function BrollPanel(props: {
   const selected = props.overlays.find((o) => o.id === props.selectedId) || null;
 
   return (
-    <Section title="B-roll overlays" icon={<Clapperboard size={14} color="#22c55e" />} defaultOpen>
-      <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.24)' }}>
+    <Section title="B-roll overlays" icon={<Clapperboard size={14} color="#166534" />} defaultOpen>
+      <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: 'rgba(22,101,52,0.07)', border: '1px solid rgba(22,101,52,0.24)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Sparkles size={13} color="#4ade80" />
+          <Sparkles size={13} color="#166534" />
           <span style={groupTitle}>Generate subject-matched B-roll</span>
           <select
             className="vs-input"
@@ -145,7 +145,7 @@ function BrollPanel(props: {
           disabled={props.omniGenerating}
           onChange={(e) => props.onOmniPrompt(e.target.value)}
           rows={3}
-          maxLength={700}
+          maxLength={10000}
           placeholder="Optional: describe the subject or scene. Leave blank to infer it from the transcript and current footage."
           style={{ ...numInput, marginTop: 8, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.45 }}
         />
@@ -161,16 +161,16 @@ function BrollPanel(props: {
           {props.omniGenerating ? `Generating${props.omniProgress ? ` · ${Math.round(props.omniProgress)}%` : '…'}` : 'Generate B-roll'}
         </button>
         {props.omniGenerating ? (
-          <div style={{ height: 5, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 8 }}>
-            <div style={{ width: `${Math.max(6, props.omniProgress)}%`, height: '100%', background: '#22c55e', transition: 'width .35s ease' }} />
+          <div style={{ height: 5, borderRadius: 999, background: 'rgba(180,120,0,0.14)', overflow: 'hidden', marginTop: 8 }}>
+            <div style={{ width: `${Math.max(6, props.omniProgress)}%`, height: '100%', background: '#166534', transition: 'width .35s ease' }} />
           </div>
         ) : null}
-        {props.omniNote ? <div style={{ ...hint, color: '#86efac' }}>{props.omniNote}</div> : null}
+        {props.omniNote ? <div style={{ ...hint, color: '#166534' }}>{props.omniNote}</div> : null}
         {props.omniError ? (
-          <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginTop: 8, padding: '7px 8px', borderRadius: 8, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', color: '#fca5a5', fontSize: 11, lineHeight: 1.5 }}>
+          <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginTop: 8, padding: '7px 8px', borderRadius: 8, background: 'rgba(153,27,27,0.09)', border: '1px solid rgba(153,27,27,0.3)', color: '#991B1B', fontSize: 11, lineHeight: 1.5 }}>
             <AlertCircle size={12} style={{ flexShrink: 0, marginTop: 2 }} />
             <span style={{ flex: 1 }}>{props.omniError}</span>
-            <button type="button" className="vs-btn" disabled={props.omniGenerating} onClick={props.onGenerateOmni} style={{ ...miniBtn, padding: '3px 7px', color: '#fca5a5' }}>
+            <button type="button" className="vs-btn" disabled={props.omniGenerating} onClick={props.onGenerateOmni} style={{ ...miniBtn, padding: '3px 7px', color: '#991B1B' }}>
               <RefreshCw size={10} /> Retry
             </button>
           </div>
@@ -193,11 +193,11 @@ function BrollPanel(props: {
           style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
             padding: '16px 12px', textAlign: 'center', cursor: 'pointer', borderRadius: 10,
-            border: dragOver ? '2px dashed #22c55e' : '2px dashed rgba(255,255,255,0.14)',
-            background: dragOver ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.02)',
+            border: dragOver ? '2px dashed #166534' : '2px dashed rgba(180,120,0,0.28)',
+            background: dragOver ? 'rgba(22,101,52,0.08)' : 'rgba(180,120,0,0.04)',
           }}
         >
-          {props.uploading ? <Loader2 size={18} className="vs-spin" color="#22c55e" /> : <UploadCloud size={18} color="#22c55e" />}
+          {props.uploading ? <Loader2 size={18} className="vs-spin" color="#166534" /> : <UploadCloud size={18} color="#166534" />}
           <span style={{ color: LB.textPrimary, fontSize: 12.5, fontWeight: 650 }}>
             {props.uploading ? 'Uploading cutaways…' : 'Drop B-roll clips here'}
           </span>
@@ -227,8 +227,8 @@ function BrollPanel(props: {
                 key={o.id}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 3,
-                  background: active ? 'rgba(34,197,94,0.16)' : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${active ? 'rgba(34,197,94,0.5)' : 'rgba(255,255,255,0.08)'}`,
+                  background: active ? 'rgba(22,101,52,0.14)' : 'rgba(180,120,0,0.05)',
+                  border: `1px solid ${active ? 'rgba(22,101,52,0.5)' : 'rgba(180,120,0,0.14)'}`,
                   borderRadius: 7, padding: '2px 3px 2px 8px',
                 }}
               >
@@ -238,7 +238,7 @@ function BrollPanel(props: {
                   onClick={() => { props.onSelect(active ? null : o.id); props.onSeek(o.start); }}
                   style={{ display: 'flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 0, textAlign: 'left', cursor: 'pointer', background: 'transparent', border: 'none', padding: '4px 0' }}
                 >
-                  <Film size={12} color="#22c55e" style={{ flexShrink: 0 }} />
+                  <Film size={12} color="#166534" style={{ flexShrink: 0 }} />
                   <span style={{ flex: 1, minWidth: 0, color: LB.textPrimary, fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</span>
                   <span style={{ color: LB.textMuted, fontSize: 10, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
                     {fmtTimecode(o.start)}–{fmtTimecode(o.end)}
@@ -250,7 +250,7 @@ function BrollPanel(props: {
                   onClick={() => props.onDelete(o.id)}
                   title={`Delete ${o.label}`}
                   aria-label={`Delete ${o.label}`}
-                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, flexShrink: 0, background: 'transparent', border: 'none', color: '#f87171', borderRadius: 6, cursor: 'pointer', padding: 0 }}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, flexShrink: 0, background: 'transparent', border: 'none', color: '#991B1B', borderRadius: 6, cursor: 'pointer', padding: 0 }}
                 >
                   <Trash2 size={12} />
                 </button>
@@ -361,7 +361,7 @@ function BrollPanel(props: {
           <div style={hint}>B-roll audio fades in over 0.3s and out over 0.5s. Main audio ramps back over 0.5s after the cutaway.</div>
 
           <div style={rowWrap}>
-            <button type="button" className="vs-btn" onClick={() => props.onDelete(selected.id)} style={{ ...miniBtn, color: '#f87171' }}>
+            <button type="button" className="vs-btn" onClick={() => props.onDelete(selected.id)} style={{ ...miniBtn, color: '#991B1B' }}>
               <Trash2 size={12} /> Remove cutaway
             </button>
           </div>
@@ -384,7 +384,7 @@ function ChromaPanel(props: {
 }) {
   const c = props.chroma;
   return (
-    <Section title="Chroma key" icon={<Wand2 size={14} color="#4ade80" />}>
+    <Section title="Chroma key" icon={<Wand2 size={14} color="#166534" />}>
       <div style={{ ...rowWrap, alignItems: 'center' }}>
         <Toggle on={c.enabled} label="Remove the green / blue screen" onChange={(v) => { props.onCheckpoint(); props.onChange({ enabled: v }); }} />
       </div>
@@ -427,7 +427,7 @@ function ChromaPanel(props: {
                   />
                 </label>
                 {c.backgroundUrl ? (
-                  <img src={c.backgroundUrl} alt="" style={{ width: 54, height: 32, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(255,255,255,0.12)' }} />
+                  <img src={c.backgroundUrl} alt="" style={{ width: 54, height: 32, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(180,120,0,0.14)' }} />
                 ) : null}
               </div>
             )}
@@ -459,9 +459,9 @@ function SpeedCurveGraph({ ramp }: { ramp: SpeedRamp }) {
   const range = rampRange(ramp);
   return (
     <div style={{ marginTop: 9 }}>
-      <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: 'block', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7 }}>
-        <line x1={0} y1={h - ((1 - 0.2) / 2.6) * h} x2={w} y2={h - ((1 - 0.2) / 2.6) * h} stroke="rgba(255,255,255,0.18)" strokeDasharray="3 3" strokeWidth={1} />
-        <polyline points={pts.join(' ')} fill="none" stroke="#f59e0b" strokeWidth={1.8} vectorEffect="non-scaling-stroke" />
+      <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: 'block', background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7 }}>
+        <line x1={0} y1={h - ((1 - 0.2) / 2.6) * h} x2={w} y2={h - ((1 - 0.2) / 2.6) * h} stroke="rgba(180,120,0,0.28)" strokeDasharray="3 3" strokeWidth={1} />
+        <polyline points={pts.join(' ')} fill="none" stroke="#C8920A" strokeWidth={1.8} vectorEffect="non-scaling-stroke" />
       </svg>
       <div style={{ ...hint, marginTop: 4 }}>
         Speed runs {range.min.toFixed(2)}× → {range.max.toFixed(2)}×. The clip keeps the same length on the
@@ -540,7 +540,7 @@ function MotionTab(props: {
       </Section>
 
       <div style={{ marginTop: 10 }}>
-        <Section title="Match cut & zoom" icon={<Zap size={14} color="#f97316" />}>
+        <Section title="Match cut & zoom" icon={<Zap size={14} color="#B45309" />}>
           <div style={{ ...rowWrap, alignItems: 'center' }}>
             <Toggle on={m.zoomCut.enabled} label="Punch in on the cut" onChange={(v) => { props.onCheckpoint(); props.onZoomCut({ enabled: v }, applyAll); }} />
           </div>
@@ -573,7 +573,7 @@ function MotionTab(props: {
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <Section title="Camera shake" icon={<Film size={14} color="#a855f7" />}>
+        <Section title="Camera shake" icon={<Film size={14} color="#C8920A" />}>
           <div style={{ ...rowWrap, alignItems: 'center' }}>
             <Toggle on={m.shake.enabled} label="Hand-held shake" onChange={(v) => { props.onCheckpoint(); props.onShake({ enabled: v }, applyAll); }} />
           </div>
@@ -632,7 +632,7 @@ function VfxTab(props: {
 
   return (
     <>
-      <Section title="Light leaks & flares" icon={<Sparkles size={14} color="#fbbf24" />} defaultOpen>
+      <Section title="Light leaks & flares" icon={<Sparkles size={14} color="#C8920A" />} defaultOpen>
         <div style={{ ...rowWrap, alignItems: 'center' }}>
           <Toggle on={v.leak.enabled} label="Add a light leak" onChange={(x) => { props.onCheckpoint(); patchLeak({ enabled: x }); }} />
         </div>
@@ -667,7 +667,7 @@ function VfxTab(props: {
       </Section>
 
       <div style={{ marginTop: 10 }}>
-        <Section title="VHS & glitch" icon={<Zap size={14} color="#22d3ee" />}>
+        <Section title="VHS & glitch" icon={<Zap size={14} color="#B4720A" />}>
           <div style={{ ...rowWrap, alignItems: 'center' }}>
             <Toggle on={v.vhs.enabled} label="VHS tape" onChange={(x) => { props.onCheckpoint(); props.onChange({ vhs: { ...v.vhs, enabled: x } }); }} />
           </div>
@@ -694,7 +694,7 @@ function VfxTab(props: {
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <Section title="Deep glow & rays" icon={<TypeIcon size={14} color="#f59e0b" />}>
+        <Section title="Deep glow & rays" icon={<TypeIcon size={14} color="#C8920A" />}>
           <div style={{ ...rowWrap, alignItems: 'center' }}>
             <Toggle on={v.textGlow.enabled} label="Glow every text layer" onChange={(x) => { props.onCheckpoint(); patchGlow({ enabled: x }); }} />
           </div>
@@ -718,7 +718,7 @@ function VfxTab(props: {
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <Section title="Turbulent displace" icon={<Layers size={14} color="#60a5fa" />}>
+        <Section title="Turbulent displace" icon={<Layers size={14} color="#1D4ED8" />}>
           <div style={{ ...rowWrap, alignItems: 'center' }}>
             <Toggle on={v.displace.enabled} label="Distort the picture" onChange={(x) => { props.onCheckpoint(); props.onChange({ displace: { ...v.displace, enabled: x } }); }} />
           </div>
@@ -761,6 +761,9 @@ const CAPTION_MIX_PRESETS: { name: string; swatch: string; patch: Partial<Captio
   { name: 'Karaoke', swatch: '#22D3EE', patch: { styleId: 'karaoke', fontId: 'roboto', sizeScale: 0.74, color: '#FFFFFF', activeColor: '#22D3EE', background: 'pill', backgroundColor: '#000000', backgroundOpacity: 0.65, position: 'bottom', offsetY: 0.1, animation: 'karaoke', uppercase: false, italic: false, outlineWidth: 0, shadowBlur: 14 } },
   { name: 'Cinematic', swatch: '#CBD5E1', patch: { styleId: 'cinematic', fontId: 'playfair', sizeScale: 0.93, color: '#FFFFFF', activeColor: '#FFFFFF', background: 'bar', backgroundColor: '#000000', backgroundOpacity: 0.86, position: 'bottom', offsetY: 0.14, animation: 'dissolve', uppercase: false, italic: true, outlineWidth: 0, shadowBlur: 8 } },
   { name: 'Street Bold', swatch: '#F8FAFC', patch: { styleId: 'tiktok', fontId: 'impact', sizeScale: 0.67, color: '#FFFFFF', activeColor: '#FFFFFF', background: 'none', position: 'bottom', offsetY: 0, animation: 'bounce', uppercase: true, italic: false, outlineColor: '#000000', outlineWidth: 3, shadowBlur: 16 } },
+  { name: 'Creator Punch', swatch: '#FFD66E', patch: { styleId: 'creator', fontId: 'montserrat', sizeScale: 0.78, color: '#FFFFFF', activeColor: '#FFD66E', background: 'preset', position: 'bottom', offsetY: 0.04, animation: 'preset', uppercase: true, italic: false, outlineColor: '#06090E', outlineWidth: 2, shadowBlur: 22 } },
+  { name: 'Newsroom', swatch: '#FB7185', patch: { styleId: 'newsroom', fontId: 'inter', sizeScale: 0.9, color: '#F8FAFC', activeColor: '#FB7185', background: 'preset', position: 'bottom', offsetY: 0.13, animation: 'karaoke', uppercase: false, italic: false, outlineWidth: 0, shadowBlur: 12 } },
+  { name: 'Desi Bold', swatch: '#FFB21A', patch: { styleId: 'desi', fontId: 'notoDevanagari', sizeScale: 0.84, color: '#FFFFFF', activeColor: '#FFB21A', background: 'preset', position: 'bottom', offsetY: 0.08, animation: 'karaoke', uppercase: false, italic: false, outlineColor: '#241503', outlineWidth: 1, shadowBlur: 18 } },
 ];
 
 function captionMixActive(settings: CaptionSettings, patch: Partial<CaptionSettings>): boolean {
@@ -794,7 +797,7 @@ function CaptionsTab(props: {
 
   return (
     <>
-      <Section title="Generate" icon={<Wand2 size={14} color="#eab308" />} defaultOpen>
+      <Section title="Generate" icon={<Wand2 size={14} color="#C8920A" />} defaultOpen>
         <div style={rowWrap}>
           <button type="button" className="vs-btn" disabled={!props.hasFootage || props.busy} onClick={props.onGenerate} style={primaryBtn}>
             {props.busy ? <Loader2 size={12} className="vs-spin" /> : <Sparkles size={12} />}
@@ -818,7 +821,7 @@ function CaptionsTab(props: {
           Lines still break on a pause or a comma first; the limit only applies when the speaker never gives
           one. Change it and press Rebuild to re-cut the track.
         </div>
-        <div style={{ ...hint, color: props.language && props.language !== 'auto' ? '#4ade80' : LB.textMuted }}>
+        <div style={{ ...hint, color: props.language && props.language !== 'auto' ? '#166534' : LB.textMuted }}>
           Language: {languageLabel(props.language)}
           {props.cues.length ? ` · ${props.cues.length} line${props.cues.length === 1 ? '' : 's'}` : ''}
         </div>
@@ -826,7 +829,7 @@ function CaptionsTab(props: {
       </Section>
 
       <div style={{ marginTop: 10 }}>
-        <Section title="Design" icon={<TypeIcon size={14} color="#eab308" />} defaultOpen>
+        <Section title="Design" icon={<TypeIcon size={14} color="#C8920A" />} defaultOpen>
           <div style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 700, marginTop: 6 }}>One-tap style bundles</div>
           <div style={{ display: 'flex', gap: 7, overflowX: 'auto', padding: '8px 1px 9px', scrollbarWidth: 'thin' }}>
             {CAPTION_MIX_PRESETS.map((preset) => {
@@ -839,12 +842,12 @@ function CaptionsTab(props: {
                   onClick={() => { props.onCheckpoint(); props.onSettings(preset.patch); }}
                   style={{
                     flex: '0 0 128px', textAlign: 'left', padding: 9, borderRadius: 10, cursor: 'pointer',
-                    background: active ? 'rgba(124,58,237,0.18)' : 'rgba(255,255,255,0.035)',
-                    border: `2px solid ${active ? '#7C3AED' : 'rgba(255,255,255,0.1)'}`,
+                    background: active ? 'rgba(200,146,10,0.18)' : 'rgba(180,120,0,0.05)',
+                    border: `2px solid ${active ? '#C8920A' : 'rgba(180,120,0,0.14)'}`,
                   }}
                 >
                   <span style={{ display: 'block', height: 32, borderRadius: 7, background: '#09090b', color: preset.swatch, fontSize: 17, fontWeight: 900, padding: '6px 8px', boxSizing: 'border-box', overflow: 'hidden' }}>Aa</span>
-                  <span style={{ display: 'block', color: active ? '#c4b5fd' : LB.textSecondary, fontSize: 11, fontWeight: 750, marginTop: 6 }}>{preset.name}</span>
+                  <span style={{ display: 'block', color: active ? '#B4720A' : LB.textSecondary, fontSize: 11, fontWeight: 750, marginTop: 6 }}>{preset.name}</span>
                 </button>
               );
             })}
@@ -863,8 +866,8 @@ function CaptionsTab(props: {
                   title={style.hint}
                   style={{
                     textAlign: 'left', cursor: 'pointer', borderRadius: 9, padding: '7px 9px',
-                    border: `1px solid ${active ? 'rgba(245,158,11,0.6)' : 'rgba(255,255,255,0.1)'}`,
-                    background: active ? 'rgba(245,158,11,0.14)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${active ? 'rgba(200,146,10,0.6)' : 'rgba(180,120,0,0.14)'}`,
+                    background: active ? 'rgba(200,146,10,0.14)' : 'rgba(180,120,0,0.05)',
                   }}
                 >
                   <div
@@ -930,7 +933,7 @@ function CaptionsTab(props: {
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <Section title={`Lines (${props.cues.length})`} icon={<Scissors size={14} color="#eab308" />} defaultOpen>
+        <Section title={`Lines (${props.cues.length})`} icon={<Scissors size={14} color="#C8920A" />} defaultOpen>
           {props.cues.length ? (
             <div ref={listRef} style={{ display: 'grid', gap: 5, marginTop: 8, maxHeight: 340, overflowY: 'auto' }} className="vs-rail">
               {props.cues.map((cue, i) => {
@@ -941,8 +944,8 @@ function CaptionsTab(props: {
                     key={cue.id}
                     style={{
                       borderRadius: 8, padding: '6px 8px',
-                      background: live ? 'rgba(234,179,8,0.14)' : 'rgba(255,255,255,0.03)',
-                      border: `1px solid ${live ? 'rgba(234,179,8,0.45)' : 'rgba(255,255,255,0.08)'}`,
+                      background: live ? 'rgba(200,146,10,0.16)' : 'rgba(180,120,0,0.05)',
+                      border: `1px solid ${live ? 'rgba(200,146,10,0.45)' : 'rgba(180,120,0,0.14)'}`,
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -967,7 +970,7 @@ function CaptionsTab(props: {
                         <button type="button" className="vs-btn" title="Join onto the line above" disabled={i === 0} onClick={() => props.onMergeUp(cue.id)} style={{ ...miniBtn, padding: '3px 6px' }}>
                           <Plus size={10} />
                         </button>
-                        <button type="button" className="vs-btn" title="Delete this line" onClick={() => props.onDeleteCue(cue.id)} style={{ ...miniBtn, padding: '3px 6px', color: '#f87171' }}>
+                        <button type="button" className="vs-btn" title="Delete this line" onClick={() => props.onDeleteCue(cue.id)} style={{ ...miniBtn, padding: '3px 6px', color: '#991B1B' }}>
                           <Trash2 size={10} />
                         </button>
                       </span>
@@ -1102,12 +1105,12 @@ export interface EffectsSidebarProps {
 
 export default function EffectsSidebar(props: EffectsSidebarProps) {
   return (
-    <div style={{ background: '#1A1A1A', border: '1px solid #2A2A2A', borderRadius: 12, padding: 10 }}>
+    <div style={{ background: '#FFFFFF', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 12, padding: 10 }}>
       <div
         role="tablist"
         aria-label="Effects and overlays"
         className="ve-scroll-x"
-        style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 10, background: 'rgba(255,255,255,0.04)' }}
+        style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 10, background: 'rgba(180,120,0,0.06)' }}
       >
         {TABS.map((t) => {
           const active = props.tab === t.id;
@@ -1124,7 +1127,7 @@ export default function EffectsSidebar(props: EffectsSidebarProps) {
                 flex: '1 0 auto', whiteSpace: 'nowrap', padding: '0 14px', minHeight: 44,
                 borderRadius: 8, border: 'none', cursor: 'pointer',
                 fontSize: 13, fontWeight: 700,
-                background: active ? '#7C3AED' : 'transparent',
+                background: active ? '#C8920A' : 'transparent',
                 color: active ? '#FFFFFF' : LB.textSecondary,
               }}
             >

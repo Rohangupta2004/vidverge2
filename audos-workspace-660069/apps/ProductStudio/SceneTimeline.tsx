@@ -24,9 +24,9 @@ const S = {
 function stateDot(scene: TrackBScene): { color: string; icon?: React.ReactNode; title: string } {
   switch (scene.state) {
     case 'EDITABLE': return { color: S.success, title: 'Editable scene' };
-    case 'REGENERATING': return { color: '#fbbf24', icon: <Loader2 size={9} className="rc-spin" />, title: STATE_EXPLAIN.REGENERATING };
+    case 'REGENERATING': return { color: '#B45309', icon: <Loader2 size={9} className="rc-spin" />, title: STATE_EXPLAIN.REGENERATING };
     case 'ERROR': return { color: S.danger, icon: <AlertTriangle size={9} />, title: STATE_EXPLAIN.ERROR };
-    default: return { color: '#94a3b8', icon: <Lock size={9} />, title: STATE_EXPLAIN[scene.state as keyof typeof STATE_EXPLAIN] ?? scene.state };
+    default: return { color: '#7A6030', icon: <Lock size={9} />, title: STATE_EXPLAIN[scene.state as keyof typeof STATE_EXPLAIN] ?? scene.state };
   }
 }
 

@@ -23,7 +23,6 @@
  * route is not reachable from a published space host.
  */
 import { EngineError, describeHttpError, generationHeaders, postGeneration } from '../../lib/videoEngineClient';
-import { capPromptText } from '../../lib/videoEngines';
 import { chargeCredits, newChargeKey, refundCredits } from '../../lib/credits';
 import { APP_IDS, OMNI_FLASH_MODEL, VEO_31_FAST_MODEL, safeModelFor } from '../../lib/appIds';
 
@@ -68,13 +67,13 @@ function editsSourceVideo(model: string): boolean {
 /** `/api/upload/file` hard ceiling. */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
-/** The app renders the first 30 seconds; longer files must be trimmed first. */
+/** The app renders at most the first 30 seconds of a longer source. */
 export const MAX_SOURCE_SECONDS = 30;
 
-/** Omni Flash's per-request ceiling. Short clips retain this original quote. */
+/** Omni Flash's per-request ceiling. */
 export const OUTPUT_SECONDS = 8;
 
-export type VfxAspect = '16:9' | '9:16';
+export type VfxAspect = '16:9' | '9:16' | '1:1';
 export type SegmentPhase = 'clipping' | 'rendering' | 'continuity' | 'stitching';
 
 export interface SegmentProgress {
@@ -95,10 +94,10 @@ export function vfxSegmentCount(seconds: number): number {
   return duration <= OUTPUT_SECONDS ? 1 : Math.ceil(duration / OUTPUT_SECONDS);
 }
 
-/** The exact preflight quote: legacy 8 credits for one shot, full seconds for long clips. */
+/** Exact preflight quote: one credit per requested output second, with Omni's 4s floor. */
 export function vfxCreditCost(seconds: number): number {
   const duration = effectiveSourceSeconds(seconds);
-  return duration <= OUTPUT_SECONDS ? OUTPUT_SECONDS : Math.ceil(duration);
+  return duration <= OUTPUT_SECONDS ? Math.max(4, Math.ceil(duration)) : Math.ceil(duration);
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -147,11 +146,12 @@ export function videoMimeTypeFor(file: File): string {
   return 'video/mp4';
 }
 
-/** Keep the output in the orientation the visitor filmed in. */
+/** Keep portrait, landscape and square footage in its source orientation. */
 export function aspectRatioFor(width?: number | null, height?: number | null): VfxAspect {
   const w = Number(width) || 0;
   const h = Number(height) || 0;
-  if (!w || !h) return '9:16';
+  if (!w || !h) throw new EngineError('The clip orientation could not be read.', { code: 'metadata_unreadable' });
+  if (Math.abs(w - h) / Math.max(w, h) <= 0.08) return '1:1';
   return h > w ? '9:16' : '16:9';
 }
 
@@ -232,8 +232,15 @@ interface Kickoff {
 }
 
 async function submitEdit(params: VfxRenderParams): Promise<Kickoff> {
+  cancelled(params);
   const model = safeModelFor(VFX_APP_ID, params.model);
   const videoEdit = editsSourceVideo(model);
+  const prompt = String(params.prompt || '').trim();
+  if (prompt.length < 10 || prompt.length > 10000) {
+    throw new EngineError('The engineered VFX prompt must be between 10 and 10,000 characters.', {
+      code: 'invalid_prompt', status: 400,
+    });
+  }
 
   // Resolved BEFORE the charge so a seed that cannot be extracted never needs
   // a refund. Omni already has the clip itself, so it only needs the
@@ -241,6 +248,7 @@ async function submitEdit(params: VfxRenderParams): Promise<Kickoff> {
   const seedImageUrl = videoEdit
     ? params.continuationFrameUrl || ''
     : params.continuationFrameUrl || (await extractContinuationFrame(params.sourceUrl, 0.1));
+  cancelled(params);
 
   const creditKey = newChargeKey('vfxdrop');
   const chargedSeconds = Math.max(1, Math.ceil(params.chargeSeconds ?? OUTPUT_SECONDS));
@@ -254,10 +262,14 @@ async function submitEdit(params: VfxRenderParams): Promise<Kickoff> {
   const release = (reason: string) => {
     if (charge.metered) void refundCredits(creditKey, reason);
   };
+  if (params.isCancelled?.()) {
+    release('The VFX render was cancelled before the provider call');
+    throw new EngineError('This VFX render was cancelled.', { code: 'cancelled' });
+  }
 
   const body = {
     model,
-    prompt: capPromptText(params.prompt, 1000),
+    prompt,
     ...(videoEdit ? { videoData: params.sourceUrl, videoMimeType: params.videoMimeType } : {}),
     ...(seedImageUrl ? { imageData: seedImageUrl } : {}),
     aspectRatio: params.aspectRatio,
@@ -469,7 +481,12 @@ async function renderOne(params: VfxRenderParams): Promise<{ url: string; kickof
 export async function renderVfx(params: VfxRenderParams): Promise<string> {
   const segments = planSegments(params.sourceSeconds ?? OUTPUT_SECONDS);
   if (segments.length === 1) {
-    const single = await renderOne({ ...params, chargeSeconds: OUTPUT_SECONDS, outputSeconds: OUTPUT_SECONDS });
+    const segment = segments[0];
+    const single = await renderOne({
+      ...params,
+      chargeSeconds: segment.chargeSeconds,
+      outputSeconds: segment.chargeSeconds,
+    });
     return single.url;
   }
 

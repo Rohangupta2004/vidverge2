@@ -84,7 +84,7 @@ export default function SveProExport(props: SveExportProps) {
   return (
     <Modal
       title="Export short"
-      icon={<Film size={16} color="#A78BFA" />}
+      icon={<Film size={16} color="#C8920A" />}
       onClose={props.onClose}
       footer={(
         <>
@@ -114,8 +114,8 @@ export default function SveProExport(props: SveExportProps) {
               disabled={busy}
               onClick={() => props.onSpec({ target: p.id })}
             >
-              <b style={{ fontSize: 12, display: 'block', color: '#E2E2E2' }}>{p.label}</b>
-              <small style={{ fontSize: 10, color: '#6A6A6A' }}>{p.blurb}</small>
+              <b style={{ fontSize: 12, display: 'block', color: '#1A1000' }}>{p.label}</b>
+              <small style={{ fontSize: 10, color: '#7A6030' }}>{p.blurb}</small>
             </button>
           ))}
         </div>
@@ -139,8 +139,8 @@ export default function SveProExport(props: SveExportProps) {
               disabled={busy}
               onClick={() => props.onSpec({ format: f.id })}
             >
-              <b style={{ fontSize: 12.5, display: 'block', color: '#E2E2E2' }}>{f.label}</b>
-              <small style={{ fontSize: 10, color: '#6A6A6A', lineHeight: 1.4 }}>{f.blurb}</small>
+              <b style={{ fontSize: 12.5, display: 'block', color: '#1A1000' }}>{f.label}</b>
+              <small style={{ fontSize: 10, color: '#7A6030', lineHeight: 1.4 }}>{f.blurb}</small>
             </button>
           ))}
         </div>
@@ -154,7 +154,7 @@ export default function SveProExport(props: SveExportProps) {
       </Section>
 
       <details>
-        <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#777' }}>
+        <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#7A6030' }}>
           Advanced
         </summary>
         <div style={{ paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -181,7 +181,7 @@ export default function SveProExport(props: SveExportProps) {
 
       <Section title="Caption file" hint={props.cueCount ? props.cueCount + ' cues' : 'No captions yet'}>
         <div className="vp-row">
-          <Captions size={13} color={props.cueCount ? '#A78BFA' : '#5A5A5A'} />
+          <Captions size={13} color={props.cueCount ? '#C8920A' : '#7A6030'} />
           <span style={{ fontSize: 12, fontWeight: 650 }}>
             {props.captionLanguage === 'hinglish' ? 'Hinglish subtitles' : 'English subtitles'}
           </span>
@@ -232,7 +232,7 @@ export default function SveProExport(props: SveExportProps) {
       {props.master ? (
         <Section title="Download ready" hint={props.geometry || '1080×1920 · H.264'}>
           <div className="vp-row">
-            <Check size={13} color="#34D399" />
+            <Check size={13} color="#166534" />
             <span style={{ fontSize: 12, fontWeight: 650 }}>Master MP4</span>
             <span className="vp-note vp-mono">{formatBytes(props.master.bytes)}</span>
             <span className="vp-spread" />
@@ -245,7 +245,7 @@ export default function SveProExport(props: SveExportProps) {
           </div>
           {props.compressed && props.smaller ? (
             <div className="vp-row">
-              <Check size={13} color="#34D399" />
+              <Check size={13} color="#166534" />
               <span style={{ fontSize: 12, fontWeight: 650 }}>Share size</span>
               <span className="vp-note vp-mono">{formatBytes(props.compressed.bytes)}</span>
               <span className="vp-spread" />
@@ -263,7 +263,7 @@ export default function SveProExport(props: SveExportProps) {
       {props.localUrl ? (
         <Section title="Browser encode" hint={spec.format.toUpperCase()}>
           <div className="vp-row">
-            <Check size={13} color="#34D399" />
+            <Check size={13} color="#166534" />
             <span style={{ fontSize: 12, fontWeight: 650 }}>{spec.format.toUpperCase()} ready</span>
             <span className="vp-note vp-mono">{formatBytes(props.localBytes)}</span>
             <span className="vp-spread" />

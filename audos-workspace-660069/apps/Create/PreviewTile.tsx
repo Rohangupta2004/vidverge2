@@ -123,7 +123,7 @@ export default function PreviewTile({
           style={{
             position: 'absolute',
             inset: 0,
-            background: 'linear-gradient(180deg, rgba(3,8,18,0) 38%, rgba(3,8,18,0.86) 100%)',
+            background: 'linear-gradient(180deg, rgba(26,16,0,0) 38%, rgba(26,16,0,0.86) 100%)',
           }}
         />
       ) : null}
@@ -140,8 +140,8 @@ export default function PreviewTile({
             maxWidth: 'calc(100% - 16px)',
             padding: '3px 8px',
             borderRadius: 999,
-            color: '#e0f2fe',
-            background: 'rgba(3,8,18,0.68)',
+            color: '#FFFFFF',
+            background: 'rgba(26,16,0,0.68)',
             backdropFilter: 'blur(6px)',
             fontSize: 10,
             fontWeight: 700,
@@ -168,7 +168,7 @@ export default function PreviewTile({
             inset: 0,
             borderRadius: radius,
             border: `2px solid ${T.accentFg}`,
-            boxShadow: 'inset 0 0 32px -6px rgba(147,197,253,0.55)',
+            boxShadow: 'inset 0 0 32px -6px rgba(200,146,10,0.55)',
           }}
         />
       ) : null}

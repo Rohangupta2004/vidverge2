@@ -52,10 +52,10 @@ function relativeTime(iso?: string): string {
 function statusBadge(status?: string): { label: string; color: string; spin: boolean } {
   const s = String(status || '').toLowerCase();
   if (/rendered|delivered|qa_passed/.test(s)) return { label: 'rendered', color: S.success, spin: false };
-  if (/render|build|compos|queue|generat/.test(s)) return { label: 'rendering', color: '#fbbf24', spin: true };
+  if (/render|build|compos|queue|generat/.test(s)) return { label: 'rendering', color: '#B45309', spin: true };
   if (/fail|error/.test(s)) return { label: 'stopped', color: S.danger, spin: false };
-  if (/planned|validated/.test(s)) return { label: 'planned', color: '#94a3b8', spin: false };
-  return { label: s || 'draft', color: '#94a3b8', spin: false };
+  if (/planned|validated/.test(s)) return { label: 'planned', color: '#7A6030', spin: false };
+  return { label: s || 'draft', color: '#7A6030', spin: false };
 }
 
 const actionBtn: React.CSSProperties = {
@@ -366,7 +366,7 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
                       ) : (
                         <video src={v.videoUrl} preload="auto" muted playsInline aria-label={`${v.title} first frame`} onLoadedData={(e) => { try { e.currentTarget.currentTime = 0.05; } catch { /* first decodable frame is already visible */ } }} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                       )}
-                      <span style={{ position: 'absolute', left: 7, bottom: 7, padding: '2px 7px', borderRadius: 999, color: '#fff', background: 'rgba(4,8,18,.75)', fontSize: 9.5, fontWeight: 800 }}>{v.style}</span>
+                      <span style={{ position: 'absolute', left: 7, bottom: 7, padding: '2px 7px', borderRadius: 999, color: '#fff', background: 'rgba(26,16,0,.75)', fontSize: 9.5, fontWeight: 800 }}>{v.style}</span>
                     </div>
                     <div style={{ padding: '8px 9px', fontSize: 11.5, fontWeight: 750, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{v.title}</div>
                   </a>
@@ -426,7 +426,7 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
                       <span style={{ fontSize: 17, fontWeight: 900, color: '#fff', textAlign: 'center', textShadow: '0 2px 10px rgba(0,0,0,0.35)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>{p.title}</span>
                     </div>
                   )}
-                  <span style={{ position: 'absolute', top: 10, left: 10, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: badge.color, background: `color-mix(in srgb, ${badge.color} 16%, rgba(4,8,18,0.72))`, border: `1px solid color-mix(in srgb, ${badge.color} 45%, transparent)` }} data-testid={`status-${p.id}`}>
+                  <span style={{ position: 'absolute', top: 10, left: 10, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: badge.color, background: `color-mix(in srgb, ${badge.color} 16%, rgba(26,16,0,0.72))`, border: `1px solid color-mix(in srgb, ${badge.color} 45%, transparent)` }} data-testid={`status-${p.id}`}>
                     {badge.spin && !hasFailure ? <Loader2 size={10} className="rc-spin" /> : null}
                     {hasFailure ? 'stopped' : badge.label}
                   </span>
@@ -524,7 +524,7 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
       </p>
 
       {deletePrompt ? (
-        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(4,8,18,0.66)' }}>
+        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(26,16,0,0.35)' }}>
           <div className="ps-fade-up" style={{ width: 'min(400px, 92vw)', borderRadius: 16, border: `1px solid ${S.borderStrong}`, background: S.panelStrong, padding: 20 }} data-testid="dialog-delete">
             <h3 style={{ margin: '0 0 8px', fontSize: 15, fontWeight: 800 }}>Delete “{deletePrompt.title}”?</h3>
             <p style={{ margin: '0 0 14px', fontSize: 13, color: S.sub, lineHeight: 1.6 }}>
@@ -541,7 +541,7 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
       ) : null}
 
       {showCreate ? (
-        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(4,8,18,0.66)' }}>
+        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(26,16,0,0.35)' }}>
           <div className="ps-fade-up" style={{ width: 'min(460px, 92vw)', maxHeight: 'min(85vh, 720px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 16, border: `1px solid ${S.borderStrong}`, background: S.panelStrong }} data-testid="dialog-create">
             <div style={{ flexShrink: 0, padding: '20px 22px 0' }}>
               <h3 style={{ margin: '0 0 6px', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 800 }}><MonitorPlay size={16} color="var(--space-text-brand)" /> New Product video</h3>
@@ -628,7 +628,7 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
               id="input-new-script"
               value={userScript}
               onChange={(e) => setUserScript(e.currentTarget.value)}
-              maxLength={2000}
+              maxLength={10000}
               rows={5}
               placeholder="Paste your narration script here — the video will be timed to match it"
               className="ps-input"
@@ -636,8 +636,8 @@ export default function MyVideos({ onOpen, onStartWizard, onEnhance, onAddSound 
               data-testid="input-new-script"
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, margin: '5px 0 12px', fontSize: 11, color: S.muted }}>
-              <span>Up to ~2,000 characters</span>
-              <span>{userScript.length}/2000</span>
+              <span>Up to ~10,000 characters</span>
+              <span>{userScript.length}/10000</span>
             </div>
 
             <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: S.muted, marginBottom: 6 }}>Voice Track (optional)</label>

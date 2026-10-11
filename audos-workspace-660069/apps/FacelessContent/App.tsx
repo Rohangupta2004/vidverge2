@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Copy, Download, Loader2,
+  AlertTriangle, Check, ChevronDown, ChevronRight, Copy, Download,
   Plus, RefreshCw, Sparkles, Wand2, X,
 } from 'lucide-react';
 import {
@@ -29,6 +29,7 @@ import { RunBrief, runFacelessPipeline } from './pipeline';
 import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
 import type { VidvergeAttachment } from '../../lib/vidvergeHandoff';
 import VideoIntegrationPicker from '../../components/VideoIntegrationPicker';
+import VergeLoader from '../../components/VergeLoader';
 import {
   loadVideoSelection, saveVideoSelection, type VideoIntegrationId,
 } from '../../lib/videoIntegrations';
@@ -46,8 +47,8 @@ const ORIENTATIONS: { id: Orientation; label: string }[] = [
 
 // ---------------------------------------------------------------- atoms ----
 
-function Spin({ size = 15 }: { size?: number }) {
-  return <Loader2 size={size} className="fc-spin" />;
+function Spin({ size = 15, label = 'Working' }: { size?: number; label?: string }) {
+  return <VergeLoader size={Math.round(size * 2.2)} label={label} />;
 }
 
 function Pill(props: { active: boolean; onClick: () => void; children: any; disabled?: boolean }) {
@@ -108,7 +109,7 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
       background: F.card, border: `1px solid ${F.warn}`, borderRadius: 16,
       backdropFilter: F.glass, WebkitBackdropFilter: F.glass,
       padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10,
-      boxShadow: '0 18px 40px rgba(6,4,20,0.6)',
+      boxShadow: '0 18px 40px rgba(120,80,0,0.12)',
     }}>
       <AlertTriangle size={15} color={F.warn} style={{ flexShrink: 0, marginTop: 1 }} />
       <span style={{ fontSize: 13, color: F.soft, lineHeight: 1.5, flex: 1 }}>{message}</span>
@@ -150,7 +151,7 @@ function Terminal({ lines }: { lines: LogLine[] }) {
     <div style={{
       background: F.terminalBg, border: `1px solid ${F.line}`, borderRadius: 16,
       backdropFilter: F.glass, WebkitBackdropFilter: F.glass,
-      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 48px rgba(6,4,20,0.5)',
+      boxShadow: 'inset 0 1px 0 rgba(180,120,0,0.08), 0 18px 48px rgba(120,80,0,0.12)',
       padding: '20px 22px', fontFamily: F.mono, fontSize: 13.5, lineHeight: 1.9,
       minHeight: 240, maxHeight: 460, overflowY: 'auto',
     }}>
@@ -428,7 +429,7 @@ export default function FacelessContentApp() {
                   placeholder="What’s your video about?"
                 />
                 <GhostBtn onClick={() => void handleSuggest()} disabled={suggesting} title="Have the writer suggest a topic for this niche">
-                  {suggesting ? <Spin size={14} /> : <Sparkles size={14} />} Suggest
+                  {suggesting ? <Spin size={14} label="Suggesting a topic" /> : <Sparkles size={14} />} Suggest
                 </GhostBtn>
               </div>
 
@@ -520,6 +521,12 @@ export default function FacelessContentApp() {
               style={{ height: 2, borderRadius: 999, marginBottom: 12, background: error ? F.line : F.accentSoft }}
             />
 
+            {error ? null : (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 18px' }}>
+                <VergeLoader size={120} caption={project?.stage || 'Starting the run'} />
+              </div>
+            )}
+
             <Terminal lines={logLines} />
 
             {error ? (
@@ -550,7 +557,7 @@ export default function FacelessContentApp() {
         {/* ================= RESULT ================= */}
         {tab === 'create' && view === 'result' && project && (
           <div>
-            <div style={{ background: '#000', borderRadius: 18, overflow: 'hidden', border: `1px solid ${F.lineStrong}`, boxShadow: '0 24px 64px rgba(6,4,20,0.6)' }}>
+            <div style={{ background: '#000', borderRadius: 18, overflow: 'hidden', border: `1px solid ${F.lineStrong}`, boxShadow: '0 24px 64px rgba(120,80,0,0.12)' }}>
               <video
                 src={project.final_video_url || ''}
                 controls
@@ -672,8 +679,8 @@ export default function FacelessContentApp() {
         {tab === 'history' && (
           <div>
             {historyLoading ? (
-              <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 10, color: F.muted, fontSize: 13.5 }}>
-                <Spin /> Loading your videos…
+              <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <VergeLoader size={120} caption="Loading your videos" />
               </div>
             ) : history.length === 0 ? (
               <div style={{ ...cardStyle, color: F.muted, fontSize: 13.5, lineHeight: 1.7 }}>
@@ -695,7 +702,7 @@ export default function FacelessContentApp() {
                         <video src={`${p.final_video_url}#t=0.1`} preload="metadata" playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                       ) : (
                         <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: F.muted, fontSize: 12.5, background: F.raised }}>
-                          {p.status === 'failed' ? 'Run failed' : 'Still rendering…'}
+                          {p.status === 'failed' ? 'Run failed' : <VergeLoader size={90} caption="Still rendering" />}
                         </div>
                       )}
                     </button>

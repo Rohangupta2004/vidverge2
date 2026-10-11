@@ -28,8 +28,8 @@ import { ExportProgress, ExportReady, vePrimary } from './studioGuide';
 const rowWrap: CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 };
 const hint: CSSProperties = { color: LB.textMuted, fontSize: 11, lineHeight: 1.55, marginTop: 6 };
 const miniBtn: CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.1)', color: LB.textSecondary, borderRadius: 7,
+  display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(180,120,0,0.06)',
+  border: '1px solid rgba(180,120,0,0.14)', color: LB.textSecondary, borderRadius: 7,
   padding: '5px 10px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
 };
 const primaryBtn: CSSProperties = {
@@ -74,13 +74,13 @@ export function ReframeInspector(props: {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 10, alignItems: 'end' }}>
         <div>
           <div style={{ color: LB.textMuted, fontSize: 10, fontWeight: 700, marginBottom: 4 }}>ORIGINAL</div>
-          <div style={{ width: '100%', aspectRatio: '16 / 9', background: '#000', borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ width: '100%', aspectRatio: '16 / 9', background: '#000', borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(180,120,0,0.14)' }}>
             {props.thumbUrl ? <img src={props.thumbUrl} alt="Original framing" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : null}
           </div>
         </div>
         <div>
           <div style={{ color: LB.accent, fontSize: 10, fontWeight: 700, marginBottom: 4 }}>{props.aspect} OUTPUT</div>
-          <div style={{ width: '100%', aspectRatio: `${aspectRatio(props.aspect)}`, maxHeight: 128, margin: '0 auto', background: '#000', borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(245,158,11,0.45)', position: 'relative' }}>
+          <div style={{ width: '100%', aspectRatio: `${aspectRatio(props.aspect)}`, maxHeight: 128, margin: '0 auto', background: '#000', borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(180,120,0,0.36)', position: 'relative' }}>
             {props.thumbUrl ? (
               <img
                 src={props.thumbUrl}
@@ -104,7 +104,7 @@ export function ReframeInspector(props: {
 
       {props.reframe.note ? <div style={hint}>{props.reframe.note}</div> : null}
       {props.reframe.focus.length ? (
-        <div style={{ ...hint, color: confidence > 0.4 ? '#4ade80' : '#fbbf24' }}>
+        <div style={{ ...hint, color: confidence > 0.4 ? '#166534' : '#B45309' }}>
           {props.reframe.detector === 'face' ? 'Face tracking' : 'Saliency tracking'} · {props.reframe.focus.length} keyframes · confidence {(confidence * 100).toFixed(0)}%
         </div>
       ) : null}
@@ -124,7 +124,7 @@ export function ReframeInspector(props: {
         </>
       ) : null}
 
-      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
         <div style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 650 }}>Export these formats</div>
         <div style={rowWrap}>
           {ASPECTS.map((a) => (
@@ -209,7 +209,7 @@ export function ClipInspector(props: {
           <button type="button" className="vs-btn" disabled={!props.canSplit || multi} onClick={props.onSplit} title="Split at the playhead (S)" style={{ ...miniBtn, padding: '4px 8px' }}>
             <Scissors size={11} />
           </button>
-          <button type="button" className="vs-btn" onClick={props.onDelete} title="Delete the selection (Delete)" style={{ ...miniBtn, padding: '4px 8px', color: '#f87171' }}>
+          <button type="button" className="vs-btn" onClick={props.onDelete} title="Delete the selection (Delete)" style={{ ...miniBtn, padding: '4px 8px', color: '#991B1B' }}>
             <Trash2 size={11} />
           </button>
         </span>
@@ -226,7 +226,7 @@ export function ClipInspector(props: {
               className="ve-input vs-input"
               onFocus={props.onCheckpoint}
               onChange={(e) => props.onTrim(clip.id, Math.max(0, Math.min(clip.out - 0.15, Number(e.target.value) || 0)), clip.out)}
-              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
+              style={{ background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
             />
           </label>
           <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, fontWeight: 600, color: LB.textSecondary }}>
@@ -236,7 +236,7 @@ export function ClipInspector(props: {
               className="ve-input vs-input"
               onFocus={props.onCheckpoint}
               onChange={(e) => props.onTrim(clip.id, clip.in, Math.max(clip.in + 0.15, Math.min(clip.sourceDuration, Number(e.target.value) || 0)))}
-              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
+              style={{ background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
             />
           </label>
         </div>
@@ -256,7 +256,7 @@ export function ClipInspector(props: {
       <Slider label="Saturation" value={a.saturation} min={0} max={200} onBegin={props.onCheckpoint} onChange={(v) => props.onAdjust({ saturation: v })} unit="%" />
       <Slider label="Opacity" value={Math.round(clip.opacity * 100)} min={0} max={100} onBegin={props.onCheckpoint} onChange={(v) => props.onOpacity(v / 100)} unit="%" />
 
-      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <span style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 650 }}>Crop &amp; resize</span>
           <button
@@ -282,7 +282,7 @@ export function ClipInspector(props: {
         <Slider label="Crop Y" value={Math.round(clip.crop.y * 100)} min={0} max={Math.max(0, Math.round((1 - clip.crop.h) * 100))} onBegin={props.onCheckpoint} onChange={(v) => props.onCrop({ y: v / 100 })} unit="%" />
       </div>
 
-      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
         <div style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 650 }}>Effects on {multi ? 'these clips' : 'this clip'}</div>
         <div style={rowWrap}>
           {VISUAL_EFFECTS.map((e) => (
@@ -294,7 +294,7 @@ export function ClipInspector(props: {
       </div>
 
       {!multi && clip.transitionIn ? (
-        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
           <div style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 650 }}>
             Incoming transition — {TRANSITIONS.find((t) => t.id === clip.transitionIn?.id)?.label}
           </div>
@@ -327,7 +327,7 @@ export function CaptionInspector(props: {
 }) {
   const s = props.settings;
   return (
-    <Section title="Captions" icon={<TypeIcon size={14} color="#eab308" />}>
+    <Section title="Captions" icon={<TypeIcon size={14} color="#C8920A" />}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 8 }}>
         {CAPTION_STYLES.map((style) => {
           const active = s.styleId === style.id;
@@ -340,8 +340,8 @@ export function CaptionInspector(props: {
               title={style.hint}
               style={{
                 textAlign: 'left', cursor: 'pointer', borderRadius: 9, padding: '7px 9px',
-                border: `1px solid ${active ? 'rgba(245,158,11,0.6)' : 'rgba(255,255,255,0.1)'}`,
-                background: active ? 'rgba(245,158,11,0.14)' : 'rgba(255,255,255,0.03)',
+                border: `1px solid ${active ? 'rgba(200,146,10,0.6)' : 'rgba(180,120,0,0.14)'}`,
+                background: active ? 'rgba(200,146,10,0.14)' : 'rgba(180,120,0,0.05)',
               }}
             >
               <div
@@ -420,7 +420,7 @@ export function TextInspector(props: {
   return (
     <Section
       title="Text layers"
-      icon={<TypeIcon size={14} color="#a855f7" />}
+      icon={<TypeIcon size={14} color="#C8920A" />}
       right={(
         <button type="button" className="vs-btn" onClick={props.onAdd} title="Add a text layer at the playhead" style={{ ...miniBtn, padding: '4px 9px' }}>
           <Plus size={11} /> Add
@@ -437,8 +437,8 @@ export function TextInspector(props: {
               onClick={() => props.onSelect(l.id === props.selectedId ? null : l.id)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 7, textAlign: 'left', cursor: 'pointer',
-                background: l.id === props.selectedId ? 'rgba(168,85,247,0.16)' : 'rgba(255,255,255,0.03)',
-                border: `1px solid ${l.id === props.selectedId ? 'rgba(168,85,247,0.5)' : 'rgba(255,255,255,0.08)'}`,
+                background: l.id === props.selectedId ? 'rgba(200,146,10,0.16)' : 'rgba(180,120,0,0.05)',
+                border: `1px solid ${l.id === props.selectedId ? 'rgba(200,146,10,0.5)' : 'rgba(180,120,0,0.14)'}`,
                 borderRadius: 7, padding: '6px 8px',
               }}
             >
@@ -448,18 +448,18 @@ export function TextInspector(props: {
           ))}
         </div>
       ) : (
-        <div style={hint}>Add a text layer at the playhead, then drag it on the stage or on the purple Overlay track.</div>
+        <div style={hint}>Add a text layer at the playhead, then drag it on the stage or on the amber Overlay track.</div>
       )}
 
       {layer ? (
-        <div style={{ marginTop: 11, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ marginTop: 11, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
           <textarea
             className="ve-input vs-input"
             value={layer.text}
             rows={2}
             onFocus={props.onCheckpoint}
             onChange={(e) => props.onChange(layer.id, { text: e.target.value })}
-            style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 8, color: LB.textPrimary, fontSize: 12.5, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+            style={{ width: '100%', background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 8, padding: 8, color: LB.textPrimary, fontSize: 12.5, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
           />
           <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
             <SelectField label="Font" value={layer.fontId} options={CAPTION_FONTS.map((f) => ({ id: f.id, label: f.label }))} onChange={(v) => props.onChange(layer.id, { fontId: v })} />
@@ -483,7 +483,7 @@ export function TextInspector(props: {
                 className="ve-input vs-input"
                 onFocus={props.onCheckpoint}
                 onChange={(e) => props.onChange(layer.id, { start: Math.max(0, Number(e.target.value) || 0) })}
-                style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
+                style={{ background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
               />
             </label>
             <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, fontWeight: 600, color: LB.textSecondary }}>
@@ -493,11 +493,11 @@ export function TextInspector(props: {
                 className="ve-input vs-input"
                 onFocus={props.onCheckpoint}
                 onChange={(e) => props.onChange(layer.id, { end: Math.max(layer.start + 0.2, Number(e.target.value) || 0) })}
-                style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
+                style={{ background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
               />
             </label>
           </div>
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
             <div style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 650 }}>Depth</div>
             <div
               style={{ ...rowWrap, alignItems: 'center', opacity: props.depthAvailable ? 1 : 0.55 }}
@@ -511,7 +511,7 @@ export function TextInspector(props: {
                 onChange={(v) => { props.onCheckpoint(); props.onChange(layer.id, { behindSubject: v }); }}
               />
               {!props.depthAvailable ? (
-                <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4, color: '#fcd34d', background: 'color-mix(in srgb, #fbbf24 16%, transparent)', border: '1px solid color-mix(in srgb, #fbbf24 38%, transparent)', borderRadius: 999, padding: '2px 7px' }}>
+                <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4, color: '#B4720A', background: 'color-mix(in srgb, #C8920A 16%, transparent)', border: '1px solid color-mix(in srgb, #C8920A 38%, transparent)', borderRadius: 999, padding: '2px 7px' }}>
                   COMING SOON
                 </span>
               ) : null}
@@ -523,7 +523,7 @@ export function TextInspector(props: {
             </div>
           </div>
 
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
             <div style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 650 }}>Glow override</div>
             <div style={{ ...rowWrap, alignItems: 'center' }}>
               <Toggle
@@ -546,7 +546,7 @@ export function TextInspector(props: {
           </div>
 
           <div style={rowWrap}>
-            <button type="button" className="vs-btn" onClick={() => props.onDelete(layer.id)} style={{ ...miniBtn, color: '#f87171' }}>
+            <button type="button" className="vs-btn" onClick={() => props.onDelete(layer.id)} style={{ ...miniBtn, color: '#991B1B' }}>
               <Trash2 size={12} /> Delete layer
             </button>
           </div>
@@ -572,10 +572,10 @@ function PolyEditor({ points, onChange }: { points: { x: number; y: number }[]; 
           const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
           onChange([...points, { x: clamp01((e.clientX - r.left) / r.width), y: clamp01((e.clientY - r.top) / r.height) }]);
         }}
-        style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, cursor: 'crosshair' }}
+        style={{ background: 'rgba(255,250,235,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7, cursor: 'crosshair' }}
       >
         {points.length >= 3 ? (
-          <polygon points={points.map((p) => `${p.x * size},${p.y * size}`).join(' ')} fill="rgba(245,158,11,0.25)" stroke="#f59e0b" strokeWidth={1.2} />
+          <polygon points={points.map((p) => `${p.x * size},${p.y * size}`).join(' ')} fill="rgba(200,146,10,0.25)" stroke="#C8920A" strokeWidth={1.2} />
         ) : null}
         {points.map((p, i) => (
           <circle
@@ -583,7 +583,7 @@ function PolyEditor({ points, onChange }: { points: { x: number; y: number }[]; 
             cx={p.x * size}
             cy={p.y * size}
             r={4}
-            fill="#f59e0b"
+            fill="#C8920A"
             onClick={(e) => { e.stopPropagation(); onChange(points.filter((_, k) => k !== i)); }}
             style={{ cursor: 'pointer' }}
           />
@@ -612,7 +612,7 @@ export function OverlayInspector(props: {
   return (
     <Section
       title="Overlays"
-      icon={<ImageIcon size={14} color="#a855f7" />}
+      icon={<ImageIcon size={14} color="#C8920A" />}
       right={(
         <span style={{ display: 'inline-flex', gap: 5 }}>
           <button type="button" className="vs-btn" onClick={props.onAddWorkspaceLogo} title="Add the workspace logo as an overlay" style={{ ...miniBtn, padding: '4px 8px' }}>Logo</button>
@@ -635,8 +635,8 @@ export function OverlayInspector(props: {
               key={o.id}
               style={{
                 display: 'flex', alignItems: 'center', gap: 3,
-                background: o.id === props.selectedId ? 'rgba(168,85,247,0.16)' : 'rgba(255,255,255,0.03)',
-                border: `1px solid ${o.id === props.selectedId ? 'rgba(168,85,247,0.5)' : 'rgba(255,255,255,0.08)'}`,
+                background: o.id === props.selectedId ? 'rgba(200,146,10,0.16)' : 'rgba(180,120,0,0.05)',
+                border: `1px solid ${o.id === props.selectedId ? 'rgba(200,146,10,0.5)' : 'rgba(180,120,0,0.14)'}`,
                 borderRadius: 7, padding: '2px 3px 2px 8px',
               }}
             >
@@ -646,9 +646,9 @@ export function OverlayInspector(props: {
                 onClick={() => props.onSelect(o.id === props.selectedId ? null : o.id)}
                 style={{ display: 'flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 0, textAlign: 'left', cursor: 'pointer', background: 'transparent', border: 'none', padding: '4px 0' }}
               >
-                <img src={o.url} alt="" style={{ width: 22, height: 22, objectFit: 'contain', borderRadius: 4, background: 'rgba(0,0,0,0.4)' }} />
+                <img src={o.url} alt="" style={{ width: 22, height: 22, objectFit: 'contain', borderRadius: 4, background: 'rgba(180,120,0,0.10)' }} />
                 <span style={{ flex: 1, minWidth: 0, color: LB.textPrimary, fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</span>
-                {o.track.enabled ? <span style={{ color: '#4ade80', fontSize: 9.5, fontWeight: 800 }}>TRACKED</span> : null}
+                {o.track.enabled ? <span style={{ color: '#166534', fontSize: 9.5, fontWeight: 800 }}>TRACKED</span> : null}
               </button>
               <button
                 type="button"
@@ -656,7 +656,7 @@ export function OverlayInspector(props: {
                 onClick={() => props.onDelete(o.id)}
                 title={`Delete ${o.label}`}
                 aria-label={`Delete ${o.label}`}
-                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, flexShrink: 0, background: 'transparent', border: 'none', color: '#f87171', borderRadius: 6, cursor: 'pointer', padding: 0 }}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, flexShrink: 0, background: 'transparent', border: 'none', color: '#991B1B', borderRadius: 6, cursor: 'pointer', padding: 0 }}
               >
                 <Trash2 size={12} />
               </button>
@@ -668,7 +668,7 @@ export function OverlayInspector(props: {
       )}
 
       {overlay ? (
-        <div style={{ marginTop: 11, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ marginTop: 11, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
           <Slider label="Size" value={Math.round(overlay.w * 100)} min={3} max={100} onBegin={props.onCheckpoint} onChange={(v) => props.onChange(overlay.id, { w: v / 100 })} unit="% of frame" />
           <Slider label="Opacity" value={Math.round(overlay.opacity * 100)} min={0} max={100} onBegin={props.onCheckpoint} onChange={(v) => props.onChange(overlay.id, { opacity: v / 100 })} unit="%" />
           <Slider label="Rotation" value={overlay.rotation} min={-180} max={180} onBegin={props.onCheckpoint} onChange={(v) => props.onChange(overlay.id, { rotation: v })} unit="°" />
@@ -688,7 +688,7 @@ export function OverlayInspector(props: {
                   type="number" step={0.1} min={0} max={props.duration} value={Number(overlay.start.toFixed(2))}
                   className="ve-input vs-input"
                   onChange={(e) => props.onChange(overlay.id, { start: Math.max(0, Number(e.target.value) || 0) })}
-                  style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
+                  style={{ background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
                 />
               </label>
               <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, fontWeight: 600, color: LB.textSecondary }}>
@@ -697,14 +697,14 @@ export function OverlayInspector(props: {
                   type="number" step={0.1} min={overlay.start + 0.2} value={Number(overlay.end.toFixed(2))}
                   className="ve-input vs-input"
                   onChange={(e) => props.onChange(overlay.id, { end: Math.max(overlay.start + 0.2, Number(e.target.value) || 0) })}
-                  style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
+                  style={{ background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7, padding: '5px 7px', color: LB.textPrimary, fontSize: 12 }}
                 />
               </label>
             </div>
           ) : null}
 
           {/* Masking */}
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
             <div style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 650 }}>Mask</div>
             <div style={rowWrap}>
               {(['none', 'rect', 'ellipse', 'poly'] as MaskShape[]).map((shape) => (
@@ -742,7 +742,7 @@ export function OverlayInspector(props: {
           </div>
 
           {/* Tracking */}
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(180,120,0,0.14)' }}>
             <div style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 650 }}>Auto-tracking</div>
             <div style={rowWrap}>
               <button
@@ -762,8 +762,8 @@ export function OverlayInspector(props: {
             {overlay.track.keys.length ? (
               <div style={{ marginTop: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.round(overlay.track.confidence * 100)}%`, height: '100%', background: overlay.track.confidence > 0.55 ? '#4ade80' : overlay.track.confidence > 0.3 ? '#fbbf24' : '#f87171' }} />
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(180,120,0,0.14)', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.round(overlay.track.confidence * 100)}%`, height: '100%', background: overlay.track.confidence > 0.55 ? '#166534' : overlay.track.confidence > 0.3 ? '#B45309' : '#991B1B' }} />
                   </div>
                   <span style={{ color: LB.textSecondary, fontSize: 11, fontWeight: 700 }}>{Math.round(overlay.track.confidence * 100)}%</span>
                 </div>
@@ -775,7 +775,7 @@ export function OverlayInspector(props: {
           </div>
 
           <div style={rowWrap}>
-            <button type="button" className="vs-btn" onClick={() => props.onDelete(overlay.id)} style={{ ...miniBtn, color: '#f87171' }}>
+            <button type="button" className="vs-btn" onClick={() => props.onDelete(overlay.id)} style={{ ...miniBtn, color: '#991B1B' }}>
               <Trash2 size={12} /> Remove overlay
             </button>
           </div>
@@ -800,7 +800,7 @@ export function LookInspector(props: {
   onCheckpoint: () => void;
 }) {
   return (
-    <Section title="Look & sound" icon={<Sparkles size={14} color="#f97316" />}>
+    <Section title="Look & sound" icon={<Sparkles size={14} color="#B45309" />}>
       <div style={{ color: LB.textSecondary, fontSize: 12, fontWeight: 650, marginTop: 6 }}>Colour grade</div>
       <div style={rowWrap}>
         {GRADES.map((g) => (
@@ -897,7 +897,7 @@ export function ExportInspector(props: {
       <ExportReady results={props.results} onShare={props.onShare} />
 
       {props.error ? (
-        <div style={{ color: '#f87171', fontSize: 12.5, lineHeight: 1.55, marginTop: 10 }}>{props.error}</div>
+        <div style={{ color: '#991B1B', fontSize: 12.5, lineHeight: 1.55, marginTop: 10 }}>{props.error}</div>
       ) : null}
     </Section>
   );

@@ -147,7 +147,7 @@ export const MOTION_PRESETS: MotionPreset[] = [
     bodyFont: 'Inter',
     accent: '#22D3EE',
     textColor: '#F0FDFF',
-    plateFrom: 'rgba(10,6,32,0.86)',
+    plateFrom: 'rgba(32,22,6,0.86)',
     plateTo: 'rgba(34,211,238,0.18)',
     titleWeight: 800,
     titleSizePx: 94,

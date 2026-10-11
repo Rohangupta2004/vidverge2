@@ -44,7 +44,7 @@ export function VideoIntegrationPicker(props: VideoIntegrationPickerProps) {
   }, [props.integration, props.model, models, props.onChange]);
 
   const meta = integrationMeta(props.integration);
-  const selectClass = props.className || 'mt-1 w-full rounded-lg border border-[color-mix(in_srgb,var(--space-border-default)_80%,transparent)] bg-[var(--space-surface-card,#10182A)] px-3 py-2 text-sm text-[var(--space-text-primary,#F8FAFC)] outline-none focus:border-[var(--space-brand-primary-500,#6366F1)]';
+  const selectClass = props.className || 'mt-1 w-full rounded-lg border border-[color-mix(in_srgb,var(--space-border-default)_80%,transparent)] bg-[var(--space-surface-card,#10182A)] px-3 py-2 text-sm text-[var(--space-text-primary,#F8FAFC)] outline-none focus:border-[var(--space-brand-primary-500,#F59E0B)]';
 
   return (
     <div style={props.style} className={props.className ? undefined : 'space-y-2'}>

@@ -62,7 +62,7 @@ export const MOTION_PRESETS: MotionPreset[] = [
     background: 'mesh',
     backgroundAnimation: 'pan',
     textAnimation: 'tracking_expand',
-    palette: { primary: '#7c3aed', secondary: '#22d3ee', background: '#05060f', text: '#F8FAFC', accent: '#22d3ee' },
+    palette: { primary: '#d97706', secondary: '#22d3ee', background: '#05060f', text: '#F8FAFC', accent: '#22d3ee' },
   },
   {
     id: 'minimal',

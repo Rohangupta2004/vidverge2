@@ -73,7 +73,7 @@ export function Chip({ active, disabled, onClick, title, color, children }: {
       style={{
         fontSize: 12, fontWeight: 700, borderRadius: 999, padding: '6px 12px',
         cursor: disabled ? 'not-allowed' : 'pointer',
-        color: active ? '#06080F' : disabled ? P.muted : P.sub,
+        color: active ? '#FFFFFF' : disabled ? P.muted : P.sub,
         background: active ? accent : P.panelSoft,
         border: '1px solid ' + (active ? accent : P.border),
         opacity: disabled ? 0.5 : 1,
@@ -150,9 +150,9 @@ function confColor(c: number): string {
 function BeforeAfterChips({ before, after }: { before?: string; after?: string }) {
   return (
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 7 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: P.coral, background: 'rgba(255,107,107,0.10)', border: '1px solid rgba(255,107,107,0.35)', borderRadius: 7, padding: '3px 9px' }}>{before || 'Before: not identified'}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: P.coral, background: 'rgba(153,27,27,0.10)', border: '1px solid rgba(153,27,27,0.35)', borderRadius: 7, padding: '3px 9px' }}>{before || 'Before: not identified'}</span>
       <ArrowRight size={12} style={{ color: P.muted, flexShrink: 0 }} />
-      <span style={{ fontSize: 11, fontWeight: 700, color: P.mint, background: 'rgba(52,224,176,0.10)', border: '1px solid rgba(52,224,176,0.35)', borderRadius: 7, padding: '3px 9px' }}>{after || 'After: not identified'}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: P.mint, background: 'rgba(22,101,52,0.10)', border: '1px solid rgba(22,101,52,0.35)', borderRadius: 7, padding: '3px 9px' }}>{after || 'After: not identified'}</span>
     </div>
   );
 }
@@ -170,7 +170,7 @@ function InsightRow({ ins }: { ins: AnalysisInsight }) {
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 800, color: P.text }}>{ins.title || ins.text}</span>
         {conf != null && (
-          <span title="How confident the AI is in this finding" style={{ fontSize: 10.5, fontWeight: 800, color: confColor(conf), background: 'rgba(7,10,18,0.6)', border: '1px solid ' + confColor(conf) + '55', borderRadius: 999, padding: '2px 9px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+          <span title="How confident the AI is in this finding" style={{ fontSize: 10.5, fontWeight: 800, color: confColor(conf), background: 'rgba(255,253,244,0.9)', border: '1px solid ' + confColor(conf) + '55', borderRadius: 999, padding: '2px 9px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
             {conf.toFixed(1)} / 10 confidence
           </span>
         )}
@@ -182,7 +182,7 @@ function InsightRow({ ins }: { ins: AnalysisInsight }) {
       <BeforeAfterChips before={before} after={after} />
       {hasScore && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ height: 6, borderRadius: 999, background: 'rgba(7,10,18,0.7)', overflow: 'hidden', border: '1px solid ' + P.borderSoft }}>
+          <div style={{ height: 6, borderRadius: 999, background: 'rgba(180,120,0,0.14)', overflow: 'hidden', border: '1px solid ' + P.borderSoft }}>
             <div style={{ height: '100%', width: (ins.score as number) + '%', borderRadius: 999, background: 'linear-gradient(90deg, ' + scoreC + 'AA, ' + scoreC + ')', transition: 'width .4s ease' }} />
           </div>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: scoreC, marginTop: 4, display: 'flex', gap: 5, alignItems: 'center' }}>
@@ -194,7 +194,7 @@ function InsightRow({ ins }: { ins: AnalysisInsight }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
           {ins.steps.map((s, i) => (
             <div key={i} style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
-              <span style={{ width: 16, height: 16, borderRadius: 999, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9.5, fontWeight: 800, color: '#06080F', background: P.violet, marginTop: 1 }}>{i + 1}</span>
+              <span style={{ width: 16, height: 16, borderRadius: 999, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9.5, fontWeight: 800, color: '#FFFFFF', background: P.violet, marginTop: 1 }}>{i + 1}</span>
               <span style={{ fontSize: 11.5, color: P.muted, lineHeight: 1.45 }}>{s}</span>
             </div>
           ))}
@@ -221,8 +221,8 @@ function AnalyzingState({ note }: { note: string }) {
       className="ve-fade"
       style={{
         marginTop: 12, padding: '16px 14px', borderRadius: 12, textAlign: 'center',
-        background: 'linear-gradient(150deg, rgba(61,139,255,0.12), rgba(167,139,250,0.10))',
-        border: '1px solid rgba(61,139,255,0.3)',
+        background: 'linear-gradient(150deg, rgba(29,78,216,0.10), rgba(200,146,10,0.10))',
+        border: '1px solid rgba(29,78,216,0.3)',
       }}
     >
       <div style={{ position: 'relative', width: 46, height: 46, margin: '0 auto 10px' }}>
@@ -230,14 +230,14 @@ function AnalyzingState({ note }: { note: string }) {
           className="ve-pulse"
           style={{
             position: 'absolute', inset: 0, borderRadius: 999,
-            background: 'radial-gradient(circle, rgba(61,139,255,0.55), transparent 68%)',
+            background: 'radial-gradient(circle, rgba(29,78,216,0.35), transparent 68%)',
             filter: 'blur(3px)',
           }}
         />
         <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: P.blue }}>
           <Brain size={24} />
         </span>
-        <Loader2 size={46} className="animate-spin" style={{ position: 'absolute', inset: 0, color: 'rgba(167,139,250,0.45)' }} />
+        <Loader2 size={46} className="animate-spin" style={{ position: 'absolute', inset: 0, color: 'rgba(200,146,10,0.45)' }} />
       </div>
       <div className="ve-gradient-text" style={{ fontSize: 14, fontWeight: 800 }}>The AI is analyzing your video…</div>
       <div className="ve-pulse" style={{ fontSize: 12, color: P.sub, marginTop: 5, lineHeight: 1.5 }}>
@@ -266,7 +266,7 @@ export function AnalyzePanel({
           icon={<Clapperboard size={15} />}
           color={P.amber}
           title="AI scene analysis"
-          right={<span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: P.violet, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.4)', borderRadius: 999, padding: '3px 9px' }}>AI vision</span>}
+          right={<span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: P.violet, background: 'rgba(200,146,10,0.12)', border: '1px solid rgba(200,146,10,0.4)', borderRadius: 999, padding: '3px 9px' }}>AI vision</span>}
         />
         <div style={{ fontSize: 12.5, color: P.muted, lineHeight: 1.55, marginBottom: 12 }}>
           Frames are sampled from your footage; the AI reports what it sees and designs graphic overlays that fit the content. Findings show a supporting chart only when they actually need one — plain findings stay plain text.
@@ -276,7 +276,7 @@ export function AnalyzePanel({
           disabled={!canAnalyze || exporting}
           busy={analyzing}
           gradient={'linear-gradient(100deg, ' + P.blue + ', ' + P.violet + ')'}
-          shadow="0 12px 30px -14px rgba(61,139,255,0.8)"
+          shadow="0 12px 30px -14px rgba(29,78,216,0.5)"
         >
           {analyzing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
           {analyzing ? 'Enhancing your footage…' : elements.length ? 'Re-enhance the footage' : 'Enhance video'}
@@ -284,7 +284,7 @@ export function AnalyzePanel({
         {analyzing && <AnalyzingState note={analyzeNote} />}
         {analyzeErr && <ErrLine>{analyzeErr}</ErrLine>}
         {summary && !analyzing && (
-          <div className="ve-fade" style={{ fontSize: 12.5, color: P.sub, lineHeight: 1.55, marginTop: 12, padding: '10px 12px', borderRadius: 10, background: 'rgba(61,139,255,0.07)', border: '1px solid rgba(61,139,255,0.22)' }}>
+          <div className="ve-fade" style={{ fontSize: 12.5, color: P.sub, lineHeight: 1.55, marginTop: 12, padding: '10px 12px', borderRadius: 10, background: 'rgba(29,78,216,0.07)', border: '1px solid rgba(29,78,216,0.22)' }}>
             <span style={{ fontWeight: 800, color: P.blue }}>What the AI saw:</span> {summary}
           </div>
         )}
@@ -309,7 +309,7 @@ export function AnalyzePanel({
           />
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
             {(Object.keys(kindCounts) as OverlayKind[]).map((k) => (
-              <span key={k} className="ve-chip" style={{ fontSize: 10.5, fontWeight: 800, color: OVERLAY_COLORS[k], background: 'rgba(7,10,18,0.55)', border: '1px solid ' + OVERLAY_COLORS[k] + '66', borderRadius: 999, padding: '3px 9px' }}>
+              <span key={k} className="ve-chip" style={{ fontSize: 10.5, fontWeight: 800, color: OVERLAY_COLORS[k], background: 'rgba(255,253,244,0.9)', border: '1px solid ' + OVERLAY_COLORS[k] + '66', borderRadius: 999, padding: '3px 9px' }}>
                 {kindCounts[k]} × {OVERLAY_KIND_LABELS[k]}
               </span>
             ))}
@@ -415,11 +415,11 @@ export function TrimPanel({
               onClick={() => onSeek(seg.start)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10,
-                background: P.panelSoft, border: '1px solid ' + (seg.kept ? 'rgba(61,139,255,0.35)' : P.borderSoft),
+                background: P.panelSoft, border: '1px solid ' + (seg.kept ? 'rgba(29,78,216,0.35)' : P.borderSoft),
                 opacity: seg.kept ? 1 : 0.5,
               }}
             >
-              <span style={{ width: 24, height: 24, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 11, fontWeight: 800, color: seg.kept ? '#06080F' : P.muted, background: seg.kept ? P.blue : 'transparent', border: '1px solid ' + (seg.kept ? P.blue : P.border) }}>
+              <span style={{ width: 24, height: 24, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 11, fontWeight: 800, color: seg.kept ? '#FFFFFF' : P.muted, background: seg.kept ? P.blue : 'transparent', border: '1px solid ' + (seg.kept ? P.blue : P.border) }}>
                 {i + 1}
               </span>
               <span style={{ flex: 1, fontSize: 12, color: seg.kept ? P.sub : P.muted, fontVariantNumeric: 'tabular-nums' }}>
@@ -538,11 +538,11 @@ export function TextPanel({ texts, selectedId, duration, playheadT, disabled, on
                 onClick={() => onSelect(t.id === selectedId ? null : t.id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderRadius: 10,
-                  background: t.id === selectedId ? 'rgba(167,139,250,0.10)' : P.panelSoft,
-                  border: '1px solid ' + (t.id === selectedId ? 'rgba(167,139,250,0.5)' : P.borderSoft),
+                  background: t.id === selectedId ? 'rgba(200,146,10,0.10)' : P.panelSoft,
+                  border: '1px solid ' + (t.id === selectedId ? 'rgba(200,146,10,0.5)' : P.borderSoft),
                 }}
               >
-                <span style={{ width: 12, height: 12, borderRadius: 4, flexShrink: 0, background: t.color, border: '1px solid rgba(255,255,255,0.25)' }} />
+                <span style={{ width: 12, height: 12, borderRadius: 4, flexShrink: 0, background: t.color, border: '1px solid rgba(180,120,0,0.28)' }} />
                 <span style={{ flex: 1, fontSize: 12, color: P.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 700 }}>{t.text || '(empty)'}</span>
                 <span style={{ fontSize: 10.5, color: P.muted, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatTime(t.start)}–{formatTime(t.end)}</span>
                 <button
@@ -568,7 +568,7 @@ export function TextPanel({ texts, selectedId, duration, playheadT, disabled, on
             maxLength={80}
             onChange={(e) => onUpdate(sel.id, { text: e.target.value })}
             placeholder="Your text"
-            style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, fontWeight: 700, color: P.text, background: 'rgba(7,10,18,0.6)', border: '1px solid ' + P.border, borderRadius: 10, padding: '10px 12px', outline: 'none', marginBottom: 12 }}
+            style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, fontWeight: 700, color: P.text, background: 'rgba(255,253,244,0.9)', border: '1px solid ' + P.border, borderRadius: 10, padding: '10px 12px', outline: 'none', marginBottom: 12 }}
           />
           <SliderRow label="Font size" value={Math.min(0.14, Math.max(0.025, sel.size))} min={0.025} max={0.14} step={0.005} display={Math.round(sel.size * 1000) / 10 + '%'} accent={P.violet} disabled={disabled} onChange={(v) => onUpdate(sel.id, { size: v })} />
           <div style={{ fontSize: 12, color: P.sub, fontWeight: 700, marginBottom: 6 }}>Color</div>
@@ -580,7 +580,7 @@ export function TextPanel({ texts, selectedId, duration, playheadT, disabled, on
                 className="ve-btn"
                 onClick={() => onUpdate(sel.id, { color: c })}
                 title={c}
-                style={{ width: 26, height: 26, borderRadius: 8, background: c, cursor: 'pointer', border: sel.color === c ? '2px solid #fff' : '2px solid transparent', boxShadow: sel.color === c ? '0 0 0 2px ' + P.violet : 'none' }}
+                style={{ width: 26, height: 26, borderRadius: 8, background: c, cursor: 'pointer', border: sel.color === c ? '2px solid #1A1000' : '2px solid transparent', boxShadow: sel.color === c ? '0 0 0 2px ' + P.violet : 'none' }}
               />
             ))}
           </div>
@@ -619,7 +619,7 @@ export function FramePanel({ aspect, muteOriginal, originalVolume, disabled, onA
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '10px 8px',
                 borderRadius: 11, cursor: disabled ? 'not-allowed' : 'pointer',
-                background: aspect === a.id ? 'rgba(34,211,238,0.12)' : P.panelSoft,
+                background: aspect === a.id ? 'rgba(180,114,10,0.12)' : P.panelSoft,
                 border: '1px solid ' + (aspect === a.id ? P.cyan : P.border),
               }}
             >
@@ -629,7 +629,7 @@ export function FramePanel({ aspect, muteOriginal, originalVolume, disabled, onA
                 height: a.ratio === null ? 20 : a.ratio >= 1 ? 30 / a.ratio : 30,
                 maxHeight: 26, borderRadius: 3,
                 border: '1.5px solid ' + (aspect === a.id ? P.cyan : P.muted),
-                background: aspect === a.id ? 'rgba(34,211,238,0.15)' : 'transparent',
+                background: aspect === a.id ? 'rgba(180,114,10,0.15)' : 'transparent',
               }} />
               <span style={{ fontSize: 11.5, fontWeight: 800, color: aspect === a.id ? P.cyan : P.sub }}>{a.label}</span>
               <span style={{ fontSize: 9.5, color: P.muted }}>{a.hint}</span>
@@ -651,13 +651,13 @@ export function FramePanel({ aspect, muteOriginal, originalVolume, disabled, onA
           style={{
             display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', borderRadius: 11,
             cursor: disabled ? 'not-allowed' : 'pointer', marginBottom: 12,
-            background: muteOriginal ? 'rgba(255,107,107,0.09)' : 'rgba(52,224,176,0.08)',
-            border: '1px solid ' + (muteOriginal ? 'rgba(255,107,107,0.4)' : 'rgba(52,224,176,0.4)'),
+            background: muteOriginal ? 'rgba(153,27,27,0.09)' : 'rgba(22,101,52,0.08)',
+            border: '1px solid ' + (muteOriginal ? 'rgba(153,27,27,0.4)' : 'rgba(22,101,52,0.4)'),
           }}
         >
           <span style={{
             width: 34, height: 20, borderRadius: 999, position: 'relative', flexShrink: 0,
-            background: muteOriginal ? 'rgba(255,107,107,0.35)' : P.mint, transition: 'background .18s ease',
+            background: muteOriginal ? 'rgba(153,27,27,0.35)' : P.mint, transition: 'background .18s ease',
           }}>
             <span style={{ position: 'absolute', top: 2, left: muteOriginal ? 2 : 16, width: 16, height: 16, borderRadius: 999, background: '#fff', transition: 'left .18s ease' }} />
           </span>
@@ -701,7 +701,7 @@ export function MusicPanel({
           icon={<Music size={15} />}
           color={P.mint}
           title="Music bed"
-          right={<span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: P.mint, background: 'rgba(52,224,176,0.10)', border: '1px solid rgba(52,224,176,0.35)', borderRadius: 999, padding: '3px 9px' }}>AI music</span>}
+          right={<span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: P.mint, background: 'rgba(22,101,52,0.10)', border: '1px solid rgba(22,101,52,0.35)', borderRadius: 999, padding: '3px 9px' }}>AI music</span>}
         />
         <div style={{ fontSize: 12.5, color: P.muted, lineHeight: 1.55, marginBottom: 10 }}>
           Describe a mood or pick a style — the track is generated to fit your video ({Math.round(keptSeconds)}s kept) and mixed into the export under the original audio.
@@ -717,16 +717,16 @@ export function MusicPanel({
           value={prompt}
           onChange={(e) => onPrompt(e.target.value)}
           rows={2}
-          maxLength={400}
+          maxLength={4100}
           placeholder="e.g. upbeat lo-fi with warm keys, or cinematic dramatic strings…"
-          style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontSize: 12.5, color: P.text, background: 'rgba(7,10,18,0.6)', border: '1px solid ' + P.border, borderRadius: 10, padding: '10px 12px', outline: 'none', marginBottom: 10, fontFamily: 'inherit', lineHeight: 1.5 }}
+          style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontSize: 12.5, color: P.text, background: 'rgba(255,253,244,0.9)', border: '1px solid ' + P.border, borderRadius: 10, padding: '10px 12px', outline: 'none', marginBottom: 10, fontFamily: 'inherit', lineHeight: 1.5 }}
         />
         <PrimaryButton
           onClick={onGenerate}
           disabled={disabled}
           busy={busy}
           gradient={'linear-gradient(100deg, ' + P.mint + ', ' + P.cyan + ')'}
-          shadow="0 12px 30px -14px rgba(52,224,176,0.7)"
+          shadow="0 12px 30px -14px rgba(22,101,52,0.45)"
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
           {busy ? 'Composing your track…' : track ? 'Regenerate music' : prompt.trim() ? 'Generate music' : 'Auto-match music'}
@@ -765,7 +765,7 @@ export function MusicPanel({
             accent={P.mint}
             onChange={(v) => onVolume(v / 100)}
           />
-          <div style={{ fontSize: 11.5, color: track.source === 'byok' ? P.mint : P.sub, lineHeight: 1.55, padding: '8px 10px', borderRadius: 9, background: 'rgba(7,10,18,0.5)', border: '1px solid ' + P.borderSoft }}>
+          <div style={{ fontSize: 11.5, color: track.source === 'byok' ? P.mint : P.sub, lineHeight: 1.55, padding: '8px 10px', borderRadius: 9, background: 'rgba(255,250,235,0.9)', border: '1px solid ' + P.borderSoft }}>
             {track.note}
           </div>
         </div>
@@ -814,7 +814,7 @@ export function ExportPanel({
             <Chip key={q.id} active={quality === q.id} disabled={exporting} onClick={() => onQuality(q.id)} color={P.cyan} title={q.hint}>{q.label}</Chip>
           ))}
         </div>
-        <div style={{ fontSize: 11.5, color: P.muted, lineHeight: 1.7, padding: '9px 11px', borderRadius: 10, background: 'rgba(7,10,18,0.5)', border: '1px solid ' + P.borderSoft, marginBottom: 12 }}>
+        <div style={{ fontSize: 11.5, color: P.muted, lineHeight: 1.7, padding: '9px 11px', borderRadius: 10, background: 'rgba(255,250,235,0.9)', border: '1px solid ' + P.borderSoft, marginBottom: 12 }}>
           <b style={{ color: P.sub }}>{formatTime(outSeconds)}</b> output ({formatTime(keptSeconds)} kept{speed !== 1 ? ' at ' + speed + '×' : ''})
           · <b style={{ color: P.sub }}>{aspect === 'original' ? 'original frame' : aspect}</b>
           · {overlayCount} AI overlay{overlayCount === 1 ? '' : 's'}
@@ -828,7 +828,7 @@ export function ExportPanel({
           disabled={disabled || !canExport}
           busy={exporting}
           gradient={'linear-gradient(100deg, ' + P.mint + ', ' + P.cyan + ')'}
-          shadow="0 14px 34px -14px rgba(52,224,176,0.75)"
+          shadow="0 14px 34px -14px rgba(22,101,52,0.45)"
         >
           {exporting ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
           {exporting ? 'Preparing ' + Math.round(progress * 100) + '%…' : 'Download video'}
@@ -857,7 +857,7 @@ export function ExportPanel({
               rel="noreferrer"
               download={'enhanced.' + (downloadExt || 'webm')}
               className="ve-btn"
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 12.5, fontWeight: 800, color: '#06231A', background: P.mint, borderRadius: 10, padding: '10px 14px', textDecoration: 'none' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 12.5, fontWeight: 800, color: '#FFFFFF', background: P.mint, borderRadius: 10, padding: '10px 14px', textDecoration: 'none' }}
             >
               <Download size={14} /> Download enhanced video
             </a>

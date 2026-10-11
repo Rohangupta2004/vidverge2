@@ -119,11 +119,11 @@ const MINUTES_PER_CLIP = 3;
 
 function StatusPill({ run }: { run: ClipRun }) {
   const map: Record<string, { label: string; color: string; bg: string; border: string }> = {
-    pending: { label: 'Queued', color: T.muted, bg: 'rgba(255,255,255,0.04)', border: T.border },
-    submitting: { label: 'Starting', color: '#fbbf24', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.28)' },
-    rendering: { label: 'Rendering', color: '#fbbf24', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.28)' },
-    done: { label: 'Done', color: T.success, bg: 'rgba(74,222,128,0.1)', border: 'rgba(74,222,128,0.28)' },
-    failed: { label: 'Failed', color: T.danger, bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.28)' },
+    pending: { label: 'Queued', color: T.muted, bg: 'rgba(180,120,0,0.06)', border: T.border },
+    submitting: { label: 'Starting', color: '#B45309', bg: 'rgba(180,83,9,0.1)', border: 'rgba(180,83,9,0.28)' },
+    rendering: { label: 'Rendering', color: '#B45309', bg: 'rgba(180,83,9,0.1)', border: 'rgba(180,83,9,0.28)' },
+    done: { label: 'Done', color: T.success, bg: 'rgba(22,101,52,0.1)', border: 'rgba(22,101,52,0.28)' },
+    failed: { label: 'Failed', color: T.danger, bg: 'rgba(153,27,27,0.08)', border: 'rgba(153,27,27,0.28)' },
   };
   const s = map[run.status] || map.pending;
   return (
@@ -219,10 +219,10 @@ function SubjectStrip({ subject, clipCount }: { subject: SeriesSubject; clipCoun
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: 'linear-gradient(160deg, rgba(124,58,237,0.3), #0a0a0f)',
+              background: 'linear-gradient(160deg, rgba(200,146,10,0.3), #FFF3D6)',
             }}
           >
-            <User size={18} color="rgba(255,255,255,0.6)" />
+            <User size={18} color="#7A6030" />
           </span>
         )}
       </span>
@@ -1401,7 +1401,7 @@ export default function VideoSeries({
               marginBottom: 16,
               borderRadius: 999,
               overflow: 'hidden',
-              background: 'rgba(255,255,255,0.07)',
+              background: 'rgba(180,120,0,0.1)',
             }}
             role="progressbar"
             aria-valuenow={liveDone}
@@ -1415,7 +1415,7 @@ export default function VideoSeries({
                 top: 0,
                 bottom: 0,
                 width: `${Math.round((liveDone / Math.max(1, liveTotal)) * 100)}%`,
-                background: 'linear-gradient(90deg, #8b5cf6, #7c3aed)',
+                background: 'linear-gradient(90deg, #E8B737, #C8920A)',
                 transition: 'width .4s ease',
               }}
             />
@@ -1519,7 +1519,7 @@ export default function VideoSeries({
                     key={clip.key}
                     style={{
                       padding: '11px 13px',
-                      borderColor: run.status === 'failed' ? 'rgba(239,68,68,0.3)' : T.border,
+                      borderColor: run.status === 'failed' ? 'rgba(153,27,27,0.3)' : T.border,
                     }}
                     data-testid={`series-render-${clip.index}`}
                   >
@@ -1538,8 +1538,8 @@ export default function VideoSeries({
                           color: run.status === 'done' ? '#fff' : T.muted,
                           background:
                             run.status === 'done'
-                              ? 'linear-gradient(135deg, #4ade80, #22c55e)'
-                              : 'rgba(255,255,255,0.07)',
+                              ? 'linear-gradient(135deg, #16A34A, #166534)'
+                              : 'rgba(180,120,0,0.1)',
                         }}
                       >
                         {run.status === 'done' ? <Check size={12} /> : clip.index}
@@ -1746,7 +1746,7 @@ export default function VideoSeries({
                               color: T.sub,
                               textDecoration: 'none',
                               border: `1px solid ${T.border}`,
-                              background: 'rgba(255,255,255,0.03)',
+                              background: 'rgba(180,120,0,0.05)',
                             }}
                             data-testid={`link-download-clip-${clip.index}`}
                           >

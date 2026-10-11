@@ -78,7 +78,7 @@ async function callPlanner(brief: string, analyses: ScreenAnalysis[], screens: I
         {
           role: 'user',
           content: [
-            `Product brief (40–600 chars, verbatim from the founder):\n${brief}`,
+            `Product brief (verbatim from the founder):\n${brief}`,
             `Screens (id, true pixel size):\n${screens.map((s) => `${s.screenId}: ${s.width}x${s.height} (${s.filename})`).join('\n')}`,
             mix && mix.clips.length
               ? `Clips (id, source, true fps, seconds, size):\n${mix.clips.map((c) => `${c.clipId}: ${c.source}, ${c.fps}fps, ${c.durationSeconds.toFixed(2)}s, ${c.width}x${c.height}`).join('\n')}`

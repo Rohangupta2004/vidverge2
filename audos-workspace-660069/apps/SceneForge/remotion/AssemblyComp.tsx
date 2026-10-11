@@ -631,11 +631,11 @@ function TitleCard(props) {
   var card = props.card;
   if (!card || !card.title) return null;
   var frames = Math.max(12, Math.round(Number(card.frames) || 72));
-  var accent = String(props.accent || '#6366F1');
+  var accent = String(props.accent || '#F59E0B');
   var intro = ease(clamp01(frame / 14), 'ease-out');
   var outro = ease(clamp01((frames - frame) / 14), 'ease-out');
   var o = Math.min(intro, outro);
-  return <AbsoluteFill style={{zIndex:100, background:'linear-gradient(140deg, rgba(6,9,20,0.97), rgba(13,10,34,0.97))', alignItems:'center', justifyContent:'center', opacity:o, pointerEvents:'none'}}>
+  return <AbsoluteFill style={{zIndex:100, background:'linear-gradient(140deg, rgba(6,9,20,0.97), rgba(34,25,10,0.97))', alignItems:'center', justifyContent:'center', opacity:o, pointerEvents:'none'}}>
     <div style={{width:112, height:6, borderRadius:999, background:accent, marginBottom:42, transform:'scaleX(' + intro + ')'}}/>
     <div style={{fontFamily:"'Inter', system-ui, sans-serif", fontSize:92, fontWeight:900, color:'#fff', letterSpacing:'-0.02em', textAlign:'center', maxWidth:'78%', lineHeight:1.08, transform:'translateY(' + ((1 - intro) * 18) + 'px)'}}>{card.title}</div>
     {card.subtitle ? <div style={{marginTop:26, fontFamily:"'Inter', system-ui, sans-serif", fontSize:34, fontWeight:500, color:'rgba(255,255,255,0.78)', textAlign:'center', maxWidth:'64%', lineHeight:1.35}}>{card.subtitle}</div> : null}
@@ -647,11 +647,11 @@ function CtaCard(props) {
   var card = props.card;
   if (!card || !card.headline) return null;
   var frames = Math.max(12, Math.round(Number(card.frames) || 84));
-  var accent = String(props.accent || '#6366F1');
+  var accent = String(props.accent || '#F59E0B');
   var intro = ease(clamp01(frame / 16), 'ease-out');
   var outro = ease(clamp01((frames - frame) / 10), 'ease-out');
   var o = Math.min(intro, outro);
-  return <AbsoluteFill style={{zIndex:100, background:'linear-gradient(140deg, rgba(5,8,18,0.96), rgba(10,9,30,0.98))', alignItems:'center', justifyContent:'center', opacity:o, pointerEvents:'none'}}>
+  return <AbsoluteFill style={{zIndex:100, background:'linear-gradient(140deg, rgba(5,8,18,0.96), rgba(30,22,9,0.98))', alignItems:'center', justifyContent:'center', opacity:o, pointerEvents:'none'}}>
     <div style={{fontFamily:"'Inter', system-ui, sans-serif", fontSize:78, fontWeight:900, color:'#fff', letterSpacing:'-0.02em', textAlign:'center', maxWidth:'74%', lineHeight:1.1, transform:'translateY(' + ((1 - intro) * 22) + 'px)'}}>{card.headline}</div>
     {card.subline ? <div style={{marginTop:22, fontFamily:"'Inter', system-ui, sans-serif", fontSize:32, fontWeight:500, color:'rgba(255,255,255,0.76)', textAlign:'center', maxWidth:'58%', lineHeight:1.35}}>{card.subline}</div> : null}
     {card.button ? <div style={{marginTop:44, padding:'20px 46px', borderRadius:999, background:accent, color:'#fff', fontFamily:"'Inter', system-ui, sans-serif", fontSize:34, fontWeight:800, letterSpacing:'0.01em', boxShadow:'0 20px 60px rgba(0,0,0,0.45)', transform:'scale(' + (0.9 + 0.1 * intro) + ')'}}>{card.button}</div> : null}

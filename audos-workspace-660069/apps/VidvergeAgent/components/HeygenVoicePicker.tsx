@@ -109,7 +109,7 @@ export default function HeygenVoicePicker({ active, selected, onSelect }: Heygen
         <button
           type="button"
           onClick={() => setAttempt((value) => value + 1)}
-          className="shrink-0 rounded-full border border-[var(--vv-border)] px-3 py-1 text-[11px] text-white/70 transition-colors hover:text-white"
+          className="shrink-0 rounded-full border border-[var(--vv-border)] px-3 py-1 text-[11px] text-[#3D2800] transition-colors hover:text-[#1A1000]"
         >
           Try again
         </button>
@@ -121,12 +121,12 @@ export default function HeygenVoicePicker({ active, selected, onSelect }: Heygen
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="flex min-w-[160px] flex-1 items-center gap-2 rounded-full border border-[var(--vv-border)] px-3 py-1.5">
-          <Search size={13} className="shrink-0 text-white/30" />
+          <Search size={13} className="shrink-0 text-[#A08B5F]" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search voices or language"
-            className="min-w-0 flex-1 bg-transparent text-[12px] text-white outline-none placeholder:text-white/30"
+            className="min-w-0 flex-1 bg-transparent text-[12px] text-[#1A1000] outline-none placeholder:text-[#A08B5F]"
             aria-label="Search HeyGen voices"
           />
         </span>
@@ -141,7 +141,7 @@ export default function HeygenVoicePicker({ active, selected, onSelect }: Heygen
               style={
                 gender === option.id
                   ? { background: 'color-mix(in srgb, var(--vv-gold) 18%, transparent)', color: 'var(--vv-gold)' }
-                  : { color: 'rgba(255,255,255,0.45)' }
+                  : { color: '#7A6030' }
               }
             >
               {option.label}
@@ -153,7 +153,7 @@ export default function HeygenVoicePicker({ active, selected, onSelect }: Heygen
           <button
             type="button"
             onClick={() => onSelect(null)}
-            className="shrink-0 rounded-full border border-[var(--vv-border)] px-3 py-1.5 text-[11px] text-white/60 transition-colors hover:text-white"
+            className="shrink-0 rounded-full border border-[var(--vv-border)] px-3 py-1.5 text-[11px] text-[#3D2800] transition-colors hover:text-[#1A1000]"
           >
             Skip voice
           </button>
@@ -181,7 +181,7 @@ export default function HeygenVoicePicker({ active, selected, onSelect }: Heygen
                     type="button"
                     onClick={() => togglePreview(voice)}
                     disabled={!voice.previewAudio}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--vv-border)] text-white/60 transition-colors hover:text-white disabled:opacity-25"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--vv-border)] text-[#7A6030] transition-colors hover:text-[#1A1000] disabled:opacity-25"
                     aria-label={voice.previewAudio ? `Preview ${voice.name}` : 'No preview available'}
                     title={voice.previewAudio ? `Preview ${voice.name}` : 'No preview available'}
                   >
@@ -194,7 +194,7 @@ export default function HeygenVoicePicker({ active, selected, onSelect }: Heygen
                     aria-pressed={chosen}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <span className="block truncate text-[12.5px] text-white/90">{voice.name}</span>
+                    <span className="block truncate text-[12.5px] text-[#1A1000]">{voice.name}</span>
                     <span className="block truncate text-[11px] text-[var(--vv-text-dim)]">
                       {voice.language}
                       {voice.gender ? ` · ${voice.gender}` : ''}

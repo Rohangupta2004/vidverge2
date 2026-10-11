@@ -530,8 +530,8 @@ function TransitionProps({ tr, timeline, actions }: { tr: TransitionInstance; ti
         onChange={(v) => actions.updateTransition(tr.id, { locked: v })}
         hint="A locked transition survives a preset switch, the pacing engine and a beat snap." />
       <div style={{
-        background: placed && placed.granted >= tr.duration - 0.02 ? 'color-mix(in srgb, #4ADE80 10%, transparent)' : 'color-mix(in srgb, #FBBF24 12%, transparent)',
-        border: '1px solid ' + (placed && placed.granted >= tr.duration - 0.02 ? 'color-mix(in srgb, #4ADE80 36%, transparent)' : 'color-mix(in srgb, #FBBF24 36%, transparent)'),
+        background: placed && placed.granted >= tr.duration - 0.02 ? 'color-mix(in srgb, #166534 10%, transparent)' : 'color-mix(in srgb, #B45309 12%, transparent)',
+        border: '1px solid ' + (placed && placed.granted >= tr.duration - 0.02 ? 'color-mix(in srgb, #166534 36%, transparent)' : 'color-mix(in srgb, #B45309 36%, transparent)'),
         borderRadius: 10, padding: 10, fontSize: 11.5, color: P.sub, lineHeight: 1.55,
       }}>
         {placed

@@ -265,18 +265,18 @@ async function watchJobRow(jobId: number, opts: { onTick?: (row: JobRow) => void
 // ---------------------------------------------------------------------------
 
 const T = {
-  ink: 'var(--space-text-primary, #F0F0F0)',
-  soft: 'var(--space-text-secondary, rgba(240,240,240,0.62))',
-  muted: 'var(--space-text-muted, rgba(240,240,240,0.38))',
-  card: 'var(--space-surface-card, #0F0F0F)',
-  panel: 'var(--space-surface-panel, #101010)',
-  raised: 'var(--space-surface-panel-strong, #141414)',
-  line: 'var(--space-border-default, rgba(255,255,255,0.06))',
-  accent: 'var(--space-brand-primary-500, #F5B936)',
-  accentDeep: 'var(--space-brand-primary-600, #E0A527)',
-  good: 'var(--space-semantic-success-600, #4ADE80)',
-  bad: 'var(--space-semantic-danger, #F87171)',
-  warn: '#F5B936',
+  ink: 'var(--space-text-primary, #1A1000)',
+  soft: 'var(--space-text-secondary, #3D2800)',
+  muted: 'var(--space-text-muted, #7A6030)',
+  card: 'var(--space-surface-card, #FFFFFF)',
+  panel: 'var(--space-surface-panel, #FFFAEB)',
+  raised: 'var(--space-surface-panel-strong, #FFF3D6)',
+  line: 'var(--space-border-default, rgba(180,120,0,0.14))',
+  accent: 'var(--space-brand-primary-500, #C8920A)',
+  accentDeep: 'var(--space-brand-primary-600, #B4720A)',
+  good: 'var(--space-semantic-success-600, #166534)',
+  bad: 'var(--space-semantic-danger, #991B1B)',
+  warn: '#B45309',
 } as const;
 
 const label: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: T.muted, display: 'block', marginBottom: 6 };
@@ -337,7 +337,7 @@ function UploadZone({ title, hint, urls, max, onChange, extra, aiWrite }: {
         {urls.map((u, i) => (
           <div key={u} style={{ position: 'relative' }}>
             <img src={u} alt="" style={{ width: 86, height: 58, objectFit: 'cover', borderRadius: 8, border: `1px solid ${T.line}` }} />
-            <button type="button" onClick={() => onChange(urls.filter((x) => x !== u))} style={{ position: 'absolute', top: -6, right: -6, width: 17, height: 17, borderRadius: 999, border: 'none', background: '#EF4444', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}><X size={10} /></button>
+            <button type="button" onClick={() => onChange(urls.filter((x) => x !== u))} style={{ position: 'absolute', top: -6, right: -6, width: 17, height: 17, borderRadius: 999, border: 'none', background: '#991B1B', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}><X size={10} /></button>
             {extra ? extra(u, i) : null}
           </div>
         ))}
@@ -705,7 +705,7 @@ export default function App() {
 
   // ------------------------------------------------------------------ UI ----
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--space-surface-bg, #0A0F1E)', color: T.ink, fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--space-surface-bg, #FFFDF4)', color: T.ink, fontFamily: "'Inter', system-ui, sans-serif" }}>
       <div style={{ maxWidth: 1060, margin: '0 auto', padding: '26px 22px 80px' }}>
 
         {/* Header */}
@@ -748,7 +748,7 @@ export default function App() {
                 </button>
               </div>
               {recommended ? (
-                <div style={{ marginTop: 8, fontSize: 12, color: T.soft, background: 'rgba(232,163,60,0.08)', border: '1px solid rgba(232,163,60,0.25)', borderRadius: 9, padding: '8px 12px' }}>
+                <div style={{ marginTop: 8, fontSize: 12, color: T.soft, background: 'rgba(200,146,10,0.08)', border: '1px solid rgba(180,120,0,0.25)', borderRadius: 9, padding: '8px 12px' }}>
                   <b style={{ color: T.warn }}>Recommended:</b> {recommended.reason}{recommended.caveat ? <span style={{ color: T.muted }}> · {recommended.caveat}</span> : null}
                 </div>
               ) : null}
@@ -832,7 +832,7 @@ export default function App() {
                           if (!r) return null;
                           return (
                             <button type="button" onClick={() => setRefs(refs.map((x) => x.url === u ? { ...x, type: x.type === 'asset' ? 'style' : 'asset' } : x))}
-                              style={{ position: 'absolute', left: 3, bottom: 3, border: 'none', borderRadius: 5, padding: '1px 6px', fontSize: 9, fontWeight: 800, cursor: 'pointer', background: r.type === 'asset' ? T.accentDeep : '#7C3AED', color: '#fff' }}>
+                              style={{ position: 'absolute', left: 3, bottom: 3, border: 'none', borderRadius: 5, padding: '1px 6px', fontSize: 9, fontWeight: 800, cursor: 'pointer', background: r.type === 'asset' ? T.accentDeep : '#B45309', color: '#fff' }}>
                               {r.type}
                             </button>
                           );
@@ -850,7 +850,7 @@ export default function App() {
                   </div>
 
                   {combineViolation && (videoExtensionOn || seedUrl.length || refs.length || lastFrameUrl.length) ? (
-                    <div style={{ fontSize: 12, color: T.warn, background: 'rgba(232,163,60,0.08)', border: '1px solid rgba(232,163,60,0.25)', borderRadius: 9, padding: '8px 12px' }}>{combineViolation}</div>
+                    <div style={{ fontSize: 12, color: T.warn, background: 'rgba(200,146,10,0.08)', border: '1px solid rgba(180,120,0,0.25)', borderRadius: 9, padding: '8px 12px' }}>{combineViolation}</div>
                   ) : null}
 
                   <div style={{ fontSize: 12, color: T.muted }}>Estimated cost: <b style={{ color: T.soft }}>{gA.costHint}{videoExtensionOn ? ' × 2 clips' : ''}</b> — the exact charge is reported when the render starts.</div>
@@ -858,7 +858,7 @@ export default function App() {
               ) : rw ? (
                 <div style={{ display: 'grid', gap: 16 }}>
                   {runwayGate === 'checking' ? <div style={{ fontSize: 12.5, color: T.soft, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 9, padding: '8px 12px' }}>Checking whether Runway is enabled…</div> : null}
-                  {runwayGate === 'unavailable' ? <div style={{ fontSize: 12.5, color: T.warn, background: 'rgba(232,163,60,0.08)', border: '1px solid rgba(232,163,60,0.25)', borderRadius: 9, padding: '8px 12px' }}>{RUNWAY_DISABLED_MESSAGE} Pick Omni Flash or a Veo engine to generate now.</div> : null}
+                  {runwayGate === 'unavailable' ? <div style={{ fontSize: 12.5, color: T.warn, background: 'rgba(200,146,10,0.08)', border: '1px solid rgba(180,120,0,0.25)', borderRadius: 9, padding: '8px 12px' }}>{RUNWAY_DISABLED_MESSAGE} Pick Omni Flash or a Veo engine to generate now.</div> : null}
                   <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                     <div>
                       <span style={label}>Ratio (Runway pixel-pair)</span>
@@ -919,7 +919,7 @@ export default function App() {
             ) : null}
 
             {fallbackNote ? (
-              <div style={{ marginTop: 14, fontSize: 12.5, lineHeight: 1.55, color: T.warn, background: 'rgba(232,163,60,0.08)', border: '1px solid rgba(232,163,60,0.25)', borderRadius: 10, padding: '10px 14px' }}>
+              <div style={{ marginTop: 14, fontSize: 12.5, lineHeight: 1.55, color: T.warn, background: 'rgba(200,146,10,0.08)', border: '1px solid rgba(180,120,0,0.25)', borderRadius: 10, padding: '10px 14px' }}>
                 {fallbackNote}
               </div>
             ) : null}
@@ -967,7 +967,7 @@ export default function App() {
                       <div style={{ padding: '7px 9px' }}>
                         <div style={{ fontSize: 10.5, fontWeight: 700, color: T.soft }}>{h.engineName}</div>
                         <div style={{ fontSize: 10, color: T.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={h.prompt}>{h.prompt}</div>
-                        <a href={h.url} target="_blank" rel="noreferrer" download style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--space-text-brand, #60A5FA)', textDecoration: 'none' }}>Download</a>
+                        <a href={h.url} target="_blank" rel="noreferrer" download style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--space-text-brand, #B4720A)', textDecoration: 'none' }}>Download</a>
                       </div>
                     </div>
                   ))}
@@ -1157,7 +1157,7 @@ function ImageLab() {
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} Generate image
         </button>
       </div>
-      {err ? <div style={{ fontSize: 12.5, color: T.bad, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, padding: '9px 13px' }}>{err}</div> : null}
+      {err ? <div style={{ fontSize: 12.5, color: T.bad, background: 'rgba(153,27,27,0.07)', border: '1px solid rgba(153,27,27,0.22)', borderRadius: 10, padding: '9px 13px' }}>{err}</div> : null}
       {out ? (
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 13, padding: 14, maxWidth: 620 }}>
           <img src={out} alt="generated" style={{ width: '100%', borderRadius: 9, display: 'block' }} />

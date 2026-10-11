@@ -18,7 +18,7 @@ export interface HeygenRenderState {
 
 const PANEL_CSS = `
 .vv-render-bar {
-  background: linear-gradient(90deg, transparent, var(--vv-gold, #F5A623), transparent);
+  background: linear-gradient(90deg, transparent, var(--vv-gold, #C8920A), transparent);
   background-size: 50% 100%;
   animation: vv-render-sweep 1.6s linear infinite;
 }
@@ -27,7 +27,7 @@ const PANEL_CSS = `
   to { background-position: 160% 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .vv-render-bar { animation: none; background: var(--vv-gold, #F5A623); }
+  .vv-render-bar { animation: none; background: var(--vv-gold, #C8920A); }
 }
 `;
 
@@ -69,7 +69,7 @@ export default function HeygenRenderPanel({
         {render.thumbnailUrl ? (
           <img src={render.thumbnailUrl} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
         ) : (
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] text-[var(--vv-gold)]">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[rgba(180,120,0,0.06)] text-[var(--vv-gold)]">
             {render.phase === 'failed'
               ? <AlertTriangle size={16} />
               : <Loader2 size={16} className={running ? 'animate-spin' : ''} />}
@@ -77,7 +77,7 @@ export default function HeygenRenderPanel({
         )}
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] text-white/90">{headline}</p>
+          <p className="truncate text-[13px] text-[#1A1000]">{headline}</p>
           <p className="mt-0.5 truncate text-[11px] text-[var(--vv-text-dim)]">
             {render.avatarName}
             {render.voiceName ? ` · ${render.voiceName}` : ' · default voice'}
@@ -88,7 +88,7 @@ export default function HeygenRenderPanel({
         <button
           type="button"
           onClick={onDismiss}
-          className="shrink-0 text-white/30 transition-colors hover:text-white/80"
+          className="shrink-0 text-[#7A6030] transition-colors hover:text-[#1A1000]"
           aria-label="Dismiss this render"
         >
           <X size={14} />
@@ -96,7 +96,7 @@ export default function HeygenRenderPanel({
       </div>
 
       {running && (
-        <span className="mt-3 block h-[2px] w-full overflow-hidden rounded-full bg-white/[0.07]">
+        <span className="mt-3 block h-[2px] w-full overflow-hidden rounded-full bg-[rgba(180,120,0,0.14)]">
           <span className="vv-render-bar block h-full w-full rounded-full" />
         </span>
       )}
@@ -121,7 +121,7 @@ export default function HeygenRenderPanel({
               href={render.videoUrl}
               download
               className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium text-[#1a1203] transition-opacity hover:opacity-90"
-              style={{ background: 'linear-gradient(135deg, var(--vv-gold-light, #FFD9A0), var(--vv-gold, #F5A623))' }}
+              style={{ background: 'linear-gradient(135deg, var(--vv-gold-light, #E8B737), var(--vv-gold, #C8920A))' }}
             >
               <Download size={13} />
               Download MP4
@@ -130,7 +130,7 @@ export default function HeygenRenderPanel({
               href={render.videoUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--vv-border)] px-3.5 py-1.5 text-[12px] text-white/70 transition-colors hover:text-white"
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--vv-border)] px-3.5 py-1.5 text-[12px] text-[#3D2800] transition-colors hover:text-[#1A1000]"
             >
               <ExternalLink size={13} />
               Open

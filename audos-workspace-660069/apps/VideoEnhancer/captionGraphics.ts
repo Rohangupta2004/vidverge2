@@ -48,7 +48,7 @@ export const MOTION_ACCENTS: Record<MotionAccentId, string> = {
   amber: '#F59E0B',
   green: '#22C55E',
   pink: '#EC4899',
-  violet: '#8B5CF6',
+  violet: '#FCD34D',
   cyan: '#06B6D4',
 };
 

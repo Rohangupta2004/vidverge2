@@ -126,7 +126,7 @@ export default function AgentFeed({
         padding: '18px 18px 8px',
         fontFamily: T.mono,
         minHeight: 260,
-        boxShadow: '0 24px 60px -32px rgba(0,0,0,0.9)',
+        boxShadow: '0 24px 60px -32px rgba(120,80,0,0.22)',
       }}
     >
       <div

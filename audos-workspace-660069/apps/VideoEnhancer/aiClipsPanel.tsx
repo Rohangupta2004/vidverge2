@@ -110,7 +110,7 @@ export default function AiClipsPanel() {
           <button onClick={() => void generate()} disabled={!ready} className="ve-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700, padding: '8px 16px', borderRadius: 9, border: 'none', cursor: ready ? 'pointer' : 'not-allowed', background: ready ? 'var(--space-brand-primary-600)' : 'var(--space-surface-panel-strong)', color: ready ? '#fff' : 'var(--space-text-muted)' }}>
             {busy ? <LightBeamLoader height={2} style={{ width: 30 }} /> : <Wand2 size={13} />} Generate clip
           </button>
-          {violation && prompt.trim() ? <span style={{ fontSize: 11.5, color: '#d97706' }}>{violation}</span> : null}
+          {violation && prompt.trim() ? <span style={{ fontSize: 11.5, color: '#B45309' }}>{violation}</span> : null}
           {model?.costHint ? <span style={{ fontSize: 11, color: 'var(--space-text-muted)' }}>Estimated: {model.costHint}</span> : null}
         </div>
         {busy && note ? <LightBeamLoader label={note} style={{ marginTop: 10 }} /> : note ? <div style={{ fontSize: 12, color: 'var(--space-text-brand)', marginTop: 9 }}>{note}</div> : null}

@@ -26,15 +26,15 @@ export const P = {
   accentSoft: 'color-mix(in srgb, var(--space-brand-primary-500, #F59E0B) 15%, transparent)',
   accentEdge: 'color-mix(in srgb, var(--space-brand-primary-500, #F59E0B) 46%, transparent)',
   ok: 'var(--space-semantic-success-600, #4ADE80)',
-  warn: '#FBBF24',
+  warn: '#B45309',
   bad: 'var(--space-semantic-danger-500, #EF4444)',
   // Track identities — the layer stack reads top to bottom in these colours.
-  video: '#60A5FA',
-  trans: '#F472B6',
-  gfxBg: '#8B5CF6',
-  gfxFg: '#A78BFA',
-  caption: '#FBBF24',
-  audio: '#34D399',
+  video: '#1D4ED8',
+  trans: '#BE185D',
+  gfxBg: '#8A5A00',
+  gfxFg: '#C8920A',
+  caption: '#B45309',
+  audio: '#166534',
 } as const;
 
 export const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -186,12 +186,12 @@ export function Toggle({ label, value, onChange, hint }: { label: string; value:
       >
         <span style={{
           width: 34, height: 19, borderRadius: 999, flexShrink: 0,
-          background: value ? P.accent : 'rgba(148,163,184,0.26)',
+          background: value ? P.accent : 'rgba(180,120,0,0.25)',
           position: 'relative', transition: 'background 140ms',
         }}>
           <span style={{
             position: 'absolute', top: 2.5, left: value ? 17 : 2.5,
-            width: 14, height: 14, borderRadius: '50%', background: '#fff', transition: 'left 140ms',
+            width: 14, height: 14, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(120,80,0,0.25)', transition: 'left 140ms',
           }} />
         </span>
         <span style={{ fontSize: 12.5, color: P.text, fontWeight: 600 }}>{label}</span>
@@ -208,7 +208,7 @@ export function Btn({ children, onClick, tone = 'ghost', disabled, title, style 
   const tones: Record<string, CSSProperties> = {
     primary: { background: P.accent, color: P.accentText, border: '1px solid transparent', fontWeight: 800 },
     soft: { background: P.accentSoft, color: P.text, border: '1px solid ' + P.accentEdge, fontWeight: 700 },
-    danger: { background: 'color-mix(in srgb, #EF4444 14%, transparent)', color: '#FCA5A5', border: '1px solid color-mix(in srgb, #EF4444 40%, transparent)', fontWeight: 700 },
+    danger: { background: 'color-mix(in srgb, #991B1B 10%, transparent)', color: '#991B1B', border: '1px solid color-mix(in srgb, #991B1B 34%, transparent)', fontWeight: 700 },
     ghost: { background: P.card, color: P.sub, border: '1px solid ' + P.border, fontWeight: 600 },
   };
   return (

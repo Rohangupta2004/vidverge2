@@ -34,7 +34,7 @@ const fw = (w: number) => (ACTIVE ? (w >= 700 ? ACTIVE.heading : ACTIVE.body) : 
 const PALETTES: Palette[] = [
   { bg: '#101418', ink: '#F5F3EE', accent: '#E8A33C', accent2: '#7FD4B4' },
   { bg: '#0D1321', ink: '#F0F4FF', accent: '#5EA8FF', accent2: '#F26D6D' },
-  { bg: '#141019', ink: '#F4EFF8', accent: '#B387F5', accent2: '#63D6C0' },
+  { bg: '#141019', ink: '#F4EFF8', accent: '#F5CD87', accent2: '#63D6C0' },
   { bg: '#0F1712', ink: '#EFF6EE', accent: '#57C785', accent2: '#F2B84B' },
   { bg: '#1A1212', ink: '#F8F1EC', accent: '#F07857', accent2: '#7FB7D9' },
   { bg: '#F3EFE7', ink: '#20242C', accent: '#C4542C', accent2: '#2C6E63' },

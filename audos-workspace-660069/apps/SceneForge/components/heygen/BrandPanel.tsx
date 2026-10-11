@@ -14,14 +14,14 @@ import { Button, CapabilityNote, Field, LockBadge, Notice, Panel, Working } from
 function Swatch({ color, label }: { color: string; label: string }) {
   if (!color) return null;
   return <span className="inline-flex items-center gap-2 rounded-lg border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-2.5 py-1.5 text-xs">
-    <span className="h-4 w-4 rounded border border-[color-mix(in_srgb,#ffffff_18%,transparent)]" style={{ background: color }} />
+    <span className="h-4 w-4 rounded border border-[color-mix(in_srgb,#B4780A_24%,transparent)]" style={{ background: color }} />
     <span className="font-medium text-[var(--space-text-secondary)]">{label}</span>
     <code className="text-[11px] text-[var(--space-text-muted)]">{color}</code>
   </span>;
 }
 
 function BrandCard({ kit }: { kit: BrandKitSummary }) {
-  return <div className="rounded-xl border border-[color-mix(in_srgb,#8b5cf6_34%,transparent)] bg-[color-mix(in_srgb,#8b5cf6_8%,transparent)] p-4">
+  return <div className="rounded-xl border border-[color-mix(in_srgb,#C8920A_34%,transparent)] bg-[color-mix(in_srgb,#C8920A_8%,transparent)] p-4">
     <div className="flex flex-wrap items-center gap-3">
       {kit.logoUrl
         ? <img src={kit.logoUrl} alt="" className="h-10 w-10 rounded-lg bg-white/90 object-contain p-1" />
@@ -188,7 +188,7 @@ export default function BrandPanel({ step }: { step: number }) {
         </Field>
 
         {parsed.length ? <div className="flex flex-wrap gap-1.5">
-          {parsed.map((term) => <span key={term} className="rounded-full bg-[color-mix(in_srgb,#6366f1_14%,transparent)] px-2.5 py-1 text-xs font-medium text-[var(--space-text-secondary)]">
+          {parsed.map((term) => <span key={term} className="rounded-full bg-[color-mix(in_srgb,#C8920A_14%,transparent)] px-2.5 py-1 text-xs font-medium text-[var(--space-text-secondary)]">
             {term}
           </span>)}
         </div> : null}

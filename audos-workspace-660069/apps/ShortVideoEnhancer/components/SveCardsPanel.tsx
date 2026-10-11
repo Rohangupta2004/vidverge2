@@ -74,7 +74,7 @@ export function SveCardsPanel(props: CardsPanelProps) {
               role="button"
               tabIndex={0}
               title="Delete card"
-              style={{ color: '#F87171', display: 'grid', placeItems: 'center', width: 26, height: 26 }}
+              style={{ color: '#991B1B', display: 'grid', placeItems: 'center', width: 26, height: 26 }}
               onClick={(event) => { event.stopPropagation(); remove(card.id); }}
             >
               <Trash2 size={14} />

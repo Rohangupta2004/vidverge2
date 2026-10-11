@@ -490,7 +490,7 @@ export default function App() {
                 value={brief}
                 onChange={(event) => setBrief(event.target.value)}
                 rows={4}
-                placeholder="What is this product, who is it for, and what should the demo make people feel? (40–600 characters)"
+                placeholder="What is this product, who is it for, and what should the demo make people feel? (at least 40 characters — write as much as you like)"
                 style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', padding: 14, borderRadius: 14, border: '1px solid var(--space-border-default)', color: 'var(--space-text-primary)', background: 'var(--space-surface-panel)', font: 'inherit', lineHeight: 1.55 }}
                 data-testid="stm-brief"
               />
@@ -518,7 +518,7 @@ export default function App() {
                           <Film size={14} color="var(--space-text-brand)" />
                           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
                           <span style={{ color: 'var(--space-text-muted)', fontSize: 11 }}>{(file.size / 1048576).toFixed(1)} MB</span>
-                          <button type="button" onClick={() => setClipFiles(clipFiles.filter((_, i) => i !== index))} aria-label={`Remove ${file.name}`} style={{ width: 22, height: 22, display: 'grid', placeItems: 'center', borderRadius: 99, border: 0, cursor: 'pointer', color: '#fff', background: 'rgba(2,6,23,.72)' }}><X size={12} /></button>
+                          <button type="button" onClick={() => setClipFiles(clipFiles.filter((_, i) => i !== index))} aria-label={`Remove ${file.name}`} style={{ width: 22, height: 22, display: 'grid', placeItems: 'center', borderRadius: 99, border: 0, cursor: 'pointer', color: '#1A1000', background: 'rgba(180,120,0,0.14)' }}><X size={12} /></button>
                         </div>
                       ))}
                     </div>

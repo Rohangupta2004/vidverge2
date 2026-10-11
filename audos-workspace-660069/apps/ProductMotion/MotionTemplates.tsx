@@ -98,10 +98,10 @@ function Lines({ widths = ['86%', '62%'], dark = false }: { widths?: string[]; d
 /** Editorial title card with a cinematic reveal and oversized typography. */
 export function TitleCardTemplate(_: SlideTemplateProps) {
   return (
-    <Frame motion="title" background="linear-gradient(135deg,#080b16 0%,#111936 58%,#6d28d9 140%)">
-      <div style={{ position: 'absolute', width: '44%', aspectRatio: '1', borderRadius: '50%', right: '-8%', top: '-38%', border: '1px solid rgba(167,139,250,.42)', boxShadow: '0 0 42px rgba(124,58,237,.32)' }} />
+    <Frame motion="title" background="linear-gradient(135deg,#080b16 0%,#111936 58%,#b45309 140%)">
+      <div style={{ position: 'absolute', width: '44%', aspectRatio: '1', borderRadius: '50%', right: '-8%', top: '-38%', border: '1px solid rgba(252,211,77,.42)', boxShadow: '0 0 42px rgba(217,119,6,.32)' }} />
       <div style={{ position: 'absolute', inset: '15% 10%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-        <span style={{ width: 42, height: 3, marginBottom: 11, borderRadius: 9, background: '#a78bfa' }} />
+        <span style={{ width: 42, height: 3, marginBottom: 11, borderRadius: 9, background: '#fcd34d' }} />
         <strong style={{ maxWidth: '75%', fontSize: 'clamp(15px,3.2vw,27px)', lineHeight: .95, letterSpacing: '-.06em' }}>THE BIG IDEA<br />STARTS HERE</strong>
         <span style={{ marginTop: 10, color: muted, fontSize: 7, letterSpacing: '.18em' }}>A CINEMATIC OPENING</span>
       </div>
@@ -215,13 +215,13 @@ export function BeforeAfterTemplate(_: SlideTemplateProps) {
 /** Milestone timeline for launches, company stories, and roadmaps. */
 export function TimelineTemplate(_: SlideTemplateProps) {
   return (
-    <Frame motion="timeline" background="linear-gradient(145deg,#17122c,#2e1f57)">
+    <Frame motion="timeline" background="linear-gradient(145deg,#2c2312,#57421f)">
       <div style={{ position: 'absolute', inset: '15% 8%' }}>
-        <span style={{ color: '#c4b5fd', fontSize: 6.5, fontWeight: 850, letterSpacing: '.14em' }}>OUR JOURNEY</span>
+        <span style={{ color: '#fcd34d', fontSize: 6.5, fontWeight: 850, letterSpacing: '.14em' }}>OUR JOURNEY</span>
         <strong style={{ display: 'block', marginTop: 5, fontSize: 15 }}>From idea to impact</strong>
         <div style={{ position: 'relative', height: '48%', marginTop: '10%' }}>
-          <div style={{ position: 'absolute', left: 0, right: 0, top: 12, height: 2, background: 'linear-gradient(90deg,#8b5cf6,#e879f9)' }} />
-          <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(4,1fr)' }}>{['IDEA','BUILD','BETA','TODAY'].map((x,i) => <div key={x} style={{ textAlign: i === 3 ? 'right' : i === 0 ? 'left' : 'center' }}><span style={{ display: 'inline-block', width: i === 3 ? 13 : 9, height: i === 3 ? 13 : 9, marginTop: i === 3 ? 6 : 8, borderRadius: '50%', border: '2px solid #ddd6fe', background: i === 3 ? '#e879f9' : '#6d28d9' }} /><strong style={{ display: 'block', marginTop: 7, fontSize: 6.5 }}>{x}</strong><span style={{ color: muted, fontSize: 5.5 }}>{2023 + i}</span></div>)}</div>
+          <div style={{ position: 'absolute', left: 0, right: 0, top: 12, height: 2, background: 'linear-gradient(90deg,#f59e0b,#fcd34d)' }} />
+          <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(4,1fr)' }}>{['IDEA','BUILD','BETA','TODAY'].map((x,i) => <div key={x} style={{ textAlign: i === 3 ? 'right' : i === 0 ? 'left' : 'center' }}><span style={{ display: 'inline-block', width: i === 3 ? 13 : 9, height: i === 3 ? 13 : 9, marginTop: i === 3 ? 6 : 8, borderRadius: '50%', border: '2px solid #fde68a', background: i === 3 ? '#fcd34d' : '#b45309' }} /><strong style={{ display: 'block', marginTop: 7, fontSize: 6.5 }}>{x}</strong><span style={{ color: muted, fontSize: 5.5 }}>{2023 + i}</span></div>)}</div>
         </div>
       </div>
     </Frame>
@@ -287,11 +287,11 @@ export function CaseStudyTemplate(_: SlideTemplateProps) {
 /** Human introduction card for a founder, host, expert, or team member. */
 export function TeamIntroTemplate(_: SlideTemplateProps) {
   return (
-    <Frame motion="team" background="linear-gradient(135deg,#312e81,#7c3aed)">
+    <Frame motion="team" background="linear-gradient(135deg,#92400e,#d97706)">
       <div style={{ position: 'absolute', width: '52%', height: '145%', left: '-12%', top: '-20%', borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
       <div style={{ position: 'absolute', inset: '13% 10%', display: 'grid', gridTemplateColumns: '.75fr 1.25fr', gap: '10%', alignItems: 'center' }}>
-        <div style={{ position: 'relative', aspectRatio: '1', borderRadius: '50%', background: 'linear-gradient(160deg,#ddd6fe,#8b5cf6)', border: '3px solid rgba(255,255,255,.6)' }}><div style={{ position: 'absolute', width: '36%', aspectRatio: '1', left: '32%', top: '20%', borderRadius: '50%', background: '#4c1d95' }} /><div style={{ position: 'absolute', width: '58%', height: '32%', left: '21%', bottom: '12%', borderRadius: '50% 50% 20% 20%', background: '#4c1d95' }} /></div>
-        <div><span style={{ color: '#ddd6fe', fontSize: 6.5, fontWeight: 800, letterSpacing: '.14em' }}>MEET YOUR HOST</span><strong style={{ display: 'block', marginTop: 5, fontSize: 'clamp(13px,2.5vw,21px)' }}>Alex Morgan</strong><span style={{ display: 'block', marginTop: 4, color: '#c4b5fd', fontSize: 7 }}>Founder · Builder · Storyteller</span><div style={{ marginTop: 10 }}><Lines widths={['90%','68%']} /></div></div>
+        <div style={{ position: 'relative', aspectRatio: '1', borderRadius: '50%', background: 'linear-gradient(160deg,#fde68a,#f59e0b)', border: '3px solid rgba(255,255,255,.6)' }}><div style={{ position: 'absolute', width: '36%', aspectRatio: '1', left: '32%', top: '20%', borderRadius: '50%', background: '#78350f' }} /><div style={{ position: 'absolute', width: '58%', height: '32%', left: '21%', bottom: '12%', borderRadius: '50% 50% 20% 20%', background: '#78350f' }} /></div>
+        <div><span style={{ color: '#fde68a', fontSize: 6.5, fontWeight: 800, letterSpacing: '.14em' }}>MEET YOUR HOST</span><strong style={{ display: 'block', marginTop: 5, fontSize: 'clamp(13px,2.5vw,21px)' }}>Alex Morgan</strong><span style={{ display: 'block', marginTop: 4, color: '#fcd34d', fontSize: 7 }}>Founder · Builder · Storyteller</span><div style={{ marginTop: 10 }}><Lines widths={['90%','68%']} /></div></div>
       </div>
     </Frame>
   );
@@ -313,9 +313,9 @@ export function AnnouncementTemplate(_: SlideTemplateProps) {
 export function OutroCtaTemplate(_: SlideTemplateProps) {
   return (
     <Frame motion="outro" background="linear-gradient(150deg,#030712,#111827)">
-      <div style={{ position: 'absolute', width: 120, height: 120, left: '50%', top: '50%', transform: 'translate(-50%,-50%) rotate(45deg)', borderRadius: 28, background: 'linear-gradient(145deg,rgba(56,189,248,.15),rgba(168,85,247,.18))', filter: 'blur(1px)' }} />
+      <div style={{ position: 'absolute', width: 120, height: 120, left: '50%', top: '50%', transform: 'translate(-50%,-50%) rotate(45deg)', borderRadius: 28, background: 'linear-gradient(145deg,rgba(56,189,248,.15),rgba(245,158,11,.18))', filter: 'blur(1px)' }} />
       <div style={{ position: 'absolute', inset: '14% 10%', display: 'grid', placeItems: 'center', textAlign: 'center' }}>
-        <div><span style={{ width: 25, height: 25, display: 'inline-grid', placeItems: 'center', borderRadius: 9, color: '#fff', background: 'linear-gradient(135deg,#38bdf8,#8b5cf6)', fontSize: 11, fontWeight: 900 }}>V</span><strong style={{ display: 'block', marginTop: 8, fontSize: 'clamp(14px,2.7vw,23px)' }}>Ready to make yours?</strong><span style={{ display: 'inline-block', marginTop: 10, padding: '5px 11px', borderRadius: 99, color: '#0f172a', background: '#f8fafc', fontSize: 6.5, fontWeight: 900 }}>GET STARTED →</span><span style={{ display: 'block', marginTop: 8, color: muted, fontSize: 5.5 }}>YOURBRAND.COM</span></div>
+        <div><span style={{ width: 25, height: 25, display: 'inline-grid', placeItems: 'center', borderRadius: 9, color: '#fff', background: 'linear-gradient(135deg,#38bdf8,#f59e0b)', fontSize: 11, fontWeight: 900 }}>V</span><strong style={{ display: 'block', marginTop: 8, fontSize: 'clamp(14px,2.7vw,23px)' }}>Ready to make yours?</strong><span style={{ display: 'inline-block', marginTop: 10, padding: '5px 11px', borderRadius: 99, color: '#0f172a', background: '#f8fafc', fontSize: 6.5, fontWeight: 900 }}>GET STARTED →</span><span style={{ display: 'block', marginTop: 8, color: muted, fontSize: 5.5 }}>YOURBRAND.COM</span></div>
       </div>
     </Frame>
   );

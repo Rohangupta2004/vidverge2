@@ -210,7 +210,7 @@ export interface DeviceFrameProps {
 /** Brand-tinted browser-chrome mockup: traffic-light control dots + address bar; children fill the viewport. */
 export const DeviceFrame: React.FC<DeviceFrameProps> = ({ brand, style, children }) => {
   const b = brand || {};
-  const primary = b.primary || '#6d5efc';
+  const primary = b.primary || '#f59e0b';
   const chromeText = b.text || '#f8fafc';
   return (
     <div style={Object.assign({ borderRadius: 24, overflow: 'hidden', border: '2px solid ' + primary + '3d', boxShadow: '0 60px 140px -40px ' + primary + '66', background: b.background || '#090b14' }, style)}>
@@ -319,7 +319,7 @@ export const SceneTextOverlay: React.FC<SceneTextOverlayProps> = ({ headline, ca
       <div style={wrap}>
         <TextReveal text={headline || ''} delay={base} stagger={2.5} style={{ color: b.text || '#f8fafc', fontSize: pos === 'center' ? 96 : 72, lineHeight: 1.06, fontWeight: 900, letterSpacing: '-0.02em', maxWidth: 1240, textShadow: '0 4px 40px ' + (b.background || '#090b14') + 'cc' }} />
         {caption ? <p style={{ margin: '22px 0 0', color: b.text || '#f8fafc', opacity: 0.78 * capIn, fontSize: 36, lineHeight: 1.4, fontWeight: 500, maxWidth: 980, transform: 'translateY(' + ((1 - capIn) * 24) + 'px)' }}>{caption}</p> : null}
-        <div style={{ marginTop: 30, height: 7, borderRadius: 999, width: Math.max(1, Math.round(210 * barIn)), background: 'linear-gradient(90deg, ' + (b.primary || '#6d5efc') + ', ' + (b.accent || b.primary || '#22d3ee') + ')' }} />
+        <div style={{ marginTop: 30, height: 7, borderRadius: 999, width: Math.max(1, Math.round(210 * barIn)), background: 'linear-gradient(90deg, ' + (b.primary || '#f59e0b') + ', ' + (b.accent || b.primary || '#22d3ee') + ')' }} />
       </div>
     </AbsoluteFill>
   );
@@ -389,7 +389,7 @@ export interface ProductStageProps {
 export const ProductStage: React.FC<ProductStageProps> = ({ brand, state, width, height, children }) => {
   const b = brand || {};
   const bg = b.background || '#090b14';
-  const primary = b.primary || '#6d5efc';
+  const primary = b.primary || '#f59e0b';
   const accent = b.accent || '#22d3ee';
   const px = -state.x * width * 0.06;
   const py = -state.y * height * 0.06;
@@ -527,7 +527,7 @@ export const InteractionFX: React.FC<InteractionFXProps> = ({ spec, t, brand, su
   const e = spec.events.find((ev) => t >= ev.at - 0.02 && t <= ev.end + 0.06) || null;
   if (!e) return null;
   const b = brand || {};
-  const primary = b.primary || '#6d5efc';
+  const primary = b.primary || '#f59e0b';
   const accent = b.accent || '#22d3ee';
   const p = demoClamp01((t - e.at) / Math.max(0.0001, e.end - e.at));
   const rect: React.CSSProperties = { position: 'absolute', left: (e.target.x * 100) + '%', top: (e.target.y * 100) + '%', width: (e.target.w * 100) + '%', height: (e.target.h * 100) + '%' };
@@ -593,7 +593,7 @@ export const SceneCaption: React.FC<SceneCaptionProps> = ({ text, brand, window:
   if (on <= 0) return null;
   return (
     <div style={{ position: 'absolute', left: 0, right: 0, bottom: portrait ? '12%' : '7%', display: 'flex', justifyContent: 'center', pointerEvents: 'none', opacity: on, transform: 'translateY(' + ((1 - on) * 26) + 'px)' }}>
-      <span style={{ maxWidth: '72%', padding: '14px 26px', borderRadius: 999, background: (b.background || '#090b14') + 'd9', border: '1px solid ' + (b.primary || '#6d5efc') + '55', color: b.text || '#f8fafc', fontFamily: b.font || 'Inter, sans-serif', fontWeight: 700, fontSize: portrait ? 30 : 34, lineHeight: 1.3, textAlign: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>{line}</span>
+      <span style={{ maxWidth: '72%', padding: '14px 26px', borderRadius: 999, background: (b.background || '#090b14') + 'd9', border: '1px solid ' + (b.primary || '#f59e0b') + '55', color: b.text || '#f8fafc', fontFamily: b.font || 'Inter, sans-serif', fontWeight: 700, fontSize: portrait ? 30 : 34, lineHeight: 1.3, textAlign: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>{line}</span>
     </div>
   );
 };

@@ -297,9 +297,17 @@ export async function assembleFilm(
             args2.push('-i', fxName);
           }
           const T = (targetDur || clipDur || 6).toFixed(3);
+          // A scene is held to a fixed length ONLY when it is being padded to
+          // make room for its narration. Otherwise it runs its full natural
+          // length: `durationS` is the PLANNED duration whenever the real one
+          // could not be probed, and capping the output at it is what chopped
+          // honest 8s and 10s clips back to the planned 4s or 6s. With the
+          // native leg unbounded, amix's duration=first follows the clip.
+          const holdToTarget = pad > 0;
+          const nativeBound = holdToTarget ? `,apad,atrim=0:${T}` : '';
           const f2: string[] = [];
           const mixIns: string[] = [];
-          f2.push(`[0:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=${nativeVol.toFixed(3)},apad,atrim=0:${T},asetpts=N/SR/TB[na]`);
+          f2.push(`[0:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=${nativeVol.toFixed(3)}${nativeBound},asetpts=N/SR/TB[na]`);
           mixIns.push('[na]');
           if (narrIdx >= 0) {
             f2.push(`[${narrIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo,apad,atrim=0:${T},asetpts=N/SR/TB[nr]`);
@@ -321,7 +329,9 @@ export async function assembleFilm(
           args2.push('-filter_complex', f2.join(';'), '-map', mapVideo, '-map', '[a]');
           if (pad > 0) args2.push('-r', '30', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p');
           else args2.push('-c:v', 'copy');
-          args2.push('-c:a', 'aac', '-ar', '44100', '-ac', '2', '-t', T, mixName);
+          args2.push('-c:a', 'aac', '-ar', '44100', '-ac', '2');
+          if (holdToTarget) args2.push('-t', T);
+          args2.push(mixName);
           cleanup.push(mixName);
           const mixRc = await ff.exec(args2);
           if (mixRc !== 0) throw new Error(`Scene ${i + 1}: the narration/SFX mix failed inside FFmpeg.`);

@@ -14,7 +14,7 @@ const FONT = "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sa
 
 export default function App() {
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: '#080808', color: '#fff', fontFamily: FONT }}>
+    <div style={{ height: '100%', overflowY: 'auto', background: '#FFFDF4', color: '#1A1000', fontFamily: FONT }}>
       <div style={{ width: '100%', maxWidth: 1080, margin: '0 auto', padding: '32px 24px 56px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginBottom: 26 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -26,15 +26,15 @@ export default function App() {
                 width: 44,
                 height: 44,
                 borderRadius: 13,
-                background: 'rgba(124,58,237,0.16)',
-                border: '1px solid rgba(124,58,237,0.4)',
+                background: 'rgba(200,146,10,0.14)',
+                border: '1px solid rgba(180,120,0,0.36)',
               }}
             >
-              <Users size={22} color="#c4b5fd" />
+              <Users size={22} color="#C8920A" />
             </span>
             <div>
               <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: -0.5 }}>My Characters</h1>
-              <p style={{ margin: '5px 0 0', fontSize: 14, color: '#9ca3af' }}>
+              <p style={{ margin: '5px 0 0', fontSize: 14, color: '#7A6030' }}>
                 Save a character once — Reel keeps them looking identical in every video.
               </p>
             </div>
@@ -53,8 +53,8 @@ export default function App() {
               color: '#fff',
               border: 'none',
               cursor: 'pointer',
-              background: 'linear-gradient(90deg, #7c3aed 0%, #4f46e5 100%)',
-              boxShadow: '0 6px 20px rgba(124,58,237,0.35)',
+              background: 'linear-gradient(90deg, #C8920A 0%, #B4720A 100%)',
+              boxShadow: '0 6px 20px rgba(200,146,10,0.3)',
             }}
           >
             <Film size={15} /> New video

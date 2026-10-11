@@ -290,7 +290,7 @@ export function TimelineEditor({
     <Panel style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, height: '100%' }}>
       {header}
       <div style={{ display: 'flex', minHeight: 0, overflowY: 'auto' }}>
-        <div style={{ width: 112, flexShrink: 0, borderRight: '1px solid ' + P.borderStrong, background: P.panelSoft, position: 'relative', zIndex: 8, boxShadow: '8px 0 18px rgba(0,0,0,.24)' }}>
+        <div style={{ width: 112, flexShrink: 0, borderRight: '1px solid ' + P.borderStrong, background: P.panelSoft, position: 'relative', zIndex: 8, boxShadow: '8px 0 18px rgba(120,80,0,0.12)' }}>
           <div style={{ height: 18, borderBottom: '1px solid ' + P.borderStrong }} />
           {rows.map((r) => (
             <div key={r.id} title={r.hint} style={{ height: ROW_H, display: 'flex', alignItems: 'center', paddingLeft: 9, gap: 6, borderBottom: '1px solid ' + P.border }}>
@@ -352,7 +352,7 @@ export function TimelineEditor({
                         position: 'absolute', left: left + '%', width: w + '%', top: 4, bottom: 4,
                         background: 'linear-gradient(180deg, color-mix(in srgb, ' + b.color + ' ' + (active ? '58%' : '36%') + ', transparent), color-mix(in srgb, ' + b.color + ' ' + (active ? '38%' : '22%') + ', transparent))',
                         border: '1px ' + (b.locked ? 'dashed' : 'solid') + ' color-mix(in srgb, ' + b.color + ' ' + (active ? '100%' : '68%') + ', transparent)',
-                        boxShadow: active ? '0 0 0 1px color-mix(in srgb, ' + b.color + ' 44%, transparent), 0 3px 10px rgba(0,0,0,.26)' : '0 2px 7px rgba(0,0,0,.2)',
+                        boxShadow: active ? '0 0 0 1px color-mix(in srgb, ' + b.color + ' 44%, transparent), 0 3px 10px rgba(120,80,0,0.14)' : '0 2px 7px rgba(120,80,0,0.10)',
                         borderRadius: 5, overflow: 'hidden',
                         cursor: b.locked || b.readOnly ? 'pointer' : b.movable ? 'grab' : 'default',
                         opacity: b.enabled ? 1 : 0.42,
@@ -374,7 +374,7 @@ export function TimelineEditor({
             <div style={{
               position: 'absolute', top: 0, bottom: 0,
               left: (Math.max(0, Math.min(duration, playheadS)) / duration) * 100 + '%',
-              width: 2, background: P.accent, boxShadow: '0 0 8px ' + P.accent + ', 0 0 0 1px rgba(0,0,0,.35)', pointerEvents: 'none', zIndex: 6,
+              width: 2, background: P.accent, boxShadow: '0 0 8px ' + P.accent + ', 0 0 0 1px rgba(120,80,0,0.25)', pointerEvents: 'none', zIndex: 6,
             }} />
           </div>
         </div>

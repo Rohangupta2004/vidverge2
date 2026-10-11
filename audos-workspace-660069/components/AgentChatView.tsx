@@ -12,16 +12,13 @@
  * presentational; it consumes the runtime and renders.
  */
 import {
+  ArrowUpRight,
   Bot,
   Send,
   BookOpen,
   Edit3,
   Save,
   Sparkles,
-  Loader2,
-  FolderOpen,
-  Search,
-  ListChecks,
   Paperclip,
   X,
   FileImage,
@@ -31,10 +28,11 @@ import {
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { getFriendlyTerm, getToolColor } from '../lib/friendly-terms';
+import { getFriendlyTerm } from '../lib/friendly-terms';
 import { tw } from '../lib/colors';
 import type { AgentChatRuntime } from './useAgentChatRuntime';
-import AgentStreak from './AgentStreak';
+import BrandLogo from './BrandLogo';
+import VergeLoader from './VergeLoader';
 
 interface AgentChatViewProps {
   runtime: AgentChatRuntime;
@@ -47,19 +45,72 @@ interface AgentChatViewProps {
  * "how can I help".
  */
 const VIDVERGE_HOME_WELCOME =
-  'Paste your product URL and I will read your brand, write you six different ad scripts, storyboard the one you pick and render it in your own colours. Describe what you are launching and I will write the script and build the launch video — teaser, reveal, demo, explainer, founder-led or social clip — in 16:9, 9:16 or square. Bring footage you already have and I will transcribe it, hand you a cut plan you can accept edit by edit, then reframe, caption and export it for every platform — or just give me a topic and I will research, script and film a faceless explainer, documentary or true-crime video end to end. Need the voice rather than the whole film? Voice Studio clones your voice, reads a Hinglish script in it, dubs a finished video into Tamil or Telugu, scores a music bed and lip-syncs an avatar presenter to any of it. Or drop a clip into VFX Drop, describe anything you want to add — rain, neon, fire, particles or something entirely new — and review the AI-expanded cinematic prompt before it is composited into your footage.';
+  'Welcome to Vidverge — bring me an idea and leave with a video. Paste your product URL and I will read your brand, write you six different ad scripts, storyboard the one you pick and render it in your own colours. In a hurry? MotionLaunch turns that same link into a 30-second launch film on its own. Describe what you are launching instead and I will write the script and build the video — teaser, reveal, demo, explainer, founder-led or social clip — in 16:9, 9:16 or square. Bring footage you already shot and I will transcribe it, hand you a cut plan you can accept edit by edit, then reframe, caption and export it for every platform. Or just give me a topic and I will research, script and film a faceless explainer, documentary or true-crime video end to end. Need the voice rather than the whole film? Voice Studio clones your voice, reads a Hinglish script in it, dubs a finished video into Tamil or Telugu, scores a music bed and lip-syncs an avatar presenter to any of it.';
+
+/**
+ * The one-line promise under the logo. The full welcome above is also the
+ * agent's own opening turn in the thread, so printing all of it above the
+ * composer turned the first screen into a wall of prose.
+ */
+const VIDVERGE_HOME_LEAD =
+  'Bring me an idea and leave with a finished video — a product URL, a script, footage you already shot, or just a topic.';
+
+/** First sentence of `text`, or `fallback` when that is missing or too long. */
+function leadSentence(text: string, fallback: string): string {
+  const clean = String(text || '').trim();
+  if (!clean) return fallback;
+  const end = clean.search(/[.!?](\s|$)/);
+  const first = (end === -1 ? clean : clean.slice(0, end + 1)).trim();
+  return first.length > 20 && first.length <= 190 ? first : fallback;
+}
 
 const VIDVERGE_STARTERS = [
+  'Make a 15-second launch video from my link',
   'Turn my product URL into an ad',
   'Write and build my product launch video',
   'Compare my brand with my competitors',
   'Make me a faceless documentary video',
   'Cut, caption and reframe footage I already have',
   'Design my clip into a vertical short',
-  'Add anything with AI to a clip of me',
+  'Turn my link into a 30-second launch film',
   'Clone my voice and make an avatar video',
   'Dub my video into Hindi or Tamil',
 ];
+
+/**
+ * Starter prompts as a two-column menu rather than centre-wrapped pills.
+ * Ten prompts of uneven length wrapped into ragged rows that were hard to
+ * read down; fixed rows with a gradient edge scan like a list of choices.
+ */
+function StarterGrid({
+  prompts,
+  onPick,
+}: {
+  prompts: string[];
+  onPick: (prompt: string) => void;
+}) {
+  if (prompts.length === 0) return null;
+  return (
+    <div className="grid gap-2.5 sm:grid-cols-2">
+      {prompts.map((prompt) => (
+        <button
+          key={prompt}
+          type="button"
+          onClick={() => onPick(prompt)}
+          data-testid={`starter-prompt-${prompt.slice(0, 24)}`}
+          className="group flex items-center gap-3 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-4 py-3 text-left text-sm font-medium text-[var(--space-text-secondary)] transition hover:border-[color-mix(in_srgb,var(--space-brand-primary-500)_45%,transparent)] hover:bg-[color-mix(in_srgb,var(--space-brand-primary-500)_9%,transparent)] hover:text-[var(--space-text-primary)]"
+        >
+          <span
+            aria-hidden="true"
+            className="h-7 w-[3px] shrink-0 rounded-full bg-gradient-to-b from-[var(--space-brand-primary-500)] to-[var(--space-brand-highlight-500)] opacity-60 transition group-hover:opacity-100"
+          />
+          <span className="min-w-0 flex-1 truncate">{prompt}</span>
+          <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)] opacity-0 transition group-hover:opacity-80" />
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function WorkingIndicator({
   lastAction,
@@ -70,28 +121,15 @@ function WorkingIndicator({
   agentLabel?: string;
   thinkingText?: string | null;
 }) {
-  const actionIcons: Record<string, any> = {
-    read_file: BookOpen,
-    write_file: Save,
-    edit_file: Edit3,
-    write_task_list: ListChecks,
-    glob: Search,
-    grep: Search,
-    ls: FolderOpen,
-  };
-
-  const Icon = actionIcons[lastAction || ''] || Loader2;
   const friendlyText = getFriendlyTerm(lastAction || '', 'thinking');
-  const color = getToolColor(lastAction || '');
 
   return (
-    <div className="flex items-center justify-center py-2 mr-8">
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--space-surface-muted)] rounded-full">
-        <Icon className={`h-4 w-4 ${color} animate-spin motion-reduce:animate-none`} />
-        <span className={`text-xs font-medium ${color}`}>
-          {thinkingText || `${agentLabel} is ${friendlyText}...`}
-        </span>
-      </div>
+    <div className="flex items-center justify-center py-3 mr-8">
+      <VergeLoader
+        size={120}
+        label={`${agentLabel} is working`}
+        caption={thinkingText || `${agentLabel} is ${friendlyText}`}
+      />
     </div>
   );
 }
@@ -488,7 +526,7 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
               title="Attach files (images, PDFs)"
             >
               {isUploadingAttachment ? (
-                <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none text-[var(--space-text-muted)]" />
+                <VergeLoader size={30} label="Uploading your file" />
               ) : (
                 <Paperclip className="w-4 h-4 text-[var(--space-text-muted)]" />
               )}
@@ -523,28 +561,27 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
         /* Home view — centered greeting + composer, like a fresh assistant session */
         <div className="flex-1 overflow-y-auto flex flex-col justify-center">
           <div className="mx-auto w-full max-w-2xl px-6 sm:px-10 py-10" data-testid="home-view">
-            <div className="text-center mb-8">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--space-surface-accent-soft)] shadow-sm">
-                <Bot className="h-6 w-6 text-[var(--space-text-brand)]" />
+            <div className="text-center mb-7">
+              <div className="mb-4 flex justify-center">
+                <BrandLogo size={176} />
               </div>
-              <h1 className="text-2xl font-semibold text-[var(--space-text-primary)]">What are we making today?</h1>
-              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--space-text-secondary)]">
-                {homeWelcomeText || VIDVERGE_HOME_WELCOME}
+              <h1 className="text-2xl font-semibold tracking-tight text-[var(--space-text-primary)] sm:text-[28px]">
+                What are we making today?
+              </h1>
+              <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-[var(--space-text-secondary)]">
+                {leadSentence(homeWelcomeText || VIDVERGE_HOME_WELCOME, VIDVERGE_HOME_LEAD)}
               </p>
             </div>
             {composerElement}
             {homeStarters.length > 0 && (
-              <div className="mt-6 flex flex-wrap justify-center gap-2">
-                {homeStarters.map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => { void sendMessageWithContent(prompt, []); }}
-                    className="rounded-full border border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-4 py-2 text-sm font-medium text-[var(--space-text-primary)] shadow-sm transition hover:border-[var(--space-border-strong)] hover:bg-[var(--space-surface-accent-soft)]"
-                  >
-                    {prompt}
-                  </button>
-                ))}
+              <div className="mt-7">
+                <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--space-text-muted)]">
+                  Or start with one of these
+                </p>
+                <StarterGrid
+                  prompts={homeStarters}
+                  onPick={(prompt) => { void sendMessageWithContent(prompt, []); }}
+                />
               </div>
             )}
           </div>
@@ -556,9 +593,8 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
         {/* Pending-init placeholder so the user never sees a blank chat */}
         {showPendingPlaceholder && (
           <div className="flex justify-start mr-8">
-            <div className="bg-[var(--space-surface-muted)] rounded-lg px-4 py-2 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none text-[var(--space-text-muted)]" />
-              <span className="text-xs text-[var(--space-text-muted)]">Getting ready…</span>
+            <div className="px-4 py-2">
+              <VergeLoader size={96} caption="Getting ready" />
             </div>
           </div>
         )}
@@ -649,24 +685,16 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
                 </div>
               </div>
             ) : (
-              <div className="text-center text-[var(--space-text-secondary)]">
-                <div className="mb-3 flex justify-center"><AgentStreak size={38} /></div>
-                <h2 className="text-lg font-semibold text-[var(--space-text-primary)]">What should we make?</h2>
+              <div className="mx-auto max-w-2xl text-center text-[var(--space-text-secondary)]">
+                <div className="mb-4 flex justify-center"><BrandLogo size={148} /></div>
+                <h2 className="text-xl font-semibold text-[var(--space-text-primary)]">What should we make?</h2>
                 <p className="mx-auto mt-2 max-w-md text-sm leading-6">Bring me a product URL, a script, or a rough idea. I’ll help shape it into a finished VidVerge video.</p>
                 {starterPrompts.length > 0 && (
-                  <div className="mt-5 flex flex-wrap justify-center gap-2">
-                    {starterPrompts.map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => {
-                          void sendMessageWithContent(prompt, []);
-                        }}
-                        className="rounded-full border border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-4 py-2 text-sm font-medium text-[var(--space-text-primary)] shadow-sm transition hover:border-[var(--space-border-strong)] hover:bg-[var(--space-surface-accent-soft)]"
-                      >
-                        {prompt}
-                      </button>
-                    ))}
+                  <div className="mt-6 text-left">
+                    <StarterGrid
+                      prompts={starterPrompts}
+                      onPick={(prompt) => { void sendMessageWithContent(prompt, []); }}
+                    />
                   </div>
                 )}
               </div>
@@ -779,21 +807,10 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
             <p className="mb-2 text-xs font-medium text-[var(--space-text-muted)]">
               Try one of these to get started:
             </p>
-            <div className="flex flex-wrap gap-2">
-              {starterPrompts.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  onClick={() => {
-                    void sendMessageWithContent(prompt, []);
-                  }}
-                  className="rounded-full border border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-4 py-2 text-sm font-medium text-[var(--space-text-primary)] shadow-sm transition hover:border-[var(--space-border-strong)] hover:bg-[var(--space-surface-accent-soft)]"
-                  data-testid={`starter-prompt-${prompt.slice(0, 24)}`}
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
+            <StarterGrid
+              prompts={starterPrompts}
+              onPick={(prompt) => { void sendMessageWithContent(prompt, []); }}
+            />
           </div>
         )}
 

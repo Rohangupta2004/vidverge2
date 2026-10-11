@@ -389,7 +389,7 @@ export default function RemotionStudio() {
             const res = await fetch(`/api/workspaces/${WORKSPACE_UUID}/audio/voiceover`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
-              body: JSON.stringify({ script: voScript.slice(0, 2000) }),
+              body: JSON.stringify({ script: voScript.slice(0, 10000) }),
             });
             const data = await res.json().catch(() => null);
             if (res.ok && data?.audioUrl) voiceoverUrl = String(data.audioUrl);

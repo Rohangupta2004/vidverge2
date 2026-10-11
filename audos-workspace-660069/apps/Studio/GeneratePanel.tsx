@@ -303,7 +303,7 @@ export default function GeneratePanel({
       {/* Progress */}
       {working && (
         <>
-          <div style={{ marginTop: 16, height: 6, borderRadius: 999, overflow: 'hidden', background: 'rgba(0,0,0,0.4)' }}>
+          <div style={{ marginTop: 16, height: 6, borderRadius: 999, overflow: 'hidden', background: 'rgba(180,120,0,0.14)' }}>
             <div
               style={{
                 height: '100%',
@@ -379,7 +379,7 @@ export default function GeneratePanel({
                   color: 'var(--space-text-on-primary)',
                   textDecoration: 'none',
                   background: 'var(--space-brand-primary)',
-                  boxShadow: '0 8px 24px rgba(124,58,237,0.35)',
+                  boxShadow: '0 8px 24px rgba(200,146,10,0.35)',
                 }}
                 data-testid="button-download-video"
               >

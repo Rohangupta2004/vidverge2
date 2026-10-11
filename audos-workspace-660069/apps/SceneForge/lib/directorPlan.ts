@@ -23,6 +23,12 @@
 //   * GENERATION IDS — every plan generation gets one id; scenes and their
 //     assets are stamped with it so timeline validation can prove that no
 //     stale asset leaks into a new generation's render.
+//
+// BEAT PURPOSE lives next door, in lib/beatPurpose. A treatment says what the
+// beat LOOKS like; its purpose says what the beat is FOR (hook, explanation,
+// proof, emotion, cta, transition) and is read off the orchestrator's own
+// `scene_type`. That is what drives the presenter's gesture and expression per
+// beat, so a hook is performed expressively and a transition stays still.
 
 import type { Project, Scene } from './supabase';
 import type { CompositionSpec } from './effects';

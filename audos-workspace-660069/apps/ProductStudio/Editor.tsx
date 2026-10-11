@@ -788,7 +788,7 @@ export default function Editor({ projectId, onBack, onEnhance }: {
       {/* frosted-glass rendering overlay — dismissible, never blocks editing */}
       {generating && generationStage && !overlayDismissed ? (
         <div className="ps-frost" role="status" aria-live="polite" style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }} data-testid="render-overlay">
-          <div className="ps-fade-up" style={{ width: 'min(520px, 94vw)', borderRadius: 18, border: `1px solid ${S.borderStrong}`, background: S.panelStrong, padding: 'clamp(18px, 4vw, 28px)', boxShadow: '0 30px 80px rgba(2,6,18,0.55)' }}>
+          <div className="ps-fade-up" style={{ width: 'min(520px, 94vw)', borderRadius: 18, border: `1px solid ${S.borderStrong}`, background: S.panelStrong, padding: 'clamp(18px, 4vw, 28px)', boxShadow: '0 30px 80px rgba(120,80,0,0.18)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <Loader2 size={20} className="rc-spin" color="var(--space-text-brand)" />
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -831,7 +831,7 @@ export default function Editor({ projectId, onBack, onEnhance }: {
 
       {/* cut confirmation — quick cut with a restorable snapshot */}
       {cutPrompt ? (
-        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(4,8,18,0.66)' }}>
+        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(26,16,0,0.35)' }}>
           <div className="ps-fade-up" style={{ width: 'min(400px, 92vw)', borderRadius: 16, border: `1px solid ${S.borderStrong}`, background: S.panelStrong, padding: 20 }} data-testid="dialog-cut">
             <h3 style={{ margin: '0 0 8px', fontSize: 15, fontWeight: 800, color: S.text }}>Cut this scene?</h3>
             <p style={{ margin: '0 0 14px', fontSize: 13, color: S.sub, lineHeight: 1.6 }}>
@@ -849,7 +849,7 @@ export default function Editor({ projectId, onBack, onEnhance }: {
 
       {/* regeneration confirmation — cost shown BEFORE execution */}
       {regenPrompt ? (
-        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(4,8,18,0.66)' }}>
+        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(26,16,0,0.35)' }}>
           <div className="ps-fade-up" style={{ width: 'min(400px, 92vw)', borderRadius: 16, border: `1px solid ${S.borderStrong}`, background: S.panelStrong, padding: 20 }} data-testid="dialog-regen">
             <h3 style={{ margin: '0 0 8px', fontSize: 15, fontWeight: 800, color: S.text }}>{regenPrompt.imageOnly ? `Re-generate the image for ${regenPrompt.sceneId}?` : `Regenerate ${regenPrompt.sceneId}?`}</h3>
             <p style={{ margin: '0 0 14px', fontSize: 13, color: S.sub, lineHeight: 1.6 }}>

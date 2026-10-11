@@ -341,8 +341,7 @@ export default function VideoScreen({
           </>
         ) : (
           <Panel style={{ padding: '54px 32px', textAlign: 'center' }}>
-            <div style={{ color: accent, display: 'flex', justifyContent: 'center', marginBottom: 14 }}><Spinner size={26} /></div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: TEXT, marginBottom: 8 }}>Writing your script</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}><Spinner size={120} caption="Writing your script" /></div>
             <LogStream lines={log} busy />
           </Panel>
         )}
@@ -402,6 +401,14 @@ export default function VideoScreen({
 
       {rendering || log.length > 0 ? (
         <Panel style={{ padding: 18, marginBottom: 18 }}>
+          {rendering ? (
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+              <Spinner
+                size={120}
+                caption={analysis.rawVideoUrl || job.remotionOperationId ? 'Adding your graphics' : 'Filming your video'}
+              />
+            </div>
+          ) : null}
           {typeof job.veoProgress === 'number' && job.veoStatus !== 'completed' ? (
             <div style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.6, color: TEXT_MUTED, marginBottom: 7, fontFamily: MONO }}>

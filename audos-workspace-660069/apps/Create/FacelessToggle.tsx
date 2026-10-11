@@ -70,9 +70,9 @@ function Option({
         color: T.text,
         border: selected ? `1px solid ${T.accentFg}` : `1px solid ${T.border}`,
         background: selected
-          ? 'linear-gradient(135deg, rgba(37,99,235,0.24), rgba(45,212,191,0.12))'
-          : 'rgba(255,255,255,0.028)',
-        boxShadow: selected ? '0 14px 38px -22px rgba(37,99,235,0.9)' : 'none',
+          ? 'linear-gradient(135deg, rgba(200,146,10,0.24), rgba(224,163,58,0.12))'
+          : 'rgba(180,120,0,0.05)',
+        boxShadow: selected ? '0 14px 38px -22px rgba(200,146,10,0.5)' : 'none',
         transition: 'all .16s ease',
       }}
     >
@@ -87,7 +87,7 @@ function Option({
           flexShrink: 0,
           color: selected ? '#fff' : T.muted,
           border: `1px solid ${selected ? T.accentBorder : T.border}`,
-          background: selected ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent',
+          background: selected ? 'linear-gradient(135deg, #E8B737, #C8920A)' : 'transparent',
         }}
       >
         {icon}

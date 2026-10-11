@@ -15,7 +15,8 @@
 
 import { claudeVisionJson, type VisionImage } from './proxy';
 import type { Scene } from './supabase';
-import { sceneMotionSpec } from './motionCapture';
+import { sceneDirection, sceneMotionSpec } from './motionCapture';
+import { MAX_MEANINGFUL_LAYERS, VISUAL_BUDGET_RULE, meaningfulLayers } from './visualBudget';
 
 export interface QaIssue { code: string; severity: 'fail' | 'warn'; detail: string }
 
@@ -122,6 +123,7 @@ const QA_CHECKS = `Inspect the frames for these DEFECTS (each found defect becom
 - missing_asset: an obviously empty placeholder box/frame where an image should be.
 - timing: comparing the sampled frames in order, an element that should persist is already gone, or nothing has appeared long after the scene started.
 - mechanical: the layout/motion evidence looks programmatically assembled (everything centered in one column, uniform spacing with no hierarchy, no dominant element).
+- COMPLEXITY_VIOLATION: more than two meaningful visual layers competing for attention in one frame — for example a headline AND a card AND a glow AND an arrow. The rule is ONE dominant visual plus ONE supporting layer; a full-frame background plate and a bottom-safe caption do not count. This is fixed by deleting layers, not by shrinking them.
 Severity: 'fail' when a viewer would notice the defect; 'warn' for minor polish notes. PASS the scene when there are no 'fail' issues. Expected content is provided — also FAIL (code content_mismatch) if a headline/number visibly differs from the expected strings.`;
 
 interface QaVerdictRaw { pass?: boolean; issues?: { code?: string; severity?: string; detail?: string }[]; summary?: string }
@@ -156,24 +158,67 @@ export function skippedQaReport(reason: string, attempts = 1): SceneQaReport {
 }
 
 /**
+ * The complexity check, run against the DIRECTION rather than against pixels.
+ *
+ * Counting layers is not something a vision model should have to do — the plan
+ * already states how many there are, and asking an inspector to eyeball it just
+ * adds a way to be wrong. So COMPLEXITY_VIOLATION is deterministic: it runs even
+ * when no frame could be extracted, and it fails the scene so the director's
+ * auto-fix pass is handed the concrete count (lib/visualBudget).
+ */
+export function complexityIssue(scene: Scene): QaIssue | null {
+  const layers = meaningfulLayers(sceneDirection(scene));
+  if (layers.length <= MAX_MEANINGFUL_LAYERS) return null;
+  return {
+    code: 'COMPLEXITY_VIOLATION',
+    severity: 'fail',
+    detail: `This beat renders ${layers.length} competing visual layers (${layers.map((layer) => `${layer.id}:${layer.type}`).join(', ')}). ${VISUAL_BUDGET_RULE}`.slice(0, 300),
+  };
+}
+
+/**
  * Full QA of one rendered scene clip. Never throws: an unavailable inspector
  * degrades to a 'skipped' report rather than blocking the pipeline.
  */
-export async function runSceneVisualQa(scene: Scene, source: Blob | string, aspect: '16:9' | '9:16', attempts: number): Promise<SceneQaReport> {
+export interface SceneQaOptions {
+  /**
+   * Skip the layer-count check. Set for a beat HeyGen rendered itself (a
+   * HyperFrames product graphic, lib/productGraphics): its frame comes from a
+   * fixed bundle, so the scene's directed-layer count describes a render that
+   * never happened and would flag a clip that is genuinely fine.
+   */
+  skipComplexity?: boolean;
+}
+
+export async function runSceneVisualQa(scene: Scene, source: Blob | string, aspect: '16:9' | '9:16', attempts: number, options: SceneQaOptions = {}): Promise<SceneQaReport> {
+  // Checked first and independently of the frames: an over-layered beat is a
+  // defect whether or not this browser can decode the clip.
+  const complexity = options.skipComplexity ? null : complexityIssue(scene);
+  // A report the inspector could not produce still carries the complexity
+  // verdict, so the one check that never needs pixels is never lost to a
+  // browser that cannot read the clip back.
+  const degraded = (reason: string): SceneQaReport => {
+    const skipped = skippedQaReport(reason, attempts);
+    if (!complexity) return skipped;
+    return { ...skipped, status: 'flagged', pass: false, issues: [complexity], summary: complexity.detail };
+  };
+
   const { frames, atFractions } = await extractClipFrames(source);
-  if (!frames.length) return skippedQaReport('frames could not be extracted from the clip in this browser', attempts);
+  if (!frames.length) return degraded('frames could not be extracted from the clip in this browser');
   try {
     const verdict = await inspectSceneFrames(scene, frames, atFractions, aspect);
+    const issues = complexity ? [complexity, ...verdict.issues] : verdict.issues;
+    const pass = verdict.pass && !complexity;
     return {
-      status: verdict.pass ? 'pass' : 'flagged',
-      pass: verdict.pass,
+      status: pass ? 'pass' : 'flagged',
+      pass,
       attempts,
       frames: frames.length,
-      issues: verdict.issues,
-      summary: verdict.summary,
+      issues: issues.slice(0, 10),
+      summary: complexity && verdict.pass ? complexity.detail : verdict.summary,
       checkedAt: new Date().toISOString(),
     };
   } catch (error: any) {
-    return skippedQaReport(String(error?.message || error).slice(0, 200), attempts);
+    return degraded(String(error?.message || error).slice(0, 200));
   }
 }

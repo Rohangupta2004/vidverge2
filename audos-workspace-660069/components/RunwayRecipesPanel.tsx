@@ -22,13 +22,13 @@ import {
 } from '../lib/videoEngineClient';
 
 const S = {
-  card: { background: 'var(--space-surface-card, #10182A)', border: '1px solid var(--space-border-default, rgba(148,163,184,0.16))', borderRadius: 12, padding: 14 } as const,
-  label: { fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--space-text-muted, #94A3B8)', display: 'block', marginBottom: 5 } as const,
-  input: { width: '100%', boxSizing: 'border-box', background: 'var(--space-surface-panel, #121C30)', border: '1px solid var(--space-border-default, rgba(148,163,184,0.16))', borderRadius: 8, color: 'var(--space-text-primary, #F8FAFC)', fontSize: 12.5, padding: '8px 10px', outline: 'none' } as const,
-  btn: { display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 9, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: '1px solid var(--space-border-default, rgba(148,163,184,0.16))', background: 'var(--space-surface-panel-strong, #18243A)', color: 'var(--space-text-primary, #F8FAFC)' } as const,
-  primary: { display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 9, padding: '9px 16px', fontSize: 13, fontWeight: 800, cursor: 'pointer', border: 'none', background: 'var(--space-brand-primary-600, #2563EB)', color: '#fff' } as const,
-  err: { color: 'var(--space-semantic-danger, #F87171)', fontSize: 12, lineHeight: 1.5, marginTop: 8, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '8px 11px' } as const,
-  warn: { color: '#E8A33C', fontSize: 12, lineHeight: 1.5, marginTop: 8, background: 'rgba(232,163,60,0.08)', border: '1px solid rgba(232,163,60,0.25)', borderRadius: 8, padding: '8px 11px' } as const,
+  card: { background: 'var(--space-surface-card, #FFFFFF)', border: '1px solid var(--space-border-default, rgba(180,120,0,0.14))', borderRadius: 12, padding: 14 } as const,
+  label: { fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--space-text-muted, #7A6030)', display: 'block', marginBottom: 5 } as const,
+  input: { width: '100%', boxSizing: 'border-box', background: 'var(--space-surface-panel, #FFFAEB)', border: '1px solid var(--space-border-default, rgba(180,120,0,0.14))', borderRadius: 8, color: 'var(--space-text-primary, #1A1000)', fontSize: 12.5, padding: '8px 10px', outline: 'none' } as const,
+  btn: { display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 9, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: '1px solid var(--space-border-default, rgba(180,120,0,0.14))', background: 'var(--space-surface-panel-strong, #FFF3D6)', color: 'var(--space-text-primary, #1A1000)' } as const,
+  primary: { display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 9, padding: '9px 16px', fontSize: 13, fontWeight: 800, cursor: 'pointer', border: 'none', background: 'var(--space-brand-primary-600, #C8920A)', color: '#fff' } as const,
+  err: { color: 'var(--space-semantic-danger, #991B1B)', fontSize: 12, lineHeight: 1.5, marginTop: 8, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.22)', borderRadius: 8, padding: '8px 11px' } as const,
+  warn: { color: '#B45309', fontSize: 12, lineHeight: 1.5, marginTop: 8, background: 'rgba(180,83,9,0.08)', border: '1px solid rgba(180,83,9,0.24)', borderRadius: 8, padding: '8px 11px' } as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -55,9 +55,9 @@ function MediaInput({ label, urls, max, accept, uploadFile, onChange }: {
         {urls.map((u) => (
           <span key={u} style={{ position: 'relative', display: 'inline-block' }}>
             {isVideo
-              ? <video src={u} style={{ width: 84, height: 56, objectFit: 'cover', borderRadius: 7, border: '1px solid var(--space-border-default, rgba(148,163,184,0.2))' }} muted />
-              : <img src={u} alt="" style={{ width: 84, height: 56, objectFit: 'cover', borderRadius: 7, border: '1px solid var(--space-border-default, rgba(148,163,184,0.2))' }} />}
-            <button type="button" onClick={() => onChange(urls.filter((x) => x !== u))} style={{ position: 'absolute', top: -6, right: -6, width: 17, height: 17, borderRadius: 999, border: 'none', background: 'var(--space-semantic-danger-500, #EF4444)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}><X size={10} /></button>
+              ? <video src={u} style={{ width: 84, height: 56, objectFit: 'cover', borderRadius: 7, border: '1px solid var(--space-border-default, rgba(180,120,0,0.14))' }} muted />
+              : <img src={u} alt="" style={{ width: 84, height: 56, objectFit: 'cover', borderRadius: 7, border: '1px solid var(--space-border-default, rgba(180,120,0,0.14))' }} />}
+            <button type="button" onClick={() => onChange(urls.filter((x) => x !== u))} style={{ position: 'absolute', top: -6, right: -6, width: 17, height: 17, borderRadius: 999, border: 'none', background: 'var(--space-semantic-danger-500, #991B1B)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}><X size={10} /></button>
           </span>
         ))}
         {urls.length < max ? (
@@ -88,7 +88,7 @@ function MediaInput({ label, urls, max, accept, uploadFile, onChange }: {
           }}>Add</button>
         </div>
       ) : null}
-      {err ? <div style={{ color: 'var(--space-semantic-danger, #F87171)', fontSize: 11.5, marginTop: 5 }}>{err}</div> : null}
+      {err ? <div style={{ color: 'var(--space-semantic-danger, #991B1B)', fontSize: 11.5, marginTop: 5 }}>{err}</div> : null}
     </div>
   );
 }
@@ -250,7 +250,7 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe, allowedR
   if (availability !== 'ready') {
     return (
       <div style={S.card}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--space-text-primary, #F8FAFC)' }}>Runway recipes</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--space-text-primary, #1A1000)' }}>Runway recipes</div>
         <div style={S.warn}>
           {availability === 'checking'
             ? 'Checking the live Runway catalog and validating a free test quote…'
@@ -266,13 +266,13 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe, allowedR
         {visibleRecipes.map((r) => (
           <button key={r.id} type="button" onClick={() => { setRecipeId(r.id); setForm(emptyForm()); setState('idle'); setError(''); setOutputs([]); }}
             title={r.purpose}
-            style={{ ...S.btn, padding: '6px 11px', fontSize: 11.5, ...(recipeId === r.id ? { background: 'var(--space-brand-primary-600, #2563EB)', color: '#fff', borderColor: 'transparent' } : {}) }}>
+            style={{ ...S.btn, padding: '6px 11px', fontSize: 11.5, ...(recipeId === r.id ? { background: 'var(--space-brand-primary-600, #C8920A)', color: '#fff', borderColor: 'transparent' } : {}) }}>
             {r.name}
           </button>
         ))}
       </div>
-      <div style={{ fontSize: 12.5, color: 'var(--space-text-secondary, #CBD5E1)', marginBottom: 4 }}>{recipe.purpose}</div>
-      <div style={{ fontSize: 11, color: 'var(--space-text-muted, #94A3B8)', marginBottom: 12 }}>Inputs: {recipe.inputsNote} · Price: {recipe.priceNote}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--space-text-secondary, #3D2800)', marginBottom: 4 }}>{recipe.purpose}</div>
+      <div style={{ fontSize: 11, color: 'var(--space-text-muted, #7A6030)', marginBottom: 12 }}>Inputs: {recipe.inputsNote} · Price: {recipe.priceNote}</div>
 
       {disabled503 ? <div style={S.warn}><AlertTriangle size={13} style={{ verticalAlign: -2, marginRight: 5 }} />{RUNWAY_DISABLED_MESSAGE}</div> : null}
 
@@ -315,13 +315,13 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe, allowedR
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ ...S.label, marginBottom: 0 }}>Mode</span>
             {(['auto', 'custom'] as const).map((m) => (
-              <button key={m} type="button" onClick={() => patch({ mode: m })} style={{ ...S.btn, padding: '5px 11px', fontSize: 11.5, ...(form.mode === m ? { background: 'var(--space-brand-primary-600, #2563EB)', color: '#fff', borderColor: 'transparent' } : {}) }}>{m === 'auto' ? 'Auto (one prompt)' : 'Custom shots'}</button>
+              <button key={m} type="button" onClick={() => patch({ mode: m })} style={{ ...S.btn, padding: '5px 11px', fontSize: 11.5, ...(form.mode === m ? { background: 'var(--space-brand-primary-600, #C8920A)', color: '#fff', borderColor: 'transparent' } : {}) }}>{m === 'auto' ? 'Auto (one prompt)' : 'Custom shots'}</button>
             ))}
             <span style={{ ...S.label, marginBottom: 0, marginLeft: 8 }}>Total</span>
             {[5, 10, 15].map((d) => (
-              <button key={d} type="button" onClick={() => patch({ duration: d })} style={{ ...S.btn, padding: '5px 10px', fontSize: 11.5, ...(form.duration === d ? { background: 'var(--space-brand-primary-600, #2563EB)', color: '#fff', borderColor: 'transparent' } : {}) }}>{d}s</button>
+              <button key={d} type="button" onClick={() => patch({ duration: d })} style={{ ...S.btn, padding: '5px 10px', fontSize: 11.5, ...(form.duration === d ? { background: 'var(--space-brand-primary-600, #C8920A)', color: '#fff', borderColor: 'transparent' } : {}) }}>{d}s</button>
             ))}
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--space-text-secondary, #CBD5E1)', marginLeft: 8, cursor: 'pointer' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--space-text-secondary, #3D2800)', marginLeft: 8, cursor: 'pointer' }}>
               <input type="checkbox" checked={form.hd} onChange={(e) => patch({ hd: e.target.checked })} /> HD (17 credits/s vs 13)
             </label>
           </div>
@@ -335,7 +335,7 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe, allowedR
                 </div>
               ))}
               {form.shots.length < 5 ? <button type="button" onClick={() => patch({ shots: [...form.shots, { prompt: '', duration: 5 }] })} style={{ ...S.btn, alignSelf: 'start', fontSize: 11.5 }}>+ Add shot</button> : null}
-              <div style={{ fontSize: 11, color: 'var(--space-text-muted, #94A3B8)' }}>3–5 shots; durations must sum to the total ({form.duration}s).</div>
+              <div style={{ fontSize: 11, color: 'var(--space-text-muted, #7A6030)' }}>3–5 shots; durations must sum to the total ({form.duration}s).</div>
             </div>
           ) : null}
         </>) : null}
@@ -377,14 +377,14 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe, allowedR
         {(recipeId === 'product_ad' || recipeId === 'product_swap' || recipeId === 'product_ugc') ? (
           <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
             <div><span style={S.label}>Duration: {form.duration}s (4–15)</span>
-              <input type="range" min={4} max={15} value={form.duration} onChange={(e) => patch({ duration: Number(e.target.value) })} style={{ width: 180, accentColor: 'var(--space-brand-primary-500, #3B82F6)' }} />
+              <input type="range" min={4} max={15} value={form.duration} onChange={(e) => patch({ duration: Number(e.target.value) })} style={{ width: 180, accentColor: 'var(--space-brand-primary-500, #C8920A)' }} />
             </div>
             {recipeId === 'product_swap' ? (
               <div><span style={S.label}>Resolution</span>
                 <select value={form.resolution} onChange={(e) => patch({ resolution: e.target.value as any })} style={{ ...S.input, width: 110, cursor: 'pointer' }}><option value="720p">720p</option><option value="1080p">1080p</option></select>
               </div>
             ) : null}
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--space-text-secondary, #CBD5E1)', cursor: 'pointer', marginTop: 12 }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--space-text-secondary, #3D2800)', cursor: 'pointer', marginTop: 12 }}>
               <input type="checkbox" checked={form.audio} onChange={(e) => patch({ audio: e.target.checked })} /> Generate audio
             </label>
           </div>
@@ -398,7 +398,7 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe, allowedR
         </button>
       </div>
 
-      {state === 'running' ? <div style={{ fontSize: 12.5, color: 'var(--space-text-brand, #60A5FA)', marginTop: 10 }}><Loader2 size={13} className="animate-spin" style={{ verticalAlign: -2, marginRight: 6 }} />{statusNote} Polling every 5s.</div> : null}
+      {state === 'running' ? <div style={{ fontSize: 12.5, color: 'var(--space-text-brand, #B4720A)', marginTop: 10 }}><Loader2 size={13} className="animate-spin" style={{ verticalAlign: -2, marginRight: 6 }} />{statusNote} Polling every 5s.</div> : null}
       {error ? <div style={S.err}>{error}{/refund/i.test(error) ? '' : (state === 'error' && /failed|cancelled/i.test(error) ? ' Credits were automatically refunded.' : '')}</div> : null}
 
       {outputs.length > 0 ? (
@@ -406,7 +406,7 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe, allowedR
           <span style={S.label}>Output{outputs.length > 1 ? `s (${outputs.length})` : ''}</span>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
             {outputs.map((u) => (
-              <div key={u} style={{ background: '#000', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--space-border-default, rgba(148,163,184,0.16))' }}>
+              <div key={u} style={{ background: '#000', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--space-border-default, rgba(180,120,0,0.14))' }}>
                 {recipe.outputKind === 'video' && /\.(mp4|webm|mov)(\?|#|$)/i.test(u)
                   ? <video src={u} controls style={{ width: '100%', display: 'block' }} />
                   : /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(u)
@@ -414,13 +414,13 @@ export default function RunwayRecipesPanel({ uploadFile, initialRecipe, allowedR
                     : recipe.outputKind === 'video'
                       ? <video src={u} controls style={{ width: '100%', display: 'block' }} />
                       : <img src={u} alt="output" style={{ width: '100%', display: 'block' }} />}
-                <a href={u} target="_blank" rel="noreferrer" download style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '7px 0', fontSize: 12, fontWeight: 700, color: 'var(--space-text-brand, #60A5FA)', textDecoration: 'none' }}>
+                <a href={u} target="_blank" rel="noreferrer" download style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '7px 0', fontSize: 12, fontWeight: 700, color: 'var(--space-text-brand, #B4720A)', textDecoration: 'none' }}>
                   <Download size={12} /> Download
                 </a>
               </div>
             ))}
           </div>
-          {taskId ? <div style={{ fontSize: 10.5, color: 'var(--space-text-muted, #94A3B8)', marginTop: 6, fontFamily: 'monospace' }}>task: {taskId}</div> : null}
+          {taskId ? <div style={{ fontSize: 10.5, color: 'var(--space-text-muted, #7A6030)', marginTop: 6, fontFamily: 'monospace' }}>task: {taskId}</div> : null}
         </div>
       ) : null}
     </div>

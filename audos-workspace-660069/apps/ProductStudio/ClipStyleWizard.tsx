@@ -704,7 +704,7 @@ export default function ClipStyleWizard({ onExit }: { onExit: () => void }) {
               <p style={{ margin: '8px 0 0', fontSize: 11.5, color: S.muted }}>The page is read once to pull the product name, tagline and features.</p>
             </div>
           ) : (
-            <textarea value={manualDesc} onChange={(e) => setManualDesc(e.currentTarget.value)} rows={5} maxLength={2000} placeholder="What is the product, who is it for, and what does it do? A few sentences is plenty." className="ps-input" style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.55 }} data-testid="input-clipstyle-manual" />
+            <textarea value={manualDesc} onChange={(e) => setManualDesc(e.currentTarget.value)} rows={5} maxLength={10000} placeholder="What is the product, who is it for, and what does it do? A few sentences is plenty." className="ps-input" style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.55 }} data-testid="input-clipstyle-manual" />
           )}
 
           {productReady ? (
@@ -864,7 +864,7 @@ export default function ClipStyleWizard({ onExit }: { onExit: () => void }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 11.5, fontWeight: 800, color: S.brand }}>[{b.code}]</span>
                     <span style={{ fontSize: 11, color: S.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 120 }}>{b.text}</span>
-                    <span style={{ fontSize: 10.5, color: countWords(prompts[i]) < 25 || countWords(prompts[i]) > 40 ? '#fbbf24' : S.muted }}>{countWords(prompts[i])} words</span>
+                    <span style={{ fontSize: 10.5, color: countWords(prompts[i]) < 25 || countWords(prompts[i]) > 40 ? '#B45309' : S.muted }}>{countWords(prompts[i])} words</span>
                   </div>
                   <textarea value={prompts[i]} onChange={(e) => setPrompts((cur) => cur.map((p, j) => (j === i ? e.currentTarget.value : p)))} rows={2} className="ps-input" style={{ ...inputStyle, fontSize: 12.5, lineHeight: 1.55, resize: 'vertical' }} data-testid={`input-prompt-${b.code}`} />
                 </div>

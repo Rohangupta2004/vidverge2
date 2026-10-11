@@ -1,4 +1,4 @@
-import { AlertTriangle, Clapperboard, Download, Layers, Loader2, Music, RefreshCw, Sparkles, XCircle } from 'lucide-react';
+import { AlertTriangle, Clapperboard, Download, Layers, Music, RefreshCw, Sparkles, XCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { assemblyJobRunning, listScenes, type CheckResult, type Project, type Scene } from '../lib/supabase';
 import { reviewAssembly, type AssemblyQcResult } from '../agents/orchestrator';
@@ -7,6 +7,7 @@ import { planOf } from '../lib/directorPlan';
 import ChecksReport from './ChecksReport';
 import CompositionPreview from './CompositionPreview';
 import OverlayEditor from './OverlayEditor';
+import VergeLoader from '../../../components/VergeLoader';
 
 const ASSEMBLY_STATUS_LABELS: Record<string, string> = { preparing: 'Preparing', assembling: 'Assembling', checking: 'Checking', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled' };
 
@@ -169,7 +170,7 @@ export default function AssemblyProgress({ busy, note, failure, project, scenes 
         same live state instead of a static placeholder. */}
     {jobRunning ? <div className="mt-8 rounded-2xl border-2 border-[color-mix(in_srgb,var(--space-brand-primary-500)_45%,transparent)] bg-[var(--space-surface-panel)] p-5 shadow-[0_4px_24px_color-mix(in_srgb,var(--space-brand-primary-600)_25%,transparent)]">
       <div className="flex flex-wrap items-center gap-3">
-        <Loader2 className="h-5 w-5 animate-spin text-[var(--space-text-brand)]" />
+        <VergeLoader size={64} label="Final assembly in progress" />
         <span className="rounded-full bg-[color-mix(in_srgb,var(--space-brand-primary-500)_14%,transparent)] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-[var(--space-text-brand)]">{statusLabel}</span>
         <span className="font-semibold text-[var(--space-text-primary)]">Final assembly in progress</span>
         <span className="ml-auto font-mono text-sm text-[var(--space-text-secondary)]">{progressPct}% · {elapsedLabel}</span>
@@ -183,7 +184,7 @@ export default function AssemblyProgress({ busy, note, failure, project, scenes 
       <p className="text-[10px] font-bold uppercase tracking-[.16em] text-[var(--space-text-muted)]">Assembly steps</p>
       <div className="mt-3 grid gap-2">
         {assemblySteps.map((step, index) => <div key={step.key} className="sf-fade-up flex flex-wrap items-center gap-2 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-3 py-2.5" style={{ animationDelay: `${index * 55}ms` }}>
-          {step.status === 'running' ? <Loader2 className="h-4 w-4 animate-spin text-[var(--space-text-brand)]" /> : step.status === 'done' ? <span className="text-[var(--space-semantic-success)]">✓</span> : step.status === 'failed' ? <AlertTriangle className="h-4 w-4 text-[var(--space-semantic-danger)]" /> : <span className="text-[var(--space-text-muted)]">○</span>}
+          {step.status === 'running' ? <VergeLoader size={32} label={step.label} /> : step.status === 'done' ? <span className="text-[var(--space-semantic-success)]">✓</span> : step.status === 'failed' ? <AlertTriangle className="h-4 w-4 text-[var(--space-semantic-danger)]" /> : <span className="text-[var(--space-text-muted)]">○</span>}
           <span className="min-w-[min(100%,180px)] flex-1 text-sm text-[var(--space-text-secondary)]">{step.label}</span>
           <span className={step.status === 'running' ? 'font-mono text-[10px] font-bold uppercase tracking-wide text-[var(--space-text-brand)]' : step.status === 'failed' ? 'font-mono text-[10px] font-bold uppercase tracking-wide text-[var(--space-semantic-danger)]' : 'font-mono text-[10px] font-bold uppercase tracking-wide text-[var(--space-text-muted)]'}>{step.status}</span>
           <span className="w-12 text-right font-mono text-[10px] tabular-nums text-[var(--space-text-muted)]">{stepElapsed(step)}</span>
@@ -215,9 +216,8 @@ export default function AssemblyProgress({ busy, note, failure, project, scenes 
           ? <video key={playable} src={playable} controls playsInline className="max-h-[560px] w-full rounded-2xl bg-black" />
           : <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--space-border-default)] px-6 text-center text-sm text-[var(--space-text-muted)]">
             {jobRunning ? <>
-              <Loader2 className="h-6 w-6 animate-spin text-[var(--space-text-brand)]" />
+              <VergeLoader size={140} caption={job?.message || 'Rendering the assembly'} />
               <span className="font-semibold text-[var(--space-text-primary)]">{statusLabel} · {progressPct}% · {elapsedLabel}</span>
-              <span>{job?.message || 'Rendering the assembly…'}</span>
             </> : job?.status === 'failed' || failure ? <span>Assembly did not finish — use Retry assembly to rebuild the film. Every scene clip is kept.</span>
               : job?.status === 'cancelled' ? <span>Assembly was cancelled — start it again to produce the film.</span>
                 : <span>The final film loads here automatically the moment assembly completes.</span>}
@@ -257,7 +257,7 @@ export default function AssemblyProgress({ busy, note, failure, project, scenes 
     </section> : null}
 
     {assembled ? <section className="mt-7 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-5">
-      <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-[var(--space-text-brand)]" /><h2 className="font-semibold text-[var(--space-text-primary)]">Opus assembly QC</h2>{qcBusy ? <Loader2 className="h-4 w-4 animate-spin text-[var(--space-text-brand)]" /> : null}</div>
+      <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-[var(--space-text-brand)]" /><h2 className="font-semibold text-[var(--space-text-primary)]">Opus assembly QC</h2>{qcBusy ? <VergeLoader size={32} label="Reviewing the assembly" /> : null}</div>
       <p className="mt-1 text-sm text-[var(--space-text-secondary)]">One review compares planned windows with the produced media list: duration fit, kinds, gaps, overlaps, and safe presenter visibility for small overlays. It never changes a scene on its own.</p>
       {qc ? <div className="mt-4 space-y-2">
         <p className="text-sm text-[var(--space-text-primary)]">{qc.summary}</p>
@@ -274,12 +274,12 @@ export default function AssemblyProgress({ busy, note, failure, project, scenes 
       {plan?.music ? <p className="mt-2 rounded-xl bg-[color-mix(in_srgb,var(--space-brand-primary-500)_8%,transparent)] p-3 text-xs leading-relaxed text-[var(--space-text-secondary)]"><strong className="text-[var(--space-text-primary)]">Director's call:</strong> {plan.music.required ? `music · ${plan.music.intensity || 'medium'} intensity · ${plan.music.mood || 'unobtrusive documentary bed'}` : 'this film works without a music bed — silence is a deliberate choice'}{plan.music.required && plan.music.prompt ? ' — the suggested brief is prefilled below.' : ''}</p> : null}
       <div className="mt-4 flex flex-wrap gap-3">
         <input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="describe the bed — e.g. warm piano that builds, 90 BPM" className="min-w-0 flex-[1_1_16rem] rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-3 text-sm text-[var(--space-text-primary)]" />
-        <button disabled={musicBusy} onClick={() => onGenerateMusic(prompt.trim())} className="flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{musicBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}{project?.music_url ? 'Regenerate music' : 'Generate music'}</button>
+        <button disabled={musicBusy} onClick={() => onGenerateMusic(prompt.trim())} className="flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{musicBusy ? <VergeLoader size={32} tone="ink" label="Generating the music bed" /> : <Sparkles className="h-4 w-4" />}{project?.music_url ? 'Regenerate music' : 'Generate music'}</button>
       </div>
       {project?.music_url ? <div className="mt-4">
         <audio src={project.music_url} controls className="w-full" />
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button disabled={musicBusy || jobRunning || portrait} onClick={onMixMusic} className="rounded-xl border border-[var(--space-border-default)] px-4 py-2.5 text-sm font-semibold text-[var(--space-text-primary)] disabled:opacity-40">{musicBusy ? <span className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Adding the music bed...</span> : bedInFilm ? 'Render again with this music bed' : 'Add the music bed to the film'}</button>
+          <button disabled={musicBusy || jobRunning || portrait} onClick={onMixMusic} className="rounded-xl border border-[var(--space-border-default)] px-4 py-2.5 text-sm font-semibold text-[var(--space-text-primary)] disabled:opacity-40">{musicBusy ? <span className="flex items-center gap-2"><VergeLoader size={32} label="Adding the music bed" />Adding the music bed...</span> : bedInFilm ? 'Render again with this music bed' : 'Add the music bed to the film'}</button>
           {!portrait && bedInFilm ? <span className="text-xs text-[var(--space-semantic-success)]">This cut already carries the bed.</span> : null}
           {!portrait && !bedInFilm ? <span className="text-xs text-[var(--space-text-muted)]">The film is rendered again with the bed under the narration - every scene clip, overlay and caption is reused, so only the join is redone.</span> : null}
         </div>

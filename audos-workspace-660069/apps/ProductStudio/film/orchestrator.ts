@@ -932,7 +932,7 @@ export async function finishProduction(film: Film, scenes: FilmScene[], hooks: R
  * optional director note is folded into the next take's prompt. */
 export async function regenerateScene(film: Film, scene: FilmScene, allScenes: FilmScene[], hooks: RunHooks, note?: string): Promise<void> {
   const spec: any = { ...(scene.spec as any) };
-  if (note && note.trim()) spec.fix_note = note.trim().slice(0, 400);
+  if (note && note.trim()) spec.fix_note = note.trim().slice(0, 5000);
   else delete spec.fix_note;
   await patchScene(scene, hooks, {
     spec,
@@ -958,7 +958,7 @@ export async function regenerateScene(film: Film, scene: FilmScene, allScenes: F
  * mockups) Opus rewrites the structured spec so the edit actually changes the
  * render; for asset scenes it becomes the image brief. */
 export async function updateScenePrompt(film: Film, scene: FilmScene, allScenes: FilmScene[], hooks: RunHooks, prompt: string): Promise<void> {
-  const text = prompt.trim().slice(0, 900);
+  const text = prompt.trim().slice(0, 10000);
   if (!text) throw new Error('The prompt cannot be empty.');
   const spec: any = { ...(scene.spec as any) };
   delete spec.fix_note;
@@ -1033,7 +1033,7 @@ export async function clearScenePromptOverride(film: Film, scene: FilmScene, all
 
 /** Edit a scene's narration: re-speak, re-time, re-render — that scene only. */
 export async function updateSceneNarration(film: Film, scene: FilmScene, allScenes: FilmScene[], hooks: RunHooks, narration: string): Promise<void> {
-  const text = narration.trim().slice(0, 300);
+  const text = narration.trim().slice(0, 5000);
   if (!text) throw new Error('The narration line cannot be empty.');
   await patchScene(scene, hooks, {
     narration: text,

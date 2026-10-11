@@ -110,7 +110,7 @@ function BrollOverlayLayer({
   const audioContextRef = useRef<AudioContext | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const visible = playhead >= overlay.start && playhead <= overlay.end;
+  const visible = playhead >= overlay.start && playhead < overlay.end;
   const src = overlay.previewUrl || overlay.url;
 
   // The cutaway is slaved to the main playhead rather than playing freely:
@@ -118,7 +118,15 @@ function BrollOverlayLayer({
   // which is what keeps a scrub or a seek from desynchronising it.
   useEffect(() => {
     const v = ref.current;
-    if (!v || !visible) return;
+    if (!v) return;
+    if (!visible) {
+      if (!v.paused) v.pause();
+      v.muted = true;
+      if (gainRef.current && audioContextRef.current) {
+        gainRef.current.gain.setValueAtTime(0, audioContextRef.current.currentTime);
+      }
+      return;
+    }
     const want = overlaySourceTime(overlay, playhead);
     if (Math.abs(v.currentTime - want) > 0.22) {
       try { v.currentTime = want; } catch { /* not seekable yet */ }
@@ -146,6 +154,7 @@ function BrollOverlayLayer({
       } catch { /* browser will fall back to media-element volume */ }
     }
     if (gainRef.current && audioContextRef.current) {
+      v.muted = false;
       const now = audioContextRef.current.currentTime;
       gainRef.current.gain.cancelScheduledValues(now);
       gainRef.current.gain.setValueAtTime(gainRef.current.gain.value, now);
@@ -167,7 +176,7 @@ function BrollOverlayLayer({
     };
   }, []);
 
-  if (!visible || !src) return null;
+  if (!src) return null;
 
   const box = overlayBox(overlay.position, overlay.scale);
   const isPip = overlay.position !== 'full';
@@ -179,6 +188,7 @@ function BrollOverlayLayer({
     <div
       onPointerDown={(e) => { e.stopPropagation(); onPick(overlay.id); }}
       style={{
+        display: visible ? 'block' : 'none',
         position: 'absolute',
         left: `${box.left * 100}%`,
         top: `${box.top * 100}%`,
@@ -203,7 +213,7 @@ function BrollOverlayLayer({
 // ---------------------------------------------------------------------------
 
 function OverlayLayer({
-  overlay, stageW, stageH, playhead, selected, onPick, onMove,
+  overlay, stageW, stageH, playhead, selected, onPick, onMove, onResize, onTransformStart,
 }: {
   overlay: Overlay;
   stageW: number;
@@ -212,10 +222,14 @@ function OverlayLayer({
   selected: boolean;
   onPick: (id: string) => void;
   onMove: (id: string, x: number, y: number) => void;
+  onResize: (id: string, width: number) => void;
+  onTransformStart: () => void;
 }) {
   const measured = useImageAspect(overlay.url);
   const imgAspect = measured !== 1 ? measured : overlay.aspect || 1;
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
+  const transformStartedRef = useRef(false);
 
   const visible = overlay.alwaysOn || (playhead >= overlay.start && playhead <= overlay.end);
   if (!visible || !overlay.url) return null;
@@ -257,18 +271,46 @@ function OverlayLayer({
     e.stopPropagation();
     onPick(overlay.id);
     if (overlay.track.enabled) return;   // a tracked overlay is driven by the path
+    transformStartedRef.current = false;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    dragRef.current = { dx: e.clientX - (left + bw / 2), dy: e.clientY - (top + bh / 2) };
+    const host = (e.currentTarget as HTMLElement).parentElement;
+    const rect = host?.getBoundingClientRect();
+    dragRef.current = {
+      dx: rect ? e.clientX - (rect.left + left + bw / 2) : 0,
+      dy: rect ? e.clientY - (rect.top + top + bh / 2) : 0,
+    };
   };
   const onMoveEvt = (e: ReactPointerEvent) => {
+    const resize = resizeRef.current;
+    if (resize) {
+      const delta = (e.clientX - resize.startX) / Math.max(1, stageW);
+      const nextWidth = Math.max(0.03, Math.min(1, resize.startW + delta));
+      if (Math.abs(nextWidth - overlay.w) < 0.0005) return;
+      if (!transformStartedRef.current) { onTransformStart(); transformStartedRef.current = true; }
+      onResize(overlay.id, nextWidth);
+      return;
+    }
     const d = dragRef.current;
     if (!d) return;
     const host = (e.currentTarget as HTMLElement).parentElement;
     if (!host) return;
     const r = host.getBoundingClientRect();
-    onMove(overlay.id, clamp01((e.clientX - d.dx - r.left) / Math.max(1, r.width)), clamp01((e.clientY - d.dy - r.top) / Math.max(1, r.height)));
+    const nextX = clamp01((e.clientX - d.dx - r.left) / Math.max(1, r.width));
+    const nextY = clamp01((e.clientY - d.dy - r.top) / Math.max(1, r.height));
+    if (Math.abs(nextX - overlay.x) < 0.0005 && Math.abs(nextY - overlay.y) < 0.0005) return;
+    if (!transformStartedRef.current) { onTransformStart(); transformStartedRef.current = true; }
+    onMove(overlay.id, nextX, nextY);
   };
-  const onUp = () => { dragRef.current = null; };
+  const onResizeDown = (e: ReactPointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onPick(overlay.id);
+    if (overlay.track.enabled) return;
+    transformStartedRef.current = false;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    resizeRef.current = { startX: e.clientX, startW: overlay.w };
+  };
+  const onUp = () => { dragRef.current = null; resizeRef.current = null; transformStartedRef.current = false; };
 
   return (
     <div
@@ -309,6 +351,20 @@ function OverlayLayer({
           mask={masked ? `url(#${maskId})` : undefined}
         />
       </svg>
+      {selected ? (
+        <>
+          <span style={{ position: 'absolute', left: 0, top: -24, padding: '3px 7px', borderRadius: 5, background: 'rgba(6,9,14,.9)', border: '1px solid rgba(245,162,10,.45)', color: '#FDE68A', fontSize: 9.5, fontWeight: 800, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+            {Math.round(overlay.w * 100)}% · drag to move
+          </span>
+          <button
+            type="button"
+            aria-label={`Resize ${overlay.label}`}
+            title="Drag to resize overlay"
+            onPointerDown={onResizeDown}
+            style={{ position: 'absolute', right: -8, bottom: -8, width: 18, height: 18, padding: 0, borderRadius: 5, cursor: overlay.track.enabled ? 'not-allowed' : 'nwse-resize', background: '#F5A20A', border: '2px solid #06090E', boxShadow: '0 2px 10px rgba(0,0,0,.55)', touchAction: 'none' }}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -325,7 +381,7 @@ export function effectiveGlow(layer: TextLayer, global: GlowState): GlowState | 
 }
 
 function TextLayerView({
-  layer, stageH, playhead, selected, glow, onPick, onMove,
+  layer, stageH, playhead, selected, glow, onPick, onMove, onTransformStart,
 }: {
   layer: TextLayer;
   stageH: number;
@@ -334,8 +390,10 @@ function TextLayerView({
   glow: GlowState | null;
   onPick: (id: string) => void;
   onMove: (id: string, x: number, y: number) => void;
+  onTransformStart: () => void;
 }) {
-  const dragRef = useRef(false);
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const transformStartedRef = useRef(false);
   if (playhead < layer.start || playhead > layer.end) return null;
   const duration = Math.max(0.2, layer.end - layer.start);
   const t = playhead - layer.start;
@@ -356,16 +414,27 @@ function TextLayerView({
     e.stopPropagation();
     onPick(layer.id);
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    dragRef.current = true;
+    const host = (e.currentTarget as HTMLElement).parentElement;
+    const r = host?.getBoundingClientRect();
+    dragRef.current = {
+      dx: r ? e.clientX - (r.left + layer.x * r.width) : 0,
+      dy: r ? e.clientY - (r.top + layer.y * r.height) : 0,
+    };
+    transformStartedRef.current = false;
   };
   const onMoveEvt = (e: ReactPointerEvent) => {
-    if (!dragRef.current) return;
+    const drag = dragRef.current;
+    if (!drag) return;
     const host = (e.currentTarget as HTMLElement).parentElement;
     if (!host) return;
     const r = host.getBoundingClientRect();
-    onMove(layer.id, clamp01((e.clientX - r.left) / Math.max(1, r.width)), clamp01((e.clientY - r.top) / Math.max(1, r.height)));
+    const nextX = clamp01((e.clientX - drag.dx - r.left) / Math.max(1, r.width));
+    const nextY = clamp01((e.clientY - drag.dy - r.top) / Math.max(1, r.height));
+    if (Math.abs(nextX - layer.x) < 0.0005 && Math.abs(nextY - layer.y) < 0.0005) return;
+    if (!transformStartedRef.current) { onTransformStart(); transformStartedRef.current = true; }
+    onMove(layer.id, nextX, nextY);
   };
-  const onUp = () => { dragRef.current = false; };
+  const onUp = () => { dragRef.current = null; transformStartedRef.current = false; };
 
   return (
     <div
@@ -391,7 +460,7 @@ function TextLayerView({
         textShadow,
         cursor: 'move',
         whiteSpace: 'pre-wrap',
-        outline: selected ? '1.5px dashed rgba(168,85,247,0.95)' : 'none',
+        outline: selected ? '1.5px dashed rgba(245,158,11,0.95)' : 'none',
         outlineOffset: 4,
         touchAction: 'none',
         userSelect: 'none',
@@ -509,13 +578,17 @@ export default function StudioStage(props: {
   onPickOverlay: (id: string | null) => void;
   onPickText: (id: string | null) => void;
   onMoveOverlay: (id: string, x: number, y: number) => void;
+  onResizeOverlay: (id: string, width: number) => void;
+  onOverlayTransformStart: () => void;
   onMoveText: (id: string, x: number, y: number) => void;
+  onTextTransformStart: () => void;
   onTogglePlay: () => void;
   /** Draw the reframe focus crosshair (shown while the reframe panel is open). */
   showFocus?: boolean;
   /** Needed so b-roll cutaways start and stop with the main transport. */
   isPlaying?: boolean;
   volume?: number;
+  previewFit?: 'fit' | 'fill';
   onPickBroll?: (id: string | null) => void;
 }) {
   const { doc, activeClip, playhead, sourceT, clipLocalT } = props;
@@ -626,6 +699,7 @@ export default function StudioStage(props: {
       glow={effectiveGlow(layer, vfx.textGlow)}
       onPick={props.onPickText}
       onMove={props.onMoveText}
+      onTransformStart={props.onTextTransformStart}
     />
   );
 
@@ -633,6 +707,7 @@ export default function StudioStage(props: {
     <div
       ref={boxRef}
       onPointerDown={() => { props.onPickOverlay(null); props.onPickText(null); props.onPickBroll?.(null); }}
+      onClick={(event) => { if (event.target === event.currentTarget) props.onTogglePlay(); }}
       style={{
         position: 'relative',
         width: '100%',
@@ -712,21 +787,21 @@ export default function StudioStage(props: {
       {/* Picture: the crop window is implemented by oversizing and offsetting
           the element inside an overflow-hidden box, then cover-fitting with
           the reframe focus as the object position. */}
-      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
         {/* No crossOrigin attribute on purpose: the effects are SVG filters,
             which never read the frame back out, so demanding CORS headers
             from the storage bucket would only risk breaking playback. */}
         <video
           ref={props.videoRef}
           playsInline
-          onClick={props.onTogglePlay}
           style={{
+            pointerEvents: 'none',
             position: 'absolute',
             width: `${100 / Math.max(0.05, crop.w)}%`,
             height: `${100 / Math.max(0.05, crop.h)}%`,
             left: `${(-crop.x * 100) / Math.max(0.05, crop.w)}%`,
             top: `${(-crop.y * 100) / Math.max(0.05, crop.h)}%`,
-            objectFit: 'cover',
+            objectFit: props.previewFit === 'fit' ? 'contain' : 'cover',
             objectPosition: focusObjectPosition(focus),
             filter: filterChain,
             opacity: (activeClip ? activeClip.opacity : 1) * (keyframe ? keyframe.opacity : 1) * (tState ? tState.opacity : 1),
@@ -763,6 +838,8 @@ export default function StudioStage(props: {
           selected={props.selection.overlayId === o.id}
           onPick={props.onPickOverlay}
           onMove={props.onMoveOverlay}
+          onResize={props.onResizeOverlay}
+          onTransformStart={props.onOverlayTransformStart}
         />
       ))}
 

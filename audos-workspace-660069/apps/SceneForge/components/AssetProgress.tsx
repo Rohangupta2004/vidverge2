@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Circle, Clapperboard, Eye, GitBranch, Image as ImageIcon, Loader2, RefreshCw, ShieldAlert, ShieldCheck, SkipForward, Type, Undo2, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Circle, Clapperboard, Eye, GitBranch, Image as ImageIcon, RefreshCw, ShieldAlert, ShieldCheck, SkipForward, Type, Undo2, X } from 'lucide-react';
 import type { Project, Scene } from '../lib/supabase';
 import { isVideoUrl, sceneKind, sceneSettled } from '../lib/sceneState';
 import { hasFreshMotionClip } from '../lib/motionCapture';
 import { KIND_COLORS, KIND_LABELS } from '../lib/effects';
 import RemotionCodePreview from './RemotionCodePreview';
 import CompositionPreview from './CompositionPreview';
+import VergeLoader from '../../../components/VergeLoader';
 
 // Live pipeline board. Every card reflects its OWN scene the moment that
 // scene's clip or still lands, so nothing waits for the slowest scene. A
@@ -71,7 +72,7 @@ function QaBadge({ scene }: { scene: Scene }) {
 
 function kindBadge(scene: Scene) {
   const kind = sceneKind(scene);
-  if (kind === 'legacy') return { icon: Eye, label: 'Legacy', color: '#94A3B8' };
+  if (kind === 'legacy') return { icon: Eye, label: 'Legacy', color: '#7A6030' };
   const icon = kind === 'ai_video' ? Clapperboard : kind === 'motion_graphic' ? GitBranch : kind === 'image' ? ImageIcon : Type;
   return { icon, label: KIND_LABELS[kind], color: KIND_COLORS[kind] };
 }
@@ -142,7 +143,7 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
 
     <div className="mt-6 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-5">
       <div className="flex flex-wrap items-center gap-3">
-        {allReady ? <CheckCircle2 className="h-5 w-5 text-[var(--space-semantic-success)]" /> : <Loader2 className="h-5 w-5 animate-spin text-[var(--space-text-brand)]" />}
+        {allReady ? <CheckCircle2 className="h-5 w-5 text-[var(--space-semantic-success)]" /> : <VergeLoader size={64} label="Producing your scenes" />}
         <span className="font-semibold text-[var(--space-text-primary)]">{phaseOf(project, settled, total)}</span>
         <span className="ml-auto font-mono text-sm text-[var(--space-text-secondary)]">Scenes settled: {settled} / {total}</span>
       </div>
@@ -155,7 +156,7 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
       <p className="mb-3 text-sm font-semibold text-[var(--space-text-primary)]">Avatar master · the primary video every scene plays over</p>
       <video src={project.heygen_video_url} controls className={project.aspect_ratio === '9:16' ? 'max-h-80 rounded-xl bg-black' : 'w-full max-w-xl rounded-xl bg-black'} />
     </div> : <div className="mt-5 flex items-center gap-3 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4">
-      <span className="h-12 w-20 animate-pulse rounded-lg bg-[var(--space-surface-muted)]" />
+      <VergeLoader size={90} label="Rendering the avatar video" />
       <span className="text-sm text-[var(--space-text-secondary)]">Avatar video rendering…</span>
     </div>}
 
@@ -184,10 +185,10 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
             : thumb
               ? <img src={thumb} alt={`Scene ${scene.scene_index} preview`} width={80} height={60} className="h-full w-full object-cover" />
               : broken ? <AlertCircle className="h-5 w-5 text-[var(--space-semantic-danger)]" />
-                : working ? <Loader2 className="h-5 w-5 animate-spin text-[var(--space-text-brand)]" />
+                : working ? <VergeLoader size={64} label={`Generating scene ${scene.scene_index}`} />
                   : kind === 'text_graphics' ? <Type className="h-5 w-5 text-[var(--space-text-muted)]" /> : <ImageIcon className="h-5 w-5 text-[var(--space-text-muted)]" />}
         </span>
-        {done ? <CheckCircle2 className="h-5 w-5 shrink-0 text-[var(--space-semantic-success)]" /> : working ? <Loader2 className="h-5 w-5 shrink-0 animate-spin text-[var(--space-text-brand)]" /> : broken ? <AlertCircle className="h-5 w-5 shrink-0 text-[var(--space-semantic-danger)]" /> : <Circle className="h-5 w-5 shrink-0 text-[var(--space-text-muted)]" />}
+        {done ? <CheckCircle2 className="h-5 w-5 shrink-0 text-[var(--space-semantic-success)]" /> : working ? <VergeLoader size={40} style={{ flexShrink: 0 }} label={`Generating scene ${scene.scene_index}`} /> : broken ? <AlertCircle className="h-5 w-5 shrink-0 text-[var(--space-semantic-danger)]" /> : <Circle className="h-5 w-5 shrink-0 text-[var(--space-text-muted)]" />}
         <div className="min-w-[min(100%,240px)] flex-1">
           <div className="flex items-center gap-2 font-semibold text-[var(--space-text-primary)]">Scene {scene.scene_index}<span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: badge.color, background: `color-mix(in srgb, ${badge.color} 14%, transparent)` }}><badge.icon className="h-3 w-3" />{badge.label}</span></div>
           <p className="truncate text-sm text-[var(--space-text-secondary)]">{scene.description}</p>
@@ -207,7 +208,7 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
     })}</div>
 
     {previewScene ? <RemotionCodePreview scene={previewScene} project={project} onClose={() => setPreviewSceneId(null)} /> : null}
-    {videoScene ? <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-6" role="dialog" aria-label={`Scene ${videoScene.scene_index} video preview`} onClick={() => setVideoSceneId(null)}>
+    {videoScene ? <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(26,16,0,0.35)] p-6" role="dialog" aria-label={`Scene ${videoScene.scene_index} video preview`} onClick={() => setVideoSceneId(null)}>
       <div className="relative w-full max-w-3xl rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between"><p className="font-semibold text-[var(--space-text-primary)]">Scene {videoScene.scene_index} · AI clip</p><button aria-label="Close preview" onClick={() => setVideoSceneId(null)} className="rounded-lg p-1.5 transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_7%,transparent)]"><X className="h-5 w-5 text-[var(--space-text-primary)]" /></button></div>
         <video src={videoScene.render_url} controls autoPlay muted className="max-h-[70vh] w-full rounded-xl bg-black object-contain" />
