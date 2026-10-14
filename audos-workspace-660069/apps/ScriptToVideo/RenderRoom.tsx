@@ -12,10 +12,12 @@ import {
   AlertTriangle, ArrowRight, Check, Circle, CircleDot, Layers, Lock,
   Play, RefreshCw, SkipForward, Sparkles, UserRound, Wand2, Zap,
 } from 'lucide-react';
-import { Film, FilmScene, T } from './api';
+import { Film, FilmScene, T, VideoClipSpec } from './api';
 import { audioReady, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
 import { videoEngine } from '../../lib/videoEngines';
 import VergeLoader from '../../components/VergeLoader';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 
 const DONE = new Set(['completed', 'skipped']);
 
@@ -129,7 +131,7 @@ export default function RenderRoom(props: {
                 key={s.id}
                 className="s2v-row"
                 onClick={() => setSelectedId(s.id)}
-                style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', background: isSel ? 'rgba(180,120,0,0.08)' : 'transparent', border: `1px solid ${isSel ? T.dim : 'transparent'}`, borderRadius: 10, padding: '9px 10px', cursor: 'pointer', marginBottom: 2 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', background: isSel ? 'rgba(212,146,10,0.12)' : 'transparent', border: `1px solid ${isSel ? T.dim : 'transparent'}`, borderRadius: 10, padding: '9px 10px', cursor: 'pointer', marginBottom: 2 }}
               >
                 <span style={{ color: meta.color, display: 'flex', flexShrink: 0 }}>{meta.icon}</span>
                 <span style={{ color: isSel ? T.bone : T.muted, fontFamily: T.mono, fontSize: 12, flexShrink: 0 }}>
@@ -178,7 +180,7 @@ export default function RenderRoom(props: {
               disabled={busy}
               title="Locks the visual style after the first scene so every clip matches the same look, palette and lighting. Prompts already written keep their text — regenerate a scene's prompt to apply the lock to it."
               onClick={() => props.onToggleStyleLock(!styleLocked)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: styleLocked ? 'rgba(200,146,10,0.14)' : 'transparent', border: `1px solid ${styleLocked ? T.live : T.dim}`, color: styleLocked ? T.live : T.muted, borderRadius: 999, padding: '5px 12px', fontSize: 11.5, fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: styleLocked ? 'rgba(212,146,10,0.14)' : 'transparent', border: `1px solid ${styleLocked ? T.live : T.dim}`, color: styleLocked ? T.live : T.muted, borderRadius: 999, padding: '5px 12px', fontSize: 11.5, fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}
             >
               <Lock size={11} /> Style Lock {styleLocked ? 'on' : 'off'}
             </button>
@@ -188,7 +190,7 @@ export default function RenderRoom(props: {
                 disabled={batchRunning}
                 title="Render every prepared scene at the same time instead of one after another. Each scene keeps its own prompt and references; one that fails fails alone."
                 onClick={props.onGenerateAll}
-                style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, background: batchRunning ? T.raised : T.live, color: batchRunning ? T.dim : '#1A1205', border: 'none', borderRadius: 9, padding: '8px 15px', fontSize: 12.5, fontWeight: 700, cursor: batchRunning ? 'default' : 'pointer' }}
+                style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, background: batchRunning ? T.raised : T.live, color: batchRunning ? T.dim : '#ffffff', border: 'none', borderRadius: 9, padding: '8px 15px', fontSize: 12.5, fontWeight: 700, cursor: batchRunning ? 'default' : 'pointer' }}
               >
                 <Layers size={13} /> {batchRunning ? 'Generating…' : `Generate All Ready (${readyToFire.length})`}
               </button>
@@ -196,16 +198,21 @@ export default function RenderRoom(props: {
           </div>
 
           {/* Persisted pipeline stage, collapsed so the active scene remains the focus. */}
-          <details style={{ marginBottom: 10, background: 'rgba(180,120,0,0.06)', border: `1px solid ${T.raised}`, borderRadius: 10, padding: '9px 12px' }}>
+          <details style={{ marginBottom: 10, background: 'rgba(255,255,255,0.04)', border: `1px solid ${T.raised}`, borderRadius: 10, padding: '9px 12px' }}>
             <summary style={{ cursor: 'pointer', color: generating || assembling ? T.live : T.muted, fontSize: 12.5, fontWeight: 700, listStylePosition: 'inside' }}>
               Production status — {note || film.stage_note || (active ? 'Waiting for the next scene' : 'Waiting for you')}
             </summary>
             <div style={{ marginTop: 9 }}><GenerationStates film={film} scenes={scenes} /></div>
           </details>
           {film.error ? (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, margin: '6px 0 10px', background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.25)', borderRadius: 9, padding: '9px 13px' }}>
-              <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{customerError(film.error)}</span>
-            </div>
+            <VideoErrorCard
+              error={film.error}
+              engineId={(film as any).video_model || (film as any).engine_id}
+              subject="this film"
+              onRetry={active ? () => props.onRetry(active) : undefined}
+              compact
+              style={{ margin: '6px 0 10px' }}
+            />
           ) : null}
 
           {/* Partial failures are never swallowed: the scenes that refused are
@@ -222,7 +229,7 @@ export default function RenderRoom(props: {
                   className="s2v-lift"
                   disabled={busy || !!generating}
                   onClick={() => { const first = failedScenes[0]; if (first) props.onRetry(first); }}
-                  style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, background: busy || generating ? T.raised : T.live, color: busy || generating ? T.dim : '#1A1205', border: 'none', borderRadius: 9, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: busy || generating ? 'default' : 'pointer' }}
+                  style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, background: busy || generating ? T.raised : T.live, color: busy || generating ? T.dim : '#ffffff', border: 'none', borderRadius: 9, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: busy || generating ? 'default' : 'pointer' }}
                 >
                   <RefreshCw size={12} /> Retry failed only
                 </button>
@@ -378,12 +385,14 @@ function ScenePanel(props: {
   const meta = statusMeta(s);
   const prev = [...scenes].filter((x) => x.idx < s.idx && x.status === 'completed').sort((a, b) => b.idx - a.idx)[0] || null;
   const refs = Array.isArray(s.reference_assets) ? s.reference_assets : [];
+  const spec = (s.spec || {}) as VideoClipSpec;
+  const routedEngine = spec.engine_id ? (videoEngine(spec.engine_id)?.label || spec.engine_id) : '';
   const working = busy || s.status === 'generating';
   // LightBeam: the ACTIVE scene card carries the amber focus glow.
   const activeGlow = isActive && !DONE.has(String(s.status));
 
   return (
-    <div style={{ background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 16, padding: '18px 20px', marginTop: 6, boxShadow: activeGlow ? '0 0 0 2px #C8920A, 0 0 20px rgba(200,146,10,0.3)' : 'none', transition: 'box-shadow 0.3s ease' }}>
+    <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: '18px 20px', marginTop: 6, boxShadow: activeGlow ? '0 0 0 2px #D4920A, 0 0 20px rgba(212,146,10,0.3)' : 'none', transition: 'box-shadow 0.3s ease' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ color: T.bone, fontSize: 17, fontWeight: 800, letterSpacing: 0.5, fontFamily: T.mono }}>
           SCENE {String(s.idx + 1).padStart(2, '0')} <span style={{ color: T.live }}>· {sceneSeconds(film, s)}s</span>
@@ -400,6 +409,9 @@ function ScenePanel(props: {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
         <MetaRow label="Duration">{Math.round(Number(s.duration_s) || 6)}s</MetaRow>
+        {spec.shot_intent ? <MetaRow label="Intent">{spec.shot_intent.replace(/_/g, ' ')}</MetaRow> : null}
+        {routedEngine ? <MetaRow label="Engine">{routedEngine}</MetaRow> : null}
+        {spec.engine_reason ? <MetaRow label="Routing">{spec.engine_reason}</MetaRow> : null}
         {s.prompt ? (
           <MetaRow label="Continuity">
             {s.continuation ? (
@@ -410,8 +422,13 @@ function ScenePanel(props: {
           </MetaRow>
         ) : null}
         {s.prompt ? <MetaRow label="Reference">{referenceLabel(s, scenes)}</MetaRow> : null}
-        {(s.spec as any)?.reasoning ? <MetaRow label="Director">{String((s.spec as any).reasoning)}</MetaRow> : null}
+        {spec.reasoning ? <MetaRow label="Director">{String(spec.reasoning)}</MetaRow> : null}
       </div>
+      {(spec.duration_notes || []).length ? (
+        <div style={{ color: T.fault, fontSize: 11.5, lineHeight: 1.55, marginTop: 10 }}>
+          {(spec.duration_notes || []).map((durationNote, index) => <div key={index}><AlertTriangle size={11} style={{ display: 'inline', marginRight: 5, verticalAlign: '-1px' }} />{durationNote}</div>)}
+        </div>
+      ) : null}
 
       {refs.length ? (
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
@@ -429,7 +446,7 @@ function ScenePanel(props: {
       {s.prompt ? (
         <div style={{ marginTop: 14 }}>
           <div style={{ color: T.dim, fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Prompt</div>
-          <div style={{ background: '#FFFAEB', border: `1px solid ${T.dim}`, borderRadius: 9, padding: '12px 14px', color: T.bone, fontSize: 12, lineHeight: 1.65, fontFamily: T.mono, maxHeight: 210, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{s.prompt}</div>
+          <div style={{ background: '#18150A', border: `1px solid ${T.dim}`, borderRadius: 9, padding: '12px 14px', color: T.bone, fontSize: 12, lineHeight: 1.65, fontFamily: T.mono, maxHeight: 210, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{s.prompt}</div>
         </div>
       ) : s.status === 'waiting' ? (
         <div style={{ color: T.dim, fontSize: 12.5, marginTop: 14 }}>
@@ -439,23 +456,28 @@ function ScenePanel(props: {
 
       {/* Skeleton shimmer while the clip renders (pure CSS keyframes). */}
       {s.status === 'generating' ? (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ width: film.aspect_ratio === '9:16' ? 200 : 380, height: film.aspect_ratio === '9:16' ? 300 : 214, borderRadius: 12, background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.10)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <VergeLoader size={film.aspect_ratio === '9:16' ? 120 : 160} caption={`Rendering scene ${s.idx + 1} of ${scenes.length}`} />
-          </div>
-        </div>
+        <VideoGeneratingState
+          label={`Rendering scene ${s.idx + 1} of ${scenes.length}`}
+          detail={`${sceneSeconds(film, s)}s clip · ${routedEngine || 'selected engine'} · ${referenceLabel(s, scenes)}`}
+          style={{ marginTop: 14, maxWidth: 520 }}
+        />
       ) : null}
 
       {s.status === 'failed' && s.error ? (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: T.fault, fontSize: 12.5, lineHeight: 1.55, marginTop: 14, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.25)', borderRadius: 9, padding: '9px 13px' }}>
-          <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{customerError(s.error)}</span>
-        </div>
+        <VideoErrorCard
+          error={s.error}
+          engineId={spec.engine_id || (film as any).video_model || (film as any).engine_id}
+          subject={`scene ${s.idx + 1}`}
+          onRetry={() => props.onRetry(s)}
+          compact
+          style={{ marginTop: 14 }}
+        />
       ) : null}
 
       {/* Completed clip playback + final frame */}
       {s.status === 'completed' && s.asset_url ? (
         <div style={{ display: 'flex', gap: 12, marginTop: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <video key={s.asset_url} src={s.asset_url} controls preload="metadata" style={{ maxWidth: film.aspect_ratio === '9:16' ? 200 : 380, maxHeight: 300, borderRadius: 10, background: '#000', border: '1px solid rgba(180,120,0,0.10)' }} />
+          <video key={s.asset_url} src={s.asset_url} controls preload="metadata" style={{ maxWidth: film.aspect_ratio === '9:16' ? 200 : 380, maxHeight: 300, borderRadius: 10, background: '#000', border: '1px solid rgba(255,255,255,0.07)' }} />
           {s.keyframe_url ? (
             <div>
               <img src={s.keyframe_url} alt="" style={{ width: film.aspect_ratio === '9:16' ? 110 : 190, borderRadius: 8, border: `1px solid ${T.dim}`, display: 'block' }} />
@@ -475,7 +497,7 @@ function ScenePanel(props: {
             className="s2v-lift"
             disabled={working}
             onClick={() => props.onGenerate(s)}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, background: working ? T.raised : T.live, color: working ? T.dim : '#1A1205', border: 'none', borderRadius: 10, padding: '12px 26px', fontSize: 14, fontWeight: 700, cursor: working ? 'default' : 'pointer', boxShadow: working ? 'none' : '0 2px 12px rgba(200,146,10,0.25)' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, background: working ? T.raised : T.live, color: working ? T.dim : '#ffffff', border: 'none', borderRadius: 10, padding: '12px 26px', fontSize: 14, fontWeight: 700, cursor: working ? 'default' : 'pointer', boxShadow: working ? 'none' : '0 2px 12px rgba(212,146,10,0.25)' }}
           >
             <Play size={15} /> Generate Video
           </button>
@@ -485,14 +507,9 @@ function ScenePanel(props: {
             <Wand2 size={13} /> Prepare this scene
           </button>
         ) : null}
-        {s.status === 'generating' ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: T.live, fontSize: 13, fontWeight: 600, padding: '11px 4px' }}>
-            <VergeLoader size={36} label="Generating" /> Generating scene {s.idx + 1}/{scenes.length} — the clip, its real duration and its final frame land automatically…
-          </div>
-        ) : null}
         {s.status === 'failed' ? (
           <>
-            <button className="s2v-lift" disabled={working} onClick={() => props.onRetry(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: T.live, color: '#1A1205', border: 'none', borderRadius: 9, padding: '10px 16px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+            <button className="s2v-lift" disabled={working} onClick={() => props.onRetry(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: T.live, color: '#ffffff', border: 'none', borderRadius: 9, padding: '10px 16px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
               <RefreshCw size={13} /> Retry
             </button>
             <button className="s2v-ghost" disabled={working} onClick={() => props.onRegenPrompt(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.bone, borderRadius: 9, padding: '10px 16px', fontSize: 12.5, cursor: 'pointer' }}>
@@ -516,7 +533,7 @@ function ScenePanel(props: {
             <VergeLoader size={34} label="Redoing this scene" /> Redoing — the director is writing a fresh prompt, then the clip re-renders. Other scenes are untouched.
           </div>
         ) : s.status === 'completed' && !working ? (
-          <button className="s2v-ghost" disabled={props.redoingId != null} onClick={() => props.onRedo(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 9, padding: '9px 15px', fontSize: 12, cursor: props.redoingId != null ? 'default' : 'pointer', opacity: props.redoingId != null ? 0.5 : 1 }} title="Opus writes a fresh prompt and the clip re-renders in place. Other scenes are untouched.">
+          <button className="s2v-ghost" disabled={props.redoingId != null} onClick={() => props.onRedo(s)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 9, padding: '9px 15px', fontSize: 12, cursor: props.redoingId != null ? 'default' : 'pointer', opacity: props.redoingId != null ? 0.5 : 1 }} title="The creative planner writes a fresh prompt and the clip re-renders in place. Other scenes are untouched.">
             <RefreshCw size={12} /> Redo this scene
           </button>
         ) : null}

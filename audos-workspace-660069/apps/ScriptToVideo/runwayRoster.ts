@@ -90,6 +90,7 @@ interface RosterSeed {
 }
 
 function seed(s: RosterSeed): RunwayRosterModel {
+  const staticallyAvailable = s.id === 'gen4.5' || s.id === 'gen4_turbo';
   return {
     id: s.id,
     label: s.label,
@@ -104,12 +105,11 @@ function seed(s: RosterSeed): RunwayRosterModel {
     t2vRatios: [...RW_T2V_RATIOS],
     i2vRatios: [...RW_ALL_RATIOS],
     priceNote: 'Priced by Runway per second — the exact cost comes from the live quote.',
-    // Optimistic until the live catalog says otherwise: a model is only ever
-    // refused because the PLATFORM did not list it, never because this file
-    // guessed.
-    available: true,
+    // The last verified proxy enum is the offline fallback. A successful live
+    // capabilities read can still enable more models immediately.
+    available: staticallyAvailable,
     liveId: null,
-    unavailableReason: '',
+    unavailableReason: staticallyAvailable ? '' : 'Not in the last verified Audos Runway proxy model list.',
   };
 }
 
@@ -425,8 +425,13 @@ export function syncRunwayRoster(opts: { force?: boolean } = {}): Promise<Roster
         : 'Live Runway catalog \u00b7 the platform is not enabling any Runway model right now';
     } catch {
       state = 'offline';
-      RUNWAY_ROSTER.forEach((m) => { m.available = true; m.liveId = null; m.unavailableReason = ''; });
-      note = 'Live Runway catalog unreachable \u2014 every model stays selectable and Runway answers for itself on submit.';
+      RUNWAY_ROSTER.forEach((m) => {
+        const available = m.id === 'gen4.5' || m.id === 'gen4_turbo';
+        m.available = available;
+        m.liveId = null;
+        m.unavailableReason = available ? '' : 'Not in the last verified Audos Runway proxy model list.';
+      });
+      note = 'Live Runway catalog unreachable \u2014 using the last verified proxy models: Gen 4.5 and Gen 4 Turbo.';
     } finally {
       inflight = null;
       notify();

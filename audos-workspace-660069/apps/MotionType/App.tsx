@@ -15,6 +15,7 @@
 import React from 'react';
 import AppShell from '../../components/ui/AppShell';
 import Badge from '../../components/ui/Badge';
+import { withBrandContext } from '../../components/BrandContextLayer';
 import { COLORS, FONT } from '../../components/theme';
 import MotionControls from './components/MotionControls';
 import MotionStage from './components/MotionStage';
@@ -28,7 +29,7 @@ import type { ColorTheme, MotionPlan, Speed, StylePreset } from './lib/motionPla
  */
 const APP_CSS = [
   '.mt-app-wordmark {',
-  '  background: linear-gradient(100deg, #C8920A 0%, #E8B737 22%, #B4720A 50%, #E8B737 76%, #C8920A 100%);',
+  '  background: linear-gradient(100deg, #D4920A 0%, #FFD168 22%, #B87808 50%, #FFD168 76%, #D4920A 100%);',
   '  background-size: 260% 100%;',
   '  -webkit-background-clip: text;',
   '  background-clip: text;',
@@ -69,7 +70,9 @@ function StatusIndicator({ status }: { status: StageStatus }) {
   return <Badge variant="muted">No sequence yet</Badge>;
 }
 
-export default function MotionType() {
+const BrandedMotionType = withBrandContext(MotionType, 'MotionType');
+export default BrandedMotionType;
+function MotionType() {
   const [text, setText] = React.useState('');
   const [style, setStyle] = React.useState<StylePreset>('Cinematic');
   const [speed, setSpeed] = React.useState<Speed>('Normal');

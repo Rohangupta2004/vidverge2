@@ -63,7 +63,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(function Input(
             (error ? 'rgba(239,68,68,0.5)' : focus ? COLORS.borderHover : COLORS.border),
           borderRadius: RADIUS.md,
           outline: 'none',
-          boxShadow: focus ? '0 0 0 3px rgba(245,158,11,0.18)' : 'none',
+          boxShadow: focus ? '0 0 0 3px rgba(212,146,10,0.18)' : 'none',
           transition: 'border-color 150ms ease, box-shadow 180ms ease',
           ...style,
         }}

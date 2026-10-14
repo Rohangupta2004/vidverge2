@@ -25,6 +25,7 @@ const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
 const FRAME_W = 1920;
 const FRAME_H = 1080;
+const BeatFrameContext = React.createContext(0);
 
 // ── shared helpers ─────────────────────────────────────────
 
@@ -107,6 +108,16 @@ function useSpan(durationFrames) {
   var cfg = useVideoConfig();
   var span = Math.max(1, Number(durationFrames) || cfg.durationInFrames || 90);
   return clamp01(frame / span);
+}
+
+function beatStrengthAt(frame) {
+  var beats = typeof BEAT_MAP !== 'undefined' && BEAT_MAP && Array.isArray(BEAT_MAP.beats) ? BEAT_MAP.beats : [];
+  var strength = 0;
+  for (var i = 0; i < beats.length; i += 1) {
+    var distance = Math.abs(Number(beats[i].frame) - Number(frame));
+    if (distance <= 5) strength = Math.max(strength, Number(beats[i].strength || 0) * (1 - distance / 6));
+  }
+  return clamp01(strength);
 }
 
 function Centered(props) {
@@ -402,6 +413,23 @@ function Logo(props) {
       },
     }, url
       ? React.createElement(Img, { src: url, style: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' } })
+      : React.createElement(MissingAsset, { handle: props.src })));
+}
+
+function ProductImage(props) {
+  var url = assetUrl(props.src);
+  var p = useSpringIn(0);
+  return React.createElement(Centered, { padding: '70px' },
+    React.createElement('div', {
+      'data-ui-id': String(props.uiId || 'product-image'),
+      style: {
+        width: '100%', height: '100%', overflow: 'hidden',
+        borderRadius: Number(props.cornerRadius) || 24,
+        boxShadow: props.shadow === false ? 'none' : '0 50px 120px rgba(0,0,0,0.55)',
+        opacity: clamp01(p), transform: 'scale(' + String(0.96 + clamp01(p) * 0.04) + ')',
+      },
+    }, url
+      ? React.createElement(Img, { src: url, style: { width: '100%', height: '100%', objectFit: props.fit || 'contain', display: 'block' } })
       : React.createElement(MissingAsset, { handle: props.src })));
 }
 
@@ -747,6 +775,55 @@ function Tooltip(props) {
     }, String(props.text || '')));
 }
 
+function SemanticUI(props) {
+  var frame = useCurrentFrame();
+  var sceneStart = React.useContext(BeatFrameContext);
+  var fps = useVideoConfig().fps;
+  var elements = Array.isArray(props.elements) ? props.elements : [];
+  var beat = props.beatReactive === false ? 0 : beatStrengthAt(frame + Number(sceneStart || 0));
+  var bg = props.background || '#0B1020';
+  var surface = props.surface || '#151C2E';
+  var text = props.textColor || '#F8FAFC';
+  var accent = props.accent || FILM_THEME.accent;
+  function elementStyle(element, index) {
+    var enter = springAt(frame, fps, index * 2);
+    var focused = props.focusId && props.focusId === element.id;
+    var type = String(element.type || 'card');
+    var button = type === 'button';
+    var nav = type === 'navbar' || type === 'sidebar';
+    return {
+      position: 'absolute',
+      left: String(Number(element.x) || 0) + '%', top: String(Number(element.y) || 0) + '%',
+      width: String(Number(element.width) || 10) + '%', height: String(Number(element.height) || 8) + '%',
+      borderRadius: button || type === 'badge' ? 999 : type === 'input' ? 12 : 18,
+      background: button ? accent : nav ? surface : type === 'heading' || type === 'text' ? 'transparent' : surface,
+      color: button ? '#07111F' : text,
+      border: type === 'heading' || type === 'text' ? 'none' : '1px solid rgba(255,255,255,0.10)',
+      boxShadow: focused ? '0 0 0 4px ' + accent + ', 0 0 60px ' + accent : '0 18px 50px rgba(0,0,0,0.22)',
+      fontFamily: FONT, fontSize: type === 'heading' ? 42 : type === 'metric' ? 36 : 24,
+      fontWeight: type === 'heading' || type === 'metric' || button ? 800 : 600,
+      display: 'flex', alignItems: 'center', justifyContent: type === 'metric' ? 'center' : 'flex-start',
+      padding: type === 'heading' || type === 'text' ? 0 : '0 20px', overflow: 'hidden',
+      opacity: clamp01(enter),
+      transform: 'translateY(' + String((1 - clamp01(enter)) * 28) + 'px) scale(' + String(1 + beat * (focused ? 0.025 : 0.008)) + ')',
+    };
+  }
+  return React.createElement(Centered, { padding: '76px 120px' },
+    React.createElement('div', {
+      'data-ui-id': String(props.referenceId || 'semantic-ui'),
+      style: {
+        position: 'relative', width: '100%', height: '100%', overflow: 'hidden', borderRadius: 24,
+        background: bg, border: '1px solid ' + FILM_THEME.border, boxShadow: '0 60px 140px rgba(0,0,0,0.6)',
+      },
+    }, elements.map(function (element, index) {
+      return React.createElement('div', {
+        key: String(element.id || index),
+        'data-ui-id': String(element.id || ('ui-element-' + String(index))),
+        style: elementStyle(element, index),
+      }, String(element.value || element.label || ''));
+    })));
+}
+
 // ── MOTION ──────────────────────────────────────────────
 
 function Parallax(props) {
@@ -1072,19 +1149,42 @@ function FullBleed(props) {
 // Every scene sits on the film's own background so a layer that draws nothing
 // still lands on brand instead of on black.
 function Stage(props) {
+  var frame = useCurrentFrame();
+  var duration = Math.max(1, Number(props.durationFrames) || 90);
+  var sceneStart = Number(props.startFrame) || 0;
+  var beat = beatStrengthAt(frame + sceneStart);
+  var edge = 8;
+  var enter = clamp01(frame / edge);
+  var exit = clamp01((duration - frame) / edge);
+  var transition = String(props.transitionOut || 'cut');
+  var opacity = transition === 'cut' ? 1 : Math.min(enter, exit);
+  var x = transition === 'push' ? (1 - enter) * 90 - (1 - exit) * 90 : 0;
+  var scale = transition === 'scale-out' ? 0.96 + exit * 0.04 : 1;
+  var blur = transition === 'blur-through' ? (1 - Math.min(enter, exit)) * 18 : 0;
+  var clip = transition === 'wipe' ? 'inset(0 ' + String((1 - enter) * 100) + '% 0 0)' : undefined;
   return React.createElement(AbsoluteFill, {
     'data-ui-id': 'stage',
-    style: { background: props.background || FILM_THEME.bg },
-  }, props.children);
+    style: {
+      background: props.background || FILM_THEME.bg,
+      opacity: opacity,
+      transform: 'translateX(' + String(x) + 'px) scale(' + String(scale + beat * 0.004) + ')',
+      filter: blur ? 'blur(' + String(blur) + 'px)' : 'none',
+      clipPath: clip,
+    },
+  }, React.createElement(BeatFrameContext.Provider, { value: sceneStart }, props.children),
+    beat > 0.72 ? React.createElement(AbsoluteFill, {
+      'data-ui-id': 'beat-flash',
+      style: { background: FILM_THEME.accent, opacity: (beat - 0.72) * 0.09, pointerEvents: 'none' },
+    }) : null);
 }
 `;
 
 /** Names the runtime defines, so the compile gate knows what the film may call. */
 export const RUNTIME_GLOBALS = [
   'Stage', 'Centered', 'MissingAsset', 'assetUrl', 'resolveAsset', 'hasAsset',
-  'FILM_THEME', 'ASSET_MAP', 'FONT', 'MONO', 'FRAME_W', 'FRAME_H',
+  'FILM_THEME', 'ASSET_MAP', 'FONT', 'MONO', 'FRAME_W', 'FRAME_H', 'BeatFrameContext',
   'clamp01', 'easeOutCubic', 'easeInCubic', 'applyEasing', 'pctX', 'pctY',
-  'justifyFor', 'hashAt', 'useEnter', 'useSpringIn', 'useSpan', 'springAt',
+  'justifyFor', 'hashAt', 'useEnter', 'useSpringIn', 'useSpan', 'springAt', 'beatStrengthAt',
 ];
 
 /** The Remotion names the bundle imports once, at the top. */

@@ -38,6 +38,8 @@ export function codeSanityProblems(code: string): string[] {
   if (code.indexOf('export default') < 0) {
     problems.push('The file has no default export. The last statement must be '
       + '"export default <RootComponentName>;".');
+  } else if (!/export\s+default\s+[A-Za-z_$][A-Za-z0-9_$]*\s*;?\s*$/.test(code)) {
+    problems.push('The default export must be the final named statement: export default <RootComponentName>;');
   }
   if (code.indexOf('registerRoot') < 0) {
     problems.push('The file never calls registerRoot.');
@@ -181,7 +183,8 @@ export function emitFilmCodeFromPlan(plan: ComponentPlan): string {
     return [
       '// ' + scene.scene_id + ' — ' + scene.role + ', ' + String(scene.duration_frames) + ' frames',
       'const ' + name + ': React.FC = () => (',
-      indent(1) + '<Stage>',
+      indent(1) + '<Stage startFrame={' + String(scene.start_frame) + '} durationFrames={'
+        + String(scene.duration_frames) + '} transitionOut=' + JSON.stringify(scene.transition_out || 'cut') + '>',
       body,
       indent(1) + '</Stage>',
       ');',

@@ -15,7 +15,7 @@
 
 import { claudeVisionJson, type VisionImage } from './proxy';
 import type { Scene } from './supabase';
-import { sceneDirection, sceneMotionSpec } from './motionCapture';
+import { sceneDirection, sceneMotionSpec } from './motionScene';
 import { MAX_MEANINGFUL_LAYERS, VISUAL_BUDGET_RULE, meaningfulLayers } from './visualBudget';
 
 export interface QaIssue { code: string; severity: 'fail' | 'warn'; detail: string }

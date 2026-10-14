@@ -16,19 +16,21 @@ import { createProject, deleteProject, listProjects, loadProject } from './lib/s
 import { runPipeline, type PipelineHandle } from './lib/pipeline';
 import { computeTiming } from './lib/plan';
 import { waitForWorkspaceBridge } from './lib/platform';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import { withBrandContext } from '../../components/BrandContextLayer';
 
 const card: CSSProperties = {
-  background: 'color-mix(in srgb, var(--space-surface-card, #0d0d14) 74%, transparent)',
-  border: '1px solid var(--space-border-default, rgba(245,158,11,0.18))',
-  borderRadius: 20,
+  background: 'color-mix(in srgb, var(--space-surface-card, #15120A) 74%, transparent)',
+  border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+  borderRadius: 12,
   backdropFilter: 'blur(16px)',
   WebkitBackdropFilter: 'blur(16px)',
   transition: 'border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease',
 };
 
-const accent = 'var(--space-brand-primary, #f59e0b)';
-const textPrimary = 'var(--space-text-primary, #fffaf1)';
-const textMuted = 'var(--space-text-muted, #bba899)';
+const accent = 'var(--space-brand-primary, #D4920A)';
+const textPrimary = 'var(--space-text-primary, #F5E9C8)';
+const textMuted = 'var(--space-text-muted, #9E8B55)';
 
 function fmtClock(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -36,7 +38,9 @@ function fmtClock(sec: number): string {
   return m + ':' + String(s).padStart(2, '0');
 }
 
-export default function App() {
+const BrandedCineAgent = withBrandContext(App, 'CineAgent');
+export default BrandedCineAgent;
+function App() {
   const [view, setView] = useState<'home' | 'run'>('home');
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [active, setActive] = useState<ProjectRow | null>(null);
@@ -109,14 +113,14 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ minHeight: '100%', color: textPrimary, fontFamily: "'Inter', system-ui, sans-serif", padding: '32px clamp(18px, 4vw, 52px) 72px', background: 'radial-gradient(1100px 540px at 50% -140px, color-mix(in srgb, var(--space-brand-primary, #f59e0b) 16%, transparent), transparent 70%), linear-gradient(180deg, var(--space-surface-panel, #111120) 0%, var(--space-surface-page, #050508) 48%, var(--space-surface-page-alt, #0a0a12) 100%)' }}>
+    <div style={{ minHeight: '100%', color: textPrimary, fontFamily: "'Inter', system-ui, sans-serif", padding: '32px clamp(18px, 4vw, 52px) 72px', background: 'radial-gradient(1100px 540px at 50% -140px, color-mix(in srgb, var(--space-brand-primary, #f59e0b) 16%, transparent), transparent 70%), linear-gradient(180deg, var(--space-surface-panel, #1C1808) 0%, var(--space-surface-page, #0D0B05) 48%, var(--space-surface-page-alt, #110E07) 100%)' }}>
       <style>{cineCss}</style>
       <header style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 30 }}>
-        <div style={{ width: 46, height: 46, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, rgba(200,146,10,0.25), rgba(224,163,58,0.18))', border: '1px solid var(--space-border-strong, rgba(245,158,11,0.45))' }}>
+        <div style={{ width: 46, height: 46, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, rgba(212,146,10,0.28), rgba(240,180,41,0.16))', border: '1px solid var(--space-border-strong, rgba(255,255,255,0.18))' }}>
           <Wand2 size={24} color={accent as string} />
         </div>
         <div style={{ flex: 1 }}>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--space-brand-primary, #f59e0b)' }}>CineAgent</h1>
+          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--space-text-brand, #F0B429)' }}>CineAgent</h1>
           <p style={{ margin: 0, fontSize: 13, color: textMuted }}>Upload footage. The AI directs, edits, reviews — and hands you the finished film.</p>
         </div>
         {view === 'run' ? (
@@ -155,16 +159,16 @@ export default function App() {
 
 const btnGhost: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px', fontSize: 13, fontWeight: 600,
-  background: 'color-mix(in srgb, var(--space-surface-panel, #111120) 55%, transparent)', color: textPrimary, border: '1px solid var(--space-border-default, rgba(245,158,11,0.18))',
+  background: 'color-mix(in srgb, var(--space-surface-panel, #1C1808) 55%, transparent)', color: textPrimary, border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
   borderRadius: 999, cursor: 'pointer',
   transition: 'transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease',
 };
 
 const btnPrimary: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 8, padding: '13px 26px', fontSize: 14, fontWeight: 700,
-  background: 'linear-gradient(135deg, var(--space-brand-primary, #f59e0b), var(--space-brand-primary-600, #d97706))',
+  background: 'linear-gradient(135deg, var(--space-brand-primary, #D4920A), var(--space-brand-highlight, #F0B429))',
   color: '#FFFFFF', border: 'none', borderRadius: 999, cursor: 'pointer',
-  boxShadow: '0 10px 30px color-mix(in srgb, var(--space-brand-primary, #f59e0b) 28%, transparent)',
+  boxShadow: '0 10px 30px color-mix(in srgb, var(--space-brand-primary, #D4920A) 30%, transparent)',
   transition: 'transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease',
 };
 
@@ -176,7 +180,7 @@ button.cine-btn:hover { border-color: var(--space-border-strong, rgba(245,158,11
 .cine-input { transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease; }
 .cine-input:focus { outline: none; border-color: color-mix(in srgb, var(--space-brand-primary, #f59e0b) 55%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--space-brand-primary, #f59e0b) 16%, transparent), 0 0 28px color-mix(in srgb, var(--space-brand-primary, #f59e0b) 18%, transparent); }
 .cine-card { transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
-.cine-card:hover { transform: translateY(-2px); border-color: var(--space-border-strong, rgba(245,158,11,0.45)); box-shadow: 0 14px 36px color-mix(in srgb, var(--space-brand-primary, #f59e0b) 10%, rgba(120,80,0,0.12)); }
+.cine-card:hover { transform: translateY(-2px); border-color: var(--space-border-strong, rgba(255,255,255,0.18)); box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
 .cine-upload { position: relative; }
 .cine-upload::before { content: ''; position: absolute; inset: 0; border-radius: 24px; padding: 2px; pointer-events: none; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--space-brand-primary, #f59e0b) 60%, transparent) 0 12px, color-mix(in srgb, var(--space-text-accent, #E0A33A) 55%, transparent) 12px 24px, transparent 24px 34px); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); mask-composite: exclude; transition: background 0.2s ease; }
 .cine-upload.cine-drag::before { background: linear-gradient(135deg, var(--space-brand-primary, #f59e0b), var(--space-text-accent, #E0A33A)); }
@@ -207,7 +211,7 @@ function HomeView(props: {
           ...card, padding: '64px 32px', textAlign: 'center',
           border: 'none', borderRadius: 24,
           background: dragOver
-            ? 'color-mix(in srgb, var(--space-brand-primary, #f59e0b) 9%, color-mix(in srgb, var(--space-surface-card, #0d0d14) 80%, transparent))'
+            ? 'color-mix(in srgb, var(--space-brand-primary, #f59e0b) 9%, color-mix(in srgb, var(--space-surface-card, #15120A) 80%, transparent))'
             : card.background,
           boxShadow: dragOver
             ? '0 0 0 4px color-mix(in srgb, var(--space-brand-primary, #f59e0b) 14%, transparent), 0 18px 50px rgba(120,80,0,0.14)'
@@ -224,7 +228,14 @@ function HomeView(props: {
           designs the motion graphics, scores it, renders it and reviews its own cut. Up to 50MB per upload.
         </p>
         <button onClick={onPick} className="cine-btn" style={btnPrimary}><Film size={17} /> Choose a video</button>
-        {error ? <p style={{ marginTop: 16, color: 'var(--space-semantic-danger, #ef4444)', fontSize: 13, fontWeight: 600 }}>{error}</p> : null}
+        {/* The failure is described rather than dumped: a wallet stop, a
+            refused model and a dropped connection need different next steps,
+            and Retry reopens the picker only when retrying can help. */}
+        {error ? (
+          <div style={{ marginTop: 18, maxWidth: 560, marginLeft: 'auto', marginRight: 'auto', textAlign: 'left' }}>
+            <VideoErrorCard error={error} subject="this edit" onRetry={onPick} compact />
+          </div>
+        ) : null}
 
         <div style={{ marginTop: 26 }}>
           <button onClick={() => setPrefsOpen(!prefsOpen)} className="cine-btn" style={{ ...btnGhost, fontSize: 12 }}>
@@ -238,7 +249,7 @@ function HomeView(props: {
               onChange={(e) => setPrefs({ ...prefs, tone: e.target.value })}
               placeholder="Anything you want the director to know? (tone, audience, must-keep moments) — optional"
               className="cine-input"
-              style={{ width: '100%', padding: '14px 20px', fontSize: 13, color: textPrimary, background: 'color-mix(in srgb, var(--space-surface-muted, #0a0a12) 78%, transparent)', border: '1px solid var(--space-border-default, rgba(245,158,11,0.18))', borderRadius: 999, outline: 'none', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '14px 20px', fontSize: 13, color: textPrimary, background: 'color-mix(in srgb, var(--space-surface-muted, #18150A) 78%, transparent)', border: '1px solid var(--space-border-default, rgba(245,158,11,0.18))', borderRadius: 999, outline: 'none', boxSizing: 'border-box' }}
             />
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <PrefSelect label="Captions" value={prefs.captions || 'auto'} options={['auto', 'on', 'off']} onChange={(v) => setPrefs({ ...prefs, captions: v as UserPrefs['captions'] })} />
@@ -270,7 +281,7 @@ function PrefSelect({ label, value, options, onChange }: { label: string; value:
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="cine-input"
-        style={{ padding: '8px 14px', fontSize: 12, color: textPrimary, background: 'color-mix(in srgb, var(--space-surface-muted, #0a0a12) 78%, transparent)', border: '1px solid var(--space-border-default, rgba(245,158,11,0.18))', borderRadius: 999 }}
+        style={{ padding: '8px 14px', fontSize: 12, color: textPrimary, background: 'color-mix(in srgb, var(--space-surface-muted, #18150A) 78%, transparent)', border: '1px solid var(--space-border-default, rgba(245,158,11,0.18))', borderRadius: 999 }}
       >
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>

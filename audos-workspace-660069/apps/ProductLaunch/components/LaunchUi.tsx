@@ -7,14 +7,14 @@
 
 import { Loader2 } from 'lucide-react';
 
-export const ACCENT = 'var(--space-brand-primary-500, #F59E0B)';
-export const ACCENT_SOFT = 'var(--space-brand-primary-100, rgba(245,158,11,0.14))';
-export const CYAN = 'var(--space-brand-highlight-500, #22D3EE)';
-export const TEXT = 'var(--space-text-primary, #FFFAF1)';
-export const MUTED = 'var(--space-text-muted, #BBA899)';
-export const BORDER = 'var(--space-border-default, rgba(245,158,11,0.18))';
-export const PANEL_BG = 'var(--space-surface-panel, #111120)';
-export const CARD_BG = 'var(--space-surface-card, #0D0D14)';
+export const ACCENT = 'var(--space-brand-primary-500, #D6AB4A)';
+export const ACCENT_SOFT = 'var(--space-brand-primary-100, rgba(214,171,74,0.12))';
+export const HIGHLIGHT = 'var(--space-brand-highlight-500, #F3D58B)';
+export const TEXT = 'var(--space-text-primary, #F6F3EB)';
+export const MUTED = 'var(--space-text-muted, #77736B)';
+export const BORDER = 'var(--space-border-default, rgba(255,255,255,0.07))';
+export const PANEL_BG = 'var(--space-surface-panel, #171A21)';
+export const CARD_BG = 'var(--space-surface-card, #111318)';
 
 export const PANEL: React.CSSProperties = {
   background: PANEL_BG,
@@ -45,13 +45,13 @@ export function PrimaryButton(props: {
         borderRadius: 12,
         border: 'none',
         background: disabled
-          ? 'rgba(180,120,0,0.12)'
-          : 'linear-gradient(135deg, ' + ACCENT + ' 0%, ' + CYAN + ' 100%)',
+          ? 'rgba(255,255,255,0.08)'
+          : 'linear-gradient(135deg, ' + ACCENT + ' 0%, ' + HIGHLIGHT + ' 100%)',
         color: disabled ? MUTED : 'var(--space-text-on-primary, #FFFFFF)',
         fontSize: 15,
         fontWeight: 700,
         letterSpacing: '-0.01em',
-        boxShadow: disabled ? 'none' : '0 0 24px rgba(200,146,10,0.25)',
+        boxShadow: disabled ? 'none' : '0 0 28px rgba(214,171,74,0.24)',
         cursor: disabled ? 'not-allowed' : 'pointer',
         transition: 'transform 120ms ease, opacity 120ms ease, box-shadow 200ms ease',
       }}
@@ -135,7 +135,7 @@ export const INPUT_STYLE: React.CSSProperties = {
   padding: '13px 15px',
   borderRadius: 12,
   border: '1px solid ' + BORDER,
-  background: 'var(--space-surface-muted, #0A0A12)',
+  background: 'var(--space-surface-muted, #0E1014)',
   color: TEXT,
   fontSize: 15,
   fontFamily: 'inherit',
@@ -200,7 +200,7 @@ export function StepRail(props: { steps: RailStep[]; activeIndex: number }) {
                   justifyContent: 'center',
                   fontSize: 11,
                   fontWeight: 800,
-                  background: active || done ? ACCENT : 'rgba(180,120,0,0.14)',
+                  background: active || done ? ACCENT : 'rgba(255,255,255,0.07)',
                   color: active || done ? 'var(--space-text-on-primary, #FFFFFF)' : MUTED,
                 }}
               >

@@ -1,7 +1,7 @@
 /**
  * VidVerge Create — shared UI primitives.
  *
- * A minimal dark-mode design system (Linear / Vercel energy): one blue
+ * A minimal dark-mode design system (Linear / Vercel energy): one warm gold
  * accent, quiet hairline borders, generous spacing, no visual noise. Colors
  * read from the --space-* theme tokens (workspace-branding source of truth)
  * with the brand values as fallbacks, so a future rebrand at the source

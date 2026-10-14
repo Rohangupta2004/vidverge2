@@ -3,71 +3,83 @@
  *
  * Every entry below is one selectable row in the lab's model grid, and every
  * `modelId` is the EXACT string the platform proxy accepts — a typo answers
- * 400 rather than falling back. The Kling, Higgsfield and native Runway
- * rosters plus most Group A entries are DERIVED from lib/videoEngines.ts. The
- * two OpenRouter-hosted Runway ids are lab-local because this app reaches them
- * through the unified proxy rather than the native Runway route. This file adds
- * the facts the lab itself needs: which platform plugin powers an entry, which
- * parameters it accepts, how many images it takes, and how long to wait.
+ * 400 rather than falling back. The Group A, native Runway and Higgsfield
+ * rosters are DERIVED from lib/videoEngines.ts; this file adds the facts the
+ * lab itself needs: which platform plugin powers an entry, which parameters
+ * it accepts, how many images it takes, and how long to wait.
  *
- * AVAILABILITY IS HONEST. An entry the platform cannot run ships
- * `available: false` with the reason and a working alternative instead of
- * being offered as a choice that only buys a 400 at submit time. That is why
- * Luma Dream Machine and Pika appear greyed out, and why the Runway roster
- * entries the proxy does not list stay disabled.
+ * THE CATALOG LISTS ONLY WHAT RUNS. An engine the platform has been seen
+ * refusing is removed rather than shipped greyed out — a disabled row is still
+ * a row a customer reads, compares and asks about. The 9 Oct 2026 live sweep
+ * (one minimal paid generation per entry, 4s / 720p / audio off, prompt "A red
+ * ball bouncing on a white floor.") is what decided which entries survived;
+ * LAB_VERIFIED at the bottom records each survivor's outcome and the cards
+ * show it, so the grid states what the platform actually did rather than what
+ * it is documented to do.
  *
- * LAST VERIFIED 9 Oct 2026 by a live end-to-end sweep (one minimal paid
- * generation per entry, 4s / 720p / audio off, prompt "A red ball bouncing on
- * a white floor."). Every outcome is recorded in LAB_VERIFIED at the bottom of
- * this file and shown on the cards, so the grid states what the platform
- * actually did rather than what it is documented to do. Three ids turned out
- * to be rejected outright by the proxy's model enum and are now disabled:
- * openrouter/bytedance/seedance-2.5-fast, runwayml/gen3a-turbo and
- * runwayml/gen4-turbo.
+ * Dropped as confirmed broken or shut down: Sora 2 and Sora 2 Pro, Veo 3.0,
+ * Veo 3.0 Fast and Veo 2.0 (the proxy answers 200 with a synthetic *_error_*
+ * id instead of a real job), Seedance 2.5 Fast and both OpenRouter-hosted
+ * Runway ids (not in the proxy's model enum), HeyGen, and the Luma / Pika
+ * placeholders. KLING went LIVE on 14 Oct 2026 (the founder's credit pack is
+ * active): kling-v2-master is discontinued upstream (502 wrapping Kling API
+ * error 404, code 1203), and Kling's own API docs (kling.ai/document-api,
+ * read 14 Oct 2026) list a NEW generation — kling-2.5-turbo, kling-2.6,
+ * kling-3.0, kling-3.0-omni. At the founder's request the lab lists the FULL
+ * Kling roster, including unverified and even the discontinued id, so they
+ * can run each one and see exactly what the proxy does — the one deliberate
+ * exception to the "only what runs" rule. Cards print the model actually
+ * used, because the proxy substitutes its default for ids it does not
+ * recognise (modelFallback). The
+ * broken Group A ids were deleted from lib/videoEngines.ts outright on
+ * 13 Oct 2026, so no app lists them anymore. Higgsfield is IN the lab:
+ * Hailuo 02 and the three DoP models were re-verified live on 13 Oct 2026.
+ * Six Higgsfield marketplace ids were trialled the same day and removed
+ * again — the proxy answers 200 but silently falls back to
+ * minimax-hailuo-02 and bills for it, so listing them would sell the wrong
+ * model. This catalog lists ONLY runnable entries: the greyed Runway roster
+ * placeholders stay in lib/videoEngines.ts for the other apps' pickers but
+ * are filtered out of the lab.
  *
  * Provider contracts, read from the platform integration docs:
  *   image-and-video-generation  POST /api/veo/generate/video    -> GET /api/veo/status/:operationId
  *   google-veo3 (managed)       POST /api/generate/video        -> GET /api/veo/status/:operationId
- *   kling-video                 POST /api/generate/kling/{text-to-video,image-to-video,multi-image}
- *                                                               -> GET /api/generate/kling/status/:taskId
- *   higgsfield-media            POST /api/generate/higgsfield/{video,image-to-video}
- *                                                               -> GET /api/generate/higgsfield/status/:requestId
- *   heygen-video                POST …/heygen/proxy/v3/{videos,video-agents}
- *                                                               -> GET …/heygen/proxy/v3/videos/:videoId
  *   runway-recipes              POST /api/generate/runway/video -> GET /api/generate/runway/status/:taskId
+ *   higgsfield-media            POST /api/generate/higgsfield/video (text-to-video)
+ *                               POST /api/generate/higgsfield/image-to-video (image attached)
+ *                               -> GET /api/generate/higgsfield/status/:requestId
+ *                               Wallet attribution needs x-app-id or workspaceId —
+ *                               the token alone answers 400 "no billable workspace".
+ *   kling-video                 POST /api/generate/kling/text-to-video
+ *                               POST /api/generate/kling/image-to-video (image attached)
+ *                               POST /api/generate/kling/multi-image (2-4 reference images, "Elements")
+ *                               POST /api/generate/kling/extend (lengthen a finished clip by ~5s)
+ *                               POST /api/generate/kling/lip-sync (add speech to a finished clip)
+ *                               -> GET /api/generate/kling/status/:taskId
+ *                               X-Workspace-DB-Token resolves the billable workspace.
  */
 
-import {
-  GROUP_A_MODELS,
-  KLING_MODELS,
-  HIGGSFIELD_VIDEO_MODELS,
-  RUNWAY_MODELS,
-} from '../../lib/videoEngines';
-import type { GroupAModel, KlingModel, HiggsfieldVideoModel, RunwayModel } from '../../lib/videoEngines';
+import { GROUP_A_MODELS, HIGGSFIELD_VIDEO_MODELS, KLING_MODELS, RUNWAY_MODELS } from '../../lib/videoEngines';
+import type { GroupAModel, HiggsfieldVideoModel, KlingModel, RunwayModel } from '../../lib/videoEngines';
 
 /** The installed platform plugin an entry is powered by. */
 export type LabPlugin =
   | 'image-and-video-generation'
   | 'google-veo3'
-  | 'kling-video'
+  | 'runway-recipes'
   | 'higgsfield-media'
-  | 'heygen-video'
-  | 'runway-recipes';
+  | 'kling-video';
 
 /** Which submit/poll pair in labClient.ts drives the entry. */
 export type LabRunner =
   | 'group-a'
   | 'veo-managed'
-  | 'kling'
-  | 'higgsfield-text'
-  | 'higgsfield-image'
-  | 'heygen-avatar'
-  | 'heygen-agent'
   | 'runway'
+  | 'higgsfield'
+  | 'kling'
   | 'unavailable';
 
-export type LabGroupId =
-  | 'bytedance' | 'google' | 'openai' | 'kling' | 'higgsfield' | 'heygen' | 'runway' | 'missing';
+export type LabGroupId = 'bytedance' | 'google' | 'runway' | 'higgsfield' | 'kling';
 
 /** 'multi' = 0 images runs text-to-video, 1 animates it, 2+ uses the
  *  multi-image/reference path where the model has one. */
@@ -81,13 +93,10 @@ export interface LabGroup {
 
 export const LAB_GROUPS: LabGroup[] = [
   { id: 'bytedance', label: 'ByteDance · Seedance', note: 'OpenRouter-hosted Seedance on the unified video proxy.' },
-  { id: 'google', label: 'Google · Veo & Gemini', note: 'Veo 3.1 / 3.0 / 2.0, the OpenRouter Veo variants, and Gemini Omni Flash.' },
-  { id: 'openai', label: 'OpenAI · Sora', note: 'Sora 2 and Sora 2 Pro through the same schema-validated proxy.' },
-  { id: 'kling', label: 'Kling AI', note: 'Text-to-video, image-to-video and Elements, plus extend and lip-sync on a finished clip.' },
-  { id: 'higgsfield', label: 'Higgsfield · MiniMax', note: 'MiniMax Hailuo 02 text-to-video and the DoP camera-motion image-to-video models.' },
-  { id: 'heygen', label: 'HeyGen', note: 'Avatar-led renders and the prompt-driven Video Agent.' },
-  { id: 'runway', label: 'Runway (OpenRouter + native)', note: 'Gen-3 Alpha Turbo and Gen-4 Turbo use the unified OpenRouter proxy; Gen 4.5 and native Gen 4 Turbo use the Runway proxy.' },
-  { id: 'missing', label: 'Requested, but not on this platform', note: 'No platform route exists for these, so the lab will not pretend to call one.' },
+  { id: 'google', label: 'Google · Veo & Gemini', note: 'Veo 3.1, the OpenRouter Veo 3.1 variants, and Gemini Omni Flash.' },
+  { id: 'runway', label: 'Runway', note: 'Gen 4.5 and Gen 4 Turbo on the native Runway proxy.' },
+  { id: 'higgsfield', label: 'Higgsfield', note: 'Native Audos Higgsfield proxy — MiniMax Hailuo text-to-video and the DoP camera-motion image-to-video models.' },
+  { id: 'kling', label: 'Kling AI', note: 'LIVE since 14 Oct 2026 (credit pack). Full roster on purpose — legacy kling-v1* ids plus the new 2.5/2.6/3.0 generation from Kling\u2019s current API docs — so you can test what the proxy actually accepts. Each card reports the model that actually rendered.' },
 ];
 
 export interface LabModeOption { id: string; label: string }
@@ -102,15 +111,23 @@ export interface LabParams {
   audio: boolean;
   negativePrompt: boolean;
   modes: LabModeOption[];
-  /** Kling cameraControl presets. */
+  /** Camera-motion preset dropdown. Declared by the standard Kling entries only. */
   camera: boolean;
+  /** Prompt-adherence slider (0-1). Kling generation entries. */
   cfgScale: boolean;
+  /** Optional integer seed for reproducibility. Kling generation entries. */
   seed: boolean;
+  /** Kling Elements: character consistency from 2-4 reference images. */
+  multiImage: boolean;
+  /** Kling Video Extend tool: lengthens a finished clip, identified by task ID. */
+  extend: boolean;
+  /** Kling Lip Sync tool: adds speech to a finished clip, identified by task ID. */
+  lipSync: boolean;
   /** Veo 3.1 / Omni Flash: the attached image can ride as a reference ingredient. */
   imageRole: boolean;
   /** Reference images this model accepts at once. */
   maxRefs: number;
-  /** HeyGen framing + voice speed. */
+  /** Presenter framing + voice speed. Unused by the current roster. */
   fit: boolean;
   voiceSpeed: boolean;
   /** Omni Flash: accepts a source video for direct video editing. */
@@ -127,6 +144,9 @@ const P = (over: Partial<LabParams> = {}): LabParams => ({
   camera: false,
   cfgScale: false,
   seed: false,
+  multiImage: false,
+  extend: false,
+  lipSync: false,
   imageRole: false,
   maxRefs: 0,
   fit: false,
@@ -182,7 +202,7 @@ interface GroupAExtra {
   unavailableReason?: string;
 }
 
-/** Only the Veo / Sora / Omni ids are documented in BOTH video plugins; the
+/** The Veo 3.1 and Omni ids are documented in BOTH video plugins; the
  *  OpenRouter-hosted ids appear only in the unified `image-and-video-generation`
  *  model enum, so they are attributed to that plugin alone. */
 const GROUP_A_EXTRA: Record<string, GroupAExtra> = {
@@ -199,41 +219,9 @@ const GROUP_A_EXTRA: Record<string, GroupAExtra> = {
     group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 300000, maxRefs: 3,
     styleNote: 'ingredients + last frame',
   },
-  'veo-3.0-generate-001': {
-    group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 300000, maxRefs: 0,
-    styleNote: 'cinematic realism',
-  },
-  'veo-3.0-fast-generate-001': {
-    group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 240000, maxRefs: 0,
-    styleNote: 'quick turnaround',
-  },
-  'veo-2.0-generate-001': {
-    group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 240000, maxRefs: 0,
-    styleNote: 'legacy / enhancePrompt',
-  },
-  'sora-2': {
-    group: 'openai', plugins: GROUP_A_PLUGINS_BOTH, capMs: 360000, maxRefs: 0,
-    styleNote: 'surreal + stylized',
-  },
-  'sora-2-pro': {
-    group: 'openai', plugins: GROUP_A_PLUGINS_BOTH, capMs: 420000, maxRefs: 0,
-    styleNote: 'showcase tier',
-  },
   'openrouter/bytedance/seedance-2.0-fast': {
     group: 'bytedance', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 300000, maxRefs: 0,
     styleNote: 'fast B-roll',
-  },
-  // Probed live 9 Oct 2026: the unified proxy answers 400 invalid_request for
-  // this id. It is catalogued in lib/videoEngines.ts but was never in the
-  // proxy's model enum, so offering it only buys a rejection at submit time.
-  'openrouter/bytedance/seedance-2.5-fast': {
-    group: 'bytedance', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 300000, maxRefs: 0,
-    styleNote: 'not in the proxy enum',
-    unavailableReason:
-      'POST /api/veo/generate/video answers 400 "Invalid request parameters" for '
-      + 'openrouter/bytedance/seedance-2.5-fast — the id is in this workspace\u2019s catalog but not in the '
-      + 'platform proxy\u2019s model enum (verified 9 Oct 2026). Use Seedance 2.0 Fast, which runs today on the '
-      + 'same route, and this entry unlocks the moment the platform adds 2.5 to the enum.',
   },
   'openrouter/google/veo-3.1': {
     group: 'google', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 300000, maxRefs: 0,
@@ -324,233 +312,6 @@ const VEO_MANAGED: LabModel = {
   available: true,
 };
 
-/** Probed live 9 Oct 2026: POST /api/veo/generate/video answers 400
- *  "Invalid request parameters" for BOTH OpenRouter-hosted Runway ids. They
- *  were catalogued here as runnable, which meant picking one bought a
- *  guaranteed rejection, so they now carry the reason and a working
- *  alternative. Nothing else about them changed — if the platform adds them to
- *  the unified proxy's model enum, flipping `available` back is a one-word
- *  edit and the runner already works. */
-const OPENROUTER_RUNWAY_UNAVAILABLE =
-  'The unified video proxy answers 400 "Invalid request parameters" for this id (verified 9 Oct 2026) — '
-  + 'OpenRouter-hosted Runway models are not in its model enum. Runway IS reachable on this platform, '
-  + 'just by its native route: use Runway Gen 4.5 or Runway Gen 4 Turbo in this same group, which go to '
-  + 'POST /api/generate/runway/video and are priced by the live Runway quote.';
-
-const OPENROUTER_RUNWAY_MODELS: LabModel[] = [
-  {
-    key: 'groupa:runwayml/gen3a-turbo',
-    modelId: 'runwayml/gen3a-turbo',
-    name: 'Runway Gen-3 Alpha Turbo',
-    provider: 'Runway (OpenRouter)',
-    group: 'runway',
-    plugins: ['image-and-video-generation'],
-    runner: 'group-a',
-    submitPath: 'POST /api/veo/generate/video',
-    statusPath: 'GET /api/veo/status/:operationId',
-    blurb: 'Runway Gen-3 Alpha Turbo routed through OpenRouter on the unified image-and-video generation proxy.',
-    specs: ['OpenRouter route', 'up to 10s', '720p / 1080p', 'text or seed image', 'fast tier'],
-    image: 'optional',
-    maxImages: 1,
-    params: P({
-      durations: [4, 5, 6, 8, 10],
-      aspectRatios: ['16:9', '9:16', '1:1'],
-      resolutions: ['720p', '1080p'],
-    }),
-    capMs: 300000,
-    costHint: 'OpenRouter pricing',
-    available: false,
-    unavailableReason: OPENROUTER_RUNWAY_UNAVAILABLE,
-  },
-  {
-    key: 'groupa:runwayml/gen4-turbo',
-    modelId: 'runwayml/gen4-turbo',
-    name: 'Runway Gen-4 Turbo',
-    provider: 'Runway (OpenRouter)',
-    group: 'runway',
-    plugins: ['image-and-video-generation'],
-    runner: 'group-a',
-    submitPath: 'POST /api/veo/generate/video',
-    statusPath: 'GET /api/veo/status/:operationId',
-    blurb: 'Runway Gen-4 Turbo routed through OpenRouter on the unified image-and-video generation proxy.',
-    specs: ['OpenRouter route', 'up to 10s', '720p / 1080p', 'text or seed image', 'fast tier'],
-    image: 'optional',
-    maxImages: 1,
-    params: P({
-      durations: [4, 5, 6, 8, 10],
-      aspectRatios: ['16:9', '9:16', '1:1'],
-      resolutions: ['720p', '1080p'],
-    }),
-    capMs: 300000,
-    costHint: 'OpenRouter pricing',
-    available: false,
-    unavailableReason: OPENROUTER_RUNWAY_UNAVAILABLE,
-  },
-];
-
-export function isOpenRouterRunwayModel(modelId: string): boolean {
-  return OPENROUTER_RUNWAY_MODELS.some((model) => model.modelId === modelId);
-}
-
-// ---------------------------------------------------------------------------
-// Kling — POST /api/generate/kling/*
-// ---------------------------------------------------------------------------
-
-const KLING_STD: LabModeOption[] = [{ id: 'std', label: 'Standard' }];
-const KLING_STD_PRO: LabModeOption[] = [{ id: 'std', label: 'Standard' }, { id: 'pro', label: 'Pro' }];
-
-interface KlingExtra { modes: LabModeOption[]; elements: boolean; masks: boolean }
-
-/** From the integration's own model table: v2-master is std-only, Elements
- *  needs v1-5 or later, and motion-brush masks stop at v1-6. */
-const KLING_EXTRA: Record<string, KlingExtra> = {
-  'kling-v2-master': { modes: KLING_STD, elements: true, masks: false },
-  'kling-v1-6': { modes: KLING_STD_PRO, elements: true, masks: true },
-  'kling-v1-5': { modes: KLING_STD_PRO, elements: true, masks: true },
-  'kling-v1': { modes: KLING_STD_PRO, elements: false, masks: true },
-};
-
-function fromKling(model: KlingModel): LabModel {
-  const extra = KLING_EXTRA[model.id] || { modes: KLING_STD_PRO, elements: false, masks: false };
-  return {
-    key: `kling:${model.id}`,
-    modelId: model.id,
-    name: model.name,
-    provider: 'Kling AI',
-    group: 'kling',
-    plugins: ['kling-video'],
-    runner: 'kling',
-    submitPath: extra.elements
-      ? 'POST /api/generate/kling/{text-to-video, image-to-video, multi-image}'
-      : 'POST /api/generate/kling/{text-to-video, image-to-video}',
-    statusPath: 'GET /api/generate/kling/status/:taskId',
-    blurb: `${model.blurb} The lab picks the route from the images you attach: none runs text-to-video, one runs image-to-video${extra.elements ? ', two to four runs Elements (multi-image)' : ''}.`,
-    specs: [
-      '5s or 10s',
-      extra.modes.length > 1 ? 'std or pro' : 'std only',
-      extra.elements ? 'Elements 2–4 refs' : 'text + single image',
-      'camera control',
-      'extend +5s · lip-sync',
-    ],
-    image: extra.elements ? 'multi' : 'optional',
-    maxImages: extra.elements ? 4 : 1,
-    params: P({
-      durations: [5, 10],
-      aspectRatios: ['16:9', '9:16', '1:1'],
-      negativePrompt: true,
-      modes: extra.modes,
-      camera: true,
-      cfgScale: true,
-      seed: true,
-    }),
-    capMs: 420000,
-    costHint: '$0.25–$1.25 / clip · extend + lip-sync $0.25 each',
-    available: true,
-  };
-}
-
-/** Kling's documented camera presets, plus the no-op the proxy defaults to. */
-export const KLING_CAMERA_PRESETS: LabModeOption[] = [
-  { id: '', label: 'Provider default' },
-  { id: 'zoom_in', label: 'Zoom in' },
-  { id: 'zoom_out', label: 'Zoom out' },
-  { id: 'pan_left', label: 'Pan left' },
-  { id: 'pan_right', label: 'Pan right' },
-  { id: 'tilt_up', label: 'Tilt up' },
-  { id: 'tilt_down', label: 'Tilt down' },
-  { id: 'push_in', label: 'Push in' },
-  { id: 'pull_out', label: 'Pull out' },
-];
-
-// ---------------------------------------------------------------------------
-// Higgsfield — POST /api/generate/higgsfield/*
-// ---------------------------------------------------------------------------
-
-function fromHiggsfield(model: HiggsfieldVideoModel): LabModel {
-  const textToVideo = model.mode === 'text-to-video';
-  return {
-    key: `higgsfield:${model.id}`,
-    modelId: model.id,
-    name: model.name,
-    provider: textToVideo ? 'MiniMax · Higgsfield' : 'Higgsfield',
-    group: 'higgsfield',
-    plugins: ['higgsfield-media'],
-    runner: textToVideo ? 'higgsfield-text' : 'higgsfield-image',
-    submitPath: textToVideo
-      ? 'POST /api/generate/higgsfield/video'
-      : 'POST /api/generate/higgsfield/image-to-video',
-    statusPath: 'GET /api/generate/higgsfield/status/:requestId',
-    blurb: textToVideo
-      ? `${model.blurb} Moderation can answer status "nsfw" — the lab reports that as its own outcome rather than a generic failure.`
-      : `${model.blurb} An image is required; the endpoint has no duration or aspect-ratio field, so the source image decides the frame.`,
-    specs: textToVideo
-      ? ['1–15s', '16:9 / 9:16', 'MiniMax Hailuo 02', 'cinematic', 'text → video']
-      : ['DoP camera motion', 'image → video', 'provider-set length', model.tier, 'seed supported'],
-    image: textToVideo ? 'none' : 'required',
-    maxImages: textToVideo ? 0 : 1,
-    params: P({
-      // Probed live 9 Oct 2026: Hailuo answers 400 "duration: 3 is not one of
-      // [6, 10]" for anything else, so only the two lengths it accepts are
-      // offered. The old [4, 5, 6, 8, 10] list made three of five picks fail.
-      durations: textToVideo ? [6, 10] : [],
-      aspectRatios: textToVideo ? ['16:9', '9:16', '1:1'] : [],
-      seed: true,
-    }),
-    capMs: 420000,
-    costHint: '$1.00 / clip',
-    available: true,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// HeyGen — the workspace credential proxy
-// ---------------------------------------------------------------------------
-
-const HEYGEN_AVATAR: LabModel = {
-  key: 'heygen:avatar',
-  modelId: 'heygen-avatar-v3',
-  name: 'HeyGen Avatar (v3)',
-  provider: 'HeyGen',
-  group: 'heygen',
-  plugins: ['heygen-video'],
-  runner: 'heygen-avatar',
-  submitPath: 'POST …/heygen/proxy/v3/videos',
-  statusPath: 'GET …/heygen/proxy/v3/videos/:videoId',
-  blurb: 'An avatar speaks your prompt. The lab reads the live look catalog, picks a look that carries both a default voice and a v3 engine, and reports which look and engine it used — no avatar or voice id is ever invented.',
-  specs: ['avatar-led', '720p / 1080p', '16:9 · 9:16 · 4:5 · 5:4 · 1:1', 'cover or contain', 'script ≤ 500 chars'],
-  image: 'none',
-  maxImages: 0,
-  params: P({
-    aspectRatios: ['16:9', '9:16', '4:5', '5:4', '1:1'],
-    resolutions: ['720p', '1080p'],
-    fit: true,
-    voiceSpeed: true,
-  }),
-  capMs: 480000,
-  costHint: 'billed against the workspace HeyGen plan',
-  available: true,
-};
-
-const HEYGEN_AGENT: LabModel = {
-  key: 'heygen:agent',
-  modelId: 'heygen-video-agent',
-  name: 'HeyGen Video Agent (prompt)',
-  provider: 'HeyGen',
-  group: 'heygen',
-  plugins: ['heygen-video'],
-  runner: 'heygen-agent',
-  submitPath: 'POST …/heygen/proxy/v3/video-agents',
-  statusPath: 'GET …/heygen/proxy/v3/videos/:videoId',
-  blurb: 'The prompt-driven Video Agent API: it takes a brief plus an orientation and composes the presenter video itself. The integration doc gives its request shape but not its response or poll shape, so the lab prints the raw creation response and then polls v3/videos/:id when an id is present.',
-  specs: ['prompt → presenter', 'portrait or landscape', 'mode generate', 'different API from v3/videos', 'response shape undocumented'],
-  image: 'none',
-  maxImages: 0,
-  params: P({ aspectRatios: ['16:9', '9:16'] }),
-  capMs: 480000,
-  costHint: 'billed against the workspace HeyGen plan',
-  available: true,
-};
-
 // ---------------------------------------------------------------------------
 // Runway — POST /api/generate/runway/video
 // ---------------------------------------------------------------------------
@@ -595,79 +356,284 @@ function fromRunway(model: RunwayModel): LabModel {
 }
 
 // ---------------------------------------------------------------------------
-// Requested providers with no platform route
+// Higgsfield — POST /api/generate/higgsfield/video
 // ---------------------------------------------------------------------------
 
-// Re-probed live 9 Oct 2026: runwayml/gen3a-turbo, runwayml/gen4-turbo and
-// openrouter/bytedance/seedance-2.5-fast all answer 400, so they are NOT in
-// the enum and are no longer listed here as if they were.
-const GROUP_A_ENUM_NOTE =
-  'the POST /api/veo/generate/video model enum is gemini-omni-flash-preview, veo-3.1-generate-preview, '
-  + 'veo-3.1-fast-generate-preview, veo-3.0-generate-001, veo-3.0-fast-generate-001, veo-2.0-generate-001, '
-  + 'sora-2, sora-2-pro, openrouter/bytedance/seedance-2.0-fast, openrouter/google/veo-3.1, '
-  + 'openrouter/google/veo-3.1-fast and openrouter/google/veo-3.1-lite';
+/** Per-second prices read from the founder's Higgsfield API page (9 Oct 2026).
+ *  The DoP models are priced per clip by the proxy. */
+const HIGGSFIELD_COST_HINT: Record<string, string> = {
+  'minimax-hailuo-02': '$0.065 / second',
+  'dop-turbo': 'per-clip DoP pricing — fast tier',
+  'dop-standard': 'per-clip DoP pricing — standard tier',
+  'dop-lite': 'per-clip DoP pricing — cheapest tier',
+};
 
-const MISSING_MODELS: LabModel[] = [
-  {
-    key: 'missing:luma',
-    modelId: '',
-    name: 'Luma Dream Machine',
-    provider: 'Luma AI',
-    group: 'missing',
-    plugins: [],
-    runner: 'unavailable',
-    submitPath: '—',
-    statusPath: '—',
-    blurb: 'Luma Dream Machine / Ray text-to-video and image-to-video.',
-    specs: ['no platform endpoint'],
-    image: 'none',
-    maxImages: 0,
-    params: P(),
-    capMs: 0,
-    costHint: '—',
-    available: false,
-    unavailableReason:
-      `No Luma integration exists in the platform catalog and no /api/generate/luma/* route is published, so there is nothing for the lab to call. The unified plugin cannot stand in either: ${GROUP_A_ENUM_NOTE} — a Luma id answers 400. Closest equivalents that run today: Veo 3.1 for cinematic text-to-video, or Kling v1.5 / Runway Gen 4 Turbo for image-to-video.`,
-  },
-  {
-    key: 'missing:pika',
-    modelId: '',
-    name: 'Pika',
-    provider: 'Pika Labs',
-    group: 'missing',
-    plugins: [],
-    runner: 'unavailable',
-    submitPath: '—',
-    statusPath: '—',
-    blurb: 'Pika text-to-video and Pikaffects-style image animation.',
-    specs: ['no platform endpoint'],
-    image: 'none',
-    maxImages: 0,
-    params: P(),
-    capMs: 0,
-    costHint: '—',
-    available: false,
-    unavailableReason:
-      `No Pika integration exists in the platform catalog and no /api/generate/pika/* route is published. The unified plugin does not carry a Pika id either: ${GROUP_A_ENUM_NOTE}. Closest equivalents that run today: Seedance 2.0 Fast for quick stylized clips, or Higgsfield DoP Turbo for camera-motion image animation.`,
-  },
+/** Clip lengths per model. MiniMax Hailuo accepts ONLY 6 or 10 seconds — any
+ *  other value answers 400 "duration: N is not one of [6, 10]" upstream, which
+ *  the proxy surfaces as a 502 with the wallet charge auto-refunded (hit live
+ *  13 Oct 2026 with duration 4). The DoP image-to-video route takes no
+ *  duration at all — the provider decides — so those entries offer no length
+ *  control. */
+const HIGGSFIELD_DURATIONS: Record<string, number[]> = {
+  'minimax-hailuo-02': [6, 10],
+};
+
+function fromHiggsfield(model: HiggsfieldVideoModel): LabModel {
+  const imageRequired = model.mode === 'image-to-video';
+  const durations = imageRequired ? [] : (HIGGSFIELD_DURATIONS[model.id] || [4, 6, 8]);
+  return {
+    key: `higgsfield:${model.id}`,
+    modelId: model.id,
+    name: model.name,
+    provider: 'Higgsfield',
+    group: 'higgsfield',
+    plugins: ['higgsfield-media'],
+    runner: 'higgsfield',
+    // Text-to-video and image-to-video are separate endpoints on this proxy;
+    // the runner switches to image-to-video whenever an image is attached.
+    submitPath: imageRequired
+      ? 'POST /api/generate/higgsfield/image-to-video'
+      : 'POST /api/generate/higgsfield/video',
+    statusPath: 'GET /api/generate/higgsfield/status/:requestId',
+    blurb: model.blurb,
+    specs: [
+      imageRequired ? 'image → video' : 'text or image → video',
+      durations.length ? `${durations.join(' / ')}s` : 'provider-set length',
+      'provider-set resolution',
+      model.tier,
+    ],
+    image: imageRequired ? 'required' : 'optional',
+    maxImages: 1,
+    params: P({
+      durations,
+      aspectRatios: ['16:9', '9:16', '1:1'],
+    }),
+    capMs: 360000,
+    costHint: HIGGSFIELD_COST_HINT[model.id] || 'per-second Higgsfield pricing',
+    available: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Kling — POST /api/generate/kling/text-to-video
+//         POST /api/generate/kling/image-to-video
+// ---------------------------------------------------------------------------
+
+function fromKling(model: KlingModel): LabModel {
+  // Modes come from the roster facts: the legacy model_name ids take std/pro,
+  // the 2.5+ model-scoped ids take no mode field at all.
+  const modes: LabModeOption[] = (model.modes || []).map((mode) => (
+    mode === 'pro' ? { id: 'pro', label: 'Pro' } : { id: 'std', label: 'Standard' }
+  ));
+  const durations = model.durations || [5, 10];
+  return {
+    key: `kling:${model.id}`,
+    modelId: model.id,
+    name: model.name,
+    provider: 'Kling AI',
+    group: 'kling',
+    plugins: ['kling-video'],
+    runner: 'kling',
+    submitPath: 'POST /api/generate/kling/text-to-video',
+    statusPath: 'GET /api/generate/kling/status/:taskId',
+    blurb: model.blurb,
+    specs: [
+      durations.map((seconds) => `${seconds}s`).join(' / '),
+      '16:9 / 9:16 / 1:1',
+      'text or image → video',
+      model.tier,
+      ...(modes.length ? ['std / pro modes'] : []),
+      ...(model.audio ? ['native audio upstream'] : []),
+      ...(model.discontinued ? ['DISCONTINUED upstream'] : []),
+    ],
+    image: 'optional',
+    maxImages: 1,
+    params: P({
+      durations,
+      aspectRatios: ['16:9', '9:16', '1:1'],
+      negativePrompt: true,
+      modes,
+      camera: true,
+      seed: true,
+    }),
+    capMs: 300_000,
+    costHint: 'proxy billing from $0.25 / 5s clip (std t2v); i2v from $0.28',
+    available: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Kling camera control — sent as `cameraControl` on text-to-video and
+// image-to-video. Each preset moves exactly one axis; "Static" holds the
+// camera still. Whether a given model honours it is the proxy's call — a
+// refusal is shown verbatim on the card.
+// ---------------------------------------------------------------------------
+
+export interface KlingCameraConfig {
+  horizontal: number;
+  vertical: number;
+  pan: number;
+  tilt: number;
+  roll: number;
+  zoom: number;
+}
+
+export interface LabCameraPreset {
+  id: string;
+  label: string;
+  /** null = send no cameraControl at all. */
+  config: KlingCameraConfig | null;
+}
+
+export const KLING_CAMERA_CONTROL_TYPE = 'preset';
+
+const CAMERA_AXES: KlingCameraConfig = { horizontal: 0, vertical: 0, pan: 0, tilt: 0, roll: 0, zoom: 0 };
+
+export const CAMERA_PRESETS: LabCameraPreset[] = [
+  { id: 'none', label: 'None', config: null },
+  { id: 'zoom_in', label: 'Zoom In', config: { ...CAMERA_AXES, zoom: -5 } },
+  { id: 'zoom_out', label: 'Zoom Out', config: { ...CAMERA_AXES, zoom: 5 } },
+  { id: 'pan_left', label: 'Pan Left', config: { ...CAMERA_AXES, pan: -5 } },
+  { id: 'pan_right', label: 'Pan Right', config: { ...CAMERA_AXES, pan: 5 } },
+  { id: 'tilt_up', label: 'Tilt Up', config: { ...CAMERA_AXES, tilt: 5 } },
+  { id: 'tilt_down', label: 'Tilt Down', config: { ...CAMERA_AXES, tilt: -5 } },
+  { id: 'static', label: 'Static', config: { ...CAMERA_AXES } },
 ];
+
+/** The `cameraControl` body field for a preset id, or null when none applies. */
+export function klingCameraControl(presetId: string | null | undefined): { type: string; config: KlingCameraConfig } | null {
+  const preset = CAMERA_PRESETS.find((item) => item.id === String(presetId || ''));
+  if (!preset || !preset.config) return null;
+  return { type: KLING_CAMERA_CONTROL_TYPE, config: { ...preset.config } };
+}
+
+// ---------------------------------------------------------------------------
+// Kling Elements — POST /api/generate/kling/multi-image
+// ---------------------------------------------------------------------------
+
+/** The models the proxy takes on the multi-image route, in display order. */
+const KLING_MULTI_IMAGE_IDS = ['kling-v1-5', 'kling-v1-6', 'kling-2.6', 'kling-3.0', 'kling-3.0-omni'];
+
+function fromKlingMultiImage(model: KlingModel): LabModel {
+  const modes: LabModeOption[] = (model.modes || []).map((mode) => (
+    mode === 'pro' ? { id: 'pro', label: 'Pro' } : { id: 'std', label: 'Standard' }
+  ));
+  return {
+    key: `kling-multi:${model.id}`,
+    modelId: model.id,
+    name: `${model.name} \u2014 Elements (Multi-image)`,
+    provider: 'Kling AI',
+    group: 'kling',
+    plugins: ['kling-video'],
+    runner: 'kling',
+    submitPath: 'POST /api/generate/kling/multi-image',
+    statusPath: 'GET /api/generate/kling/status/:taskId',
+    blurb: 'Character consistency from 2\u20134 reference images. Ideal for series and ad creative where the same character must appear across scenes.',
+    specs: [
+      '2\u20134 reference images',
+      '5s / 10s',
+      '16:9 / 9:16 / 1:1',
+      model.tier,
+      ...(modes.length ? ['std / pro modes'] : []),
+    ],
+    image: 'multi',
+    maxImages: 4,
+    params: P({
+      multiImage: true,
+      durations: [5, 10],
+      aspectRatios: ['16:9', '9:16', '1:1'],
+      negativePrompt: true,
+      modes,
+    }),
+    capMs: 360_000,
+    costHint: 'per-clip Kling proxy billing',
+    available: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Kling tools — act on a clip that already finished, identified by task ID
+// ---------------------------------------------------------------------------
+
+const KLING_EXTEND: LabModel = {
+  key: 'kling-extend',
+  modelId: '',
+  name: 'Kling \u2014 Video Extend',
+  provider: 'Kling AI',
+  group: 'kling',
+  plugins: ['kling-video'],
+  runner: 'kling',
+  submitPath: 'POST /api/generate/kling/extend',
+  statusPath: 'GET /api/generate/kling/status/:taskId',
+  blurb: 'Paste the task ID of any finished Kling clip to lengthen it by ~5 seconds. Costs $0.25 per extend.',
+  specs: ['+~5s per extend', 'finished clip task ID', 'no model selector', 'optional prompt'],
+  image: 'none',
+  maxImages: 0,
+  params: P({ extend: true }),
+  capMs: 360_000,
+  costHint: '$0.25 / extend',
+  available: true,
+};
+
+const KLING_LIPSYNC: LabModel = {
+  key: 'kling-lipsync',
+  modelId: '',
+  name: 'Kling \u2014 Lip Sync',
+  provider: 'Kling AI',
+  group: 'kling',
+  plugins: ['kling-video'],
+  runner: 'kling',
+  submitPath: 'POST /api/generate/kling/lip-sync',
+  statusPath: 'GET /api/generate/kling/status/:taskId',
+  blurb: 'Add speech to any finished Kling clip. Type text for TTS, or paste an audio URL. Costs $0.25 per sync.',
+  specs: ['finished clip task ID', 'text-to-speech or audio URL', 'voice + language', 'no model selector'],
+  image: 'none',
+  maxImages: 0,
+  params: P({ lipSync: true, voiceSpeed: true }),
+  capMs: 360_000,
+  costHint: '$0.25 / sync',
+  available: true,
+};
+
+/** True for the entries that act on a finished clip rather than generate one. */
+export function isKlingTool(model: LabModel): boolean {
+  return model.params.extend || model.params.lipSync;
+}
 
 // ---------------------------------------------------------------------------
 // The catalog
 // ---------------------------------------------------------------------------
 
 export const LAB_MODELS: LabModel[] = [
+  // ByteDance · Seedance
   ...GROUP_A_MODELS.filter((model) => GROUP_A_EXTRA[model.id]?.group === 'bytedance').map(fromGroupA),
-  ...GROUP_A_MODELS.filter((model) => (GROUP_A_EXTRA[model.id]?.group || 'google') === 'google').map(fromGroupA),
+  // Google · the Veo 3.1 family and Omni Flash. An id GROUP_A_EXTRA no longer
+  // carries was dropped from this catalog deliberately, so the empty-string
+  // default keeps it out rather than letting it fall through to Google.
+  ...GROUP_A_MODELS.filter((model) => (GROUP_A_EXTRA[model.id]?.group || '') === 'google').map(fromGroupA),
   VEO_MANAGED,
-  ...GROUP_A_MODELS.filter((model) => GROUP_A_EXTRA[model.id]?.group === 'openai').map(fromGroupA),
-  ...KLING_MODELS.map(fromKling),
+  // Runway (native) — only the ids the proxy actually accepts. The greyed-out
+  // roster placeholders stay in lib/videoEngines.ts for the other apps' pickers
+  // (they auto-unlock via the live capabilities sync), but this catalog lists
+  // only what runs.
+  ...RUNWAY_MODELS.filter((model) => model.type === 'video' && model.available).map(fromRunway),
+  // Higgsfield — the 4 models verified working live on 13 Oct 2026.
   ...HIGGSFIELD_VIDEO_MODELS.map(fromHiggsfield),
-  HEYGEN_AVATAR,
-  HEYGEN_AGENT,
-  ...OPENROUTER_RUNWAY_MODELS,
-  ...RUNWAY_MODELS.filter((model) => model.type === 'video').map(fromRunway),
-  ...MISSING_MODELS,
+  // Kling AI — key LIVE since 14 Oct 2026 (credit pack). The FULL roster is
+  // listed deliberately at the founder's request — legacy ids plus the new
+  // 2.5/2.6/3.0 generation from Kling's own API docs, and even the
+  // discontinued v2-master — so each one can be run to see what the proxy
+  // actually accepts. The comingSoon flag is ignored HERE on purpose; general
+  // pickers elsewhere still honor it. Cards print the model actually used.
+  ...KLING_MODELS.map(fromKling),
+  // Kling Elements — character consistency from 2-4 reference images.
+  ...KLING_MULTI_IMAGE_IDS
+    .map((id) => KLING_MODELS.find((model) => model.id === id))
+    .filter((model): model is KlingModel => Boolean(model))
+    .map(fromKlingMultiImage),
+  // Kling tools — shown last in the Kling group under a "Tools" separator.
+  KLING_EXTEND,
+  KLING_LIPSYNC,
 ];
 
 /** Seedance is the entry the founder has already seen produce a clip, so the
@@ -685,6 +651,9 @@ export function labModelsInGroup(group: LabGroupId): LabModel[] {
 /** 'Text → video' / 'Image → video' / 'Text or image → video' for a card. */
 export function labInputLabel(model: LabModel): string {
   if (model.image === 'required') return 'Image → video';
+  if (model.params.extend) return 'Task ID → longer clip';
+  if (model.params.lipSync) return 'Task ID + text or audio → lip-synced clip';
+  if (model.params.multiImage) return `2\u2013${model.maxImages} reference images → video`;
   if (model.image === 'none') return 'Text → video';
   if (model.image === 'multi') return `Text, image or ${model.maxImages} refs → video`;
   return 'Text or image → video';
@@ -694,10 +663,9 @@ export function pluginLabel(plugin: LabPlugin): string {
   switch (plugin) {
     case 'image-and-video-generation': return 'image-and-video-generation';
     case 'google-veo3': return 'google-veo3';
-    case 'kling-video': return 'kling-video';
-    case 'higgsfield-media': return 'higgsfield-media';
-    case 'heygen-video': return 'heygen-video';
     case 'runway-recipes': return 'runway-recipes';
+    case 'higgsfield-media': return 'higgsfield-media';
+    case 'kling-video': return 'kling-video';
     default: return String(plugin);
   }
 }
@@ -732,33 +700,40 @@ export const LAB_VERIFIED: Record<string, VerifiedResult> = {
   'groupa:gemini-omni-flash-preview': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
   'groupa:veo-3.1-generate-preview': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
   'groupa:veo-3.1-fast-generate-preview': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
-  'groupa:veo-3.0-generate-001': { outcome: 'fail', note: 'The proxy answered 200 with the synthetic id veo_video_error_…, which means the upstream Veo submission was refused. Platform-side and likely transient — Veo 3.1 and 3.1 Fast both work.' },
-  'groupa:veo-3.0-fast-generate-001': { outcome: 'fail', note: 'The proxy answered 200 with the synthetic id veo_video_error_…, which means the upstream Veo submission was refused. Platform-side and likely transient — Veo 3.1 Fast is the working stand-in.' },
-  'groupa:veo-2.0-generate-001': { outcome: 'fail', note: 'The proxy answered 200 with the synthetic id veo_video_error_…, which means the upstream Veo submission was refused. Platform-side and likely transient.' },
-  'groupa:sora-2': { outcome: 'fail', note: 'The proxy answered 200 with the synthetic id sora_error_…, which means the upstream Sora submission was refused. Platform-side — no request shape fixes it from here.' },
-  'groupa:sora-2-pro': { outcome: 'fail', note: 'The proxy answered 200 with the synthetic id sora_error_…, which means the upstream Sora submission was refused. Platform-side — no request shape fixes it from here.' },
   'groupa:openrouter/bytedance/seedance-2.0-fast': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
-  'groupa:openrouter/bytedance/seedance-2.5-fast': { outcome: 'fail', note: '400 "Invalid request parameters" — this id is not in the unified proxy\u2019s model enum. Disabled here; use Seedance 2.0 Fast.' },
   'groupa:openrouter/google/veo-3.1': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
   'groupa:openrouter/google/veo-3.1-fast': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
   'groupa:openrouter/google/veo-3.1-lite': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
-  'groupa:runwayml/gen3a-turbo': { outcome: 'fail', note: '400 "Invalid request parameters" — not in the unified proxy\u2019s model enum. Disabled here; use native Runway Gen 4.5.' },
-  'groupa:runwayml/gen4-turbo': { outcome: 'fail', note: '400 "Invalid request parameters" — not in the unified proxy\u2019s model enum. Disabled here; use native Runway Gen 4 Turbo.' },
   'veo-managed': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4 from the server-pinned Veo 3.1.' },
-  'kling:kling-v2-master': { outcome: 'fail', note: '503 — “Kling is not configured on this platform (KLING_API_KEY missing).” The models catalogue still answers 200 with a static list, so only a submit reveals this.' },
-  'kling:kling-v1-6': { outcome: 'fail', note: '503 — “Kling is not configured on this platform (KLING_API_KEY missing).” The models catalogue still answers 200 with a static list, so only a submit reveals this.' },
-  'kling:kling-v1-5': { outcome: 'fail', note: '503 — “Kling is not configured on this platform (KLING_API_KEY missing).” The models catalogue still answers 200 with a static list, so only a submit reveals this.' },
-  'kling:kling-v1': { outcome: 'fail', note: '503 — “Kling is not configured on this platform (KLING_API_KEY missing).” The models catalogue still answers 200 with a static list, so only a submit reveals this.' },
-  'higgsfield:minimax-hailuo-02': { outcome: 'pass', note: 'Submitted at 6s, rendered and returned a playable MP4. Durations other than 6 and 10 are refused.' },
-  'higgsfield:dop-turbo': { outcome: 'pass', note: 'Submitted from a public image URL, rendered and returned a playable MP4.' },
-  'higgsfield:dop-standard': { outcome: 'pass', note: 'Submitted from a public image URL, rendered and returned a playable MP4.' },
-  'higgsfield:dop-lite': { outcome: 'pass', note: 'Submitted from a public image URL, rendered and returned a playable MP4.' },
   'runway:gen4.5': { outcome: 'inconclusive', note: 'The free quote answered 200 and priced a 2s clip at $0.24, so the model and the proxy are live. The paid submit needs the browser X-Workspace-DB-Token, which the server-side harness cannot mint — run it from this panel to confirm end to end.' },
   'runway:gen4_turbo': { outcome: 'inconclusive', note: 'The free quote answered 200 and priced a 2s clip at $0.10, so the model and the proxy are live. The paid submit needs the browser X-Workspace-DB-Token — run it from this panel to confirm end to end.' },
-  'heygen:avatar': { outcome: 'inconclusive', note: 'The HeyGen credential proxy answered 401 “Same-origin request required” to the server-side harness. It is reachable only from this page — run it from this panel to confirm.' },
-  'heygen:agent': { outcome: 'inconclusive', note: 'Same as the HeyGen avatar entry: the credential proxy is same-origin only, so it can only be verified from this panel.' },
-  'missing:luma': { outcome: 'no-endpoint', note: 'No Luma route exists on this platform, so nothing was called.' },
-  'missing:pika': { outcome: 'no-endpoint', note: 'No Pika route exists on this platform, so nothing was called.' },
+  'higgsfield:minimax-hailuo-02': { outcome: 'pass', note: 'Re-verified live 13 Oct 2026 — a 6s submit rendered and returned a playable MP4. Durations other than 6 or 10 answer 400.' },
+  'higgsfield:dop-turbo': { outcome: 'pass', note: 'Re-verified live 13 Oct 2026 — rendered a playable MP4 from a source image. Higgsfield refuses inline images today, so the lab stages the attachment to workspace storage first.' },
+  'higgsfield:dop-standard': { outcome: 'pass', note: 'Re-verified live 13 Oct 2026 — rendered a playable MP4 from a source image (staged to workspace storage first).' },
+  'higgsfield:dop-lite': { outcome: 'pass', note: 'Re-verified live 13 Oct 2026 — rendered a playable MP4 from a source image (staged to workspace storage first).' },
+  'kling:kling-v2-master': { outcome: 'fail', note: 'Discontinued upstream: a live 14 Oct 2026 submit answered 502 wrapping Kling API error (404, code 1203) "The model has been discontinued". The wallet charge auto-refunded. Pick Kling 2.6 or 3.0 instead.' },
+  'kling:kling-v1-6': { outcome: 'inconclusive', note: 'The Kling key went LIVE 14 Oct 2026 (credit pack) — submits now reach Kling. This legacy id has not returned a clip yet and may be retired upstream like v2-master; run it from this panel to find out.' },
+  'kling:kling-v1-5': { outcome: 'inconclusive', note: 'Key live 14 Oct 2026 (credit pack). The proxy default tier — not yet proven end to end; run it from this panel.' },
+  'kling:kling-v1': { outcome: 'inconclusive', note: 'Key live 14 Oct 2026 (credit pack). Oldest legacy id — not yet proven end to end; run it from this panel.' },
+  'kling:kling-2.5-turbo': { outcome: 'inconclusive', note: 'Current id in Kling\u2019s own API docs (read 14 Oct 2026). The platform proxy\u2019s static catalogue does not list it yet — if the proxy substitutes its default, this card will name the model that actually rendered.' },
+  'kling:kling-2.6': { outcome: 'inconclusive', note: 'Current id in Kling\u2019s own API docs (read 14 Oct 2026) — text/image → video with native audio upstream. Unlisted in the proxy\u2019s static catalogue; the card reports the model actually used.' },
+  'kling:kling-3.0': { outcome: 'inconclusive', note: 'Kling\u2019s current flagship per the 14 Oct 2026 API docs (multi-shot prompts, up to 4K / 3–15s upstream). Unlisted in the proxy\u2019s static catalogue; the card reports the model actually used.' },
+  'kling:kling-3.0-omni': { outcome: 'inconclusive', note: 'Kling\u2019s omni multi-modal id per the 14 Oct 2026 API docs. Unlisted in the proxy\u2019s static catalogue; the card reports the model actually used.' },
+};
+
+KLING_MULTI_IMAGE_IDS.forEach((id) => {
+  LAB_VERIFIED[`kling-multi:${id}`] = {
+    outcome: 'inconclusive',
+    note: 'Elements (multi-image) route added 14 Oct 2026 — not yet run end to end. Needs 2\u20134 reference images, so the smoke sweep skips it; run it from the chat with images attached.',
+  };
+});
+LAB_VERIFIED['kling-extend'] = {
+  outcome: 'inconclusive',
+  note: 'Added 14 Oct 2026 — needs the task ID of a finished Kling clip, so the smoke sweep skips it; paste an ID in the Kling controls to run it ($0.25).',
+};
+LAB_VERIFIED['kling-lipsync'] = {
+  outcome: 'inconclusive',
+  note: 'Added 14 Oct 2026 — needs the task ID of a finished Kling clip plus text or an audio URL, so the smoke sweep skips it; run it from the Kling controls ($0.25).',
 };
 
 export function labVerified(key: string): VerifiedResult | null {
@@ -776,8 +751,20 @@ export interface LabRunInput {
   audio: boolean;
   mode: string;
   camera: string;
+  /** 'none' | 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'tilt_up' | 'tilt_down' | 'static' */
+  cameraPreset: string;
+  /** Kling prompt adherence, 0-1. */
   cfgScale: number;
-  seed: string;
+  /** Kling reproducibility seed; null = random. */
+  seed: number | null;
+  /** Extend and Lip Sync: the task ID of the finished clip to act on. */
+  sourceTaskId: string;
+  /** Lip Sync: text for text-to-speech. */
+  lipSyncText: string;
+  /** Lip Sync: audio URL, used instead of text. */
+  lipSyncAudioUrl: string;
+  voiceId: string;
+  language: string;
   /** 'seed' sends the first image as imageData; 'reference' sends the
    *  attached images as referenceImages ingredients. */
   imageRole: 'seed' | 'reference';
@@ -801,8 +788,14 @@ export function defaultRunInput(model: LabModel, prompt: string): LabRunInput {
     audio: false,
     mode: params.modes[0]?.id ?? '',
     camera: '',
+    cameraPreset: 'none',
     cfgScale: 0.5,
-    seed: '',
+    seed: null,
+    sourceTaskId: '',
+    lipSyncText: '',
+    lipSyncAudioUrl: '',
+    voiceId: '',
+    language: '',
     imageRole: 'seed',
     fit: 'cover',
     voiceSpeed: 1,
@@ -829,6 +822,9 @@ export function retargetRunInput(input: LabRunInput, model: LabModel): LabRunInp
     audio: params.audio ? input.audio : false,
     mode: keep(input.mode, params.modes.map((option) => option.id), params.modes[0]?.id ?? ''),
     camera: params.camera ? input.camera : '',
+    cameraPreset: params.camera ? input.cameraPreset : 'none',
+    cfgScale: params.cfgScale ? input.cfgScale : 0.5,
+    seed: params.seed ? input.seed : null,
     negativePrompt: params.negativePrompt ? input.negativePrompt : '',
     imageRole: params.imageRole ? input.imageRole : 'seed',
     videoInput: model.params.videoUpload ? input.videoInput : '',
@@ -863,9 +859,17 @@ export function describeImageNotice(model: LabModel, input: LabRunInput): string
  *  Call it with effectiveRunInput(model, input), not the raw shared input. */
 export function describeRunBlock(model: LabModel, input: LabRunInput): string | null {
   if (!model.available) return model.unavailableReason || `${model.name} is not available on this platform.`;
+  if (model.params.extend || model.params.lipSync) {
+    if (!input.sourceTaskId.trim()) {
+      return `${model.name} acts on a finished clip — paste its Kling task ID first.`;
+    }
+    if (model.params.lipSync && !input.lipSyncText.trim() && !input.lipSyncAudioUrl.trim()) {
+      return 'Lip Sync needs either text to speak or an audio URL.';
+    }
+    return null;
+  }
   const prompt = input.prompt.trim();
-  const needsPrompt = model.runner !== 'higgsfield-image';
-  if (needsPrompt && prompt.length < 10) return 'This endpoint needs a prompt of at least 10 characters.';
+  if (prompt.length < 10) return 'This endpoint needs a prompt of at least 10 characters.';
   if (model.image === 'required' && input.images.length === 0) {
     return `${model.name} is an image-to-video model — attach one image to run it.`;
   }
@@ -874,8 +878,8 @@ export function describeRunBlock(model: LabModel, input: LabRunInput): string | 
       ? `${model.name} takes no image input — it would be ignored.`
       : `${model.name} accepts at most ${model.maxImages} image${model.maxImages === 1 ? '' : 's'}.`;
   }
-  if (model.runner === 'kling' && input.images.length >= 2 && model.image !== 'multi') {
-    return `${model.name} has no Elements route — use Kling v1.5 or later for 2–4 reference images.`;
+  if (model.params.multiImage && input.images.length < 2) {
+    return `${model.name} needs 2\u2013${model.maxImages} reference images — attach at least 2.`;
   }
   return null;
 }

@@ -88,6 +88,8 @@ export interface Scene {
   video_prompt?: string | null;
   /** Structured motion-graphic scene spec (layout kind, title, items, stat…) written by the orchestrator. Deterministic source for the GSAP+SVG engine. */
   spec?: Record<string, unknown> | null;
+  /** Structured compositor payload. video_backed_graphic stores its background clip metadata plus independently animated ElementComposition layers here. */
+  composition_spec?: Record<string, unknown> | null;
   /** Native supporting-media audio stays under the uninterrupted HeyGen master. */
   audio_muted?: boolean; audio_volume?: number;
   /** Fields explicitly edited by the user; replanning preserves them. */

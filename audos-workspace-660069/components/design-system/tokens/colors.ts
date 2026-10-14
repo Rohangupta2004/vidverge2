@@ -1,49 +1,47 @@
 /**
  * VidVerge LightBeam — color tokens.
  *
- * Black space + flowing gold-amber energy. Every LightBeam component reads its
+ * Deep space + flowing gold energy. Every LightBeam component reads its
  * colors from here; nothing hardcodes a hex value of its own.
  *
  * These values are mirrored into the shell's `--space-*` CSS variables in
- * config.json, so the dock, the agent chat and Settings stay on the identical
- * palette. When one changes, change both.
+ * config.json and into components/theme.ts, so the dock, the agent chat and
+ * Settings stay on the identical palette. When one changes, change all three.
  *
- * TWO SURFACES DELIBERATELY DO NOT INHERIT THIS, and neither is a bug:
+ * ONE SURFACE DELIBERATELY DOES NOT INHERIT THIS, and it is not a bug:
  * `components/EmailGate.tsx` runs the "Prismatic Refraction" landing palette
- * (a #06060f canvas with a spectral pink-to-violet gradient) and
- * `apps/VFXDropSite/App.tsx` runs a violet/cyan microsite palette. Both are
- * marketing pages with their own art direction, each declares its colours at
- * the top of its own file, and neither should be "corrected" back to gold
- * without the founder asking for it.
+ * (a #0D0B05 canvas with its own spectral gradient). It is a
+ * marketing page with its own art direction, it declares its colours at the
+ * top of its own file, and it already sits in the same dark gold family.
  */
 export const colors = {
   // Backgrounds
-  bgPrimary: '#080808',
-  bgSurface: '#0f0f0f',
+  bgPrimary: '#0D0B05',
+  bgSurface: '#15120A',
   bgGlass: 'rgba(255,255,255,0.03)',
   bgGlassHover: 'rgba(255,255,255,0.06)',
 
   // Light beam system
   beamCore: '#ffffff',           // white-hot center
-  beamPrimary: '#f5b936',        // gold/amber beam
-  beamGlow: 'rgba(245,185,54,0.15)',
-  beamTrail: 'rgba(245,185,54,0.06)',
-  beamDim: 'rgba(245,185,54,0.03)',
+  beamPrimary: '#D4920A',        // gold beam
+  beamGlow: 'rgba(212,146,10,0.18)',
+  beamTrail: 'rgba(212,146,10,0.07)',
+  beamDim: 'rgba(212,146,10,0.03)',
 
   // Borders
-  borderSubtle: 'rgba(255,255,255,0.06)',
-  borderActive: 'rgba(245,185,54,0.4)',
-  borderBeam: '#f5b936',
+  borderSubtle: 'rgba(255,200,50,0.08)',
+  borderActive: 'rgba(212,146,10,0.45)',
+  borderBeam: '#D4920A',
 
   // Text
-  textPrimary: '#f0f0f0',
-  textSecondary: 'rgba(240,240,240,0.5)',
-  textDim: 'rgba(240,240,240,0.25)',
+  textPrimary: '#F5E9C8',
+  textSecondary: 'rgba(245,233,200,0.6)',
+  textDim: 'rgba(245,233,200,0.3)',
 
   // States
   success: '#4ade80',
   error: '#f87171',
-  warning: '#f5b936',
+  warning: '#fbbf24',
 } as const;
 
 export type ColorToken = keyof typeof colors;

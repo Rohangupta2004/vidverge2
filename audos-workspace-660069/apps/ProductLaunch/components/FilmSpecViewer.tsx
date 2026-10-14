@@ -12,16 +12,16 @@ import { filmSeconds, type FilmSpec, type SceneSpec } from '../types/film-spec.t
 import { ACCENT, BORDER, CARD_BG, MUTED, PANEL, TEXT } from './LaunchUi';
 
 const ROLE_TINT: Record<string, string> = {
-  hook: '#C8920A',
-  problem: '#991B1B',
-  product: '#1D4ED8',
-  proof: '#166534',
-  outcome: '#B4720A',
-  cta: '#B45309',
+  hook: 'var(--space-brand-primary, #D4920A)',
+  problem: 'var(--space-semantic-danger, #f87171)',
+  product: 'var(--space-brand-highlight, #F0B429)',
+  proof: 'var(--space-semantic-success, #4ade80)',
+  outcome: 'var(--space-brand-primary, #D4920A)',
+  cta: 'var(--space-semantic-warning, #fbbf24)',
 };
 
 function tintFor(role: string): string {
-  return ROLE_TINT[role] || '#7A6030';
+  return ROLE_TINT[role] || 'var(--space-text-muted, #9E8B55)';
 }
 
 function Chip(props: { children: React.ReactNode; color?: string; title?: string }) {

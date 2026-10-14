@@ -49,7 +49,7 @@ export const ANGLE_SCRIPT_CSS = `
 @keyframes ras-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .ras-rise { animation: ras-rise .34s cubic-bezier(.22,.9,.3,1) both; }
 .ras-pick { transition: transform .2s cubic-bezier(.22,.9,.3,1), border-color .2s ease, background-color .2s ease, box-shadow .2s ease; }
-.ras-pick:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(120,80,0,.12); }
+.ras-pick:hover { transform: translateY(-2px); box-shadow: 0 4px 24px rgba(0,0,0,.4); }
 .ras-pick:active { transform: scale(.985); }
 @media (prefers-reduced-motion: reduce) {
   .ras-rise { animation: none !important; }
@@ -299,7 +299,7 @@ export default function RecipeAngleScript(props: RecipeAngleScriptProps) {
                         onClick={() => { setChosen(angle); setClips([]); }}
                         style={{
                           textAlign: 'left', borderRadius: 12, padding: '12px 14px', cursor: 'pointer',
-                          background: picked ? 'rgba(200,146,10,.1)' : T.panel,
+                          background: picked ? 'rgba(212,146,10,.14)' : T.panel,
                           border: `1px solid ${picked ? T.accent : T.line}`,
                           color: T.ink, fontFamily: T.sans, animationDelay: `${index * 45}ms`,
                         }}

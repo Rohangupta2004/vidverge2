@@ -39,17 +39,28 @@ FOR EACH CONCEPT:
 
 6. List risks honestly: 'Requires drift example asset — unavailable, hook loses impact'
 
-VALID SDK COMPONENTS ONLY:
-UI: BrowserFrame, Dashboard, Cursor, Highlight, Tooltip
+VALID PRODUCTION COMPONENTS:
+UI: SemanticUI, Cursor, Highlight, Tooltip
 Typography: MassiveType, KineticText, WordReveal, SplitText, TypeOn
-Motion: Parallax, Camera, Zoom, BlurMask, Morph, Particle
-Composition: SplitScreen, FloatingUI, Perspective, Grid, FullBleed
-Media: Screenshot, Logo, MetricCounter
+Motion: Parallax, Camera, Zoom, BlurMask, Particle
+Composition: SplitScreen, Perspective
+Media: ProductImage, Logo, MetricCounter
+
+SCREENSHOT RULE: screenshots are visual references only. Reconstruct their interface with
+SemanticUI and the ProductContext.ui_references element tree. Never place a screenshot image
+in the film. Every important reconstructed element keeps its stable semantic data-ui-id so
+motion can target it. ProductImage is only for a real product photo/illustration; Logo is for
+the real logo.
+
+AUDIO RULE: music is mandatory. music_style must be tension, momentum, minimal or cinematic,
+never none. Motion and transitions must be designed around downbeats, strong beats, drops and
+section changes. Narration is optional; kinetic text must still carry the story without it.
 
 DO NOT:
 - Follow a fixed scene template (hook -> problem -> feature -> CTA is a starting point, not a rule)
 - Use components that are not in the SDK list above
-- Reference assets not in ProductContext.assets
+- Reference assets not in the renderable asset registry or UI references not in ui_references
+- Embed screenshot pixels under any component name
 - Design scenes that require assets flagged as manufacture_required without noting the risk
 - Produce the same concept three times with different typography
 
@@ -129,7 +140,7 @@ The // notes are guidance for you: do not include them in your answer.
     "color_story": "one sentence",
     "visual_language": "one or two sentences",
     "narration_enabled": false,
-    "music_style": "momentum",                 // tension | momentum | minimal | cinematic | none
+    "music_style": "momentum",                 // REQUIRED: tension | momentum | minimal | cinematic
     "concept_score": 0.82,                     // 0-1, scored honestly
     "concept_rationale": "one sentence",
     "risks": ["one sentence each"],

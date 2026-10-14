@@ -17,17 +17,14 @@
  */
 
 import { pollGroupA, submitGroupA } from './videoEngineClient';
-import { KLING_MODELS, capPromptText, groupAModel, runwayModel } from './videoEngines';
+import {
+  KLING_MODELS, OMNI_MODEL_ID, capPromptText, groupAModel, runwayModel,
+  sceneDurationLimits,
+} from './videoEngines';
 import type { AppId } from './appIds';
 
-/** The Group A model every fallback lands on.
- *
- * `gemini-omni-flash-preview` is the ONLY Omni Flash id the video proxy's
- * model enum accepts (integrations/image-and-video-generation/docs.md); a
- * versioned spelling such as `gemini-omni-flash-1.1` is not in the enum and
- * answers 400 invalid_enum_value. */
-// TODO: upgrade to 1.1 when platform key is confirmed
-export const OMNI_FALLBACK_MODEL = 'gemini-omni-flash-preview';
+/** The canonical platform default every fallback lands on. */
+export const OMNI_FALLBACK_MODEL = OMNI_MODEL_ID;
 
 /** What the customer is told they got. */
 export const OMNI_FALLBACK_LABEL = 'Omni Flash';
@@ -113,6 +110,7 @@ export async function generateWithOmniFlash(input: OmniFallbackInput): Promise<O
     throw new Error(`${OMNI_FALLBACK_LABEL} needs a written description of the shot before it can stand in.`);
   }
   const spec = groupAModel(OMNI_FALLBACK_MODEL);
+  const limits = sceneDurationLimits(OMNI_FALLBACK_MODEL);
   const seed = httpsOnly(input.seedImageUrl);
   const reference = httpsOnly(input.referenceImageUrl);
 
@@ -123,7 +121,7 @@ export async function generateWithOmniFlash(input: OmniFallbackInput): Promise<O
     prompt,
     negativePrompt: input.negativePrompt ? capPromptText(input.negativePrompt, 10000) : undefined,
     aspectRatio: omniAspect(input.aspect),
-    duration: Math.max(4, Math.min(spec?.maxDurationS || 8, Math.round(Number(input.durationSeconds) || 6))),
+    duration: Math.max(limits.minS, Math.min(spec?.maxDurationS || limits.maxS, Math.round(Number(input.durationSeconds) || limits.defaultS))),
     generateAudio: true,
     imageData: seed || reference || undefined,
     referenceImages: seed && reference ? [{ imageData: reference, referenceType: 'asset' }] : undefined,

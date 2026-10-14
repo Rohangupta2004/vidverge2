@@ -62,11 +62,12 @@ export function auditConcept(spec: FilmSpec, ctx: ProductContext): ConceptAudit 
   // cannot distinguish from a bad execution, so it is named here instead.
   const productBeatsWithoutVisuals = spec.scenes.filter(
     (scene) => (scene.role === 'product' || scene.role === 'proof')
-      && !scene.assets_needed.length,
+      && !scene.assets_needed.length
+      && scene.components.indexOf('SemanticUI') < 0,
   );
   if (productBeatsWithoutVisuals.length && ctx.ui_richness !== 'low') {
     warnings.push(
-      'The product beat shows no captured UI even though this site had usable screenshots: '
+      'The product beat shows neither semantic UI nor a renderable asset even though UI references were captured: '
       + productBeatsWithoutVisuals.map((scene) => scene.id).join(', ') + '.',
     );
   }

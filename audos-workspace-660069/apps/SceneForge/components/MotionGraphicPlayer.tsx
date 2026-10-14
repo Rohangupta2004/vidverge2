@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { gsap } from 'https://esm.sh/gsap@3.12.5';
 import { accentForSpec, contrastAccent, normalizeMotionSpec, type MotionItem, type MotionSpec } from '../lib/motionSpec';
-import { BG, INK, INK_SOFT, INK_MUTED, FONT, FONT_DISPLAY, PANEL, PANEL_EDGE, PANEL_GLASS, GLASS_EDGE, NEUTRAL, EDGE_SOFT, THEME, SVG_NS, cameraMove, desatFilter, drawIn, drawnLine, el, grainOverlay, halftonePattern, motionThemeForStyle, nodeBox, nodeImageChip, paperShadowFilter, riseIn, setMotionTheme, springIn, textBlock, tornClipPath, wrapLines } from '../lib/motionKit';
+import { BG, INK, INK_SOFT, INK_MUTED, FONT, FONT_DISPLAY, PANEL, PANEL_EDGE, PANEL_GLASS, GLASS_EDGE, NEUTRAL, EDGE_SOFT, THEME, SVG_NS, cameraMove, drawIn, drawnLine, el, grainOverlay, halftonePattern, motionThemeForStyle, nodeBox, nodeImageChip, paperShadowFilter, riseIn, setMotionTheme, springIn, textBlock, tornClipPath, wrapLines } from '../lib/motionKit';
 import { renderDirectedLayers, renderUSStateMap } from '../lib/motionPrimitives';
 import { normalizeSceneDirection, type SceneDirection } from '../lib/visualTimeline';
+import { themeFromProjectStyle, themeOf, type SceneForgeThemeId } from '../lib/styleTokens';
 
 // MOTION GRAPHICS ENGINE — GSAP + SVG. One builder produces both surfaces:
 //   * the live in-browser preview (this component), and
@@ -37,6 +38,17 @@ const draw = (tl: gsap.core.Timeline, line: SVGLineElement, at: number, dur = 0.
 
 export interface BuiltMotionGraphic { svg: SVGSVGElement; timeline: gsap.core.Timeline; durationSec: number }
 
+/** Standalone headline primitive used by previews and paper-theme UI cards. */
+export function KineticHeadline({ text, theme = 'vox-paper', className }: { text: string; theme?: SceneForgeThemeId; className?: string }) {
+  const tokens = themeOf(theme);
+  return <svg className={className} viewBox="0 0 1200 240" role="img" aria-label={text} style={{ width: '100%', overflow: 'visible' }}>
+    <rect x="50" y="96" width="0" height="96" rx="8" fill={tokens.highlight} opacity="0.92">
+      <animate attributeName="width" from="0" to="1100" dur="420ms" fill="freeze" />
+    </rect>
+    <text x="600" y="164" textAnchor="middle" fill={tokens.ink} style={{ fontFamily: tokens.fontHeadline, fontSize: 74, fontWeight: 900, letterSpacing: '-0.02em', textTransform: 'uppercase' }}>{text}</text>
+  </svg>;
+}
+
 export interface MotionBuildOptions {
   /** Render with a fully transparent background — no full-bleed fill, grid,
    * glow or backdrop image — so the graphic composites OVER the live
@@ -69,7 +81,10 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
   // renders the paper-cut system, everything else keeps midnight. Builds are
   // synchronous and captures serialize through one queue, so swapping the
   // module theme here is race-free.
-  setMotionTheme(motionThemeForStyle(options.styleId ?? (typeof window !== 'undefined' ? String((window as any).__sceneForgeStyleId || '') : '')));
+  const projectStyle = options.styleId ?? (typeof window !== 'undefined' ? String((window as any).__sceneForgeStyleId || '') : '');
+  const themeId = spec.theme || themeFromProjectStyle(projectStyle);
+  const styleTokens = themeOf(themeId);
+  setMotionTheme(motionThemeForStyle(themeId === 'vox-paper' ? 'vox-explainer' : projectStyle));
   const W = width; const H = height;
   const transparent = options.transparent === true;
   const u = (Math.min(W, H) / 1080) * (Number(options.unitScale) > 0 ? Number(options.unitScale) : 1);
@@ -124,7 +139,7 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
     backdropImage.setAttributeNS('http://www.w3.org/1999/xlink', 'href', spec.imageUrl);
     // Paper theme: photos get pulled into the flat palette (desaturated) and
     // washed with paper rather than dimmed with navy.
-    if (THEME.paper) backdropImage.setAttribute('filter', `url(#${desatFilter(defs, 0.25)})`);
+    if (THEME.paper) backdropImage.setAttribute('style', `filter:${styleTokens.duotoneFilter}`);
     // Vignette: edges darken toward rgba(0,0,0,0.55) while the center stays
     // transparent, so the center of the image reads vibrant while text at the
     // edges keeps its contrast — readable borders without flattening the
@@ -429,7 +444,7 @@ export function buildMotionGraphic(rawSpec: MotionSpec | Record<string, unknown>
     if (spec.imageUrl) {
       const image = el('image', { x: frameX, y: frameY, width: frameW, height: frameH, href: spec.imageUrl, preserveAspectRatio: 'xMidYMid slice' }, imageGroup);
       image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', spec.imageUrl);
-      if (THEME.paper) image.setAttribute('filter', `url(#${desatFilter(defs, 0.3)})`);
+      if (THEME.paper) image.setAttribute('style', `filter:${styleTokens.duotoneFilter}`);
       gsap.set(image, { transformOrigin: '50% 50%', scale: 1.04 });
       tl.to(image, { scale: 1.14, x: -frameW * 0.015, duration: total, ease: 'none' }, 0);
     } else if (THEME.paper) {

@@ -3,8 +3,8 @@
  * localStorage session persistence for the agentic short-form ad engine:
  *
  *   product URL + avatar + assets
- *     → web research (scrape-website server function + Claude Opus 5)
- *     → ad angles → clip script → scene plan (all Opus 5 creative direction)
+ *     → web research (scrape-website server function + creative planner)
+ *     → ad angles → clip script → intent-led scene plan
  *     → Veo generation with Opus inspection + continuity notes
  *     → GSAP/SVG overlay layer (screenshot mockups, callouts, captions)
  *     → FFmpeg.wasm assembly (NO Remotion anywhere)
@@ -13,6 +13,8 @@
  * Standalone by design: Ads Studio shares no module with Product Video,
  * SceneForge, Video Enhancer or Script-to-Video.
  */
+
+import type { ShotIntent } from '../../lib/videoEngines';
 
 // ---------------------------------------------------------------------------
 // Session / auth plumbing
@@ -113,6 +115,14 @@ export interface GeneratedAssetNeed { description: string; purpose: string }
 
 export interface ScenePlan {
   clip_number: number;
+  /** The creative decision. Shared routing turns this intent into a workflow. */
+  shot_intent?: ShotIntent;
+  /** Resolved by routeShotIntent; never invented by the planner. */
+  workflow_kind?: 'engine' | 'recipe' | 'code' | 'unavailable';
+  engine_id?: string | null;
+  engine_reason?: string;
+  /** Every duration clamp/violation is visible; none is applied silently. */
+  duration_notes?: string[];
   camera_movement: string;
   framing: string;
   subject_position: string;
@@ -199,6 +209,8 @@ export interface AdsSession {
   // Scene plan
   scenePlan: ScenePlan[];
   voiceDescription: string;
+  /** Film-level guardrail/routing notes surfaced on the storyboard. */
+  planNotes: string[];
   generatedAssets: GeneratedAsset[];
   // Cast — the ONE presenter every clip renders from. castUrl is the locked
   // reference image (the uploaded avatar, or a portrait cast and generated
@@ -228,7 +240,7 @@ export function emptySession(): AdsSession {
     research: null, researchStatus: 'idle', researchError: null,
     angles: [], selectedAngleIds: [], activeAngleId: null, opusPick: null,
     script: [],
-    scenePlan: [], voiceDescription: '', generatedAssets: [],
+    scenePlan: [], voiceDescription: '', planNotes: [], generatedAssets: [],
     castUrl: null, castDescription: '',
     clips: [],
     finalVideoUrl: null, assemblyStatus: 'idle', assemblyError: null,
@@ -362,21 +374,23 @@ export async function generateImageAsset(prompt: string, aspect: '9:16' | '16:9'
 // ---------------------------------------------------------------------------
 
 export const T = {
-  canvas: 'var(--space-surface-bg, #FFFDF4)',
-  panel: 'var(--space-surface-panel, #FFFAEB)',
-  card: 'var(--space-surface-card, #FFFFFF)',
-  raised: 'var(--space-surface-panel-strong, #FFF3D6)',
-  line: 'var(--space-border-default, rgba(180,120,0,0.14))',
-  lineStrong: 'var(--space-border-strong, rgba(180,120,0,0.36))',
-  ink: 'var(--space-text-primary, #1A1000)',
-  soft: 'var(--space-text-secondary, #3D2800)',
-  muted: 'var(--space-text-muted, #7A6030)',
-  accent: 'var(--space-brand-primary-500, #C8920A)',
-  accentDeep: 'var(--space-brand-primary-600, #B4720A)',
-  highlight: 'var(--space-brand-highlight-500, #E0A33A)',
-  good: 'var(--space-semantic-success-500, #166534)',
-  bad: 'var(--space-semantic-danger-500, #991B1B)',
-  warn: '#B45309',
+  canvas: 'var(--space-surface-bg, #08090B)',
+  panel: 'var(--space-surface-panel, #171A21)',
+  card: 'var(--space-surface-card, #111318)',
+  raised: 'var(--space-surface-panel-strong, #1D212A)',
+  line: 'var(--space-border-default, rgba(255,255,255,0.07))',
+  lineStrong: 'var(--space-border-strong, rgba(255,255,255,0.18))',
+  ink: 'var(--space-text-primary, #F6F3EB)',
+  soft: 'var(--space-text-secondary, #B8B2A7)',
+  muted: 'var(--space-text-muted, #77736B)',
+  accent: 'var(--space-brand-primary-500, #D6AB4A)',
+  accentDeep: 'var(--space-brand-primary-600, #B8892F)',
+  highlight: 'var(--space-brand-highlight-500, #F3D58B)',
+  good: 'var(--space-semantic-success-500, #4ade80)',
+  bad: 'var(--space-semantic-danger-500, #f87171)',
+  warn: '#fbbf24',
+  /** Input well — recessed below a card rather than level with it. */
+  input: 'var(--space-surface-muted, #0E1014)',
   sans: "'Inter', 'Geist', system-ui, -apple-system, sans-serif",
   mono: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
 } as const;

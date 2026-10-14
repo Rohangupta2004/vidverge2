@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Check, Coins, Crown, Minus, Plus, Sparkles, X, Zap } from 'lucide-react';
 import { currentUserEmail, REELIO_PLANS } from '../lib/plans';
+import { COLORS, SHADOW } from './theme';
 import type { PlanId, PricingRequest, PricingTrigger, ReelioPlan } from '../lib/plans';
 import {
   PAYG_BLOCK_CREDITS,
@@ -39,9 +40,8 @@ interface PricingScreenProps {
 
 const FONT = "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
-/** The brand amber. The plans screen is the one place money is discussed, so
- *  it stays on the shell's accent rather than inventing a second palette. */
-const BRAND = '#C8920A';
+/** Shared brand gold — pricing uses the same accent as every other surface. */
+const BRAND = COLORS.primary;
 
 const STYLES = `
 @keyframes rlpFade { from { opacity: 0 } to { opacity: 1 } }
@@ -60,13 +60,13 @@ const STYLES = `
 .rlp-cta:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.08); }
 .rlp-cta:disabled { opacity: .6; cursor: default; }
 .rlp-ghost { transition: color .2s ease, border-color .2s ease, background .2s ease; }
-.rlp-ghost:hover { color: #1A1000; border-color: rgba(180,120,0,.36); background: rgba(180,120,0,.08); }
+.rlp-ghost:hover { color: #F5E9C8; border-color: rgba(212,146,10,.45); background: rgba(212,146,10,.12); }
 .rlp-step { transition: background .18s ease, border-color .18s ease; }
-.rlp-step:not(:disabled):hover { background: rgba(180,120,0,.10); }
+.rlp-step:not(:disabled):hover { background: rgba(212,146,10,.14); }
 .rlp-step:disabled { opacity: .35; cursor: default; }
 .rlp-scroll::-webkit-scrollbar { width: 9px; }
 .rlp-scroll::-webkit-scrollbar-track { background: transparent; }
-.rlp-scroll::-webkit-scrollbar-thumb { background: rgba(180,120,0,0.28); border-radius: 999px; }
+.rlp-scroll::-webkit-scrollbar-thumb { background: #2A2410; border-radius: 999px; }
 `;
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -119,6 +119,7 @@ function PlanCard({
   onChoose: (plan: ReelioPlan) => void;
 }) {
   const isPayg = plan.id === 'payg';
+  const accent = BRAND;
   const paygCredits = paygBlocks * PAYG_BLOCK_CREDITS;
   const paygPrice = paygBlocks * PAYG_BLOCK_PRICE_CENTS;
 
@@ -132,12 +133,12 @@ function PlanCard({
         borderRadius: 20,
         padding: highlighted ? '30px 24px 26px' : '26px 22px 24px',
         background: highlighted
-          ? `linear-gradient(180deg, ${hexToRgba(plan.accent, 0.16)} 0%, #FFFFFF 46%, #FFFDF4 100%)`
-          : '#FFFFFF',
-        border: `1px solid ${highlighted ? hexToRgba(plan.accent, 0.5) : 'rgba(180,120,0,0.14)'}`,
+          ? `linear-gradient(180deg, ${hexToRgba(accent, 0.18)} 0%, ${COLORS.surfaceAlt} 46%, ${COLORS.surface} 100%)`
+          : COLORS.surface,
+        border: `1px solid ${highlighted ? hexToRgba(accent, 0.5) : COLORS.border}`,
         boxShadow: highlighted
-          ? `0 0 0 1px ${hexToRgba(plan.accent, 0.18)}, 0 28px 74px ${hexToRgba(plan.accent, 0.3)}`
-          : '0 14px 40px rgba(120,80,0,0.12)',
+          ? `0 0 0 1px ${hexToRgba(accent, 0.18)}, 0 28px 74px ${hexToRgba(accent, 0.3)}`
+          : SHADOW.card,
         animationDelay: `${120 + index * 80}ms`,
       }}
       data-testid={`plan-card-${plan.id}`}
@@ -157,8 +158,8 @@ function PlanCard({
             letterSpacing: 1,
             textTransform: 'uppercase',
             color: '#FFFFFF',
-            background: `linear-gradient(90deg, ${plan.accent} 0%, ${hexToRgba(plan.accent, 0.75)} 100%)`,
-            boxShadow: `0 8px 22px ${hexToRgba(plan.accent, 0.45)}`,
+            background: `linear-gradient(90deg, ${accent} 0%, ${hexToRgba(accent, 0.75)} 100%)`,
+            boxShadow: `0 8px 22px ${hexToRgba(accent, 0.45)}`,
           }}
         >
           {plan.badge}
@@ -171,11 +172,11 @@ function PlanCard({
             width: 7,
             height: 7,
             borderRadius: 999,
-            background: plan.accent,
-            boxShadow: `0 0 12px ${hexToRgba(plan.accent, 0.9)}`,
+            background: accent,
+            boxShadow: `0 0 12px ${hexToRgba(accent, 0.9)}`,
           }}
         />
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#1A1000', letterSpacing: 0.1 }}>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: COLORS.text, letterSpacing: 0.1 }}>
           {plan.name}
         </h3>
         {isCurrent && (
@@ -187,8 +188,8 @@ function PlanCard({
               fontSize: 10,
               fontWeight: 600,
               letterSpacing: 0.3,
-              color: '#7A6030',
-              border: '1px solid rgba(180,120,0,0.14)',
+              color: COLORS.textMuted,
+              border: '1px solid ' + COLORS.border,
             }}
             data-testid={`plan-current-${plan.id}`}
           >
@@ -203,13 +204,13 @@ function PlanCard({
             fontSize: highlighted ? 44 : 40,
             fontWeight: 700,
             letterSpacing: -1.4,
-            color: '#1A1000',
+            color: COLORS.text,
             lineHeight: 1,
           }}
         >
           {isPayg ? dollars(paygPrice) : plan.price}
         </span>
-        <span style={{ fontSize: 13.5, fontWeight: 500, color: '#7A6030' }}>{plan.cadence}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 500, color: COLORS.textMuted }}>{plan.cadence}</span>
       </div>
 
       <div
@@ -223,9 +224,9 @@ function PlanCard({
           borderRadius: 999,
           fontSize: 12.5,
           fontWeight: 600,
-          color: plan.accent,
-          background: hexToRgba(plan.accent, 0.1),
-          border: `1px solid ${hexToRgba(plan.accent, 0.26)}`,
+          color: accent,
+          background: hexToRgba(accent, 0.1),
+          border: `1px solid ${hexToRgba(accent, 0.26)}`,
         }}
         data-testid={`plan-credits-${plan.id}`}
       >
@@ -233,11 +234,11 @@ function PlanCard({
         {isPayg ? `${formatCredits(paygCredits)} credits` : plan.quota}
       </div>
 
-      <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.5, color: hexToRgba(plan.accent, 0.85) }}>
+      <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.5, color: hexToRgba(accent, 0.85) }}>
         {plan.creditNote}
       </p>
 
-      <p style={{ margin: '12px 0 0', fontSize: 13.5, lineHeight: 1.55, color: '#7A6030' }}>{plan.pitch}</p>
+      <p style={{ margin: '12px 0 0', fontSize: 13.5, lineHeight: 1.55, color: COLORS.textMuted }}>{plan.pitch}</p>
 
       <ul style={{ listStyle: 'none', margin: '18px 0 0', padding: 0, display: 'grid', gap: 10 }}>
         {plan.features.map((feature) => (
@@ -252,12 +253,12 @@ function PlanCard({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: hexToRgba(plan.accent, 0.14),
+                background: hexToRgba(accent, 0.14),
               }}
             >
-              <Check size={10} color={plan.accent} strokeWidth={3} />
+              <Check size={10} color={accent} strokeWidth={3} />
             </span>
-            <span style={{ fontSize: 13, lineHeight: 1.5, color: '#3D2800' }}>{feature}</span>
+            <span style={{ fontSize: 13, lineHeight: 1.5, color: COLORS.textMuted }}>{feature}</span>
           </li>
         ))}
       </ul>
@@ -274,11 +275,11 @@ function PlanCard({
             gap: 10,
             padding: '8px 10px',
             borderRadius: 12,
-            border: '1px solid rgba(180,120,0,0.14)',
-            background: 'rgba(180,120,0,0.06)',
+            border: '1px solid ' + COLORS.border,
+            background: COLORS.input,
           }}
         >
-          <span style={{ fontSize: 11.5, color: '#7A6030' }}>$9 blocks</span>
+          <span style={{ fontSize: 11.5, color: COLORS.textMuted }}>$9 blocks</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
               type="button"
@@ -291,7 +292,7 @@ function PlanCard({
             >
               <Minus size={13} />
             </button>
-            <span style={{ minWidth: 20, textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#1A1000' }}>
+            <span style={{ minWidth: 20, textAlign: 'center', fontSize: 14, fontWeight: 700, color: COLORS.text }}>
               {paygBlocks}
             </span>
             <button
@@ -326,12 +327,12 @@ function PlanCard({
           fontSize: 13.5,
           fontWeight: 600,
           cursor: 'pointer',
-          color: highlighted ? '#FFFFFF' : '#1A1000',
-          border: highlighted ? 'none' : `1px solid ${hexToRgba(plan.accent, 0.4)}`,
+          color: highlighted ? '#FFFFFF' : COLORS.text,
+          border: highlighted ? 'none' : `1px solid ${hexToRgba(accent, 0.4)}`,
           background: highlighted
-            ? `linear-gradient(90deg, ${plan.accent} 0%, ${hexToRgba(plan.accent, 0.8)} 100%)`
-            : hexToRgba(plan.accent, 0.1),
-          boxShadow: highlighted ? `0 12px 32px ${hexToRgba(plan.accent, 0.4)}` : 'none',
+            ? `linear-gradient(90deg, ${accent} 0%, ${hexToRgba(accent, 0.8)} 100%)`
+            : hexToRgba(accent, 0.1),
+          boxShadow: highlighted ? `0 12px 32px ${hexToRgba(accent, 0.4)}` : 'none',
         }}
         data-testid={`button-plan-${plan.id}`}
       >
@@ -349,7 +350,7 @@ function PlanCard({
       </button>
 
       {error && (
-        <p style={{ margin: '9px 0 0', fontSize: 11.5, lineHeight: 1.45, textAlign: 'center', color: '#991B1B' }}>
+        <p style={{ margin: '9px 0 0', fontSize: 11.5, lineHeight: 1.45, textAlign: 'center', color: COLORS.error }}>
           {error}
         </p>
       )}
@@ -365,9 +366,9 @@ const stepStyle: CSSProperties = {
   justifyContent: 'center',
   borderRadius: 8,
   cursor: 'pointer',
-  color: '#3D2800',
-  background: 'rgba(180,120,0,0.06)',
-  border: '1px solid rgba(180,120,0,0.14)',
+  color: COLORS.textMuted,
+  background: COLORS.input,
+  border: '1px solid ' + COLORS.border,
 };
 
 export default function PricingScreen({
@@ -445,8 +446,8 @@ export default function PricingScreen({
         inset: 0,
         zIndex: 200,
         overflowY: 'auto',
-        background: '#FFFDF4',
-        color: '#1A1000',
+        background: COLORS.bg,
+        color: COLORS.text,
         fontFamily: FONT,
       }}
       role="dialog"
@@ -456,7 +457,7 @@ export default function PricingScreen({
     >
       <style>{STYLES}</style>
 
-      {/* Cinematic wash — brand amber over the middle, teal creeping in at the edge */}
+      {/* Cinematic gold light field, using the shared product accent. */}
       <div aria-hidden style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
         <div
           className="rlp-breathe"
@@ -467,7 +468,7 @@ export default function PricingScreen({
             transform: 'translateX(-50%)',
             width: 900,
             height: 640,
-            background: 'radial-gradient(circle at 50% 50%, rgba(200,146,10,0.22), transparent 62%)',
+            background: 'radial-gradient(circle at 50% 50%, rgba(212,146,10,0.22), transparent 62%)',
             filter: 'blur(90px)',
           }}
         />
@@ -479,7 +480,7 @@ export default function PricingScreen({
             left: '-12%',
             width: 620,
             height: 620,
-            background: 'radial-gradient(circle at 50% 50%, rgba(224,163,58,0.22), transparent 62%)',
+            background: 'radial-gradient(circle at 50% 50%, rgba(240,180,41,0.18), transparent 62%)',
             filter: 'blur(100px)',
             animationDelay: '3s',
           }}
@@ -492,7 +493,7 @@ export default function PricingScreen({
             right: '-14%',
             width: 560,
             height: 560,
-            background: 'radial-gradient(circle at 50% 50%, rgba(232,183,55,0.24), transparent 60%)',
+            background: 'radial-gradient(circle at 50% 50%, rgba(255,209,104,0.16), transparent 60%)',
             filter: 'blur(100px)',
             animationDelay: '6s',
           }}
@@ -516,9 +517,9 @@ export default function PricingScreen({
           justifyContent: 'center',
           borderRadius: 999,
           cursor: 'pointer',
-          color: '#7A6030',
-          background: 'rgba(180,120,0,0.06)',
-          border: '1px solid rgba(180,120,0,0.14)',
+          color: COLORS.textMuted,
+          background: COLORS.input,
+          border: '1px solid ' + COLORS.border,
         }}
         data-testid="button-close-pricing"
       >
@@ -545,11 +546,11 @@ export default function PricingScreen({
               borderRadius: 14,
               textAlign: 'center',
               border: `1px solid ${hexToRgba(BRAND, 0.45)}`,
-              background: `linear-gradient(90deg, ${hexToRgba(BRAND, 0.18)} 0%, ${hexToRgba(BRAND, 0.06)} 100%), #FFFFFF`,
+              background: `linear-gradient(90deg, ${hexToRgba(BRAND, 0.18)} 0%, ${hexToRgba(BRAND, 0.06)} 100%), ${COLORS.surface}`,
             }}
             data-testid="banner-credit-wall"
           >
-            <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.55, color: '#1A1000' }}>
+            <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.55, color: COLORS.text }}>
               <strong style={{ color: BRAND }}>{formatCredits(shortfall)} credits short.</strong>{' '}
               {seconds > 0 ? `That ${seconds}-second video costs ${formatCredits(required)} credits` : `That video costs ${formatCredits(required)} credits`}
               {' '}and you have {formatCredits(balance)}. Top up below and your render picks up where it left off.
@@ -572,8 +573,8 @@ export default function PricingScreen({
               padding: '12px 18px',
               borderRadius: 14,
               textAlign: 'center',
-              border: '1px solid rgba(180,120,0,0.14)',
-              background: '#FFFFFF',
+              border: '1px solid ' + COLORS.border,
+              background: COLORS.surface,
             }}
             data-testid="banner-credit-balance"
           >
@@ -589,13 +590,13 @@ export default function PricingScreen({
                 letterSpacing: 0.6,
                 textTransform: 'uppercase',
                 color: '#FFFFFF',
-                background: `linear-gradient(90deg, ${BRAND} 0%, #B4720A 100%)`,
+                background: `linear-gradient(135deg, ${BRAND} 0%, ${COLORS.primaryGlow} 100%)`,
               }}
             >
               <Crown size={12} /> {credits.planLabel}
             </span>
-            <span style={{ fontSize: 13.5, color: '#3D2800' }}>
-              You have <strong style={{ color: '#1A1000' }}>{formatCredits(credits.balance)} credits</strong>
+            <span style={{ fontSize: 13.5, color: COLORS.textMuted }}>
+              You have <strong style={{ color: COLORS.text }}>{formatCredits(credits.balance)} credits</strong>
               {' '}— {formatCredits(credits.balance)} seconds of video
               {credits.rollover && credits.monthlyCredits > 0
                 ? `. Another ${formatCredits(credits.monthlyCredits)} land${nextGrant ? ` on ${nextGrant}` : ' next month'}, on top of whatever is left.`
@@ -616,7 +617,7 @@ export default function PricingScreen({
               fontWeight: 600,
               letterSpacing: 1.4,
               textTransform: 'uppercase',
-              color: '#B4720A',
+              color: COLORS.primaryGlow,
               background: hexToRgba(BRAND, 0.12),
               border: `1px solid ${hexToRgba(BRAND, 0.28)}`,
             }}
@@ -632,14 +633,14 @@ export default function PricingScreen({
               fontWeight: 700,
               letterSpacing: -1.4,
               lineHeight: 1.08,
-              color: '#1A1000',
+              color: COLORS.text,
             }}
           >
             One credit.
             <br />
             <span
               style={{
-                background: 'linear-gradient(90deg, #C8920A 0%, #B4720A 100%)',
+                background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryGlow} 100%)`,
                 WebkitBackgroundClip: 'text',
                 backgroundClip: 'text',
                 color: 'transparent',
@@ -649,7 +650,7 @@ export default function PricingScreen({
             </span>
           </h1>
 
-          <p style={{ margin: '18px auto 0', maxWidth: 560, fontSize: 15.5, lineHeight: 1.6, color: '#7A6030' }}>
+          <p style={{ margin: '18px auto 0', maxWidth: 560, fontSize: 15.5, lineHeight: 1.6, color: COLORS.textMuted }}>
             That is the whole pricing model. Every engine costs the same, we pick the right one behind the
             scenes, and the only thing you ever spend on is the video itself.
           </p>
@@ -702,17 +703,17 @@ export default function PricingScreen({
                 gap: 9,
                 padding: '13px 15px',
                 borderRadius: 14,
-                border: '1px solid rgba(180,120,0,0.14)',
-                background: '#FFFFFF',
+                border: '1px solid ' + COLORS.border,
+                background: COLORS.surface,
               }}
             >
               <Coins size={14} color={BRAND} style={{ flex: '0 0 auto', marginTop: 2 }} />
-              <span style={{ fontSize: 12.5, lineHeight: 1.5, color: '#3D2800' }}>{rule}</span>
+              <span style={{ fontSize: 12.5, lineHeight: 1.5, color: COLORS.textMuted }}>{rule}</span>
             </div>
           ))}
         </div>
 
-        <p style={{ margin: '22px auto 0', maxWidth: 580, textAlign: 'center', fontSize: 12, lineHeight: 1.6, color: '#7A6030' }}>
+        <p style={{ margin: '22px auto 0', maxWidth: 580, textAlign: 'center', fontSize: 12, lineHeight: 1.6, color: COLORS.textMuted }}>
           A {PAYG_BLOCK_CREDITS}-credit block is {dollars(PAYG_BLOCK_PRICE_CENTS)} and buys a full minute of video — buy as many as
           you want, whenever you want, on any plan. Cancel a subscription any time; credits you already
           have stay yours.
@@ -729,9 +730,9 @@ export default function PricingScreen({
               fontSize: 13,
               fontWeight: 500,
               cursor: 'pointer',
-              color: '#7A6030',
+              color: COLORS.textMuted,
               background: 'transparent',
-              border: '1px solid rgba(180,120,0,0.14)',
+              border: '1px solid ' + COLORS.border,
             }}
             data-testid="button-dismiss-pricing"
           >

@@ -92,6 +92,8 @@ export interface DirectedLayer {
   /** One sentence: why this layer is on screen. Required by the director. */
   purpose?: string;
   content?: DirectedLayerContent;
+  /** 0 = foreground (most parallax), 1 = background (barely moves). */
+  depth_z?: number;
 }
 
 export interface TransitionSpec {
@@ -113,6 +115,8 @@ export interface SceneDirection {
   camera: { move: CameraMove; intensity?: number };
   pacing: PacingStyle;
   ambient: boolean;
+  /** Required for video_backed_graphic: text-free cinematic footage brief. */
+  background_prompt?: string;
   layers: DirectedLayer[];
   transitionIn?: TransitionSpec;
   transitionOut?: TransitionSpec;
@@ -218,6 +222,8 @@ export function normalizeSceneDirection(raw: any): SceneDirection | null {
     if (entry.purpose) layer.purpose = str(entry.purpose, 300);
     const content = normalizeContent(entry.content);
     if (content) layer.content = content;
+    const depth = num(entry.depth_z ?? entry.depthZ);
+    if (depth !== undefined) layer.depth_z = Math.min(1, Math.max(0, depth));
     layers.push(layer);
   });
   if (!layers.length) return null;
@@ -230,6 +236,8 @@ export function normalizeSceneDirection(raw: any): SceneDirection | null {
     ambient: source.ambient !== false,
     layers,
   };
+  const backgroundPrompt = str(source.background_prompt ?? source.backgroundPrompt ?? '', 1200);
+  if (backgroundPrompt) direction.background_prompt = backgroundPrompt;
   const tin = normalizeTransition(source.transitionIn ?? source.transition_in ?? source.transition);
   const tout = normalizeTransition(source.transitionOut ?? source.transition_out);
   if (tin) direction.transitionIn = tin;
@@ -243,7 +251,12 @@ export function normalizeSceneDirection(raw: any): SceneDirection | null {
  * decides whether a stored capture is still a capture of THIS direction. */
 export function directionFingerprint(direction: SceneDirection | null): string {
   if (!direction) return '';
-  const ordered = JSON.stringify(direction, Object.keys(direction as unknown as Record<string, unknown>).sort());
+  const stable = (value: any): any => Array.isArray(value)
+    ? value.map(stable)
+    : value && typeof value === 'object'
+      ? Object.keys(value).sort().reduce((out, key) => { out[key] = stable(value[key]); return out; }, {} as Record<string, unknown>)
+      : value;
+  const ordered = JSON.stringify(stable(direction));
   let hash = 5381;
   for (let i = 0; i < ordered.length; i += 1) hash = ((hash << 5) + hash + ordered.charCodeAt(i)) >>> 0;
   return hash.toString(36);
@@ -283,8 +296,8 @@ export function chooseTransition(ctx: TransitionContext): TransitionSpec {
   if (fromMotion === 'big_stat') return { type: 'push_through', duration: 0.45 };
   // Cutting between real footage and graphics: zoom match cut keeps the
   // visual energy moving in one direction across the cut.
-  if (from === 'ai_video' && (to === 'motion_graphic' || to === 'text_overlay')) return { type: 'zoom_match_cut', duration: 0.45 };
-  if ((from === 'motion_graphic' || from === 'text_overlay') && to === 'ai_video') return { type: 'zoom_match_cut', duration: 0.45 };
+  if ((from === 'ai_video' || from === 'video_backed_graphic') && (to === 'motion_graphic' || to === 'text_overlay')) return { type: 'zoom_match_cut', duration: 0.45 };
+  if ((from === 'motion_graphic' || from === 'text_overlay') && (to === 'ai_video' || to === 'video_backed_graphic')) return { type: 'zoom_match_cut', duration: 0.45 };
   // Problem/solution and A-vs-B structures replace each other in place.
   if (toMotion === 'comparison' || fromMotion === 'comparison') return { type: 'spatial_collapse', duration: 0.5 };
   // A still reveals what is underneath (good for before/after and portraits).

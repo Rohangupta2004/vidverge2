@@ -43,7 +43,7 @@ function themeOf(identity) {
   return {
     grad: 'linear-gradient(135deg, ' + identity.primary + ' 0%, ' + identity.accent + ' 100%)',
     glass: {
-      background: 'linear-gradient(165deg, rgba(16,16,24,0.90) 0%, rgba(9,9,15,0.82) 100%)',
+      background: 'linear-gradient(165deg, rgba(17,14,7,0.90) 0%, rgba(13,11,5,0.82) 100%)',
       border: '1px solid rgba(255,255,255,0.10)',
       boxShadow: '0 32px 90px rgba(0,0,0,0.55), 0 4px 18px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.07)',
       backdropFilter: 'blur(16px)',
@@ -322,7 +322,7 @@ function ListReveal({ spec, identity, theme, durationFrames }) {
               <div style={{
                 width: 38, height: 38, borderRadius: 12, backgroundImage: theme.grad, marginRight: 22, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 19, fontWeight: 840, color: '#0a0a12',
+                fontSize: 19, fontWeight: 840, color: '#0D0B05',
               }}>{i + 1}</div>
               <div style={{ fontSize: 30, fontWeight: 560, color: identity.text, lineHeight: 1.3 }}>{item}</div>
             </div>
@@ -394,7 +394,7 @@ function Badge({ spec, identity, theme, durationFrames }) {
     <InOut durationFrames={durationFrames} inFrames={6} outFrames={8}>
       <div style={{
         display: 'inline-block', transform: 'scale(' + p + ') rotate(' + (1 - p) * -4 + 'deg)',
-        backgroundImage: theme.grad, color: '#0a0a12', fontWeight: 830, fontSize: 27,
+        backgroundImage: theme.grad, color: '#0D0B05', fontWeight: 830, fontSize: 27,
         padding: '14px 32px', borderRadius: 999, letterSpacing: '0.05em', textTransform: 'uppercase',
         boxShadow: '0 14px 44px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.25)',
       }}>{spec.text}</div>
@@ -485,7 +485,7 @@ function TimelineStrip({ spec, identity, theme, durationFrames }) {
               <div key={i} style={{ flex: 1, textAlign: 'center', opacity: p, transform: 'translateY(' + (1 - p) * 26 + 'px)' }}>
                 <div style={{
                   width: 28, height: 28, borderRadius: 14, backgroundImage: theme.grad, margin: '0 auto',
-                  border: '5px solid rgba(10,10,16,0.95)', boxShadow: '0 0 18px ' + identity.accent + '66',
+                  border: '5px solid rgba(13,11,5,0.95)', boxShadow: '0 0 18px ' + identity.accent + '66',
                 }} />
                 <div style={{ fontSize: 25, fontWeight: 740, color: identity.text, marginTop: 16 }}>{item.label}</div>
                 {item.detail ? <div style={{ fontSize: 20, color: identity.text, opacity: 0.6, marginTop: 7, padding: '0 12px', lineHeight: 1.35 }}>{item.detail}</div> : null}
@@ -512,9 +512,9 @@ function KeywordPop({ spec, identity, theme, durationFrames }) {
           <div key={i} style={{
             opacity: p, transform: 'scale(' + (0.65 + p * 0.35) + ') rotate(' + (1 - p) * (i % 2 ? 5 : -5) + 'deg)',
             backgroundImage: primary ? theme.grad : 'none',
-            background: primary ? undefined : 'rgba(16,16,24,0.88)',
+            background: primary ? undefined : 'rgba(17,14,7,0.88)',
             border: primary ? 'none' : '1px solid rgba(255,255,255,0.14)',
-            color: primary ? '#0a0a12' : identity.text,
+            color: primary ? '#0D0B05' : identity.text,
             fontSize: 42, fontWeight: 830, padding: '16px 34px', borderRadius: 18,
             boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
           }}>{w}</div>
@@ -729,7 +729,7 @@ function GeneratedSegment({ seg, assets, durationFrames }) {
   const asset = assets[seg.assetId];
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  if (!asset) return <AbsoluteFill style={{ background: '#101018' }} />;
+  if (!asset) return <AbsoluteFill style={{ background: '#110E07' }} />;
   if (asset.kind === 'video') {
     const maxFrames = asset.durationSec ? Math.max(6, Math.floor(asset.durationSec * fps) - 2) : durationFrames;
     return (
@@ -789,7 +789,7 @@ function CaptionCueView({ cue, preset, posStyle, identity, theme, stageW = 1920 
   const pill = preset === 'minimal' || preset === 'editorial'
     ? { textShadow: '0 3px 20px rgba(0,0,0,0.9)' }
     : {
-      background: 'linear-gradient(165deg, rgba(10,10,16,0.82), rgba(6,6,10,0.72))',
+      background: 'linear-gradient(165deg, rgba(13,11,5,0.82), rgba(9,7,3,0.72))',
       border: '1px solid rgba(255,255,255,0.08)',
       borderRadius: 18, padding: '14px 32px', backdropFilter: 'blur(10px)',
       boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
@@ -862,9 +862,9 @@ export default function CineAgentFilm(props) {
   const assets = props.assets || {};
   const identity = {
     primary: plan.identity.primary || '#f59e0b',
-    secondary: plan.identity.secondary || '#111120',
+    secondary: plan.identity.secondary || '#110E07',
     accent: plan.identity.accent || '#22d3ee',
-    bg: plan.identity.bg || '#0a0a12',
+    bg: plan.identity.bg || '#0D0B05',
     text: plan.identity.text || '#ffffff',
     fontStyle: plan.identity.fontStyle || 'modern',
   };

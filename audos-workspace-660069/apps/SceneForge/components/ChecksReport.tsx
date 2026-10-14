@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
 import type { CheckResult } from '../lib/supabase';
 
 /**
- * The six delivery checks. "Assembly needs attention" is reserved for checks
+ * Delivery checks plus the temporal Film QC gate. "Assembly needs attention" is reserved for checks
  * that actually ran and failed: an empty list means they have not run yet
  * (most often because the assembly render never produced a film), and saying
  * "needs attention" there pointed the customer at the checks instead of at the
@@ -10,7 +10,7 @@ import type { CheckResult } from '../lib/supabase';
  */
 export default function ChecksReport({ checks, busy, assembled, onRetry }: { checks: CheckResult[]; busy?: boolean; assembled?: boolean; onRetry: () => void }) {
   const ran = checks.length > 0;
-  const pass = checks.length === 6 && checks.every((check) => check.pass);
+  const pass = checks.length >= 6 && checks.every((check) => check.pass);
   const failing = ran && !pass;
   const banner = pass
     ? 'border-[color-mix(in_srgb,var(--space-semantic-success-500)_40%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-success-500)_10%,transparent)]'
@@ -24,7 +24,7 @@ export default function ChecksReport({ checks, busy, assembled, onRetry }: { che
         {pass ? <CheckCircle2 className="h-5 w-5 text-[var(--space-semantic-success)]" />
           : failing ? <AlertTriangle className="h-5 w-5 text-[var(--space-semantic-danger)]" />
             : <Clock className="h-5 w-5 text-[var(--space-text-muted)]" />}
-        {pass ? 'All six checks passed' : failing ? 'Assembly needs attention' : busy ? 'Checks run as soon as the film is assembled' : assembled ? 'Checks have not been tallied for this cut yet' : 'The six checks run once the film is assembled'}
+        {pass ? `All ${checks.length} checks passed` : failing ? 'Assembly needs attention' : busy ? 'Checks run as soon as the film is assembled' : assembled ? 'Checks have not been tallied for this cut yet' : 'Delivery checks run once the film is assembled'}
       </div>
     </div>
     {checks.map((check, index) => <div key={check.id} className="sf-card flex gap-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4 transition-all hover:-translate-y-0.5 hover:border-[var(--space-border-strong)] hover:shadow-xl" style={{ animationDelay: `${index * 45}ms` }}>

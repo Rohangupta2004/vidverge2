@@ -60,9 +60,9 @@ const SMOKE_CAP_MS = 150000;
 const LANES = 3;
 
 const C = {
-  bg: '#050508',
-  card: '#0d0d14',
-  raised: '#111120',
+  bg: '#0D0B05',
+  card: '#15120A',
+  raised: '#1C1808',
   line: 'rgba(245,158,11,0.18)',
   lineStrong: 'rgba(245,158,11,0.45)',
   accent: '#f59e0b',

@@ -59,13 +59,13 @@ export default function CreditBalance({ variant = 'chrome', className = '' }: Cr
       style={{
         color: 'var(--space-text-primary)',
         background: 'linear-gradient(90deg, #FFFFFF 0%, #FFF6DD 100%)',
-        border: low ? '1px solid rgba(180,83,9,0.55)' : '1px solid rgba(180,120,0,0.18)',
+        border: low ? '1px solid rgba(180,83,9,0.55)' : '1px solid rgba(184,120,8,0.18)',
         boxShadow: '0 6px 18px rgba(120,80,0,0.12)',
       }}
       data-testid="button-credit-balance"
       data-credit-balance={credits.balance}
     >
-      <Coins className="w-4 h-4" style={{ color: low ? '#B45309' : '#C8920A' }} />
+      <Coins className="w-4 h-4" style={{ color: low ? '#B45309' : '#D4920A' }} />
       {formatCredits(credits.balance)}
       <span style={{ color: 'var(--space-text-muted)', fontWeight: 500 }}>{low ? 'left — top up' : 'credits'}</span>
     </button>

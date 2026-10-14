@@ -15,22 +15,24 @@
 // the model described that was never captured is dropped, and an asset that
 // was captured but ignored is appended rather than silently lost.
 
-import { callModelForJson, OPUS_MODEL } from '../lib/ai-client';
+import { callModelForJson, imageBlock, OPUS_MODEL, textBlock } from '../lib/ai-client';
 import { buildAssetRegistry } from '../lib/asset-registry';
 import { callHook, hostOf, normalizeUrl, pageUrl, toHandle } from '../lib/platform';
+import type { LaunchUpload } from '../lib/uploads';
 import {
   EXTRACTION_EVIDENCE_CLAUSE,
   EXTRACTION_SYSTEM_PROMPT,
   PRODUCT_CONTEXT_JSON_SHAPE,
 } from '../prompts/extraction.prompt';
 import {
-  ASSET_TYPES,
   DESIGN_MATURITIES,
   VISUAL_QUALITIES,
   type AssetType,
   type DesignMaturity,
   type ExtractedAsset,
   type ProductContext,
+  type SemanticUiElement,
+  type SemanticUiReference,
   type VisualQuality,
 } from '../types/product-context.types';
 
@@ -132,7 +134,7 @@ export async function scrapePage(url: string): Promise<ScrapeResult> {
   } catch {
     return empty;
   }
-  if (!data || data.success === false) return empty;
+  if (!data || (data.success === false && !firstString(data.screenshotUrl))) return empty;
 
   const palette = strings(data.palette, 8);
   const themeColor = firstString(data.themeColor);
@@ -140,7 +142,7 @@ export async function scrapePage(url: string): Promise<ScrapeResult> {
 
   return {
     url: target,
-    ok: true,
+    ok: data.success !== false,
     title: firstString(data.title, data.siteName),
     description: firstString(data.description),
     headlines: strings(data.headlines, 14),
@@ -150,8 +152,9 @@ export async function scrapePage(url: string): Promise<ScrapeResult> {
     palette,
     fonts: strings(data.fonts, 5),
     screenshotUrl: firstString(data.screenshotUrl),
-    imageUrls: strings(data.images, 10),
-    logoUrl: firstString(data.logoUrl, data.logo, data.ogImage),
+    imageUrls: [firstString(data.ogImage)].concat(strings(data.images, 10)).filter(Boolean)
+      .filter((value, index, list) => list.indexOf(value) === index).slice(0, 10),
+    logoUrl: firstString(data.logoUrl, data.logo),
   };
 }
 
@@ -163,7 +166,7 @@ export interface CapturedAsset {
   origin: string;
 }
 
-function captureAssets(pages: ScrapeResult[]): CapturedAsset[] {
+function captureAssets(pages: ScrapeResult[], uploads: LaunchUpload[] = []): CapturedAsset[] {
   const captured: CapturedAsset[] = [];
   const seenUrls: string[] = [];
   const push = (asset: CapturedAsset): void => {
@@ -202,7 +205,80 @@ function captureAssets(pages: ScrapeResult[]): CapturedAsset[] {
     });
   }
 
+  uploads.forEach((upload) => push({
+    handle: upload.handle,
+    url: upload.url,
+    type: upload.type,
+    origin: 'creator-uploaded ' + upload.kind + ': ' + upload.name,
+  }));
+
   return captured;
+}
+
+const UI_TYPES = ['navbar', 'sidebar', 'heading', 'text', 'button', 'card', 'metric', 'chart', 'table', 'input', 'badge', 'image'] as const;
+
+function pct(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return isFinite(n) ? Math.max(0, Math.min(100, n)) : fallback;
+}
+
+function normalizeUiElement(raw: unknown, index: number): SemanticUiElement {
+  const source = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const type = oneOf(source.type, [...UI_TYPES], 'card');
+  return {
+    id: str(source.id) || type + '-' + String(index + 1),
+    type,
+    label: str(source.label) || str(source.value) || type,
+    value: str(source.value) || undefined,
+    x: pct(source.x, 5),
+    y: pct(source.y, 5 + index * 8),
+    width: Math.max(2, pct(source.width, 28)),
+    height: Math.max(2, pct(source.height, 10)),
+  };
+}
+
+async function analyzeUiReference(asset: CapturedAsset, signal?: AbortSignal): Promise<SemanticUiReference> {
+  const raw = await callModelForJson<Record<string, unknown>>([
+    imageBlock(asset.url),
+    textBlock([
+      'This screenshot is VISUAL REFERENCE ONLY. Reconstruct its visible interface as semantic React data.',
+      'Return one JSON object with screen_name, background, surface, text, accent and elements[].',
+      'Each element needs id, type, label, optional value, x, y, width, height.',
+      'Coordinates are percentages of the screenshot. Use stable kebab-case ids that describe function:',
+      'navbar, sidebar, dashboard, feature-card, cta-button, revenue-chart, search-input.',
+      'Preserve visible copy and hierarchy accurately. Do not return image pixels or HTML.',
+    ].join(' ')),
+  ], { model: OPUS_MODEL, maxTokens: 5000, signal });
+  const elements = (Array.isArray(raw.elements) ? raw.elements : [])
+    .slice(0, 28)
+    .map(normalizeUiElement);
+  return {
+    id: 'ui-' + asset.handle,
+    source_handle: asset.handle,
+    screen_name: str(raw.screen_name) || asset.origin,
+    background: str(raw.background) || '#0B1020',
+    surface: str(raw.surface) || '#151C2E',
+    text: str(raw.text) || '#F8FAFC',
+    accent: str(raw.accent) || '#7C3AED',
+    elements,
+  };
+}
+
+async function buildUiReferences(captured: CapturedAsset[], signal?: AbortSignal): Promise<SemanticUiReference[]> {
+  const screenshots = captured.filter((asset) => asset.type === 'screenshot' && asset.url).slice(0, 3);
+  const references: SemanticUiReference[] = [];
+  for (const asset of screenshots) {
+    try {
+      const reference = await analyzeUiReference(asset, signal);
+      if (reference.elements.length) references.push(reference);
+    } catch (error) {
+      // A creator-supplied screenshot is an explicit requirement, so silently
+      // dropping it would ship the wrong film. Site screenshots remain optional.
+      if (asset.handle === 'uploaded_ui_reference') throw error;
+      // Never embed screenshot pixels as a fallback.
+    }
+  }
+  return references;
 }
 
 function describePage(page: ScrapeResult, index: number): string {
@@ -273,7 +349,7 @@ function normalizeAsset(raw: unknown, captured: CapturedAsset): ExtractedAsset {
   const source = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   return {
     handle: captured.handle,
-    type: oneOf<AssetType>(source.type, ASSET_TYPES, captured.type),
+    type: captured.type,
     source_url: captured.url,
     description: str(source.description) || captured.origin,
     visual_quality: oneOf<VisualQuality>(source.visual_quality, VISUAL_QUALITIES, 'medium'),
@@ -315,6 +391,7 @@ function normalizeContext(
   url: string,
   pages: ScrapeResult[],
   captured: CapturedAsset[],
+  uiReferences: SemanticUiReference[],
 ): ProductContext {
   const source = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const brandRaw = (source.brand && typeof source.brand === 'object'
@@ -388,6 +465,7 @@ function normalizeContext(
       design_maturity: oneOf<DesignMaturity>(brandRaw.design_maturity, DESIGN_MATURITIES, 'functional'),
     },
     assets,
+    ui_references: uiReferences,
 
     best_hook_asset: handles.indexOf(bestHook) >= 0 ? bestHook : handles[0],
     ui_richness: oneOf<'high' | 'medium' | 'low'>(source.ui_richness, ['high', 'medium', 'low'], 'low'),
@@ -401,6 +479,7 @@ function normalizeContext(
 export interface ExtractOptions {
   onProgress?: (detail: string) => void;
   signal?: AbortSignal;
+  uploads?: LaunchUpload[];
 }
 
 /**
@@ -433,10 +512,13 @@ export async function extractProductContext(
     }
   }
 
-  const captured = captureAssets(pages);
+  const captured = captureAssets(pages, options.uploads || []);
+  report('Reconstructing captured UI as semantic React elements…');
+  const uiReferences = await buildUiReferences(captured, options.signal);
   report(
     String(pages.filter((page) => page.ok).length) + ' page(s) read, '
-    + String(captured.length) + ' asset(s) captured — Opus is writing the brief…',
+    + String(captured.length) + ' asset(s) captured, '
+    + String(uiReferences.length) + ' UI reference(s) reconstructed — Opus is writing the brief…',
   );
 
   if (!home.ok && !captured.length) {
@@ -454,6 +536,7 @@ export async function extractProductContext(
     target,
     pages,
     captured,
+    uiReferences,
   );
 
   // Every later step resolves handles through the registry, so it is built the

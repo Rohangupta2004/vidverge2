@@ -5,6 +5,9 @@ import { normalizeMotionSpec } from '../lib/motionSpec';
 import { chooseTransition, normalizeSceneDirection, type TransitionSpec } from '../lib/visualTimeline';
 import { defaultMotionTreatment, effectivePresenterState, normalizeMotionTreatment, normalizeOverlays, type MotionTreatment, type PipPosition, type SceneOverlayElement } from '../lib/directorPlan';
 import { normalizeBroll, type BrollClip } from '../lib/broll';
+import { sceneVideoBackedSpec, directorLayersOf } from '../lib/videoBackedGraphic';
+import type { DirectedLayer } from '../lib/visualTimeline';
+import { sceneElementComposition, type ElementComposition } from '../lib/elementComposition';
 
 export interface TimelineSegment {
   type: 'avatar' | 'scene';
@@ -60,6 +63,18 @@ export interface TimelineSegment {
    * the place of the scene's visual for the window and carries the speech
    * itself, so no separate <Audio> is mounted beside it. */
   lipsyncUrl?: string;
+  /** video_backed_graphic: fullscreen footage + director layers composed in Remotion. */
+  /** New motion_graphic/text_overlay rows: structured, fingerprinted motion
+   * rendered frame-by-frame in this same server-side Remotion pass. */
+  elementComposition?: ElementComposition | null;
+  videoBacked?: {
+    background_clip_url: string;
+    /** Legacy directed layers are retained for old rows; new rows carry the real ElementComposition. */
+    director_layers: DirectedLayer[];
+    element_composition?: ElementComposition;
+    camera?: { move: string; intensity?: number };
+    durationSec: number;
+  } | null;
 }
 
 // Decide from the URL itself, not from "this scene has code": a scene whose
@@ -80,7 +95,7 @@ export function buildTimeline(project: Project, scenes: Scene[], assets: Asset[]
   // flag lost to an edit) every scene that actually has a picture, an overlay
   // or code still joins the film instead of shipping an avatar-only cut.
   const flagged = sceneRows.filter((scene) => scene.approved);
-  const usable = flagged.length ? flagged : sceneRows.filter((scene) => scene.render_url || scene.remotion_code || scene.overlay_config);
+  const usable = flagged.length ? flagged : sceneRows.filter((scene) => scene.render_url || scene.remotion_code || scene.overlay_config || scene.composition_spec);
   const approved = usable.sort((a, b) => sec(a.script_start_sec) - sec(b.script_start_sec));
   // A project that never recorded a duration still has to produce a timeline,
   // so the scenes themselves are the fallback length.
@@ -106,13 +121,27 @@ export function buildTimeline(project: Project, scenes: Scene[], assets: Asset[]
     // prefers its own render (the generated clip). A pure text scene
     // legitimately has neither.
     const kind = visualKindOf(scene.visual_kind);
+    const vbgSpec = kind === 'video_backed_graphic' ? sceneVideoBackedSpec(scene) : null;
+    const vbgDirection = kind === 'video_backed_graphic' ? normalizeSceneDirection(scene.director_timeline) : null;
+    const elementComposition = kind === 'motion_graphic' || kind === 'text_overlay'
+      ? sceneElementComposition(scene)
+      : null;
+    const videoBacked = vbgSpec?.background_clip_url && vbgDirection
+      ? {
+          background_clip_url: String(vbgSpec.background_clip_url),
+          director_layers: directorLayersOf(scene),
+          ...(vbgSpec.element_composition ? { element_composition: vbgSpec.element_composition } : {}),
+          camera: vbgSpec.element_composition?.camera || vbgDirection.camera,
+          durationSec: Math.max(0.1, end - start),
+        }
+      : null;
     // An over-avatar overlay never replaces the picture: the presenter stays
     // on screen and the label composes on top, so a captured clip parked on
     // render_url is deliberately ignored — only a picked still may ride along
     // as a small corner chip beside the callout.
     const overAvatar = Boolean(overlay?.overAvatar) && (kind === 'text_overlay' || kind === 'text_graphics');
     const pickedAsset = overlay?.showAsset !== false ? overlay?.assetUrl : '';
-    const renderUrl = overAvatar ? (pickedAsset || '') : ((kind === 'text_graphics' && !scene.remotion_code ? (pickedAsset || scene.render_url) : (scene.render_url || pickedAsset)) || '');
+    const renderUrl = overAvatar ? (pickedAsset || '') : (vbgSpec?.background_clip_url || ((kind === 'text_graphics' && !scene.remotion_code ? (pickedAsset || scene.render_url) : (scene.render_url || pickedAsset)) || ''));
     const hasCodedRender = looksLikeVideo(renderUrl);
     // A motion-graphic / text-overlay capture already carries its text INSIDE
     // the clip (the GSAP engine baked it); drawing the overlay again here
@@ -151,6 +180,8 @@ export function buildTimeline(project: Project, scenes: Scene[], assets: Asset[]
       ...(overlayElements.length ? { overlayElements } : {}),
       ...(stillMotion ? { motion: stillMotion } : {}),
       ...(broll ? { broll } : {}),
+      ...(elementComposition ? { elementComposition } : {}),
+      ...(videoBacked ? { videoBacked } : {}),
       audioMuted: scene.audio_muted !== false,
       audioVolume: Math.max(0, Math.min(1, Number(scene.audio_volume || 0))),
     });
@@ -657,10 +688,118 @@ function CtaCard(props) {
     {card.button ? <div style={{marginTop:44, padding:'20px 46px', borderRadius:999, background:accent, color:'#fff', fontFamily:"'Inter', system-ui, sans-serif", fontSize:34, fontWeight:800, letterSpacing:'0.01em', boxShadow:'0 20px 60px rgba(0,0,0,0.45)', transform:'scale(' + (0.9 + 0.1 * intro) + ')'}}>{card.button}</div> : null}
   </AbsoluteFill>;
 }
+var elemAnchor = function (anchor) {
+  var x = '-50%'; var y = '-50%';
+  if (anchor === 'top_left' || anchor === 'left' || anchor === 'bottom_left') x = '0%';
+  if (anchor === 'top_right' || anchor === 'right' || anchor === 'bottom_right') x = '-100%';
+  if (anchor === 'top_left' || anchor === 'top' || anchor === 'top_right') y = '0%';
+  if (anchor === 'bottom_left' || anchor === 'bottom' || anchor === 'bottom_right') y = '-100%';
+  return 'translate(' + x + ',' + y + ')';
+};
+var elemState = function (el, t) {
+  var start = Math.max(0, Number(el.start) || 0); var end = Math.max(start + 0.2, Number(el.end) || 6);
+  if (t < start || t >= end) return null;
+  var inDur = Math.max(0.15, Number(el.enter && el.enter.duration) || 0.5);
+  var p = ease((t - start) / inDur, 'ease-out');
+  var outDur = Math.max(0.12, Number(el.exit && el.exit.duration) || 0.35);
+  var q = ease((end - t) / outDur, 'ease-out');
+  var opacity = Number.isFinite(Number(el.opacity)) ? Number(el.opacity) : 1;
+  var x = 0; var y = 0; var scale = Number(el.scale) || 1; var draw = 1; var blur = 0; var clip = '';
+  var enter = String(el.enter && el.enter.style || 'fade');
+  if (enter === 'fade') opacity *= p;
+  else if (enter === 'slide_up') { opacity *= p; y += 64 * (1 - p); }
+  else if (enter === 'slide_down') { opacity *= p; y -= 64 * (1 - p); }
+  else if (enter === 'slide_left') { opacity *= p; x += 92 * (1 - p); }
+  else if (enter === 'slide_right') { opacity *= p; x -= 92 * (1 - p); }
+  else if (enter === 'scale_in' || enter === 'spring_in' || enter === 'pop') { opacity *= Math.min(1, p * 2); scale *= 0.72 + 0.28 * p + (enter === 'pop' ? 0.05 * Math.sin(p * Math.PI) : 0); }
+  else if (enter === 'mask_reveal' || enter === 'wipe') { opacity *= Math.min(1, p * 2); clip = 'inset(0% ' + ((1 - p) * 100) + '% 0% 0%)'; }
+  else if (enter === 'draw' || enter === 'countup') { opacity *= Math.min(1, p * 2); draw = p; }
+  else if (enter === 'blur_in') { opacity *= p; blur = 12 * (1 - p); }
+  var exit = String(el.exit && el.exit.style || 'fade');
+  if (exit === 'fade') opacity *= q;
+  else if (exit === 'slide_up') { opacity *= q; y -= 48 * (1 - q); }
+  else if (exit === 'slide_down') { opacity *= q; y += 48 * (1 - q); }
+  else if (exit === 'scale_out') { opacity *= q; scale *= 0.84 + 0.16 * q; }
+  else if (exit === 'drift') { opacity *= q; y -= 32 * (1 - q); }
+  return {opacity:opacity,x:x,y:y,scale:scale,draw:draw,blur:blur,clip:clip,count:p};
+};
+function ElementLayer(props) {
+  var el = props.element || {}; var frame = props.frame || 0; var t = frame / 30; var st = elemState(el, t);
+  if (!st || st.opacity <= 0.004) return null;
+  var depth = Number(el.depth_z); if (!Number.isFinite(depth)) depth = 0.5; depth = clamp01(depth);
+  var speed = 0.2 + 0.8 * (1 - depth); var camera = props.camera || {move:'none', intensity:1};
+  var k = Number(camera.intensity); if (!(k > 0)) k = 1; if (k > 1.5) k = 1.5;
+  var duration = Math.max(0.1, Number(props.durationSec) || 6); var cp = ease(t / duration, 'ease-in-out');
+  var camX = 0; var camY = 0; var camScale = 1;
+  if (camera.move === 'push_in') camScale = 1 + 0.08 * speed * k * cp;
+  else if (camera.move === 'pull_back') camScale = 1 + 0.08 * speed * k * (1 - cp);
+  else if (camera.move === 'drift_left' || camera.move === 'drift_right') { camX = (camera.move === 'drift_left' ? -1 : 1) * 0.04 * speed * k * (cp - 0.5) * 2 * 1920; camScale = 1 + 0.02 * speed * k; }
+  var accent = String(el.accent || '#FFE566'); var w = Math.max(0.01, Number(el.w) || 0.3); var h = Number(el.h);
+  var base = {position:'absolute',left:(Number(el.x || 0.5)*100)+'%',top:(Number(el.y || 0.5)*100)+'%',width:(w*100)+'%',height:Number.isFinite(h)?(h*100)+'%':undefined,zIndex:Math.max(1,Math.min(4,Math.round(Number(el.z)||props.plane||1))),opacity:st.opacity,transform:elemAnchor(el.anchor)+' translate3d('+(st.x+camX)+'px,'+(st.y+camY)+'px,'+(depth*-300)+'px) rotate('+(Number(el.rotation)||0)+'deg) scale('+(st.scale*camScale)+')',transformOrigin:'50% 50%',transformStyle:'preserve-3d',clipPath:st.clip||undefined,filter:st.blur?'blur('+st.blur+'px)':undefined,pointerEvents:'none',fontFamily:"'Work Sans', Inter, system-ui, sans-serif",color:'#fff'};
+  if (el.kind === 'arrow' || el.kind === 'line') { var x1=Number(el.x||0.5)*1920,y1=Number(el.y||0.5)*1080,x2=Number(el.tx||el.x||0.5)*1920,y2=Number(el.ty||el.y||0.5)*1080; return <AbsoluteFill style={{zIndex:base.zIndex,opacity:st.opacity,transform:'translateZ('+(depth*-300)+'px)'}}><svg viewBox="0 0 1920 1080" style={{width:'100%',height:'100%'}}><line x1={x1} y1={y1} x2={x1+(x2-x1)*st.draw} y2={y1+(y2-y1)*st.draw} stroke={accent} strokeWidth={7} strokeLinecap="round"/>{el.kind==='arrow'&&st.draw>0.92?<circle cx={x2} cy={y2} r={11} fill={accent}/>:null}</svg></AbsoluteFill>; }
+  if (el.kind === 'image' && el.asset_url) return <div style={Object.assign({},base,{overflow:'hidden',borderRadius:Number(el.radius)||16})}><Img src={el.asset_url} style={COVER}/></div>;
+  if (el.kind === 'card') return <div style={Object.assign({},base,{background:el.bg||'rgba(8,12,24,.72)',border:'2px solid rgba(255,255,255,.18)',borderRadius:Number(el.radius)||20,boxShadow:'0 22px 60px rgba(0,0,0,.45)'})}/>;
+  if (el.kind === 'highlight') return <div style={Object.assign({},base,{background:accent,opacity:st.opacity*.48,borderRadius:Number(el.radius)||8})}/>;
+  if (el.kind === 'underline') return <div style={Object.assign({},base,{width:(w*st.draw*100)+'%',height:10,background:accent,borderRadius:9})}/>;
+  if (el.kind === 'chart') { var items=Array.isArray(el.items)?el.items:[]; var max=Math.max.apply(null,[1].concat(items.map(function(i){return Number(i.value)||0;}))); return <div style={Object.assign({},base,{display:'flex',alignItems:'flex-end',gap:'5%',height:base.height||'34%'})}>{items.map(function(item,i){var bp=clamp01(st.draw*items.length-i);return <div key={i} style={{flex:1,height:'100%',display:'flex',flexDirection:'column',justifyContent:'flex-end',alignItems:'center'}}><div style={{width:'72%',height:(Math.max(.03,(Number(item.value)||max*.6)/max*bp)*76)+'%',background:accent,borderRadius:8}}/><div style={{fontSize:22,fontWeight:700,marginTop:8,textAlign:'center'}}>{item.label}</div></div>;})}</div>; }
+  if (el.kind === 'progress') { var steps=Array.isArray(el.items)?el.items:[]; return <div style={Object.assign({},base,{display:'flex',flexDirection:'column',gap:12})}>{steps.map(function(item,i){return <div key={i}><div style={{fontSize:22,fontWeight:700}}>{item.label}</div><div style={{height:9,width:(clamp01(st.draw*steps.length-i)*100)+'%',background:accent,borderRadius:9}}/></div>;})}</div>; }
+  if (el.kind === 'stat') { var value=Number(el.value)||0; var shown=Math.round(value*st.count*10)/10; return <div style={Object.assign({},base,{textAlign:'center'})}><div style={{fontFamily:"'Archivo Black','Arial Black',sans-serif",fontSize:96,lineHeight:1,color:accent}}>{String(el.prefix||'')+shown+String(el.suffix||'')}</div>{el.text?<div style={{fontSize:28,fontWeight:700,marginTop:12}}>{el.text}</div>:null}</div>; }
+  var pill = el.kind === 'pill'; return <div style={Object.assign({},base,pill?{background:el.bg||'rgba(8,12,24,.78)',borderLeft:'7px solid '+accent,borderRadius:14,padding:'18px 24px',textAlign:'center'}:{textAlign:'center'})}>{el.text?<div style={{fontFamily:el.variant==='headline'?"'Archivo Black','Arial Black',sans-serif":undefined,fontSize:el.variant==='headline'?64:el.variant==='subhead'?46:34,fontWeight:900,lineHeight:1.12,textShadow:'0 4px 24px rgba(0,0,0,.75)'}}>{el.text}</div>:null}{el.subtext?<div style={{fontSize:24,fontWeight:600,marginTop:10,opacity:.92}}>{el.subtext}</div>:null}</div>;
+}
 function SceneOverlay(props) {
   var frame = useCurrentFrame();
   var s = props.segment || {};
   var frames = frameCount(s);
+  var vb = s.videoBacked;
+  if (vb && vb.background_clip_url) {
+    var comp = vb.element_composition || null;
+    var elements = comp && Array.isArray(comp.elements) ? comp.elements.slice() : [];
+    // Backward compatibility for a row generated before ElementComposition:
+    // convert its directed layers into simple text/stat planes. Freshness
+    // guards regenerate these rows on the next production pass.
+    if (!elements.length) elements = (Array.isArray(vb.director_layers) ? vb.director_layers : []).map(function(layer,index){var c=layer.content||{};var zone=String(layer.zone||'center');var pos=zone==='left'?{x:.26,y:.5,w:.4}:zone==='right'?{x:.74,y:.5,w:.4}:zone==='top'?{x:.5,y:.12,w:.8}:zone==='lower'||zone==='bottom_safe'?{x:.5,y:.78,w:.8}:{x:.5,y:.5,w:.72};return {id:layer.id||('legacy-'+index),kind:c.value!=null?'stat':'text',x:pos.x,y:pos.y,w:pos.w,z:Math.max(1,Math.min(4,Number(layer.zIndex)||index+1)),depth_z:Number.isFinite(Number(layer.depth_z))?Number(layer.depth_z):.5,start:Number(layer.entrance&&layer.entrance.at)||0,end:Number(vb.durationSec)||6,anchor:'center',enter:{style:'spring_in',duration:.5},exit:{style:'fade',duration:.35},text:c.text||'',subtext:c.subtext||'',value:c.value,prefix:c.prefix,suffix:c.suffix,items:c.items,variant:layer.type==='KineticHeadline'?'headline':'label'};});
+    elements.sort(function(a,b){return (Number(a.z)||1)-(Number(b.z)||1);});
+    var durSec = Number(vb.durationSec) || Math.max(0.1, frames / 30);
+    var cam = (comp && comp.camera) || vb.camera || {move:'none', intensity:1};
+    var pCam = durSec > 0 ? clamp01((frame / 30) / durSec) : 0;
+    var bgScale = 1 + 0.018 * pCam;
+    var tsVb = transitionStyle(s, frame, frames, props.transitionPreset);
+    return <AbsoluteFill style={{opacity: tsVb.opacity, transform: tsVb.transform || undefined, clipPath: tsVb.clipPath || undefined, overflow:'hidden'}}>
+      <AbsoluteFill style={{zIndex:0,transform:'scale(' + bgScale + ')'}}><OffthreadVideo src={vb.background_clip_url} muted loop style={COVER}/></AbsoluteFill>
+      <AbsoluteFill style={{zIndex:1,perspective:'1200px', transformStyle:'preserve-3d'}}>
+        {elements.map(function (element, index) { return <ElementLayer key={element.id || index} element={element} frame={frame} camera={cam} durationSec={durSec} plane={Math.max(1,Math.min(4,index+1))}/>; })}
+      </AbsoluteFill>
+      <OverlayElements overlays={s.overlayElements} frames={frames}/>
+    </AbsoluteFill>;
+  }
+  var ec = s.elementComposition || null;
+  if (ec && Array.isArray(ec.elements) && ec.elements.length) {
+    var ecElements = ec.elements.slice().sort(function(a,b){return (Number(a.z)||1)-(Number(b.z)||1);});
+    var ecDuration = Number(ec.duration) || Math.max(0.1, frames / 30);
+    var ecCamera = ec.camera || {move:'none', intensity:1};
+    var ecTransition = transitionStyle(s, frame, frames, props.transitionPreset);
+    var ecLayers = <AbsoluteFill style={{background:ec.background||'transparent',perspective:'1200px',transformStyle:'preserve-3d'}}>
+      {ec.backdrop_url?<AbsoluteFill style={{opacity:.3}}><Img src={ec.backdrop_url} style={COVER}/></AbsoluteFill>:null}
+      {ecElements.map(function(element,index){return <ElementLayer key={element.id||index} element={element} frame={frame} camera={ecCamera} durationSec={ecDuration} plane={Math.max(1,Math.min(4,index+1))}/>;})}
+    </AbsoluteFill>;
+    var ecComp = s.composition || null;
+    var ecMode = ecComp && (String(ecComp.mode)==='overlay'||String(ecComp.mode)==='central') ? String(ecComp.mode) : '';
+    if (ecMode) {
+      var ecCard = compositionFrameStyle(ecComp);
+      return <AbsoluteFill style={{opacity:ecTransition.opacity,transform:ecTransition.transform||undefined,clipPath:ecTransition.clipPath||undefined,background:'transparent',overflow:'hidden'}}>
+        <div style={ecCard}>{ecLayers}</div>
+        <PresenterPip segment={s} avatarVideoUrl={props.avatarVideoUrl}/>
+        <BrollPip segment={s} enabled={props.brollEnabled}/>
+        <OverlayElements overlays={s.overlayElements} frames={frames}/>
+      </AbsoluteFill>;
+    }
+    return <AbsoluteFill style={{opacity:ecTransition.opacity,transform:ecTransition.transform||undefined,clipPath:ecTransition.clipPath||undefined,overflow:'hidden'}}>
+      {ecLayers}
+      <PresenterPip segment={s} avatarVideoUrl={props.avatarVideoUrl}/>
+      <BrollPip segment={s} enabled={props.brollEnabled}/>
+      <OverlayElements overlays={s.overlayElements} frames={frames}/>
+    </AbsoluteFill>;
+  }
   var ts = transitionStyle(s, frame, frames, props.transitionPreset);
   var opacity = ts.opacity;
   var overlay = s.overlay || {};

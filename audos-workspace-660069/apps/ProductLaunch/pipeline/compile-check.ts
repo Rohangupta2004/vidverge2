@@ -21,7 +21,7 @@ import { schemaAsPromptText } from '../sdk/component-schema';
 import { isSDKComponent, RENDER_CONSTRAINTS, SDK_COMPONENTS } from '../sdk/component-sdk.types';
 import { REMOTION_IMPORTS, RUNTIME_GLOBALS } from '../sdk/runtime-source';
 import { UNCHECKED_VALUE, validateLayerProps } from '../sdk/validate-props';
-import type { ComponentPlan } from '../types/component-plan.types';
+import { planAssetHandles, type ComponentInstance, type ComponentPlan } from '../types/component-plan.types';
 import { codeSanityProblems } from './codegen';
 
 /** The only module specifiers the generated film may import. */
@@ -41,6 +41,8 @@ export const HOST_ELEMENTS = [
   'AbsoluteFill', 'Sequence', 'Series', 'Audio', 'Img', 'Video', 'OffthreadVideo',
   'Stage', 'Fragment', 'React.Fragment',
 ];
+
+const PIXEL_UI_COMPONENTS = ['BrowserFrame', 'Dashboard', 'Morph', 'FloatingUI', 'Grid', 'FullBleed', 'Screenshot'];
 
 export interface CompileResult {
   success: boolean;
@@ -112,6 +114,17 @@ function propsFromAttrs(attrs: JsxAttr[]): Record<string, unknown> {
   return props;
 }
 
+function plannedUiLayers(plan: ComponentPlan): ComponentInstance[] {
+  const layers: ComponentInstance[] = [];
+  const visit = (layer: ComponentInstance): void => {
+    if (layer.component === 'SemanticUI') layers.push(layer);
+    const children = layer.props?.children;
+    if (Array.isArray(children)) (children as ComponentInstance[]).forEach(visit);
+  };
+  plan.scenes.forEach((scene) => scene.layers.forEach(visit));
+  return layers;
+}
+
 export interface CompileContext {
   plan?: ComponentPlan | null;
   /** Defaults to the live asset registry. */
@@ -133,6 +146,8 @@ export async function compileCheck(
   for (const problem of codeSanityProblems(code)) errors.push(problem);
 
   const scan = scanTsx(code);
+  const seenUiReferences: string[] = [];
+  const seenUiProps: Record<string, Record<string, unknown>> = {};
   for (const error of scan.errors) errors.push(error);
 
   for (const specifier of scan.imports) {
@@ -160,6 +175,17 @@ export async function compileCheck(
         + '> is neither an SDK component nor defined in this file.');
       continue;
     }
+    if (PIXEL_UI_COMPONENTS.indexOf(element.name) >= 0) {
+      errors.push('Line ' + String(element.line) + ': <' + element.name
+        + '> embeds screenshot pixels. Use SemanticUI, ProductImage or Logo.');
+    }
+    if (element.name === 'Stage') {
+      const names = element.attrs.map((attr) => attr.name);
+      for (const required of ['startFrame', 'durationFrames', 'transitionOut']) {
+        if (names.indexOf(required) < 0) errors.push('Line ' + String(element.line)
+          + ': <Stage> is missing ' + required + ' for beat-aligned transitions.');
+      }
+    }
     if (!isSDKComponent(element.name)) continue;
 
     const spread = element.attrs.find((attr) => attr.name === '...');
@@ -168,7 +194,12 @@ export async function compileCheck(
         + '> uses a spread. Every prop must be written out literally.');
     }
 
-    const result = validateLayerProps(element.name, propsFromAttrs(element.attrs), knownHandles);
+    const parsedProps = propsFromAttrs(element.attrs);
+    if (element.name === 'SemanticUI' && typeof parsedProps.referenceId === 'string') {
+      if (seenUiReferences.indexOf(parsedProps.referenceId) < 0) seenUiReferences.push(parsedProps.referenceId);
+      seenUiProps[parsedProps.referenceId] = parsedProps;
+    }
+    const result = validateLayerProps(element.name, parsedProps, knownHandles);
     for (const problem of result.problems) {
       errors.push('Line ' + String(element.line) + ': ' + problem.message);
     }
@@ -204,6 +235,25 @@ export async function compileCheck(
         errors.push('Scene ' + scene.scene_id + ' is missing: no <Sequence from={'
           + String(scene.start_frame) + '} durationInFrames={'
           + String(scene.duration_frames) + '}> appears in the file.');
+      }
+    }
+    for (const handle of planAssetHandles(plan)) {
+      if (scan.assetHandles.indexOf(handle) < 0) {
+        errors.push('The generated file dropped planned asset "' + handle + '".');
+      }
+    }
+    for (const layer of plannedUiLayers(plan)) {
+      const referenceId = String(layer.props?.referenceId || '');
+      if (seenUiReferences.indexOf(referenceId) < 0) {
+        errors.push('The generated file dropped semantic UI reference "' + referenceId + '".');
+        continue;
+      }
+      const generated = seenUiProps[referenceId] || {};
+      for (const key of ['screenName', 'elements', 'background', 'surface', 'textColor', 'accent']) {
+        if (JSON.stringify(generated[key]) !== JSON.stringify(layer.props?.[key])) {
+          errors.push('Semantic UI reference "' + referenceId + '" changed its ' + key
+            + ' data during code generation.');
+        }
       }
     }
   }

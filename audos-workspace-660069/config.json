@@ -5,6 +5,13 @@
   "version": "1.0.0",
   "apps": [
     {
+      "id": "vidverge-engine",
+      "name": "Video Engine",
+      "description": "The autonomous video and motion graphics engine \u2014 two pipelines that each turn a single input into a finished, broadcast-ready MP4 with no manual editing. SaaS Motion Reel reads a product URL with the Apify scraper for real brand colours, logo and copy, writes and voices the script with ElevenLabs, times every word with Deepgram nova-3, then has Claude Opus 5 engineer a Remotion composition (3-Object Rule, spring physics, lexical subtitles locked to the word timings) and renders it. Vox Documentary takes a topic, writes fifteen sequential four-second beats with GPT-5.6, narrates them, builds a torn-paper editorial collage still for every beat, animates each one as rigid stop-motion with Seedance 2.0 Fast, and assembles the film through the DocumentaryMaster composition with five-frame cross-dissolves and the ambient bed ducked to -22 dB under the narration. Every run is tracked live through QUEUED, INGESTING, AUDIO_SYNTHESIS, GENERATING_VISUALS, AUDITING and RENDERING against the vge_video_jobs table, so a reloaded tab picks the job back up, and finished masters play and download in the app.",
+      "icon": "Zap",
+      "component": "apps/Vidverge/App.tsx"
+    },
+    {
       "id": "vidverge-agent",
       "name": "Vidverge Agent",
       "description": "The primary agent hub for Vidverge — a premium, near-black single screen whose identity is a living light wave. A multi-trail SVG motion wave (pure CSS keyframes, no video or animation library) dips into a smooth V across the full width with a bright particle travelling along the main path, and it reacts to what the agent is doing: calm breathing when idle, a faster brighter particle with shimmering trails while working, a one-shot sweep that illuminates the whole path on completion, and a gentle amber trail when something needs attention. A floating VIDVERGE label over the wave shows the live state (Ready to create / Thinking... / Generating / Editing / Finalizing). Below it sits the frosted pill Create bar: attachment button, a full-width 'What do you want to create?' input, a dropdown that routes the brief to any of the six studios (SceneForge, Faceless Content, Script-to-Video, SaaS Verger, Video Enhancer, Ads Studio) and a golden Create button — submitting opens the selected studio with the brief prefilled. Underneath, a compact Recent Jobs queue shows up to five projects with stage label, thin golden progress bar and a preview tile, beside a small Activity panel with an equaliser heartbeat and the agent's last few actions. The Create bar now uploads any attachment once, hands the brief and durable file URL to the selected studio's create screen, and opens that studio immediately. Recent Jobs polls the studios' persisted WorkspaceDB projects, reflects real in-flight state in the wave and status label, and opens the owning studio project when a row is clicked.",
@@ -54,13 +61,6 @@
       "component": "apps/AdsStudio/App.tsx"
     },
     {
-      "id": "saas-verger",
-      "name": "SaaS Verger",
-      "description": "Autonomous SaaS product video maker: paste one SaaS landing-page URL and the app handles the entire production without mid-flow choices. It fetches the live page, uses Claude Sonnet 5 to extract the product name, tagline, real brand colours, 3–5 actual features, CTA, tone and target user, then writes a unique 60–90 second three-act narration grounded in that identity. ElevenLabs generates an Adam voiceover while three pure-coded Remotion UI mockups are assembled in parallel: branded sidebars, navigation, forms, workflow nodes, cards and analytics using the product's real name and feature labels, animated with a spring cursor, click ripples, character-by-character typing and visible empty-to-complete state transitions. A dynamic 1920×1080, 30fps Remotion composition times the three product screens and kinetic phrases to the generated script, layers them over a dark brand-to-amber gradient, adds the voiceover from frame zero, closes on a full-width branded CTA card, and renders server-side to a downloadable MP4. Progress updates through analysis, scripting, voiceover, mockups and rendering; completed projects persist in sv_projects and reopen with an inline video preview and Download MP4 action. An optional NARRATION & VISUAL MATCHING step now sits between the identity review and the render: 'Add narration & visuals' writes the scene script first, then every scene gets an editable narration box with a per-scene AI rewrite and an ElevenLabs voice preview, alongside a Suggested visuals panel that keyword-matches the narration against the customer's own uploads and this workspace's clip library. Attaching a screenshot or clip drops it inside that scene's animated product shell (and behind the closing CTA card), per-scene ElevenLabs narration segments replace the single voice track and set each scene's length, and when voice generation is unavailable the narration is burned in as an on-screen caption instead. Any scene that has narration but no relevant visual shows an inline warning in English and Hinglish, with a '3 scenes missing visuals' style count at the top of the panel so it can be fixed before rendering rather than after. No stock footage, image generation or AI-invented pictures are used — the customer's own screenshots are the only pictures, and scenes without one still render as pure coded UI. Distinct from Product Video: SaaS Verger is the one-URL autonomous route, while Product Video remains the deeper editable multi-workflow studio.",
-      "icon": "Zap",
-      "component": "apps/SaaSVerger/App.tsx"
-    },
-    {
       "id": "faceless-content",
       "name": "Faceless Content",
       "description": "Topic in, one finished faceless MP4 out — no templates, everything written and filmed from scratch on every run. The Create tab is a single clean form: a topic (with a 'Suggest a topic' button), a niche pill picker (Explainer / Documentary / Crime), a target length (2 / 5 / 8 minutes, default 5), an orientation toggle (16:9 landscape or 9:16 portrait) and a video-model toggle (Veo 3 or Runway Turbo), under one full-width electric-blue Generate. Pressing Generate replaces the form with a terminal-style progress log whose lines fade in as the pipeline advances, driven by a 2-second poll of the project row so a reload resumes mid-run. The pipeline: Claude Opus 5 acts as the Faceless Script Writer — it verifies its own facts, writes the body first and the three-layer hook afterwards (cold drop, stakes sentence, peak teases), and follows the blueprint for the chosen niche (Crime: Normal Day → Discovery → investigation loops → the Turn at 70% → Resolution → gut-punch closer; Explainer: short hook → 5–12 escalating segments → held-back closer; Documentary: the Surface → descent loops → a named human core → the Why in numbers → a return to the opening image), returning three title options, a thumbnail line, timecoded VO/VISUAL blocks and a fact-check list. A second Opus 5 call turns every VISUAL line into a camera-only shot prompt — physical verbs, FOV in degrees, white balance in Kelvin, a cut every ~2 seconds, positive-only phrasing and a verbatim 'NO MUSIC. SFX ONLY' audio lock. Scenes then render SEQUENTIALLY so each one can seed from the previous scene's last frame (extracted server-side with ffmpeg) for visual continuity, on Veo 3 or, when the founder's RUNWAY_API_KEY is configured, Runway Gen-4 Turbo through the secrets proxy — a missing key falls back to Veo 3 with a toast rather than failing. Finished clips are concatenated server-side into one MP4. The Result screen is a full-width player with Download, the three title options, a collapsed script accordion with timecodes, the fact-check list, and Regenerate / New Video. The History tab is a two-column grid of past videos (thumbnail, topic, niche badge, date, duration, Download). Dark #0A0A0A UI with #1A1A1A cards, electric-blue #3B82F6 accent, Inter for the UI and JetBrains Mono for the terminal and script view. Projects and scenes persist to the fc_projects and fc_scenes tables.",
@@ -84,7 +84,7 @@
     {
       "id": "video-provider-lab",
       "name": "Video Provider Lab",
-      "description": "An owner-only developer test panel: one shared prompt, one shared image attachment, and every video model the platform exposes in a single selector - 25 runnable entries across all 6 installed video plugins - so the same brief can be put through each provider and read side by side. Nothing in the app holds an API key, an environment variable or a BYOK secret; every request goes to a same-origin Audos proxy path that adds the provider credential server-side and bills the workspace wallet, with X-Workspace-DB-Token as the only credential sent. THREE FILES: labModels.ts is the catalog (what exists, which plugin powers it, which parameters it takes, how long to poll - the Group A, Kling, Higgsfield and Runway rosters are derived from lib/videoEngines.ts so a model id still lives in exactly one place), labClient.ts is the network layer (one submit -> poll pair per plugin, hitting the proxies directly and deliberately NOT going through lib/videoEngineClient.ts, which would charge the customer credit ledger and can raise the plans screen), and App.tsx is only the panel. ENTRIES: image-and-video-generation + google-veo3 on POST /api/veo/generate/video -> GET /api/veo/status/:operationId for Seedance 2.0 Fast (ByteDance via OpenRouter), Gemini Omni Flash, Veo 3.1, Veo 3.1 Fast, Veo 3.0, Veo 3.0 Fast, Veo 2.0, Sora 2, Sora 2 Pro and the OpenRouter Veo 3.1 / Fast / Lite variants, plus the platform-managed POST /api/generate/video which takes no model field; kling-video on POST /api/generate/kling/{text-to-video, image-to-video, multi-image} -> GET /api/generate/kling/status/:taskId for kling-v2-master, v1-6, v1-5 and v1, where the attached images pick the route (none = text-to-video, one = image-to-video, two to four = Elements) and a finished clip offers Extend +5s and TTS lip-sync; higgsfield-media on POST /api/generate/higgsfield/video (MiniMax Hailuo 02) and /image-to-video (DoP Turbo / Standard / Lite) -> GET /api/generate/higgsfield/status/:requestId, with moderation's nsfw status reported as its own outcome; heygen-video on POST .../heygen/proxy/v3/videos (avatar-led, the look and engine resolved from the live catalog, script capped at 500 characters) and .../v3/video-agents (prompt-driven, orientation rather than aspect ratio); runway-recipes on POST /api/generate/runway/quote first - free, unauthenticated, spends nothing - then /video with a fresh Idempotency-Key -> GET /api/generate/runway/status/:taskId for Gen 4.5 and Gen 4 Turbo, with the rest of the Runway roster listed but disabled until the capabilities endpoint lists it. Luma Dream Machine and Pika appear greyed out with the reason the platform has no route for either, rather than being offered as choices that would only answer 400. NOTHING SUBSTITUTES A MODEL: the old id ladder is gone, every id comes from the documented proxy enum, and a rejection is reported with its status, its path and the exact id that was sent. Per-entry parameter controls: duration, aspect ratio, resolution (4K only where it is honoured), generate-audio, negative prompt, Kling std/pro mode and camera preset, cfgScale, seed, HeyGen fit and voice speed, and a seed-frame-vs-reference-ingredient image role on Veo 3.1 and Omni Flash. A searchable grid grouped by provider plus a full dropdown, a compare checkbox that runs several models on the same brief at once, and a run log keeping the last 24 runs with a status badge, a live elapsed timer, the parameters that run actually sent, the exact request paths made, an inline player with an MP4 link, and the real error text - 402 reads as insufficient wallet balance, and a request the endpoint would refuse is recorded as Not sent with the reason instead of being submitted. Polling is a 5s setInterval cleared on completion, on Stop polling and on unmount, with per-entry caps from 4:00 on the fast Veo routes to 8:00 on HeyGen and Runway. Nothing is persisted - a session lives in the open tab. Dark panel scoped to these files only (#0a0a0a background, #111 cards, #6c63ff accent) so the VidVerge shell theme is untouched. Files: apps/VideoProviderLab/App.tsx, apps/VideoProviderLab/labModels.ts, apps/VideoProviderLab/labClient.ts.",
+      "description": "An owner-only developer test panel: one shared prompt, one shared image attachment, and every video model the platform exposes in a single selector - 25 runnable entries across all 6 installed video plugins - so the same brief can be put through each provider and read side by side. Nothing in the app holds an API key, an environment variable or a BYOK secret; every request goes to a same-origin Audos proxy path that adds the provider credential server-side and bills the workspace wallet, with X-Workspace-DB-Token as the only credential sent. THREE FILES: labModels.ts is the catalog (what exists, which plugin powers it, which parameters it takes, how long to poll - the Group A, Kling, Higgsfield and Runway rosters are derived from lib/videoEngines.ts so a model id still lives in exactly one place), labClient.ts is the network layer (one submit -> poll pair per plugin, hitting the proxies directly and deliberately NOT going through lib/videoEngineClient.ts, which would charge the customer credit ledger and can raise the plans screen), and App.tsx is only the panel. ENTRIES: image-and-video-generation + google-veo3 on POST /api/veo/generate/video -> GET /api/veo/status/:operationId for Seedance 2.0 Fast (ByteDance via OpenRouter), Gemini Omni Flash, Veo 3.1, Veo 3.1 Fast, Veo 3.0, Veo 3.0 Fast, Veo 2.0, Sora 2, Sora 2 Pro and the OpenRouter Veo 3.1 / Fast / Lite variants, plus the platform-managed POST /api/generate/video which takes no model field; kling-video on POST /api/generate/kling/{text-to-video, image-to-video, multi-image} -> GET /api/generate/kling/status/:taskId for kling-v2-master, v1-6, v1-5 and v1, where the attached images pick the route (none = text-to-video, one = image-to-video, two to four = Elements) and a finished clip offers Extend +5s and TTS lip-sync; higgsfield-media on POST /api/generate/higgsfield/video (MiniMax Hailuo 02) and /image-to-video (DoP Turbo / Standard / Lite) -> GET /api/generate/higgsfield/status/:requestId, with moderation's nsfw status reported as its own outcome; heygen-video on POST .../heygen/proxy/v3/videos (avatar-led, the look and engine resolved from the live catalog, script capped at 500 characters) and .../v3/video-agents (prompt-driven, orientation rather than aspect ratio); runway-recipes on POST /api/generate/runway/quote first - free, unauthenticated, spends nothing - then /video with a fresh Idempotency-Key -> GET /api/generate/runway/status/:taskId for Gen 4.5 and Gen 4 Turbo, with the rest of the Runway roster listed but disabled until the capabilities endpoint lists it. Luma Dream Machine and Pika appear greyed out with the reason the platform has no route for either, rather than being offered as choices that would only answer 400. NOTHING SUBSTITUTES A MODEL: the old id ladder is gone, every id comes from the documented proxy enum, and a rejection is reported with its status, its path and the exact id that was sent. Per-entry parameter controls: duration, aspect ratio, resolution (4K only where it is honoured), generate-audio, negative prompt, Kling std/pro mode and camera preset, cfgScale, seed, HeyGen fit and voice speed, and a seed-frame-vs-reference-ingredient image role on Veo 3.1 and Omni Flash. A searchable grid grouped by provider plus a full dropdown, a compare checkbox that runs several models on the same brief at once, and a run log keeping the last 24 runs with a status badge, a live elapsed timer, the parameters that run actually sent, the exact request paths made, an inline player with an MP4 link, and the real error text - 402 reads as insufficient wallet balance, and a request the endpoint would refuse is recorded as Not sent with the reason instead of being submitted. Polling is a 5s setInterval cleared on completion, on Stop polling and on unmount, with per-entry caps from 4:00 on the fast Veo routes to 8:00 on HeyGen and Runway. Nothing is persisted - a session lives in the open tab. Dark panel scoped to these files only (#0a0a0a background, #111 cards, #D4920A accent) so the VidVerge shell theme is untouched. Files: apps/VideoProviderLab/App.tsx, apps/VideoProviderLab/labModels.ts, apps/VideoProviderLab/labClient.ts.",
       "icon": "FlaskConical",
       "component": "apps/VideoProviderLab/App.tsx",
       "allowedRoles": [
@@ -104,6 +104,13 @@
       "description": "CineAgent is the fully autonomous AI video EDITOR: upload raw footage (talking head, tutorial, screen recording, ad, podcast, vlog, interview — any type) and the agent owns the entire post-production: it analyzes, directs, edits, designs motion graphics, scores, renders, reviews its own cut and delivers a finished 1080p MP4 — no scene plans, prompts, model picking or settings required from the user (optional preferences exist but are never a prerequisite). PIPELINE: (1) upload to workspace storage with duration/aspect probing; (2) ANALYSIS — the audio track is decoded in-browser to 16kHz WAV for Deepgram nova-3 word-level transcription plus local silence detection, Gemini watches the complete video (including the ending) through /api/generate/video-analysis and returns structured scenes/key moments/on-screen text/quality notes, and ffmpeg frame extraction samples stills at scene boundaries + uniform coverage + the ending; (3) DIRECTION — Claude Opus 5 (via the workspace Anthropic proxy, with real frames attached as vision blocks) acts as editor/creative director/motion designer and authors a structured EditPlan: source cuts timed into transcript gaps, pacing, a content-matched visual identity, motion-graphic overlays chosen from a 14-primitive vocabulary (kinetic titles, lower thirds, callouts, animated stats/charts/timelines/lists, quotes, chapter cards, badges, keyword pops, image panels, progress arcs) PLUS a free-form keyframed 'custom' layer system so it can invent compositions — all as JSON, never as generated code; (4) ASSETS — generated video inserts run on Seedance 2.0 Fast / Veo 3.1 / Omni Flash through /api/veo/generate/video with a documented fallback ladder and optional source-frame seeding for continuity (never silently substituted — the registry records the engine that actually produced each clip), images on gemini-3.1-flash-image re-uploaded to durable GCS URLs, an ElevenLabs/Lyria underscore sized to the cut with speech-envelope ducking, optional ElevenLabs narration; (5) RENDER — ONE deterministic server-side Remotion pass (1920x1080/30fps) through /api/render/remotion: a hand-written runtime (apps/CineAgent/lib/motionRuntime.ts) interprets the plan — OffthreadVideo source segments with blurred-fill fit or cover framing, five transition types, every graphic primitive, burned captions baked deterministically from the word timestamps through the cut (clean/bold/karaoke/minimal/editorial presets), and mixed audio — so a render can never fail on director syntax; cuts past ~9.5 minutes render as chunks and concatenate via the ffmpeg stitch endpoint; (6) REVIEW — mechanical checks on the real file (playability, duration vs plan) then Opus vision reads frames of the FINISHED render against the plan and names defects; actionable defects trigger a targeted plan revision and re-render, capped at two passes, best-scoring cut ships with open notes documented honestly. Every stage checkpoints to the cine_projects WorkspaceDB table so a refresh resumes the run; asset and analysis work is never re-paid. UI is three states in one screen: a drop-zone home with optional creative preferences (tone note, captions/music/framing/motion intensity) and a resumable project grid; a run view with a seven-stage rail, live agent activity log and an optional 'see what the agent decided' plan inspector; and a result view with inline player, Download MP4, the reviewer's score and any open notes. Standalone — shares nothing with Video Enhancer or any other app. Files: apps/CineAgent/App.tsx + apps/CineAgent/lib/{types,ai,platform,audio,plan,director,assets,motionRuntime,render,qa,pipeline,store}.ts.",
       "icon": "Wand2",
       "component": "apps/CineAgent/App.tsx"
+    },
+    {
+      "id": "brand-context",
+      "name": "Brand Context",
+      "description": "Brand Context is the paste-once brand primer: one screen that shows the workspace's full brand brief already formatted as a ChatGPT-ready prompt block \u2014 brand name, what Vidverge does, target audience, the core problem, the differentiator, the video format, the tone and the full credit pricing \u2014 so the customer never re-types brand details before asking an external AI for work. A read-only terminal-style block renders the text with a visible copy affordance in its title bar, a full-width Copy to Clipboard button puts it on the clipboard (Clipboard API first, hidden-textarea fallback where the browser blocks it) and confirms with a checkmark for two seconds before resetting, and three numbered hint cards close the loop: paste the block into a new ChatGPT conversation, ask for a 30-second script, then bring the script back into Script-to-Video or the Vidverge Agent. Entirely static and standalone \u2014 no AI calls, no WorkspaceDB, no auth; the copied text lives in the BRAND_CONTEXT constant in apps/BrandContext/App.tsx, which is the single place to edit the brand. Styled with the shared obsidian design system (components/ui/AppShell, Card, Button, Badge over components/theme tokens).",
+      "icon": "Clipboard",
+      "component": "apps/BrandContext/App.tsx"
     }
   ],
   "terminology": {
@@ -115,8 +122,8 @@
   },
   "desktop": {
     "theme": {
-      "gradient": "from-[#FFFFFF] to-[#FFFDF4]",
-      "accentColor": "#C8920A",
+      "gradient": "from-[#08090B] to-[#111318]",
+      "accentColor": "#D6AB4A",
       "dockStyle": "glass"
     },
     "themeTokens": {
@@ -126,61 +133,61 @@
         "fontFamily": "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
       },
       "shell": {
-        "accentColor": "#C8920A",
+        "accentColor": "#D6AB4A",
         "dockStyle": "glass",
-        "pageBackground": "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(200,146,10,0.14) 0%, transparent 60%), radial-gradient(ellipse 60% 40% at 88% 4%, rgba(224,163,58,0.10) 0%, transparent 58%), #FFFDF4",
-        "gateBackground": "radial-gradient(ellipse 80% 55% at 50% -5%, rgba(200,146,10,0.18) 0%, transparent 62%), radial-gradient(ellipse 55% 45% at 90% 2%, rgba(224,163,58,0.12) 0%, transparent 58%), #FFFDF4",
-        "panelBackground": "rgba(255,255,255,0.92)",
-        "panelStrongBackground": "#FFF3D6"
+        "pageBackground": "radial-gradient(ellipse 78% 48% at 50% -8%, rgba(214,171,74,0.14) 0%, transparent 62%), radial-gradient(ellipse 52% 38% at 92% 2%, rgba(243,213,139,0.07) 0%, transparent 60%), #08090B",
+        "gateBackground": "radial-gradient(ellipse 80% 55% at 50% -5%, rgba(214,171,74,0.18) 0%, transparent 64%), radial-gradient(ellipse 55% 42% at 92% 0%, rgba(243,213,139,0.08) 0%, transparent 60%), #08090B",
+        "panelBackground": "rgba(17,19,24,0.94)",
+        "panelStrongBackground": "#1D212A"
       },
       "cssVariables": {
-        "--space-surface-bg": "#FFFDF4",
-        "--space-surface-gradient-from": "#FFFFFF",
-        "--space-surface-gradient-via": "#FFFDF4",
-        "--space-surface-gradient-to": "#FFF8E8",
-        "--space-surface-card": "#FFFFFF",
-        "--space-surface-panel": "#FFFAEB",
-        "--space-surface-panel-strong": "#FFF3D6",
-        "--space-surface-muted": "#FFF9E8",
-        "--space-surface-accent-soft": "rgba(200,146,10,0.10)",
-        "--space-border-default": "rgba(180,120,0,0.14)",
-        "--space-border-strong": "rgba(180,120,0,0.36)",
-        "--space-text-primary": "#1A1000",
-        "--space-text-secondary": "#3D2800",
-        "--space-text-muted": "#7A6030",
-        "--space-text-brand": "#8A6400",
-        "--space-text-accent": "#B4720A",
-        "--space-text-on-primary": "#ffffff",
-        "--space-text-on-highlight": "#ffffff",
-        "--space-brand-primary": "#C8920A",
-        "--space-brand-primary-50": "rgba(200,146,10,0.06)",
-        "--space-brand-primary-100": "rgba(200,146,10,0.12)",
-        "--space-brand-primary-200": "rgba(200,146,10,0.22)",
-        "--space-brand-primary-500": "#C8920A",
-        "--space-brand-primary-600": "#A87A06",
-        "--space-brand-primary-700": "#8A6400",
-        "--space-brand-primary-900": "#5A4100",
-        "--space-brand-highlight": "#B4720A",
-        "--space-brand-highlight-50": "rgba(180,114,10,0.06)",
-        "--space-brand-highlight-100": "rgba(180,114,10,0.12)",
-        "--space-brand-highlight-200": "rgba(180,114,10,0.22)",
-        "--space-brand-highlight-500": "#E0A33A",
-        "--space-brand-highlight-600": "#B4720A",
-        "--space-brand-highlight-700": "#8A5600",
-        "--space-brand-highlight-900": "#4A2F00",
-        "--space-shell-dock-text": "#1A1000",
-        "--space-shell-icon": "#C8920A",
-        "--space-semantic-success": "#166534",
-        "--space-semantic-success-50": "rgba(22,101,52,0.08)",
-        "--space-semantic-success-100": "rgba(22,101,52,0.16)",
-        "--space-semantic-success-500": "#166534",
-        "--space-semantic-success-600": "#15803D",
-        "--space-semantic-success-700": "#14532D",
-        "--space-semantic-danger": "#991B1B",
-        "--space-semantic-danger-500": "#991B1B",
-        "--space-semantic-danger-600": "#B91C1C",
-        "--space-neutral-800": "#FFF3D6",
-        "--space-neutral-100": "#3D2800"
+        "--space-surface-bg": "#08090B",
+        "--space-surface-gradient-from": "#08090B",
+        "--space-surface-gradient-via": "#0B0D10",
+        "--space-surface-gradient-to": "#111318",
+        "--space-surface-card": "#111318",
+        "--space-surface-panel": "#171A21",
+        "--space-surface-panel-strong": "#1D212A",
+        "--space-surface-muted": "#0E1014",
+        "--space-surface-accent-soft": "rgba(214,171,74,0.12)",
+        "--space-border-default": "rgba(255,255,255,0.07)",
+        "--space-border-strong": "rgba(243,213,139,0.24)",
+        "--space-text-primary": "#F6F3EB",
+        "--space-text-secondary": "#B8B2A7",
+        "--space-text-muted": "#77736B",
+        "--space-text-brand": "#F3D58B",
+        "--space-text-accent": "#FFE8AB",
+        "--space-text-on-primary": "#08090B",
+        "--space-text-on-highlight": "#08090B",
+        "--space-brand-primary": "#D6AB4A",
+        "--space-brand-primary-50": "rgba(214,171,74,0.06)",
+        "--space-brand-primary-100": "rgba(214,171,74,0.12)",
+        "--space-brand-primary-200": "rgba(214,171,74,0.22)",
+        "--space-brand-primary-500": "#D6AB4A",
+        "--space-brand-primary-600": "#B8892F",
+        "--space-brand-primary-700": "#90671F",
+        "--space-brand-primary-900": "#3B2A12",
+        "--space-brand-highlight": "#F3D58B",
+        "--space-brand-highlight-50": "rgba(243,213,139,0.06)",
+        "--space-brand-highlight-100": "rgba(243,213,139,0.12)",
+        "--space-brand-highlight-200": "rgba(243,213,139,0.22)",
+        "--space-brand-highlight-500": "#F3D58B",
+        "--space-brand-highlight-600": "#D6AB4A",
+        "--space-brand-highlight-700": "#B8892F",
+        "--space-brand-highlight-900": "#3B2A12",
+        "--space-shell-dock-text": "#08090B",
+        "--space-shell-icon": "#F3D58B",
+        "--space-semantic-success": "#4ade80",
+        "--space-semantic-success-50": "rgba(74,222,128,0.08)",
+        "--space-semantic-success-100": "rgba(74,222,128,0.16)",
+        "--space-semantic-success-500": "#4ade80",
+        "--space-semantic-success-600": "#22c55e",
+        "--space-semantic-success-700": "#16a34a",
+        "--space-semantic-danger": "#f87171",
+        "--space-semantic-danger-500": "#f87171",
+        "--space-semantic-danger-600": "#ef4444",
+        "--space-neutral-800": "#171A21",
+        "--space-neutral-100": "#B8B2A7"
       }
     },
     "layout": {
@@ -188,7 +195,7 @@
       "dockPosition": "left",
       "appWindowSize": "fullscreen",
       "defaultLandingView": "app",
-      "defaultLandingAppId": "verge-hub"
+      "defaultLandingAppId": "vidverge-agent"
     },
     "branding": {
       "name": "VidVerge",
@@ -199,7 +206,7 @@
     }
   },
   "agent": {
-    "welcomeMessage": "Welcome to Vidverge — bring me an idea and leave with a video. A product URL, a written script, rough footage you already shot, or just a topic: tell me what you have and I'll route it to the right studio and stay with it to the finished cut. In a hurry? MotionLaunch is the one-press route: paste a product link, pick landscape or portrait, and it comes back as a 30-second launch film — three photorealistic glassmorphism mockups of your product, each animated into a 10-second clip that starts on the frame the last one ended on, stitched into one seamless piece. Pure motion, no text overlays. Shot something already? CineAgent is the autonomous editor: drop in raw footage and it watches the whole thing, writes its own edit, designs the motion graphics, scores it, renders a 1080p MP4 and reviews its own cut before handing it to you — nothing to configure. Already written the narration? Faceless records it first and cuts the whole film to it, so every shot lands on the exact words being spoken. Just need the voice? Voice Studio clones a voice, reads your Hinglish script, dubs a finished cut into another language and lip-syncs an avatar presenter. Not sure where to start? Say what you are launching and I'll pick the studio for you.",
+    "welcomeMessage": "Welcome to VidVerge — your AI production studio for product teams, brands and creators. Bring a product URL, a script, raw footage or just an idea; I’ll route it to the right engine, direct the workflow and help you leave with a publish-ready video. Try a launch film, a conversion-focused ad, a character-consistent scene, a faceless documentary or a polished edit of footage you already shot.",
     "name": "VidVerge Director",
     "thinkingText": "VidVerge is shaping your video…"
   }

@@ -56,15 +56,16 @@ export function planAssetHandles(plan: ComponentPlan): string[] {
   const add = (value: unknown): void => {
     if (typeof value === 'string' && value && seen.indexOf(value) < 0) seen.push(value);
   };
-  for (const scene of plan.scenes) {
-    for (const layer of scene.layers) {
-      const props = layer.props || {};
-      for (const key of ASSET_HANDLE_PROPS) {
-        const value = props[key];
-        if (Array.isArray(value)) value.forEach(add);
-        else add(value);
-      }
+  const visit = (layer: ComponentInstance): void => {
+    const props = layer.props || {};
+    for (const key of ASSET_HANDLE_PROPS) {
+      const value = props[key];
+      if (Array.isArray(value)) value.forEach(add);
+      else add(value);
     }
-  }
+    const children = props.children;
+    if (Array.isArray(children)) (children as ComponentInstance[]).forEach(visit);
+  };
+  for (const scene of plan.scenes) scene.layers.forEach(visit);
   return seen;
 }

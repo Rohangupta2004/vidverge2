@@ -157,7 +157,7 @@ export interface OverlayConfig {
  *  - 'text_overlay'   — deterministic animated text, captured to a clip by the same engine
  *  - 'text_graphics'  — LEGACY combined text+asset overlay composed at final assembly (pre-v4 scenes)
  */
-export type VisualKind = 'ai_video' | 'image' | 'motion_graphic' | 'text_overlay' | 'text_graphics';
+export type VisualKind = 'ai_video' | 'image' | 'motion_graphic' | 'text_overlay' | 'text_graphics' | 'video_backed_graphic';
 
 export interface EffectPresetMeta {
   id: string;
@@ -233,7 +233,7 @@ export function normalizeEffect(effect?: EffectSetting | null): EffectSetting {
   };
 }
 
-const VISUAL_KIND_IDS: VisualKind[] = ['ai_video', 'image', 'motion_graphic', 'text_overlay', 'text_graphics'];
+const VISUAL_KIND_IDS: VisualKind[] = ['ai_video', 'image', 'motion_graphic', 'text_overlay', 'text_graphics', 'video_backed_graphic'];
 
 /** Legacy scenes (null visual_kind) behave as text/graphics overlays. */
 export function visualKindOf(value?: string | null): VisualKind {
@@ -251,6 +251,7 @@ export const KIND_COLORS: Record<'heygen' | VisualKind, string> = {
   ai_video: '#fbbf24',
   image: '#f59e0b',
   motion_graphic: '#22c55e',
+  video_backed_graphic: '#D4920A',
   text_overlay: '#2dd4bf',
   text_graphics: '#2dd4bf',
 };
@@ -260,6 +261,7 @@ export const KIND_LABELS: Record<'heygen' | VisualKind, string> = {
   ai_video: 'AI Video',
   image: 'Image',
   motion_graphic: 'Motion Graphic',
+  video_backed_graphic: 'Video + Graphics',
   text_overlay: 'Text Overlay',
   text_graphics: 'Text / Graphics',
 };

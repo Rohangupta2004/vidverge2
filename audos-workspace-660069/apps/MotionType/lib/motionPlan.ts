@@ -223,7 +223,7 @@ interface ThemeFallback {
 }
 
 export const THEME_FALLBACK: Record<ColorTheme, ThemeFallback> = {
-  Cosmic: { color: '#e8e4ff', background: '#07070f' },
+  Cosmic: { color: '#FEEFC2', background: '#0D0B05' },
   Monochrome: { color: '#f5f5f5', background: '#0a0a0a' },
   Fire: { color: '#ffd9a8', background: '#120604' },
   Ice: { color: '#d8f4ff', background: '#04101a' },

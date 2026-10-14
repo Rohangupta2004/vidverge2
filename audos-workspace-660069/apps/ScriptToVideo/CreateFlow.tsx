@@ -3,9 +3,9 @@
  *
  * AI MODE (the default): paste the script (source of truth, never rewritten),
  * pick the aspect, optionally attach a reference image and a director note.
- * Submitting hands the WHOLE script to Opus 5, which reads the complete story
- * before segmenting it into sequential clips of 4–10 seconds each — whatever
- * length the beat needs, bounded only by the chosen model's real limit.
+ * Submitting hands the WHOLE script to the creative planner, which reads the
+ * complete story before choosing each shot's intent, workflow and engine.
+ * Shared duration guardrails split over-long beats without dropping words.
  *
  * MANUAL SCRIPT MODE: paste a script that is ALREADY broken into scenes. No
  * model reads it — the parser in ../manualScript.ts pulls the scenes straight
@@ -31,9 +31,32 @@ import {
 } from './runwayRoster';
 import VideoIntegrationPicker from '../../components/VideoIntegrationPicker';
 import VergeLoader from '../../components/VergeLoader';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 import {
   loadVideoSelection, saveVideoSelection, type VideoIntegrationId,
 } from '../../lib/videoIntegrations';
+import {
+  formatSceneDurationHint, sceneDurationLimitsFrom, validateSceneDurations,
+  type SceneDurationLimits,
+} from '../../lib/videoEngines';
+
+/**
+ * SCENE LENGTH IS A CONSTRAINT, NOT A PREFERENCE.
+ *
+ * Every generation model has a hard per-clip ceiling, and a manual script is
+ * free to ask for any length it likes — "Scene 4 — The reveal | 14 sec" on an
+ * 8-second model is not a 14-second clip, it is a provider rejection, or worse
+ * a clip that silently drops the end of the dialogue. So the pasted durations
+ * are checked against the chosen model's REAL limits here, before anything is
+ * paid for, by the same shared contract Vidverge Multi-Shot validates against
+ * (lib/videoEngines.ts).
+ *
+ * The scene ceiling is deliberately generous rather than the contract's
+ * default of 12: that default exists to stop a planning AGENT returning sixty
+ * scenes for a thirty-second ad. A person who has written out forty scenes
+ * means it, and capping them would be the tool arguing with its own input.
+ */
+const MAX_SCRIPT_SCENES = 60;
 
 /**
  * ORIENTATION — a first-class choice, not an Advanced one. Every generation
@@ -61,7 +84,7 @@ function OrientationToggle({ value, onChange, disabled }: { value: Aspect; onCha
           borderRadius: 999, background: T.live,
           transform: `translateX(${index * 100}%)`,
           transition: 'transform .28s cubic-bezier(.22,.9,.3,1)',
-          boxShadow: '0 2px 12px rgba(200,146,10,0.28)',
+          boxShadow: '0 2px 12px rgba(212,146,10,0.28)',
         }}
       />
       {options.map((option) => {
@@ -77,7 +100,7 @@ function OrientationToggle({ value, onChange, disabled }: { value: Aspect; onCha
             style={{
               position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
               background: 'transparent', border: 'none', borderRadius: 999, padding: '10px 14px',
-              color: active ? '#1A1205' : T.muted, fontSize: 13.5, fontWeight: 700,
+              color: active ? '#ffffff' : T.muted, fontSize: 13.5, fontWeight: 700,
               cursor: disabled ? 'default' : 'pointer', transition: 'color .22s ease', opacity: disabled ? 0.6 : 1,
             }}
           >
@@ -85,7 +108,7 @@ function OrientationToggle({ value, onChange, disabled }: { value: Aspect; onCha
               aria-hidden
               style={{
                 width: option.id === '16:9' ? 18 : 11, height: option.id === '16:9' ? 11 : 18,
-                borderRadius: 3, border: `2px solid ${active ? '#1A1205' : T.muted}`, transition: 'border-color .22s ease',
+                borderRadius: 3, border: `2px solid ${active ? '#ffffff' : T.muted}`, transition: 'border-color .22s ease',
               }}
             />
             {option.label} <span style={{ fontWeight: 600, opacity: .75 }}>{option.hint}</span>
@@ -149,7 +172,7 @@ function ModeToggle({ value, onChange, disabled }: { value: CreateMode; onChange
             onClick={() => onChange(option.id)}
             style={{
               background: active ? T.live : T.raised,
-              color: active ? '#1A1205' : T.muted,
+              color: active ? '#ffffff' : T.muted,
               border: `1px solid ${active ? T.live : T.dim}`,
               borderRadius: 999, padding: '9px 18px', fontSize: 13, fontWeight: 700,
               cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1,
@@ -332,7 +355,7 @@ function StoredReferencesField({ disabled }: { disabled: boolean }) {
                 role="radio"
                 aria-checked={kind === option}
                 onClick={() => setKind(option)}
-                style={{ background: kind === option ? T.live : T.raised, color: kind === option ? '#1A1205' : T.muted, border: `1px solid ${kind === option ? T.live : T.dim}`, borderRadius: 999, padding: '6px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                style={{ background: kind === option ? T.live : T.raised, color: kind === option ? '#ffffff' : T.muted, border: `1px solid ${kind === option ? T.live : T.dim}`, borderRadius: 999, padding: '6px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
               >
                 {option[0].toUpperCase()}{option.slice(1)}
               </button>
@@ -349,7 +372,7 @@ function StoredReferencesField({ disabled }: { disabled: boolean }) {
               className="s2v-lift"
               disabled={busy || disabled || !slug}
               onClick={() => fileRef.current?.click()}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, background: busy || !slug ? T.raised : T.live, color: busy || !slug ? T.dim : '#1A1205', border: 'none', borderRadius: 9, padding: '9px 15px', fontSize: 12.5, fontWeight: 700, cursor: busy || !slug ? 'default' : 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 7, background: busy || !slug ? T.raised : T.live, color: busy || !slug ? T.dim : '#ffffff', border: 'none', borderRadius: 9, padding: '9px 15px', fontSize: 12.5, fontWeight: 700, cursor: busy || !slug ? 'default' : 'pointer' }}
             >
               {busy ? <VergeLoader size={30} label="Saving your reference" /> : <ImageIcon size={13} />}
               {busy ? 'Saving…' : 'Choose image & save'}
@@ -404,7 +427,7 @@ function StyleLockToggle({ value, onChange, disabled }: { value: boolean; onChan
           aria-hidden
           style={{ position: 'relative', width: 38, height: 22, borderRadius: 999, background: value ? T.live : T.raised, border: `1px solid ${value ? T.live : T.dim}`, flexShrink: 0, transition: 'background-color .22s ease' }}
         >
-          <span style={{ position: 'absolute', top: 3, left: 3, width: 14, height: 14, borderRadius: '50%', background: value ? '#1A1205' : T.muted, transform: `translateX(${value ? 16 : 0}px)`, transition: 'transform .22s cubic-bezier(.22,.9,.3,1)' }} />
+          <span style={{ position: 'absolute', top: 3, left: 3, width: 14, height: 14, borderRadius: '50%', background: value ? '#ffffff' : T.muted, transform: `translateX(${value ? 16 : 0}px)`, transition: 'transform .22s cubic-bezier(.22,.9,.3,1)' }} />
         </span>
         <Lock size={14} color={value ? T.live : T.dim} />
         <span style={{ color: value ? T.bone : T.muted, fontSize: 13.5, fontWeight: 700 }}>Style Lock</span>
@@ -418,7 +441,17 @@ function StyleLockToggle({ value, onChange, disabled }: { value: boolean; onChan
 
 /** What the parser actually found, shown before anything is generated so a
  * mis-formatted script is caught here rather than three clips in. */
-function ParsePreview({ parsed, hasText }: { parsed: ParsedScript; hasText: boolean }) {
+function ParsePreview({
+  parsed,
+  hasText,
+  limits,
+  problems,
+}: {
+  parsed: ParsedScript;
+  hasText: boolean;
+  limits: SceneDurationLimits;
+  problems: string[];
+}) {
   if (!hasText) return null;
   if (!parsed.scenes.length) {
     return (
@@ -443,13 +476,40 @@ function ParsePreview({ parsed, hasText }: { parsed: ParsedScript; hasText: bool
           ~{total}s total{parsed.globalStyle ? ' · overall style block found' : ''}
         </span>
       </div>
+
+      <div style={{ color: T.dim, fontSize: 11.5, lineHeight: 1.55, marginBottom: 10 }}>
+        {formatSceneDurationHint(limits)}
+      </div>
+
+      {problems.length ? (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 10, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.25)', borderRadius: 10, padding: '11px 14px' }}>
+          <AlertTriangle size={14} color={T.fault} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span style={{ color: T.fault, fontSize: 12.5, lineHeight: 1.6 }}>
+            {problems.map((problem, i) => (
+              <span key={i} style={{ display: 'block' }}>{problem}</span>
+            ))}
+          </span>
+        </div>
+      ) : null}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {parsed.scenes.map((scene) => (
           <details key={scene.index} style={{ background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 10, padding: '9px 12px' }}>
             <summary style={{ cursor: 'pointer', listStylePosition: 'inside', color: T.bone, fontSize: 12.5, fontWeight: 600 }}>
               <span style={{ fontFamily: T.mono, color: T.muted, marginRight: 8 }}>{String(scene.index).padStart(2, '0')}</span>
               {scene.title}
-              <span style={{ color: T.live, fontWeight: 800, fontFamily: T.mono, marginLeft: 8 }}>{scene.durationSec}s</span>
+              <span
+                title={
+                  scene.durationSec > limits.maxS || scene.durationSec < limits.minS
+                    ? `This model films ${limits.minS}–${limits.maxS}s per scene.`
+                    : undefined
+                }
+                style={{
+                  color: scene.durationSec > limits.maxS || scene.durationSec < limits.minS ? T.fault : T.live,
+                  fontWeight: 800, fontFamily: T.mono, marginLeft: 8,
+                }}
+              >
+                {scene.durationSec}s
+              </span>
             </summary>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 9, color: T.muted, fontSize: 12, lineHeight: 1.55 }}>
               {scene.visual
@@ -514,14 +574,14 @@ export function CreateScreen(props: {
     return !m.availabilityNote;
   };
 
-  // "Auto — Director picks" resolves to a concrete model at submit time so the
-  // pipeline always receives a real, accepted id. Gen 4.5 is this app's
-  // default engine; anything else only wins when the platform has Gen 4.5
-  // switched off.
-  const autoPick = (canOpenAFilm(DEFAULT_FILM_MODEL) ? DEFAULT_FILM_MODEL : VIDEO_MODELS.find(canOpenAFilm)) || DEFAULT_FILM_MODEL;
-  const autoPickReason = autoPick.id === DEFAULT_FILM_MODEL.id
-    ? 'Runway Gen 4.5 is the default engine: the most dependable text-to-video model on the platform, and it animates each continuation scene from the previous clip’s final frame. Pick any other model below to override it for this film.'
-    : `Runway Gen 4.5 is not enabled on the platform right now, so the director falls back to ${autoPick.label} — the strongest engine that can open a film today.`;
+  // Auto mode uses Omni's conservative 8-second ceiling for the form preview,
+  // then the creative planner chooses a shot intent per scene and the shared
+  // routeShotIntent() contract resolves the actual engine. A manual selection
+  // remains an explicit whole-film override/fallback for legacy scenes.
+  const autoPick = VIDEO_MODELS.find((model) => model.apiModel === 'gemini-omni-1.1-flash')
+    || (canOpenAFilm(DEFAULT_FILM_MODEL) ? DEFAULT_FILM_MODEL : VIDEO_MODELS.find(canOpenAFilm))
+    || DEFAULT_FILM_MODEL;
+  const autoPickReason = `The director chooses an intent for every shot, then shared routing picks the engine. ${autoPick.label} supplies the conservative duration preview and consistency fallback; choose a model below only to override auto routing.`;
 
   const chosenModel = VIDEO_MODELS.find((m) => m.id === videoModel) || autoPick;
   const chosenLive = liveOf(chosenModel);
@@ -588,8 +648,37 @@ export function CreateScreen(props: {
 
   const parsed = useMemo(() => (mode === 'manual' ? parseManualScript(text) : EMPTY_PARSE), [mode, text]);
 
+  // The model every clip of this film will actually render on, resolved ONCE
+  // so the duration limits shown to the customer and the id sent to the
+  // pipeline can never disagree.
+  const effectiveModel = modelMode === 'auto' ? autoPick : chosenModel;
+  const effectiveApiModel = modelMode === 'auto'
+    ? autoPick.apiModel
+    : (nativeModel || effectiveModel.apiModel || videoModel);
+  const effectiveLive = liveOf(effectiveModel);
+  const sceneLimits = sceneDurationLimitsFrom({
+    modelId: effectiveApiModel,
+    modelName: effectiveModel.label,
+    maxS: effectiveLive?.maxDurationS ?? effectiveModel.safeMaxDuration,
+    minS: effectiveLive?.minDurationS ?? 2,
+  });
+
+  // The pre-submit check. A pasted script that cannot be filmed as written is
+  // reported HERE, naming the scene and the fix, instead of being discovered
+  // as a provider 400 after the first clip has been paid for.
+  const durationProblems = useMemo(
+    () => (mode === 'manual' && parsed.scenes.length
+      ? validateSceneDurations(
+        effectiveApiModel,
+        parsed.scenes.map((scene) => scene.durationSec),
+        { limits: sceneLimits, maxScenes: MAX_SCRIPT_SCENES },
+      )
+      : []),
+    [mode, parsed, effectiveApiModel, sceneLimits.minS, sceneLimits.maxS, sceneLimits.source],
+  );
+
   const canGo = mode === 'manual'
-    ? parsed.scenes.length > 0
+    ? parsed.scenes.length > 0 && durationProblems.length === 0
     : text.trim().split(/\s+/).filter(Boolean).length >= 3;
 
   return (
@@ -633,7 +722,14 @@ export function CreateScreen(props: {
           />
         </div>
 
-        {mode === 'manual' ? <ParsePreview parsed={parsed} hasText={text.trim().length > 0} /> : null}
+        {mode === 'manual' ? (
+          <ParsePreview
+            parsed={parsed}
+            hasText={text.trim().length > 0}
+            limits={sceneLimits}
+            problems={durationProblems}
+          />
+        ) : null}
 
         {mode === 'manual' ? (
           <div style={{ marginTop: 26 }}>
@@ -648,12 +744,18 @@ export function CreateScreen(props: {
           <div style={{ color: T.dim, fontSize: 12, marginTop: 9, lineHeight: 1.55 }}>
             Every clip renders at {aspect}, and the final assembly inherits it — a portrait film stitches to a portrait MP4.
           </div>
+          <div style={{ color: T.dim, fontSize: 12, marginTop: 7, lineHeight: 1.55 }}>
+            {formatSceneDurationHint(sceneLimits)}
+            {mode === 'ai'
+              ? ' The director divides your story into clips inside that range — a beat that needs longer is split at a sentence boundary rather than cut short.'
+              : ''}
+          </div>
           <StyleLockToggle value={styleLock} onChange={setStyleLock} disabled={busy} />
         </div>
 
         <details style={{ marginTop: 22, background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 12, padding: '12px 14px' }}>
           <summary style={{ cursor: 'pointer', color: T.bone, fontSize: 13, fontWeight: 700, listStylePosition: 'inside' }}>
-            Advanced <span style={{ color: T.muted, fontWeight: 500 }}>— {modelMode === 'auto' ? `Director picks (${autoPick.label})` : chosenModel.label}</span>
+            Advanced <span style={{ color: T.muted, fontWeight: 500 }}>— {modelMode === 'auto' ? 'Director picks per shot' : chosenModel.label}</span>
           </summary>
 
         <div style={{ marginTop: 22, marginBottom: 14 }}>
@@ -676,8 +778,8 @@ export function CreateScreen(props: {
           <div style={{ color: T.dim, fontSize: 11 }}>{catalogLine}</div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-          <button onClick={() => setModelMode('auto')} style={{ background: modelMode === 'auto' ? T.live : T.raised, color: modelMode === 'auto' ? '#1A1205' : T.muted, border: `1px solid ${modelMode === 'auto' ? T.live : T.dim}`, borderRadius: 999, padding: '8px 15px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
-            Auto — Director picks ({autoPick.label})
+          <button onClick={() => setModelMode('auto')} style={{ background: modelMode === 'auto' ? T.live : T.raised, color: modelMode === 'auto' ? '#ffffff' : T.muted, border: `1px solid ${modelMode === 'auto' ? T.live : T.dim}`, borderRadius: 999, padding: '8px 15px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+            Auto — Director picks per shot
           </button>
           {modelMode === 'manual' && videoModel !== DEFAULT_FILM_MODEL.id ? (
             <button className="s2v-ghost" onClick={() => setVideoModel(DEFAULT_FILM_MODEL.id)} style={{ background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 999, padding: '8px 15px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
@@ -693,7 +795,7 @@ export function CreateScreen(props: {
         />
         <div style={{ marginTop: 10, background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 10, padding: '11px 14px' }}>
           <div style={{ color: T.bone, fontSize: 12.5, fontWeight: 700, marginBottom: 3 }}>
-            {modelMode === 'auto' ? `Director's pick: ${autoPick.label}` : `Every clip renders on ${chosenModel.label}`}
+            {modelMode === 'auto' ? 'Director routes each shot' : `Every clip renders on ${chosenModel.label}`}
           </div>
           <div style={{ color: T.muted, fontSize: 12, lineHeight: 1.55 }}>{modelNote}</div>
         </div>
@@ -751,9 +853,9 @@ export function CreateScreen(props: {
           disabled={!canGo || busy || shotBusy || charBusy}
           onClick={() => onSubmit({
             mode, script: text.trim(), aspect, screenshotUrl: shotUrl || null, characterRefUrl: charUrl || null, note: note.trim(), styleLock,
-            videoModel: modelMode === 'auto' ? autoPick.apiModel : (nativeModel || VIDEO_MODELS.find((m) => m.id === videoModel)?.apiModel || videoModel),
+            videoModel: modelMode === 'auto' ? '' : effectiveApiModel,
           })}
-          style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 26, background: canGo && !busy ? T.live : T.raised, color: canGo && !busy ? '#1A1205' : T.dim, border: 'none', borderRadius: 11, padding: '14px 28px', fontSize: 15, fontWeight: 700, cursor: canGo && !busy ? 'pointer' : 'default', boxShadow: canGo && !busy ? '0 2px 12px rgba(200,146,10,0.25)' : 'none' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 26, background: canGo && !busy ? T.live : T.raised, color: canGo && !busy ? '#ffffff' : T.dim, border: 'none', borderRadius: 11, padding: '14px 28px', fontSize: 15, fontWeight: 700, cursor: canGo && !busy ? 'pointer' : 'default', boxShadow: canGo && !busy ? '0 2px 12px rgba(212,146,10,0.25)' : 'none' }}
         >
           {busy ? <VergeLoader size={38} label="Planning your film" /> : <Clapperboard size={17} />}
           {busy
@@ -761,16 +863,13 @@ export function CreateScreen(props: {
             : (mode === 'manual' ? 'Generate All Scenes' : 'Plan my film')}
         </button>
         {busy ? (
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
-            <VergeLoader size={120} caption={mode === 'manual' ? 'Reading your scenes' : 'The director is reading your story'} />
-          </div>
-        ) : null}
-        {busy ? (
-          <div style={{ color: T.muted, fontSize: 12.5, marginTop: 12 }}>
-            {mode === 'manual'
-              ? 'Your scenes are being created and the first prompt built straight from your script — there is no AI planning step in this mode, so it is quick.'
-              : 'Your director is reading the entire script, understanding the story, splitting it into sequential clips and preparing the first prompt — about a minute.'}
-          </div>
+          <VideoGeneratingState
+            label={mode === 'manual' ? 'Reading your scenes' : 'The director is reading your story'}
+            detail={mode === 'manual'
+              ? 'Creating the scenes and building the first prompt directly from your script'
+              : 'Understanding the story, splitting it into clips and preparing the first prompt'}
+            style={{ marginTop: 24 }}
+          />
         ) : null}
       </div>
     </div>

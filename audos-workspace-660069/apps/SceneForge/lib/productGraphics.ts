@@ -17,20 +17,22 @@
 //
 // WHAT THIS DOES NOT TOUCH. Charts, timelines, node graphs, branching diagrams
 // and kinetic typography are NOT product graphics: they are data visualisation
-// and abstract motion, which the GSAP engine does well and HyperFrames would do
-// worse. They stay exactly where they were. Nor does anything here touch the
+// and abstract motion rendered as structured Remotion elements. HyperFrames
+// would do those worse. Nor does anything here touch the
 // Remotion assembly compositor or the ElevenLabs → HeyGen voice pipeline.
 //
 // THE FALLBACK IS THE EXISTING PATH. HyperFrames is capability-gated like every
 // other HeyGen extra (lib/heygenApi), so an account without it keeps the
-// Remotion/GSAP graphic renderer — same scene, same spec, same timing, drawn the
-// old way. Nothing is removed until HeyGen has answered.
+// deterministic Remotion element renderer — same scene, same spec, same timing.
+// Nothing is removed until HeyGen has answered.
 
 import { CapabilityUnavailable, capabilityState } from './heygenApi';
 import { renderFrame } from './heygenFrames';
 import { brandKitFromWorkspace, type AspectRatio, type BrandKit, type CardTemplateId } from './motionEditor';
 import { accentForSpec, motionFingerprint, type MotionKind, type MotionSpec } from './motionSpec';
-import { sceneMotionSpec } from './motionCapture';
+import { validateSceneDurations } from '../../../lib/videoEngines';
+import { DEFAULT_SCENE_PROVIDER, sceneForgeDurationLimits } from './providers';
+import { sceneMotionSpec } from './motionScene';
 import { uploadFile } from './proxy';
 import { updateScene, type Project, type Scene } from './supabase';
 
@@ -68,8 +70,8 @@ export function productGraphicKind(spec: MotionSpec | null | undefined): Product
   if (!spec) return null;
   const kind = SPEC_TO_PRODUCT[spec.kind];
   if (!kind) return null;
-  // A "UI highlight" with no screenshot is just a label on a plate; the GSAP
-  // annotated-image renderer handles that case better than an empty frame would.
+  // A "UI highlight" with no screenshot is just a label on a plate; the
+  // deterministic annotated-image renderer handles it better than an empty frame.
   if (kind === 'ui_highlight' && !spec.imageUrl) return null;
   // A comparison with one empty side is not a comparison. The orchestrator is
   // told to fill both, but a plan that did not must not render a half table.
@@ -110,7 +112,7 @@ export function beatWindowSec(scene: Scene, spec?: MotionSpec | null): number {
 //
 // The marker keeps the `mg:` prefix the rest of the pipeline tests for
 // (lib/motionSpec.isMotionFingerprint) while still being distinguishable from a
-// GSAP capture, so switching renderers re-renders rather than silently reusing a
+// historical browser capture, so switching renderers re-renders rather than silently reusing a
 // clip that was drawn the other way.
 
 const PRODUCT_MARKER = 'hf';
@@ -252,7 +254,7 @@ export interface ProductGraphicOptions {
 
 /**
  * Render one product-graphic beat through HeyGen HyperFrames and persist it onto
- * the scene exactly as the capture path does.
+ * the scene under the same fingerprinted persistence contract.
  *
  * Throws `CapabilityUnavailable` when the account has no HyperFrames endpoint —
  * the caller's signal to draw the beat the old way — and throws whatever HeyGen
@@ -266,7 +268,9 @@ export async function renderProductGraphic(project: Project, scene: Scene, optio
   if (hyperFramesRuledOut()) throw new CapabilityUnavailable('hyperframes', 'HeyGen HyperFrames', '');
 
   const template = TEMPLATE_FOR[kind];
-  const durationSec = beatWindowSec(scene, spec);
+  const durationSec = Math.round(beatWindowSec(scene, spec));
+  const durationProblems = validateSceneDurations(DEFAULT_SCENE_PROVIDER, [durationSec], { limits: sceneForgeDurationLimits(DEFAULT_SCENE_PROVIDER) });
+  if (durationProblems.length) throw new Error(durationProblems[0].replace(/^Scene 1\b/, `Scene ${scene.scene_index}`));
   const fingerprint = productGraphicFingerprint(spec, kind, durationSec);
   if (!options.force && hasFreshProductGraphic(scene, fingerprint)) {
     return { videoUrl: String(scene.render_url), fingerprint, kind, template, durationSec, reused: true };

@@ -39,6 +39,8 @@ import {
 } from './types/editorial';
 import { createFacelessFilm, newFilmId } from './hooks/createFacelessFilm';
 import VergeLoader from '../../components/VergeLoader';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 import { describeFinalFilm } from './hooks/finalizeFilm';
 import { useTopicSuggestions } from './hooks/useTopicSuggestions';
 import {
@@ -79,6 +81,7 @@ import GlobalStyles from '../../components/ui/GlobalStyles';
 import DepthStage, { type DepthAnnotation } from './components/DepthStage';
 import { ToastStack, useToasts } from './components/ToastStack';
 import { waitForDbSession } from '../../lib/reelioStudio';
+import { withBrandContext } from '../../components/BrandContextLayer';
 
 // ---------------------------------------------------------------------------
 
@@ -234,7 +237,9 @@ function resolvedStyle(run: FilmRunState | null, chosen: FacelessMode | 'auto'):
   return run?.timeline?.mode || run?.analysis?.mode || (chosen === 'auto' ? null : chosen);
 }
 
-export default function FacelessApp() {
+const BrandedFacelessApp = withBrandContext(FacelessApp, 'Faceless');
+export default BrandedFacelessApp;
+function FacelessApp() {
   const [screen, setScreen] = useState<Screen>('brief');
   const [topic, setTopic] = useState('');
   const [script, setScript] = useState('');
@@ -315,6 +320,8 @@ export default function FacelessApp() {
     let cancelled = false;
     findRecentUnfinishedFilm().then((row) => {
       if (!cancelled) setResumeCandidate(row);
+    }).catch((resumeError) => {
+      console.warn('[Faceless] could not inspect recent runs:', resumeError);
     });
     return () => { cancelled = true; };
   }, []);
@@ -343,8 +350,10 @@ export default function FacelessApp() {
         setScreen('done');
       }
     };
-    void poll();
-    const timer = window.setInterval(poll, 2000);
+    void poll().catch((pollError) => console.warn('[Faceless] project refresh failed:', pollError));
+    const timer = window.setInterval(() => {
+      void poll().catch((pollError) => console.warn('[Faceless] project refresh failed:', pollError));
+    }, 2000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -463,8 +472,8 @@ export default function FacelessApp() {
       style={{
         position: 'relative',
         isolation: 'isolate',
-        background: 'var(--space-surface-bg, #050508)',
-        color: 'var(--space-text-primary, #fffaf1)',
+        background: 'var(--space-surface-bg, #0D0B05)',
+        color: 'var(--space-text-primary, #F5E9C8)',
       }}
     >
       <GlobalStyles />
@@ -519,6 +528,7 @@ export default function FacelessApp() {
             error={error}
             logRef={logRef}
             onBack={leaveRun}
+            onRetry={start}
             settings={settings}
             style={style}
             depth={depth}
@@ -583,11 +593,11 @@ function Header() {
         className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
         style={{ background: 'color-mix(in srgb, var(--space-brand-primary-500) 16%, transparent)' }}
       >
-        <Clapperboard className="h-5 w-5" style={{ color: 'var(--space-brand-primary-500, #f59e0b)' }} />
+        <Clapperboard className="h-5 w-5" style={{ color: 'var(--space-brand-primary-500, #D4920A)' }} />
       </div>
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Faceless</h1>
-        <p className="mt-1 max-w-2xl text-sm" style={{ color: 'var(--space-text-secondary, #E6D9C9)' }}>
+        <p className="mt-1 max-w-2xl text-sm" style={{ color: 'var(--space-text-secondary, #9E8B55)' }}>
           An AI editor that happens to generate footage. Your narration is recorded first, then every cut,
           camera move and piece of text is chosen against the words being spoken at that exact second.
         </p>
@@ -601,8 +611,8 @@ function Panel({ children, className = '' }: { children: ReactNode; className?: 
     <section
       className={`rounded-2xl border p-5 ${className}`}
       style={{
-        background: 'var(--space-surface-panel, #101623)',
-        borderColor: 'var(--space-border-default, rgba(245,158,11,0.18))',
+        background: 'var(--space-surface-panel, #15120A)',
+        borderColor: 'var(--space-border-default, rgba(255,255,255,0.07))',
       }}
     >
       {children}
@@ -614,7 +624,7 @@ function Label({ children }: { children: ReactNode }) {
   return (
     <span
       className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em]"
-      style={{ color: 'var(--space-text-muted, #BBA899)' }}
+      style={{ color: 'var(--space-text-muted, #9E8B55)' }}
     >
       {children}
     </span>
@@ -645,8 +655,8 @@ function OptionTile({
       className={`rounded-xl border text-left transition-colors ${compact ? 'px-3 py-2' : 'px-3 py-2.5'}`}
       style={{
         borderColor: active
-          ? 'var(--space-brand-primary-500, #f59e0b)'
-          : 'var(--space-border-default, rgba(245,158,11,0.18))',
+          ? 'var(--space-brand-primary-500, #D4920A)'
+          : 'var(--space-border-default, rgba(255,255,255,0.07))',
         background: active
           ? 'color-mix(in srgb, var(--space-brand-primary-500) 12%, transparent)'
           : 'transparent',
@@ -657,7 +667,7 @@ function OptionTile({
         {title}
       </div>
       {blurb && (
-        <div className="mt-0.5 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+        <div className="mt-0.5 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
           {blurb}
         </div>
       )}
@@ -700,8 +710,8 @@ function BriefScreen(props: BriefProps) {
           placeholder="What is this film about?"
           className="w-full rounded-lg border bg-transparent px-3 py-2.5 text-sm outline-none"
           style={{
-            borderColor: 'var(--space-border-default, rgba(245,158,11,0.18))',
-            color: 'var(--space-text-primary, #fffaf1)',
+            borderColor: 'var(--space-border-default, rgba(255,255,255,0.07))',
+            color: 'var(--space-text-primary, #F5E9C8)',
           }}
         />
 
@@ -711,7 +721,7 @@ function BriefScreen(props: BriefProps) {
             {suggestions.loading && suggestions.suggestions.length === 0 ? (
               <span
                 className="inline-flex items-center gap-1.5 text-[11px]"
-                style={{ color: 'var(--space-text-muted, #BBA899)' }}
+                style={{ color: 'var(--space-text-muted, #9E8B55)' }}
               >
                 <VergeLoader size={30} label="Finding angles" /> Finding angles…
               </span>
@@ -725,12 +735,12 @@ function BriefScreen(props: BriefProps) {
                   style={{
                     borderColor: 'color-mix(in srgb, var(--space-brand-primary-500) 34%, transparent)',
                     background: 'color-mix(in srgb, var(--space-brand-primary-500) 8%, transparent)',
-                    color: 'var(--space-text-secondary, #E6D9C9)',
+                    color: 'var(--space-text-secondary, #9E8B55)',
                   }}
                 >
                   <span
                     className="font-semibold uppercase tracking-[0.1em]"
-                    style={{ color: 'var(--space-brand-primary-500, #f59e0b)' }}
+                    style={{ color: 'var(--space-brand-primary-500, #D4920A)' }}
                   >
                     {suggestion.kind}
                   </span>
@@ -747,7 +757,7 @@ function BriefScreen(props: BriefProps) {
             type="button"
             onClick={() => props.setScript(SAMPLE)}
             className="mb-2 text-xs underline-offset-2 hover:underline"
-            style={{ color: 'var(--space-text-muted, #BBA899)' }}
+            style={{ color: 'var(--space-text-muted, #9E8B55)' }}
           >
             Use a sample script
           </button>
@@ -759,11 +769,11 @@ function BriefScreen(props: BriefProps) {
           placeholder="Write the words the narrator will say. Everything else — shots, camera, text, music — is derived from this."
           className="w-full resize-y rounded-lg border bg-transparent px-3 py-2.5 text-sm leading-relaxed outline-none"
           style={{
-            borderColor: 'var(--space-border-default, rgba(245,158,11,0.18))',
-            color: 'var(--space-text-primary, #fffaf1)',
+            borderColor: 'var(--space-border-default, rgba(255,255,255,0.07))',
+            color: 'var(--space-text-primary, #F5E9C8)',
           }}
         />
-        <p className="mt-2 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+        <p className="mt-2 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
           {props.wordCount} words · roughly {props.estimateSeconds}s of narration · about{' '}
           {Math.max(4, Math.round(props.estimateSeconds / 3.1))} cuts
         </p>
@@ -787,7 +797,7 @@ function BriefScreen(props: BriefProps) {
             />
           ))}
         </div>
-        <p className="mt-2 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+        <p className="mt-2 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
           Composed on a {shape.width}×{shape.height} canvas. Every image, clip and stock search is requested
           in this shape.
         </p>
@@ -805,12 +815,12 @@ function BriefScreen(props: BriefProps) {
               />
             ))}
           </div>
-          <p className="mt-2 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+          <p className="mt-2 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
             {scenes} scenes · about {targetWords} words of script. The finished length is always the
             narration's real length, so this is the number to write to.
           </p>
           {settings.targetDurationSeconds >= LONG_RUN_WARNING_SECONDS && (
-            <p className="mt-2 text-xs" style={{ color: 'var(--space-semantic-warning-500, #f59e0b)' }}>
+            <p className="mt-2 text-xs" style={{ color: 'var(--space-semantic-warning-500, #D4920A)' }}>
               A {Math.round(settings.targetDurationSeconds / 60)}-minute film takes noticeably longer to
               generate and costs more — expect to leave this running.
             </p>
@@ -866,7 +876,7 @@ function BriefScreen(props: BriefProps) {
         </div>
 
         <div className="mt-4 flex items-center gap-3">
-          <Music className="h-4 w-4 shrink-0" style={{ color: 'var(--space-text-muted, #BBA899)' }} />
+          <Music className="h-4 w-4 shrink-0" style={{ color: 'var(--space-text-muted, #9E8B55)' }} />
           <input
             type="range"
             min={0}
@@ -876,13 +886,13 @@ function BriefScreen(props: BriefProps) {
             onChange={(event) => patchSettings({ musicVolume: Number(event.target.value) / 100 })}
             aria-label="Music volume"
             className="h-1 flex-1 cursor-pointer"
-            style={{ accentColor: 'var(--space-brand-primary-500, #f59e0b)' }}
+            style={{ accentColor: 'var(--space-brand-primary-500, #D4920A)' }}
           />
-          <span className="w-10 text-right text-xs tabular-nums" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+          <span className="w-10 text-right text-xs tabular-nums" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
             {Math.round(settings.musicVolume * 100)}%
           </span>
         </div>
-        <p className="mt-1.5 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+        <p className="mt-1.5 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
           The bed is mixed under the narration and follows each beat's energy; this is its ceiling, never
           its constant level.
         </p>
@@ -892,7 +902,7 @@ function BriefScreen(props: BriefProps) {
             <div className="flex items-center gap-1.5 text-sm font-medium">
               <Type className="h-3.5 w-3.5" /> Auto-captions
             </div>
-            <div className="mt-0.5 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+            <div className="mt-0.5 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
               Burned-in-looking caption pills in the player, synced to the narration
             </div>
           </div>
@@ -929,7 +939,7 @@ function BriefScreen(props: BriefProps) {
             <div className="flex items-center gap-1.5 text-sm font-medium">
               <Layers className="h-3.5 w-3.5" /> Animate the depth-stage background
             </div>
-            <div className="mt-0.5 max-w-lg text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+            <div className="mt-0.5 max-w-lg text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
               Documentary only. The three-layer stage always runs with a generated still behind it; this
               adds Seedance 2.0 image-to-video motion on that layer for about ${SEEDANCE_CLIP_COST_USD} a
               film, which is more than the rest of a short film costs put together.
@@ -959,7 +969,7 @@ function BriefScreen(props: BriefProps) {
         onClick={props.onStart}
         className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-sm font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
         style={{
-          background: 'var(--space-brand-primary-500, #f59e0b)',
+          background: 'var(--space-brand-primary-500, #D4920A)',
           color: 'var(--space-text-on-primary, #ffffff)',
         }}
       >
@@ -993,9 +1003,9 @@ function Switch({
       className="relative h-6 w-11 shrink-0 rounded-full transition-colors"
       style={{
         background: checked
-          ? 'var(--space-brand-primary-500, #f59e0b)'
-          : 'var(--space-surface-muted, #0d1220)',
-        border: '1px solid var(--space-border-default, rgba(245,158,11,0.18))',
+          ? 'var(--space-brand-primary-500, #D4920A)'
+          : 'var(--space-surface-muted, #18150A)',
+        border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
       }}
     >
       <span
@@ -1005,7 +1015,7 @@ function Switch({
           width: 18,
           left: 2,
           transform: checked ? 'translateX(20px)' : 'translateX(0)',
-          background: checked ? 'var(--space-text-on-primary, #ffffff)' : 'var(--space-text-muted, #BBA899)',
+          background: checked ? 'var(--space-text-on-primary, #ffffff)' : 'var(--space-text-muted, #9E8B55)',
         }}
       />
     </button>
@@ -1112,30 +1122,21 @@ function PhaseProgress({
 
   return (
     <Panel>
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
-          {failed ? (
-            <AlertCircle className="h-4 w-4" style={{ color: 'var(--space-semantic-danger-500, #ef4444)' }} />
-          ) : (
-            <VergeLoader size={44} label="Working on your film" />
-          )}
-          <div>
-            <div className="text-sm font-medium">
-              {failed ? 'The run stopped' : PROGRESS_PHASES[activeIndex]?.label || PROGRESS_PHASES[0].label}
-            </div>
-            <div className="text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
-              {stages[active]?.label || 'Starting'}
-              {stages[active]?.detail ? ` — ${stages[active]?.detail}` : ''}
-            </div>
-          </div>
+      {failed ? (
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+          <AlertCircle className="h-4 w-4" style={{ color: 'var(--space-semantic-danger-500, #ef4444)' }} />
+          The run stopped
         </div>
-        {!failed && (
-          <div className="shrink-0 text-right text-xs tabular-nums" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
-            <div>about {formatDuration(remaining)} left</div>
-            <div>{formatDuration(elapsed)} elapsed</div>
-          </div>
-        )}
-      </div>
+      ) : (
+        <VideoGeneratingState
+          label={PROGRESS_PHASES[activeIndex]?.label || PROGRESS_PHASES[0].label}
+          detail={`${stages[active]?.label || 'Starting'}${stages[active]?.detail ? ` — ${stages[active]?.detail}` : ''} · about ${formatDuration(remaining)} left`}
+          progress={fraction * 100}
+          elapsedSeconds={elapsed}
+          compact
+          style={{ marginBottom: 14 }}
+        />
+      )}
 
       <div className="grid grid-cols-3 gap-1.5">
         {PROGRESS_PHASES.map((phase, index) => {
@@ -1145,7 +1146,7 @@ function PhaseProgress({
             <div key={phase.id}>
               <div
                 className="h-1.5 w-full overflow-hidden rounded-full"
-                style={{ background: 'var(--space-surface-muted, #0d1220)' }}
+                style={{ background: 'var(--space-surface-muted, #18150A)' }}
               >
                 <div
                   className="h-full rounded-full transition-all duration-500"
@@ -1153,7 +1154,7 @@ function PhaseProgress({
                     width: `${Math.round(fill * 100)}%`,
                     background: failed && state === 'active'
                       ? 'var(--space-semantic-danger-500, #ef4444)'
-                      : 'var(--space-brand-primary-500, #f59e0b)',
+                      : 'var(--space-brand-primary-500, #D4920A)',
                   }}
                 />
               </div>
@@ -1161,8 +1162,8 @@ function PhaseProgress({
                 className="mt-1.5 flex items-center gap-1 text-[10px] leading-tight"
                 style={{
                   color: state === 'pending'
-                    ? 'var(--space-text-muted, #BBA899)'
-                    : 'var(--space-text-secondary, #E6D9C9)',
+                    ? 'var(--space-text-muted, #9E8B55)'
+                    : 'var(--space-text-secondary, #9E8B55)',
                 }}
               >
                 {state === 'done' && <CheckCircle2 className="h-3 w-3 shrink-0" />}
@@ -1194,6 +1195,7 @@ function RunningScreen({
   error,
   logRef,
   onBack,
+  onRetry,
   settings,
   style,
   depth,
@@ -1207,6 +1209,7 @@ function RunningScreen({
   error: string | null;
   logRef: MutableRefObject<HTMLDivElement | null>;
   onBack: () => void;
+  onRetry: () => void;
   settings: FilmSettings;
   style: FacelessMode | null;
   depth: DepthBackground | null;
@@ -1222,9 +1225,12 @@ function RunningScreen({
   return (
     <div className="space-y-4">
       {error && (
-        <Notice icon={<AlertCircle className="h-4 w-4" />} tone="danger">
-          <div className="font-medium">The pipeline stopped.</div>
-          <div className="mt-1">{error}</div>
+        <div>
+          <VideoErrorCard
+            error={error}
+            subject="this faceless film"
+            onRetry={() => void onRetry()}
+          />
           <button
             type="button"
             onClick={onBack}
@@ -1232,7 +1238,7 @@ function RunningScreen({
           >
             <ArrowLeft className="h-3 w-3" /> Back to the brief
           </button>
-        </Notice>
+        </div>
       )}
 
       <PhaseProgress
@@ -1267,7 +1273,7 @@ function RunningScreen({
             style={{ background: '#000', aspectRatio: shape.css }}
           />
           <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <p className="max-w-md text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+            <p className="max-w-md text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
               This film had already finished rendering when the run stopped, so it is yours to keep.
             </p>
             <a
@@ -1275,7 +1281,7 @@ function RunningScreen({
               download
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold"
               style={{
-                background: 'var(--space-brand-primary-500, #f59e0b)',
+                background: 'var(--space-brand-primary-500, #D4920A)',
                 color: 'var(--space-text-on-primary, #ffffff)',
               }}
             >
@@ -1300,28 +1306,28 @@ function RunningScreen({
                     style={{
                       color:
                         state === 'pending'
-                          ? 'var(--space-text-muted, #BBA899)'
-                          : 'var(--space-text-primary, #fffaf1)',
+                          ? 'var(--space-text-muted, #9E8B55)'
+                          : 'var(--space-text-primary, #F5E9C8)',
                       fontWeight: state === 'active' ? 600 : 400,
                     }}
                   >
                     {view?.label || stage.label}
                   </div>
                   {view?.detail && (
-                    <div className="mt-0.5 break-words text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+                    <div className="mt-0.5 break-words text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
                       {view.detail}
                     </div>
                   )}
                   {typeof view?.progress === 'number' && state === 'active' && (
                     <div
                       className="mt-1.5 h-1 w-full overflow-hidden rounded-full"
-                      style={{ background: 'var(--space-surface-muted, #0d1220)' }}
+                      style={{ background: 'var(--space-surface-muted, #18150A)' }}
                     >
                       <div
                         className="h-full rounded-full transition-all"
                         style={{
                           width: `${Math.round(Math.max(0, Math.min(1, view.progress)) * 100)}%`,
-                          background: 'var(--space-brand-primary-500, #f59e0b)',
+                          background: 'var(--space-brand-primary-500, #D4920A)',
                         }}
                       />
                     </div>
@@ -1341,7 +1347,7 @@ function RunningScreen({
           <div
             ref={logRef}
             className="max-h-48 overflow-y-auto rounded-lg p-3 font-mono text-[11px] leading-relaxed"
-            style={{ background: 'var(--space-surface-muted, #0d1220)', color: 'var(--space-text-secondary, #E6D9C9)' }}
+            style={{ background: 'var(--space-surface-muted, #18150A)', color: 'var(--space-text-secondary, #9E8B55)' }}
           >
             {log.map((line, index) => (
               <div key={index}>{line}</div>
@@ -1429,7 +1435,7 @@ function DepthComposition({
               type="button"
               onClick={toggle}
               className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs"
-              style={{ borderColor: 'var(--space-border-default, rgba(245,158,11,0.18))' }}
+              style={{ borderColor: 'var(--space-border-default, rgba(255,255,255,0.07))' }}
             >
               {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
               {playing ? 'Pause narration' : 'Play narration'}
@@ -1470,7 +1476,7 @@ function DepthComposition({
         />
       )}
 
-      <p className="mt-3 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+      <p className="mt-3 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
         Three layers: a Seedance 2.0 background, floating midground annotations drawn from the edit, and a
         foreground of vignette and captions. This is the composition surface — the film itself keeps the
         grammar the director chose.
@@ -1488,8 +1494,8 @@ function CaptionToggle({ enabled, onToggle }: { enabled: boolean; onToggle: () =
       className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs"
       style={{
         borderColor: enabled
-          ? 'var(--space-brand-primary-500, #f59e0b)'
-          : 'var(--space-border-default, rgba(245,158,11,0.18))',
+          ? 'var(--space-brand-primary-500, #D4920A)'
+          : 'var(--space-border-default, rgba(255,255,255,0.07))',
         background: enabled
           ? 'color-mix(in srgb, var(--space-brand-primary-500) 12%, transparent)'
           : 'transparent',
@@ -1513,9 +1519,9 @@ function StageIcon({ state }: { state: StageState }) {
     return <AlertCircle className={base} style={{ color: 'var(--space-semantic-danger-500, #ef4444)' }} />;
   }
   if (state === 'skipped') {
-    return <TriangleAlert className={base} style={{ color: 'var(--space-text-muted, #BBA899)' }} />;
+    return <TriangleAlert className={base} style={{ color: 'var(--space-text-muted, #9E8B55)' }} />;
   }
-  return <Clock className={base} style={{ color: 'var(--space-text-muted, #BBA899)' }} />;
+  return <Clock className={base} style={{ color: 'var(--space-text-muted, #9E8B55)' }} />;
 }
 
 /** The editorial decisions, shown while they are being made rather than after. */
@@ -1527,13 +1533,13 @@ function DecisionPanel({ run }: { run: FilmRunState }) {
   return (
     <Panel>
       <Label>The edit</Label>
-      <p className="mb-3 text-xs" style={{ color: 'var(--space-text-secondary, #E6D9C9)' }}>
+      <p className="mb-3 text-xs" style={{ color: 'var(--space-text-secondary, #9E8B55)' }}>
         {timeline.continuityGuide.colorStory} · {timeline.continuityGuide.visualMotif} ·{' '}
         {timeline.continuityGuide.cameraGrammar}
       </p>
 
       {plan && (plan.downgrades.length > 0 || plan.noveltyDeviations.length > 0) && (
-        <div className="mb-3 space-y-1 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+        <div className="mb-3 space-y-1 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
           {plan.downgrades.map((entry) => (
             <div key={`d-${entry.beatId}`}>
               Beat {entry.beatId}: tier {entry.from} → {entry.to}. {entry.reason}
@@ -1551,10 +1557,10 @@ function DecisionPanel({ run }: { run: FilmRunState }) {
         {timeline.beats.map((beat) => {
           const asset = run.resolvedAssets[beat.id];
           return (
-            <div key={beat.id} className="rounded-lg px-3 py-2" style={{ background: 'var(--space-surface-muted, #0d1220)' }}>
+            <div key={beat.id} className="rounded-lg px-3 py-2" style={{ background: 'var(--space-surface-muted, #18150A)' }}>
               <div
                 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]"
-                style={{ color: 'var(--space-text-muted, #BBA899)' }}
+                style={{ color: 'var(--space-text-muted, #9E8B55)' }}
               >
                 <span style={{ color: 'var(--space-text-brand, #fbbf24)' }}>
                   {beat.narrationStart.toFixed(1)}–{beat.narrationEnd.toFixed(1)}s
@@ -1568,11 +1574,11 @@ function DecisionPanel({ run }: { run: FilmRunState }) {
                 {beat.isHook && <span style={{ color: 'var(--space-text-brand, #fbbf24)' }}>hook</span>}
                 {beat.transition?.type === 'match_cut' && <span>match cut</span>}
               </div>
-              <div className="mt-1 text-xs" style={{ color: 'var(--space-text-secondary, #E6D9C9)' }}>
+              <div className="mt-1 text-xs" style={{ color: 'var(--space-text-secondary, #9E8B55)' }}>
                 {beat.visualIntent}
               </div>
               {beat.textOverlay && (
-                <div className="mt-1 text-[11px]" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+                <div className="mt-1 text-[11px]" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
                   text ({beat.textOverlay.type}): {beat.textOverlay.content}
                 </div>
               )}
@@ -1657,10 +1663,10 @@ function DoneScreen({
 
         <div className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div className="min-w-0">
-            <p className="text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+            <p className="text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
               {describeFinalFilm(film)}
             </p>
-            <p className="mt-1 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+            <p className="mt-1 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
               {shape.label} {shape.width}×{shape.height} · {voice?.label || 'default'} voice
               {effect && effect.id !== 'none' ? ` + ${effect.label}` : ''} · {mood?.label || 'Documentary'} bed at{' '}
               {Math.round(settings.musicVolume * 100)}%
@@ -1673,7 +1679,7 @@ function DoneScreen({
               download
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold"
               style={{
-                background: 'var(--space-brand-primary-500, #f59e0b)',
+                background: 'var(--space-brand-primary-500, #D4920A)',
                 color: 'var(--space-text-on-primary, #ffffff)',
               }}
             >
@@ -1683,7 +1689,7 @@ function DoneScreen({
               type="button"
               onClick={() => onShare(film.mp4Url)}
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm"
-              style={{ borderColor: 'var(--space-border-default, rgba(245,158,11,0.18))' }}
+              style={{ borderColor: 'var(--space-border-default, rgba(255,255,255,0.07))' }}
             >
               <Share2 className="h-4 w-4" /> Share
             </button>
@@ -1691,7 +1697,7 @@ function DoneScreen({
               type="button"
               onClick={onNew}
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm"
-              style={{ borderColor: 'var(--space-border-default, rgba(245,158,11,0.18))' }}
+              style={{ borderColor: 'var(--space-border-default, rgba(255,255,255,0.07))' }}
             >
               <Wand2 className="h-4 w-4" /> New film
             </button>
@@ -1722,7 +1728,7 @@ function MyVideosPanel({
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <Label>My Videos</Label>
-          <p className="text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+          <p className="text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
             Your finished films, newest first.
           </p>
         </div>
@@ -1731,7 +1737,7 @@ function MyVideosPanel({
             type="button"
             onClick={onRefresh}
             className="rounded-lg border px-3 py-1.5 text-xs"
-            style={{ borderColor: 'var(--space-border-default, rgba(245,158,11,0.18))' }}
+            style={{ borderColor: 'var(--space-border-default, rgba(255,255,255,0.07))' }}
           >
             Try again
           </button>
@@ -1739,7 +1745,7 @@ function MyVideosPanel({
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 py-8 text-sm" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+        <div className="flex items-center gap-2 py-8 text-sm" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
           <VergeLoader size={36} label="Loading your videos" /> Loading your videos…
         </div>
       ) : error ? (
@@ -1747,7 +1753,7 @@ function MyVideosPanel({
           My Videos could not be loaded. {error}
         </p>
       ) : videos.length === 0 ? (
-        <p className="py-8 text-center text-sm" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+        <p className="py-8 text-center text-sm" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
           No videos yet — generate your first one above!
         </p>
       ) : (
@@ -1756,7 +1762,7 @@ function MyVideosPanel({
             <article
               key={video.id}
               className="overflow-hidden rounded-xl border"
-              style={{ borderColor: 'var(--space-border-default, rgba(245,158,11,0.18))' }}
+              style={{ borderColor: 'var(--space-border-default, rgba(255,255,255,0.07))' }}
             >
               <video
                 src={video.video_url}
@@ -1770,7 +1776,7 @@ function MyVideosPanel({
               <div className="space-y-3 p-3">
                 <div>
                   <h3 className="truncate text-sm font-medium">{video.title || 'Untitled film'}</h3>
-                  <p className="mt-1 text-xs" style={{ color: 'var(--space-text-muted, #BBA899)' }}>
+                  <p className="mt-1 text-xs" style={{ color: 'var(--space-text-muted, #9E8B55)' }}>
                     {formatVideoDate(video.created_at)}
                   </p>
                 </div>
@@ -1780,7 +1786,7 @@ function MyVideosPanel({
                     download
                     className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold"
                     style={{
-                      background: 'var(--space-brand-primary-500, #f59e0b)',
+                      background: 'var(--space-brand-primary-500, #D4920A)',
                       color: 'var(--space-text-on-primary, #ffffff)',
                     }}
                   >
@@ -1790,7 +1796,7 @@ function MyVideosPanel({
                     type="button"
                     onClick={() => onShare(video.video_url)}
                     className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs"
-                    style={{ borderColor: 'var(--space-border-default, rgba(245,158,11,0.18))' }}
+                    style={{ borderColor: 'var(--space-border-default, rgba(255,255,255,0.07))' }}
                   >
                     <Share2 className="h-3.5 w-3.5" /> Share
                   </button>
@@ -1833,7 +1839,7 @@ function Notice({
       style={{
         background: `color-mix(in srgb, ${colour} 10%, transparent)`,
         borderColor: `color-mix(in srgb, ${colour} 38%, transparent)`,
-        color: 'var(--space-text-secondary, #E6D9C9)',
+        color: 'var(--space-text-secondary, #9E8B55)',
       }}
     >
       <span className="mt-0.5 shrink-0" style={{ color: colour }}>

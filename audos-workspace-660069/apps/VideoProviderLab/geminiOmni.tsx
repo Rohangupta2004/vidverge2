@@ -70,8 +70,7 @@ const OMNI_MODELS = {
 const VIDEO_MODELS: { id: string; label: string }[] = [
   { id: 'gemini-omni-flash-preview', label: 'Gemini Omni Flash (video)' },
   { id: 'veo-3.1-generate-preview', label: 'Veo 3.1' },
-  { id: 'veo-3.0-generate-001', label: 'Veo 3.0' },
-  { id: 'veo-2.0-generate-001', label: 'Veo 2.0' },
+  { id: 'veo-3.1-fast-generate-preview', label: 'Veo 3.1 Fast' },
 ];
 
 /** Chat models for multimodal understanding. The Gemini ids are the ones the

@@ -104,7 +104,7 @@ export const neutral = {
 export const typography = {
   // Font family - loaded via Google Fonts link in Desktop.tsx
   // UPDATE: Replace "Inter" with the workspace headingFont from config.desktop.branding
-  fontFamily: 'var(--space-font-family, "Sora", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif)',
+  fontFamily: 'var(--space-font-family, "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif)',
   
   // Font sizes with line heights
   size: {
@@ -127,7 +127,7 @@ export const typography = {
     bold: 'font-bold',        // 700
   },
   
-  // Text colors — token-driven so the light warm-gold theme flows everywhere
+  // Text colors — token-driven so the premium obsidian theme flows everywhere
   color: {
     primary: 'text-[var(--space-text-primary)]',      // Headings, important text
     secondary: 'text-[var(--space-text-secondary)]',  // Body text, descriptions
@@ -155,17 +155,17 @@ export const colors = {
   
   // Gradient backgrounds (for Desktop background)
   gradients: {
-    default: 'from-sky-50 via-blue-50 to-indigo-50',
-    warm: 'from-orange-50 via-rose-50 to-pink-50',
-    cool: 'from-cyan-50 via-sky-50 to-blue-50',
-    nature: 'from-emerald-50 via-teal-50 to-cyan-50',
-    purple: 'from-blue-50 via-sky-50 to-cyan-50',
+    default: 'from-[#08090B] via-[#0B0D10] to-[#111318]',
+    warm: 'from-[#0B0D10] via-[#111318] to-[#171A21]',
+    cool: 'from-[#08090B] via-[#0D1016] to-[#131722]',
+    nature: 'from-[#08090B] via-[#0D1213] to-[#121A1B]',
+    brand: 'from-[#111318] via-[#171A21] to-[#1D212A]',
   },
   
   // Glass/frosted effect
   glass: {
-    background: 'bg-white/80 backdrop-blur-lg',
-    border: 'border-gray-200/50',
+    background: 'bg-[rgba(17,19,24,0.86)] backdrop-blur-lg',
+    border: 'border-[rgba(255,255,255,0.07)]',
   }
 } as const;
 
@@ -257,8 +257,8 @@ export const tw = {
     primary: 'bg-[var(--space-surface-accent-soft)] text-[var(--space-text-brand)]',
     accent: 'bg-[var(--space-brand-highlight-100)] text-[var(--space-text-accent)]',
     success: 'bg-[var(--space-semantic-success-50)] text-[var(--space-semantic-success)]',
-    warning: 'bg-amber-500/15 text-amber-700',
-    danger: 'bg-red-500/10 text-[var(--space-semantic-danger)]',
+    warning: 'bg-[color-mix(in_srgb,#fbbf24_15%,transparent)] text-[#fcd34d]',
+    danger: 'bg-[color-mix(in_srgb,#f87171_12%,transparent)] text-[var(--space-semantic-danger)]',
     neutral: 'bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)]',
   },
   
@@ -311,8 +311,8 @@ export const tw = {
   // LEGACY (for backwards compatibility)
   // ---------------------------------------------------------------------------
   priority: {
-    high: 'bg-red-500/10 text-[var(--space-semantic-danger)]',
-    medium: 'bg-amber-500/15 text-amber-700',
+    high: 'bg-[color-mix(in_srgb,#f87171_12%,transparent)] text-[var(--space-semantic-danger)]',
+    medium: 'bg-[color-mix(in_srgb,#fbbf24_15%,transparent)] text-[#fcd34d]',
     low: 'bg-[var(--space-semantic-success-50)] text-[var(--space-semantic-success)]',
   },
   
@@ -387,7 +387,7 @@ export function getGradientClass(gradient?: string): string {
  * Get font family style object for inline styles
  */
 export function getFontFamily(): React.CSSProperties {
-  return { fontFamily: "var(--space-font-family, Sora, system-ui, sans-serif)" };
+  return { fontFamily: "var(--space-font-family, Inter, system-ui, sans-serif)" };
 }
 
 /**

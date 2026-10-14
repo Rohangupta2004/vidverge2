@@ -25,14 +25,14 @@ import AppShell from '../../components/ui/AppShell';
 import { COLORS } from '../../components/theme';
 import { directorOwnerKey } from '../SceneForge/lib/directorStore';
 import { useSpaceRuntime } from '../../SpaceRuntimeContext';
+import { withBrandContext } from '../../components/BrandContextLayer';
 
 /**
  * Dark-cosmic palette for the agent hub, mirrored from components/theme.ts so
  * the hub, the shared UI layer and the rest of the app family stay in step.
  *
- * The `--vv-gold*` names are kept as the brand channel the picker, queue and
- * create-bar subcomponents already read from; they now carry the amber brand
- * rather than the retired gold.
+ * The legacy `--vv-gold*` variable names remain for compatibility with the
+ * child components, but they now carry the canonical gold brand channel.
  */
 const TOKENS = {
   '--vv-bg': COLORS.bg,
@@ -42,10 +42,10 @@ const TOKENS = {
   '--vv-border-hover': COLORS.borderHover,
   '--vv-gold': COLORS.primary,
   '--vv-gold-light': COLORS.primaryGlow,
-  '--vv-gold-glow': 'rgba(200,146,10,0.45)',
+  '--vv-gold-glow': 'rgba(214,171,74,0.38)',
   '--vv-accent': COLORS.accent,
   '--vv-accent-light': COLORS.accentGlow,
-  '--vv-text-dim': 'rgba(26,16,0,0.55)',
+  '--vv-text-dim': COLORS.textMuted,
   '--vv-success': COLORS.success,
   '--vv-error': COLORS.error,
 } as unknown as CSSProperties;
@@ -305,8 +305,8 @@ function VergeMark({ size = 22 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <defs>
         <linearGradient id="vvAgentMark" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="var(--vv-gold-light, #E8B737)" />
-          <stop offset="100%" stopColor="var(--vv-gold, #C8920A)" />
+          <stop offset="0%" stopColor="var(--vv-gold-light, #F3D58B)" />
+          <stop offset="100%" stopColor="var(--vv-gold, #D6AB4A)" />
         </linearGradient>
       </defs>
       <path
@@ -318,7 +318,7 @@ function VergeMark({ size = 22 }: { size?: number }) {
       />
       <path
         d="M8.4 4.8 L12 11.2 L15.6 4.8"
-        stroke="var(--vv-gold, #C8920A)"
+        stroke="var(--vv-gold, #D6AB4A)"
         strokeWidth="1.1"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -328,7 +328,9 @@ function VergeMark({ size = 22 }: { size?: number }) {
   );
 }
 
-export default function App() {
+const BrandedVidvergeAgent = withBrandContext(App, 'Vidverge Agent');
+export default BrandedVidvergeAgent;
+function App() {
   const { subscription, subscriptionReady, sessionId } = useSpaceRuntime();
   const accountIdentity = subscriptionReady ? String(subscription?.email || sessionId || '') : '';
   const [agentState, setAgentState] = useState<AgentState>('idle');
@@ -564,9 +566,9 @@ export default function App() {
             width: 38,
             height: 38,
             borderRadius: 12,
-            background: 'linear-gradient(140deg, rgba(200,146,10,0.22) 0%, rgba(224,163,58,0.14) 100%)',
+            background: 'linear-gradient(140deg, rgba(214,171,74,0.2) 0%, rgba(243,213,139,0.1) 100%)',
             border: '1px solid var(--vv-border)',
-            boxShadow: '0 0 18px rgba(200,146,10,0.22)',
+            boxShadow: '0 0 22px rgba(214,171,74,0.2)',
           }}
         >
           <VergeMark />
@@ -588,7 +590,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => setCalm((prev) => !prev)}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--vv-border)] text-[#7A6030] transition-colors hover:border-[var(--vv-border-hover)] hover:bg-[rgba(180,120,0,0.06)] hover:text-[#1A1000]"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--vv-border)] text-[var(--vv-text-dim)] transition-colors hover:border-[var(--vv-border-hover)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--space-text-primary)]"
             title={calm ? 'Motion is calmed — switch back to full motion' : 'Calm the motion'}
             aria-label={calm ? 'Switch back to full motion' : 'Calm the motion'}
           >
@@ -622,7 +624,7 @@ export default function App() {
             onSubmit={handleSubmit}
             busy={agentState === 'working'}
           />
-          <p className="mt-3 text-center text-[11px] text-[#7A6030]">
+          <p className="mt-3 text-center text-[11px] text-[var(--vv-text-dim)]">
             {heygenAvatar
               ? 'Create renders a HeyGen talking head here · clear the character to route to a studio instead'
               : 'Describe the video · pick the studio · the agent takes it from there'}
@@ -631,7 +633,7 @@ export default function App() {
           {(heygenAvatar || heygenVoice) && (
             <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
               {heygenAvatar && (
-                <span className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--vv-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--vv-gold)_10%,transparent)] py-1 pl-1 pr-3 text-[11px] text-[#1A1000]">
+                <span className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--vv-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--vv-gold)_10%,transparent)] py-1 pl-1 pr-3 text-[11px] text-[var(--space-text-primary)]">
                   {heygenAvatar.previewImage ? (
                     <img src={heygenAvatar.previewImage} alt="" className="h-5 w-5 rounded-full object-cover" />
                   ) : (
@@ -641,7 +643,7 @@ export default function App() {
                 </span>
               )}
               {heygenVoice && (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--vv-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--vv-gold)_10%,transparent)] px-3 py-1 text-[11px] text-[#1A1000]">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--vv-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--vv-gold)_10%,transparent)] px-3 py-1 text-[11px] text-[var(--space-text-primary)]">
                   <Volume2 size={12} className="text-[var(--vv-gold)]" />
                   <span className="max-w-[160px] truncate">{heygenVoice.name}</span>
                 </span>

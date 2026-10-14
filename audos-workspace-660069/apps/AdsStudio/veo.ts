@@ -5,8 +5,8 @@
  *   submit:  POST /api/veo/generate/video       → { operationId }
  *   poll:    GET  /api/veo/status/:operationId  → { status, videoUrl }
  *
- * Model: gemini-omni-flash-preview — the only video model the platform
- * accepts (the retired veo-3.x ids answer 400).
+ * Default model: gemini-omni-1.1-flash. Retired preview ids are resolved to
+ * that canonical engine and are never presented as separate choices.
  *
  * CHARACTER CONSISTENCY (the Script-to-Video mechanism). Two images travel
  * with every clip and resolveClipReferences below splits them across the
@@ -26,17 +26,17 @@ import {
   engineLabelOf, generateWithOmniFlash, isModelRejection,
 } from '../../lib/omniFallback';
 import { pollGroupA, submitGroupA } from '../../lib/videoEngineClient';
-import { APP_IDS, OMNI_FLASH_MODEL } from '../../lib/appIds';
-import { groupAModel, isRunwayModel } from '../../lib/videoEngines';
+import { APP_IDS } from '../../lib/appIds';
+import {
+  OMNI_MODEL_ID, groupAModel, isRunwayModel, resolveEngineId,
+  sceneDurationLimits,
+} from '../../lib/videoEngines';
 import { generateVideoClip, integrationForEngineId, type VideoIntegrationId } from '../../lib/videoIntegrations';
 
-/** The default model an Ads Studio clip renders on — exported so the pipeline
- * can RECORD the actual model used on each generated clip.
- *
- * `gemini-omni-flash-preview` is the only Omni Flash spelling the proxy's model
- * enum accepts; a versioned id answers 400 invalid_enum_value. */
-// TODO: upgrade to 1.1 when platform key is confirmed
-export const VEO_MODEL = OMNI_FLASH_MODEL;
+/** Platform default and consistency engine. It accepts up to ten reference
+ * images alongside a seed frame and supports last-frame interpolation; its
+ * output ceiling is 720p. */
+export const VEO_MODEL = OMNI_MODEL_ID;
 
 // The proxy rejects prompts over 1000 characters ("String must contain at
 // most 1000 character(s)"), so every prompt is capped BEFORE submission.
@@ -79,7 +79,7 @@ export function resolveClipReferences(model: string, refs: ClipReferences): {
 } {
   const character = publicImage(refs.characterImageUrl);
   const seed = publicImage(refs.seedImageUrl);
-  const spec = groupAModel(model || VEO_MODEL);
+  const spec = groupAModel(resolveEngineId(model || VEO_MODEL));
   const carriesBoth = Boolean(spec && spec.supportsReferenceImages && !spec.refsExclusiveWithSeed);
   return {
     imageData: seed || character,
@@ -99,9 +99,9 @@ export async function submitVeo(params: ClipReferences & {
   model?: string;
   creditKey?: string;
 }): Promise<{ operationId: string; creditKey?: string }> {
-  // The video model renders 4–8s clips; a 10s script clip renders at the 8s cap.
-  const duration = Math.min(8, Math.max(4, Math.round(params.durationS || 6)));
-  const model = params.model || VEO_MODEL;
+  const model = resolveEngineId(params.model || VEO_MODEL);
+  const limits = sceneDurationLimits(model);
+  const duration = Math.min(limits.maxS, Math.max(limits.minS, Math.round(params.durationS || limits.defaultS)));
   const refs = resolveClipReferences(model, {
     characterImageUrl: params.characterImageUrl ?? params.referenceImageUrl,
     seedImageUrl: params.seedImageUrl,

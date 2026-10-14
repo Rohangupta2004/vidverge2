@@ -87,9 +87,9 @@ const BeamBackground: React.FC<BeamBackgroundProps> = function BeamBackground({
           height: 760,
           transform: 'translate(-50%, -50%)',
           background:
-            'radial-gradient(circle, rgba(200,146,10,' +
+            'radial-gradient(circle, rgba(214,171,74,' +
             (intensity * 1.5).toFixed(3) +
-            ') 0%, rgba(224,163,58,' +
+            ') 0%, rgba(243,213,139,' +
             (intensity * 0.65).toFixed(3) +
             ') 40%, rgba(255,253,244,0) 72%)',
           filter: 'blur(14px)',
@@ -108,13 +108,13 @@ const BeamBackground: React.FC<BeamBackgroundProps> = function BeamBackground({
           transformOrigin: 'bottom center',
           transform: 'translateX(-50%) rotate(' + beam.angle + 'deg)',
           background:
-            'linear-gradient(to top, rgba(200,146,10,0) 0%, ' +
+            'linear-gradient(to top, rgba(214,171,74,0) 0%, ' +
             COLORS.primary +
             ' 22%, ' +
             COLORS.primaryGlow +
             ' 55%, ' +
             COLORS.accentGlow +
-            ' 88%, rgba(224,163,58,0) 100%)',
+            ' 88%, rgba(243,213,139,0) 100%)',
           filter: 'blur(0.7px)',
           animation:
             'vvBeamPulse ' + duration + 's ease-in-out ' + beam.delay + 's infinite',

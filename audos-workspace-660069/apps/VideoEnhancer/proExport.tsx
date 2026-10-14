@@ -15,6 +15,8 @@ import { useMemo } from 'react';
 import { AlertTriangle, Check, Copy, Download, Film, Loader2, Play } from 'lucide-react';
 import { ASPECTS, AspectId, RESOLUTIONS, ResolutionId, outputDims } from './studioModel';
 import { Modal, Pills, Section } from './proUi';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 
 export type ExportFormat = 'mp4' | 'webm' | 'gif';
 
@@ -72,7 +74,7 @@ export default function ProExport(props: ExportProps) {
   return (
     <Modal
       title="Export video"
-      icon={<Film size={16} color="#C8920A" />}
+      icon={<Film size={16} color="var(--space-brand-primary, #D4920A)" />}
       onClose={props.onClose}
       footer={(
         <>
@@ -103,8 +105,8 @@ export default function ProExport(props: ExportProps) {
               onClick={() => props.onSpec({ format: f.id })}
               disabled={props.busy}
             >
-              <b style={{ fontSize: 12.5, display: 'block', color: '#1A1000' }}>{f.label}</b>
-              <small style={{ fontSize: 10, color: '#7A6030', lineHeight: 1.4 }}>{f.blurb}</small>
+              <b style={{ fontSize: 12.5, display: 'block', color: 'var(--space-text-primary, #F5E9C8)' }}>{f.label}</b>
+              <small style={{ fontSize: 10, color: 'var(--space-text-muted, #9E8B55)', lineHeight: 1.4 }}>{f.blurb}</small>
             </button>
           ))}
         </div>
@@ -161,7 +163,7 @@ export default function ProExport(props: ExportProps) {
       </Section>
 
       <details>
-        <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#7A6030' }}>
+        <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--space-text-muted, #9E8B55)' }}>
           Advanced
         </summary>
         <div style={{ paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -198,22 +200,28 @@ export default function ProExport(props: ExportProps) {
       {props.warning ? <p className="vp-note warn">{props.warning}</p> : null}
 
       {props.busy ? (
-        <div>
-          <div className="vp-bar"><i style={{ width: `${Math.round(props.progress * 100)}%` }} /></div>
-          <p className="vp-note" style={{ marginTop: 6 }}>
-            {props.stage || 'Working…'}
-            {props.etaS > 0 ? ` · about ${Math.ceil(props.etaS)}s left` : ''}
-          </p>
-        </div>
+        <VideoGeneratingState
+          label="Exporting your video"
+          detail={`${props.stage || 'Working…'}${props.etaS > 0 ? ` · about ${Math.ceil(props.etaS)}s left` : ''}`}
+          progress={props.progress * 100}
+          compact
+        />
       ) : null}
 
-      {props.error ? <p className="vp-note bad">{props.error}</p> : null}
+      {props.error ? (
+        <VideoErrorCard
+          error={props.error}
+          subject="this export"
+          onRetry={props.onExport}
+          compact
+        />
+      ) : null}
 
       {props.results.length ? (
         <Section title="Download ready" hint={`${props.results.length} file${props.results.length === 1 ? '' : 's'}`}>
           {props.results.map((r) => (
             <div key={`${r.aspect}-${r.url}`} className="vp-row">
-              <Check size={13} color="#166534" />
+              <Check size={13} color="var(--space-semantic-success, #4ade80)" />
               <span style={{ fontSize: 12, fontWeight: 650 }}>{r.label}</span>
               <span className="vp-note vp-mono">{r.geometry}</span>
               <span className="vp-spread" />

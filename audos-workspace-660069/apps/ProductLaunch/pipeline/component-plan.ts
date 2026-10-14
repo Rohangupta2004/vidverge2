@@ -10,11 +10,12 @@
 // turn; discovering the same fault after a render costs a render.
 
 import { callModelForJson, errorMessage, OPUS_MODEL } from '../lib/ai-client';
+import type { BeatMap } from '../lib/audio';
 import {
   COMPONENT_PLAN_CONVENTIONS,
   COMPONENT_PLAN_SYSTEM_PROMPT,
 } from '../prompts/component-plan.prompt';
-import { schemaAsPromptText } from '../sdk/component-schema';
+import { handlePropsOf, schemaAsPromptText } from '../sdk/component-schema';
 import { CONTAINER_COMPONENTS, isSDKComponent, RENDER_CONSTRAINTS } from '../sdk/component-sdk.types';
 import { validateLayerProps } from '../sdk/validate-props';
 import type {
@@ -165,18 +166,45 @@ function clampLayerTiming(layer: ComponentInstance, sceneFrames: number): Compon
 // Validation
 // ---------------------------------------------------------------------------
 
+const PIXEL_UI_COMPONENTS = ['BrowserFrame', 'Dashboard', 'Morph', 'FloatingUI', 'Grid', 'FullBleed', 'Screenshot'];
+
 function validateLayer(
   layer: ComponentInstance,
   sceneId: string,
   knownHandles: string[],
+  ctx: ProductContext,
   errors: string[],
   path: string,
 ): void {
   const where = sceneId + ' / ' + path + ' (' + layer.component + ')';
 
+  if (PIXEL_UI_COMPONENTS.indexOf(layer.component) >= 0) {
+    errors.push(where + ': screenshot pixels are reference-only. Use SemanticUI, or ProductImage/Logo for non-UI imagery.');
+  }
   if (!isSDKComponent(layer.component)) {
     errors.push(where + ': "' + layer.component + '" is not an SDK component.');
     return;
+  }
+  if (layer.component === 'SemanticUI') {
+    const referenceId = str(layer.props?.referenceId);
+    const reference = ctx.ui_references.find((entry) => entry.id === referenceId);
+    if (!reference) {
+      errors.push(where + ': SemanticUI referenceId "' + referenceId + '" was not reconstructed from a real screenshot.');
+    } else {
+      const expected = {
+        screenName: reference.screen_name,
+        elements: reference.elements,
+        background: reference.background,
+        surface: reference.surface,
+        textColor: reference.text,
+        accent: reference.accent,
+      };
+      for (const key of Object.keys(expected) as Array<keyof typeof expected>) {
+        if (JSON.stringify(layer.props?.[key]) !== JSON.stringify(expected[key])) {
+          errors.push(where + ': SemanticUI.' + key + ' must match reference "' + referenceId + '" exactly.');
+        }
+      }
+    }
   }
 
   const children = layer.props?.children;
@@ -193,9 +221,49 @@ function validateLayer(
       return;
     }
     (children as ComponentInstance[]).forEach((child, index) => {
-      validateLayer(child, sceneId, knownHandles, errors, path + '.children[' + String(index) + ']');
+      validateLayer(child, sceneId, knownHandles, ctx, errors, path + '.children[' + String(index) + ']');
     });
   }
+}
+
+export function alignPlanToBeats(plan: ComponentPlan, beatMap?: BeatMap): ComponentPlan {
+  const strong = (beatMap?.beats || []).filter((beat) => beat.strength >= 0.7 || beat.kind !== 'beat');
+  if (!strong.length || plan.scenes.length < 2) return plan;
+  const boundaries: number[] = [];
+  let cursor = 0;
+  for (let i = 0; i < plan.scenes.length - 1; i += 1) {
+    cursor += plan.scenes[i].duration_frames;
+    const candidates = strong.filter((beat) => beat.frame > (boundaries[i - 1] || 0) + 15 && beat.frame < plan.total_frames - 15);
+    const nearest = candidates.sort((a, b) => Math.abs(a.frame - cursor) - Math.abs(b.frame - cursor))[0];
+    boundaries.push(nearest && Math.abs(nearest.frame - cursor) <= 24 ? nearest.frame : cursor);
+  }
+  const scenes = plan.scenes.map((scene, index) => {
+    const start = index === 0 ? 0 : boundaries[index - 1];
+    const end = index === plan.scenes.length - 1 ? plan.total_frames : boundaries[index];
+    const duration = Math.max(1, end - start);
+    return { ...scene, start_frame: start, duration_frames: duration, layers: scene.layers.map((layer) => clampLayerTiming(layer, duration)) };
+  });
+  return { ...plan, scenes };
+}
+
+function collectPlanUsage(plan: ComponentPlan): { handles: string[]; uiReferences: string[] } {
+  const handles: string[] = [];
+  const uiReferences: string[] = [];
+  const add = (list: string[], value: unknown): void => {
+    if (typeof value === 'string' && value && list.indexOf(value) < 0) list.push(value);
+  };
+  const visit = (layer: ComponentInstance): void => {
+    for (const prop of handlePropsOf(layer.component)) {
+      const value = layer.props?.[prop];
+      if (Array.isArray(value)) value.forEach((entry) => add(handles, entry));
+      else add(handles, value);
+    }
+    if (layer.component === 'SemanticUI') add(uiReferences, layer.props?.referenceId);
+    const children = layer.props?.children;
+    if (Array.isArray(children)) (children as ComponentInstance[]).forEach(visit);
+  };
+  plan.scenes.forEach((scene) => scene.layers.forEach(visit));
+  return { handles, uiReferences };
 }
 
 export function validateComponentPlan(plan: ComponentPlan, ctx: ProductContext): string[] {
@@ -223,13 +291,29 @@ export function validateComponentPlan(plan: ComponentPlan, ctx: ProductContext):
     expectedStart += scene.duration_frames;
 
     scene.layers.forEach((layer, index) => {
-      validateLayer(layer, scene.scene_id, knownHandles, errors, 'layers[' + String(index) + ']');
+      validateLayer(layer, scene.scene_id, knownHandles, ctx, errors, 'layers[' + String(index) + ']');
     });
   }
 
   if (expectedStart !== plan.total_frames) {
     errors.push('Scene durations sum to ' + String(expectedStart)
       + ' but total_frames is ' + String(plan.total_frames) + '.');
+  }
+
+  const usage = collectPlanUsage(plan);
+  const requiredAssets = ctx.assets.filter((asset) => asset.handle === 'uploaded_logo' || asset.handle === 'uploaded_product_image');
+  for (const asset of requiredAssets) {
+    if (usage.handles.indexOf(asset.handle) < 0) {
+      errors.push('Creator-uploaded asset "' + asset.handle + '" must survive into the film unchanged via '
+        + (asset.type === 'logo' ? 'Logo.' : 'ProductImage.'));
+    }
+  }
+  const requiredUi = ctx.ui_references.filter((reference) => reference.source_handle === 'uploaded_ui_reference');
+  for (const reference of requiredUi) {
+    if (usage.uiReferences.indexOf(reference.id) < 0) {
+      errors.push('Creator-uploaded screenshot reference "' + reference.id
+        + '" must survive as a SemanticUI reconstruction with its stable data-ui-id elements.');
+    }
   }
   return errors;
 }
@@ -238,7 +322,7 @@ export function validateComponentPlan(plan: ComponentPlan, ctx: ProductContext):
 // Generation
 // ---------------------------------------------------------------------------
 
-function buildUserMessage(spec: FilmSpec, ctx: ProductContext): string {
+function buildUserMessage(spec: FilmSpec, ctx: ProductContext, beatMap?: BeatMap): string {
   const handles = assetHandles(ctx);
   return [
     'FILM SPEC (the creative brief you are translating)',
@@ -249,14 +333,20 @@ function buildUserMessage(spec: FilmSpec, ctx: ProductContext): string {
     '',
     COMPONENT_PLAN_CONVENTIONS,
     '',
-    'ASSET REGISTRY — the only handles that resolve',
+    'RENDERABLE ASSET REGISTRY — screenshot handles are deliberately absent',
     handles.length
       ? handles.map((handle) => {
         const asset = ctx.assets.find((entry) => entry.handle === handle);
         return '  ' + handle + (asset ? '  — ' + asset.description : '')
           + (asset && !asset.source_url ? '  [NO FILE: will draw as a missing-asset plate]' : '');
       }).join('\n')
-      : '  none — this film has no imagery, so use typography and motion components only',
+      : '  none — this film has no non-UI imagery, so use typography and SemanticUI only',
+    '',
+    'SEMANTIC UI REFERENCES — use SemanticUI with these exact fields; never embed the screenshot source:',
+    ctx.ui_references.length ? JSON.stringify(ctx.ui_references, null, 2) : '  none',
+    '',
+    'BEAT MAP — scene boundaries and high-energy events should land on strong frames:',
+    beatMap ? JSON.stringify({ bpm: beatMap.bpm, beats: beatMap.beats.filter((beat) => beat.strength >= 0.7) }, null, 2) : '  unavailable',
     '',
     'Scene durations must sum to exactly ' + String(spec.total_duration_frames) + ' frames at '
     + String(RENDER_CONSTRAINTS.fps) + 'fps.',
@@ -267,6 +357,7 @@ function buildUserMessage(spec: FilmSpec, ctx: ProductContext): string {
 export interface ComponentPlanOptions {
   onProgress?: (detail: string, attempt: number) => void;
   signal?: AbortSignal;
+  beatMap?: BeatMap;
 }
 
 export async function generateComponentPlan(
@@ -275,7 +366,7 @@ export async function generateComponentPlan(
   options: ComponentPlanOptions = {},
 ): Promise<ComponentPlan> {
   const report = options.onProgress || (() => undefined);
-  const base = buildUserMessage(spec, ctx);
+  const base = buildUserMessage(spec, ctx, options.beatMap);
 
   let plan: ComponentPlan | null = null;
   let errors: string[] = [];
@@ -298,7 +389,7 @@ export async function generateComponentPlan(
     );
 
     try {
-      plan = normalizePlan(
+      plan = alignPlanToBeats(normalizePlan(
         await callModelForJson<unknown>(message, {
           system: COMPONENT_PLAN_SYSTEM_PROMPT,
           model: OPUS_MODEL,
@@ -306,7 +397,7 @@ export async function generateComponentPlan(
           signal: options.signal,
         }),
         spec,
-      );
+      ), options.beatMap);
     } catch (error) {
       if (attempt === MAX_REPAIR_ATTEMPTS) throw error;
       errors = [errorMessage(error)];
@@ -317,16 +408,10 @@ export async function generateComponentPlan(
     if (!errors.length) return plan;
   }
 
-  // Out of repair attempts. The plan is returned with its faults recorded on
-  // the scenes rather than thrown away: the compile gate downstream will see
-  // the same problems, and a half-valid plan the creator can read beats an
-  // exception that tells them nothing.
+  // A plan that still fails validation cannot safely reach a paid render.
+  // In particular, screenshot pixels or a dropped creator asset must never be
+  // papered over by the deterministic code printer.
   if (!plan) throw new Error('The component plan could not be built.');
-  const unresolved = errors.slice();
-  return {
-    ...plan,
-    scenes: plan.scenes.map((scene, index) => (index === 0
-      ? { ...scene, warnings: (scene.warnings || []).concat(unresolved) }
-      : scene)),
-  };
+  throw new Error('The component plan still has ' + String(errors.length)
+    + ' validation error(s) after repair: ' + errors.slice(0, 6).join(' '));
 }

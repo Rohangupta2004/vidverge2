@@ -3,7 +3,7 @@ import { COLORS } from '../theme';
 
 /** Small pill label used for statuses, counts and provider tags. */
 
-export type BadgeVariant = 'violet' | 'cyan' | 'green' | 'red' | 'amber' | 'muted';
+export type BadgeVariant = 'brand' | 'cyan' | 'green' | 'red' | 'amber' | 'muted';
 
 export interface BadgeProps {
   children?: React.ReactNode;
@@ -18,17 +18,17 @@ export interface BadgeProps {
 }
 
 const TONES: Record<BadgeVariant, { fg: string; bg: string; border: string }> = {
-  violet: { fg: COLORS.primaryGlow, bg: 'rgba(245,158,11,0.14)', border: 'rgba(245,158,11,0.35)' },
+  brand: { fg: COLORS.primaryGlow, bg: 'rgba(212,146,10,0.14)', border: 'rgba(212,146,10,0.35)' },
   cyan: { fg: COLORS.accentGlow, bg: 'rgba(6,182,212,0.14)', border: 'rgba(6,182,212,0.35)' },
   green: { fg: '#6ee7b7', bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.35)' },
   red: { fg: '#fca5a5', bg: 'rgba(239,68,68,0.14)', border: 'rgba(239,68,68,0.35)' },
-  amber: { fg: '#fcd34d', bg: 'rgba(245,158,11,0.14)', border: 'rgba(245,158,11,0.35)' },
+  amber: { fg: COLORS.accentGlow, bg: 'rgba(240,180,41,0.14)', border: 'rgba(240,180,41,0.35)' },
   muted: { fg: COLORS.textMuted, bg: 'rgba(187,168,153,0.1)', border: 'rgba(187,168,153,0.22)' },
 };
 
 const Badge: React.FC<BadgeProps> = function Badge({
   children,
-  variant = 'violet',
+  variant = 'brand',
   dot = false,
   pulse = false,
   className,

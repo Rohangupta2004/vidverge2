@@ -20,7 +20,7 @@
 //      per-clip cost hint, so the customer sees the bill BEFORE pressing
 //      Generate All.
 
-import { GROUP_A_MODELS, HIGGSFIELD_VIDEO_MODELS, KLING_MODELS, RUNWAY_MODELS, groupAModel, isRunwayModel, videoEngine } from '../../../lib/videoEngines';
+import { HIGGSFIELD_VIDEO_MODELS, KLING_MODELS, OMNI_MODEL_ID, RUNWAY_MODELS, groupAModel, isEngineAvailable, isRunwayModel, sceneDurationLimits, sceneDurationLimitsFrom, videoEngine, type SceneDurationLimits } from '../../../lib/videoEngines';
 import { WORKSPACE_ID } from './supabase';
 
 export type ProviderState = 'available' | 'unconfigured' | 'degraded' | 'unknown';
@@ -50,12 +50,11 @@ export interface ProviderStatus extends ProviderMeta {
 
 /** The scene-clip engines SceneForge offers, newest/most useful first. */
 const SCENE_PROVIDER_IDS = [
-  'gemini-omni-flash-preview',
-  'veo-3.1-fast-generate-preview',
-  'veo-3.1-generate-preview',
-  'veo-3.0-fast-generate-001',
-  'sora-2',
   'openrouter/bytedance/seedance-2.0-fast',
+  OMNI_MODEL_ID,
+  'openrouter/google/veo-3.1',
+  'openrouter/google/veo-3.1-fast',
+  'openrouter/google/veo-3.1-lite',
   'kling-v1-5',
   'kling-v2-master',
   'minimax-hailuo-02',
@@ -120,10 +119,12 @@ export const HEYGEN_PROVIDER: ProviderMeta = {
 
 /** Static catalogue: every provider SceneForge knows how to drive. */
 export function providerCatalogue(): ProviderMeta[] {
-  const scene = SCENE_PROVIDER_IDS.map((id) => groupAMeta(id) || klingMeta(id) || higgsfieldMeta(id)).filter(Boolean) as ProviderMeta[];
+  const scene = SCENE_PROVIDER_IDS
+    .filter(isEngineAvailable)
+    .map((id) => groupAMeta(id) || klingMeta(id) || higgsfieldMeta(id))
+    .filter(Boolean) as ProviderMeta[];
   const runway = RUNWAY_MODELS
-    .filter((model) => model.type === 'video' && model.route === 'video')
-    .slice(0, 3)
+    .filter((model) => model.type === 'video' && model.route === 'video' && model.available)
     .map((model): ProviderMeta => ({
       id: model.id,
       label: model.label,
@@ -141,6 +142,32 @@ export function providerMeta(id: string | null | undefined): ProviderMeta | null
   const wanted = String(id || '');
   if (wanted === 'heygen') return HEYGEN_PROVIDER;
   return klingMeta(wanted) || higgsfieldMeta(wanted) || providerCatalogue().find((entry) => entry.id === wanted) || null;
+}
+
+/**
+ * The duration rule SceneForge can preserve through its declared route.
+ * Seedance accepts 10s, but the required Omni fallback caps at 8s; keeping the
+ * effective ceiling at 8 means a fallback can use the exact same scene
+ * division instead of truncating or silently splitting creative intent.
+ */
+export function sceneForgeDurationLimits(modelId: string | null | undefined): SceneDurationLimits {
+  const meta = providerMeta(modelId);
+  const primary = sceneDurationLimitsFrom({
+    modelId,
+    modelName: meta?.label,
+    maxS: meta?.maxDurationS || 8,
+    minS: 2,
+    defaultS: Math.min(meta?.maxDurationS || 8, 6),
+  });
+  if (String(modelId || '') !== DEFAULT_SCENE_PROVIDER) return primary;
+  const fallback = sceneDurationLimits(OMNI_MODEL_ID);
+  const maxS = Math.min(primary.maxS, fallback.maxS);
+  return {
+    minS: Math.max(primary.minS, fallback.minS),
+    maxS,
+    defaultS: Math.min(maxS, primary.defaultS),
+    source: `Seedance 2 is primary; Gemini Omni Flash is the explicit fallback, so scenes stay within the ${maxS}s both routes can preserve unchanged.`,
+  };
 }
 
 /** The provider's display name, used in every error sentence. */
@@ -417,4 +444,4 @@ export function usableSceneProviders(statuses: ProviderStatus[]): ProviderStatus
   return statuses.filter((entry) => entry.role === 'scene' && entry.state !== 'unconfigured');
 }
 
-export const DEFAULT_SCENE_PROVIDER = GROUP_A_MODELS[0]?.id || 'gemini-omni-flash-preview';
+export const DEFAULT_SCENE_PROVIDER = 'openrouter/bytedance/seedance-2.0-fast';

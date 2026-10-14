@@ -32,7 +32,7 @@ async function generateOnce(prompt: string, onProgress?: (message: string) => vo
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'veo-3.0-fast-generate-001',
+      model: 'veo-3.1-fast-generate-preview',
       prompt,
       negativePrompt: NEGATIVE_PROMPT,
       aspectRatio: '16:9',

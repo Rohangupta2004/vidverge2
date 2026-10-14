@@ -1,5 +1,4 @@
-import { buildMotionGraphic, type BuiltMotionGraphic } from '../components/MotionGraphicPlayer';
-import { motionThemeForStyle } from './motionKit';
+import type { BuiltMotionGraphic } from '../components/MotionGraphicPlayer';
 import { motionFingerprint, normalizeMotionSpec, specFromOverlay, type MotionSpec } from './motionSpec';
 import { directionFingerprint, normalizeSceneDirection, type SceneDirection } from './visualTimeline';
 import { updateScene, type Project, type Scene } from './supabase';
@@ -319,6 +318,102 @@ export async function generatePortraitCalloutImage(project: Project, scene: Scen
   return uploaded.url;
 }
 
+/**
+ * Draw a motion-graphic spec into one transparent, face-safe portrait card.
+ * Portrait export cannot use the platform's fixed 1920x1080 Remotion output,
+ * so this is the deterministic 9:16 counterpart: exact stored copy and data,
+ * no real-time playback, MediaRecorder, requestAnimationFrame, or open-tab
+ * dependency. Landscape renders the same spec as animated element layers in
+ * the final Remotion pass.
+ */
+export async function generatePortraitMotionCardPng(project: Project, scene: Scene, comp: CompositionSpec): Promise<string> {
+  const spec = sceneMotionSpec(scene);
+  const rect = portraitPlacement(comp, { tall: spec.items.length > 3 });
+  const canvas = document.createElement('canvas');
+  canvas.width = FRAME_W;
+  canvas.height = FRAME_H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas 2D is unavailable in this browser.');
+  if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined);
+  ctx.clearRect(0, 0, FRAME_W, FRAME_H);
+
+  const paper = String(project.style || '') === 'vox-explainer';
+  const accent = /^#[0-9a-fA-F]{3,8}$/.test(String(spec.accent || '')) ? String(spec.accent) : '#F5B936';
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 44;
+  ctx.shadowOffsetY = 14;
+  roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, paper ? 10 : 30);
+  ctx.fillStyle = paper ? 'rgba(250,247,240,0.97)' : 'rgba(8,12,24,0.92)';
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = paper ? 'rgba(26,26,26,0.25)' : 'rgba(255,255,255,0.2)';
+  ctx.stroke();
+  ctx.restore();
+
+  const ink = paper ? '#1A1A1A' : '#FFFFFF';
+  const muted = paper ? 'rgba(26,26,26,0.76)' : 'rgba(255,255,255,0.78)';
+  const pad = Math.max(34, Math.round(rect.w * 0.055));
+  const centerX = rect.x + rect.w / 2;
+  let y = rect.y + pad;
+  const title = String(spec.title || scene.description || '').trim();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = ink;
+  ctx.font = `800 ${Math.max(34, Math.round(rect.w * 0.07))}px Inter, Arial, sans-serif`;
+  const titleLines = wrapCanvasText(ctx, title, rect.w - pad * 2, 3);
+  const titleLine = Math.round(rect.w * 0.083);
+  titleLines.forEach((line) => { ctx.fillText(line, centerX, y); y += titleLine; });
+  if (spec.subtitle) {
+    y += 10;
+    ctx.fillStyle = muted;
+    ctx.font = `600 ${Math.max(24, Math.round(rect.w * 0.038))}px Inter, Arial, sans-serif`;
+    const lines = wrapCanvasText(ctx, spec.subtitle, rect.w - pad * 2, 3);
+    const lineH = Math.round(rect.w * 0.052);
+    lines.forEach((line) => { ctx.fillText(line, centerX, y); y += lineH; });
+  }
+
+  if (spec.stat) {
+    y += Math.max(18, Math.round(rect.h * 0.035));
+    ctx.fillStyle = accent;
+    ctx.font = `900 ${Math.max(72, Math.round(rect.w * 0.18))}px Inter, Arial, sans-serif`;
+    ctx.fillText(`${spec.stat.prefix || ''}${spec.stat.value}${spec.stat.suffix || ''}`, centerX, y);
+    y += Math.round(rect.w * 0.2);
+    if (spec.stat.label) {
+      ctx.fillStyle = ink;
+      ctx.font = `700 ${Math.max(25, Math.round(rect.w * 0.042))}px Inter, Arial, sans-serif`;
+      ctx.fillText(spec.stat.label, centerX, y);
+      y += Math.round(rect.w * 0.06);
+    }
+  }
+
+  const labels = spec.kind === 'comparison'
+    ? [...(spec.leftItems || []).map((item) => `${spec.leftTitle || 'A'} · ${item}`), ...(spec.rightItems || []).map((item) => `${spec.rightTitle || 'B'} · ${item}`)]
+    : spec.items.map((item) => `${item.label}${item.value !== undefined ? ` · ${item.value}` : ''}${item.sublabel ? ` — ${item.sublabel}` : ''}`);
+  const room = rect.y + rect.h - pad - y;
+  const rowH = Math.max(46, Math.min(76, Math.floor(room / Math.max(1, Math.min(6, labels.length)))));
+  labels.slice(0, 6).forEach((label, index) => {
+    const top = y + index * rowH;
+    roundedRect(ctx, rect.x + pad, top, rect.w - pad * 2, rowH - 10, paper ? 7 : 16);
+    ctx.fillStyle = paper ? 'rgba(26,26,26,0.07)' : 'rgba(255,255,255,0.08)';
+    ctx.fill();
+    ctx.fillStyle = accent;
+    ctx.fillRect(rect.x + pad, top, 7, rowH - 10);
+    ctx.fillStyle = ink;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = `700 ${Math.max(22, Math.round(rect.w * 0.034))}px Inter, Arial, sans-serif`;
+    const clipped = label.length > 72 ? `${label.slice(0, 69).trim()}…` : label;
+    ctx.fillText(clipped, rect.x + pad + 28, top + (rowH - 10) / 2, rect.w - pad * 2 - 46);
+  });
+
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('The portrait motion card came back empty.')), 'image/png'));
+  const file = new File([blob], `scene-${scene.scene_index}-motion-card.png`, { type: 'image/png' });
+  const uploaded = await uploadFile(file, `sceneforge-v2/${project.id}/overlays`);
+  return uploaded.url;
+}
+
 // ---------------------------------------------------------------------------
 // PORTRAIT COMPOSITION LAYER — overlay/central visuals for the 9:16 FFmpeg
 // composite. The portrait endpoint accepts only full-frame assets but its
@@ -395,6 +490,7 @@ export async function generatePortraitMotionOverlayFrames(project: Project, scen
   // Small tiles get a bigger type unit so labels remain readable at 9:16.
   const unitScale = comp.mode === 'central' ? 1.12 : compact ? 1.5 : 1.25;
   if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined);
+  const { buildMotionGraphic } = await import('../components/MotionGraphicPlayer');
   const built: BuiltMotionGraphic = buildMotionGraphic(spec, rect.w, rect.h, duration, { transparent: true, panel: true, unitScale, directed: sceneDirection(scene), styleId: project.style });
   const host = document.createElement('div');
   host.style.cssText = `position:fixed;left:-100000px;top:0;width:${rect.w}px;height:${rect.h}px;pointer-events:none;opacity:0;`;
@@ -538,6 +634,10 @@ export async function recordMotionGraphic(spec: MotionSpec, aspect: '16:9' | '9:
   const H = portrait ? 1920 : 1080;
 
   const inlined = await inlineSpecImages(spec);
+  const [{ buildMotionGraphic }, { motionThemeForStyle }] = await Promise.all([
+    import('../components/MotionGraphicPlayer'),
+    import('./motionKit'),
+  ]);
   const built = buildMotionGraphic(inlined, W, H, durationSec, { ...(directed ? { directed } : {}), styleId: styleId ?? null });
   const host = document.createElement('div');
   host.style.cssText = `position:fixed;left:-100000px;top:0;width:${W}px;height:${H}px;pointer-events:none;opacity:0;`;

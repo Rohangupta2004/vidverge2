@@ -17,6 +17,7 @@ import {
   runwayVideoRatio,
   clampRunwayDuration,
   engineHealthWarning,
+  isEngineAvailable,
 } from './videoEngines';
 import {
   EngineError,
@@ -114,12 +115,12 @@ function withHealth(modelId: string, hint: string): string {
 export function modelsForIntegration(integration: VideoIntegrationId): IntegrationModelOption[] {
   switch (integration) {
     case 'image-and-video-generation':
-      return GROUP_A_MODELS.map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) }));
+      return GROUP_A_MODELS.filter((m) => !m.aliasOf).map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) }));
     case 'google-veo3':
       return [
         { id: GOOGLE_VEO_CONVENIENCE_MODEL, label: 'Veo 3.1 (managed default)', hint: 'POST /api/generate/video' },
-        ...GROUP_A_MODELS.filter((m) => m.provider === 'Google' || m.id.startsWith('veo-')).map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) })),
-        ...GROUP_A_MODELS.filter((m) => m.id.startsWith('sora')).map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) })),
+        ...GROUP_A_MODELS.filter((m) => !m.aliasOf && (m.provider === 'Google' || m.id.startsWith('openrouter/google/veo-'))).map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) })),
+
       ];
     case 'kling-video':
       return KLING_MODELS.map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.blurb.slice(0, 80)) }));
@@ -140,10 +141,11 @@ export function modelsForIntegration(integration: VideoIntegrationId): Integrati
 
 export function defaultModelForIntegration(integration: VideoIntegrationId): string {
   const models = modelsForIntegration(integration);
+  const working = models.find((m) => isEngineAvailable(m.id));
   if (integration === 'image-and-video-generation' || integration === 'google-veo3') {
-    return models.find((m) => m.id === DEFAULT_ENGINE_ID)?.id || models[0]?.id || DEFAULT_ENGINE_ID;
+    return models.find((m) => m.id === DEFAULT_ENGINE_ID && isEngineAvailable(m.id))?.id || working?.id || DEFAULT_ENGINE_ID;
   }
-  return models[0]?.id || '';
+  return working?.id || models[0]?.id || '';
 }
 
 /** Infer integration from a legacy engine id stored on older projects. */
@@ -298,6 +300,9 @@ export function loadVideoSelection(): { integration: VideoIntegrationId; model: 
     if (!meta || meta.role !== 'scene') return fallback;
     const models = modelsForIntegration(integration);
     const chosen = models.some((m) => m.id === model) ? model : defaultModelForIntegration(integration);
+    // A stale session must not silently reopen on a model the health sweep
+    // proved broken. Fall back to the verified-working global default instead.
+    if (!isEngineAvailable(chosen)) return fallback;
     return { integration, model: chosen };
   } catch {
     return fallback;

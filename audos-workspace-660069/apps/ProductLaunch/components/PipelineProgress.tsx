@@ -8,9 +8,11 @@
 import { AlertTriangle, Check, Circle, Minus } from 'lucide-react';
 
 import VergeLoader from '../../../components/VergeLoader';
+import VideoErrorCard from '../../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../../components/video/VideoGeneratingState';
 
 import { formatMs, type PipelineStep } from '../lib/pipeline-events';
-import { ACCENT, BORDER, CARD_BG, GhostButton, MUTED, TEXT } from './LaunchUi';
+import { ACCENT, BORDER, CARD_BG, MUTED, TEXT } from './LaunchUi';
 
 const DANGER = 'var(--space-semantic-danger, #F87171)';
 const SUCCESS = 'var(--space-semantic-success, #34D399)';
@@ -22,7 +24,7 @@ function StepIcon(props: { state: PipelineStep['state'] }) {
   if (props.state === 'running') {
     return <VergeLoader size={24} label="Running" />;
   }
-  return <Circle size={9} style={{ color: 'rgba(122,96,48,0.5)' }} />;
+  return <Circle size={9} style={{ color: 'rgba(158,139,85,0.5)' }} />;
 }
 
 function Row(props: { step: PipelineStep; onRetry?: () => void }) {
@@ -40,7 +42,7 @@ function Row(props: { step: PipelineStep; onRetry?: () => void }) {
         borderRadius: 14,
         border: '1px solid ' + (running ? ACCENT : 'transparent'),
         background: running
-          ? 'color-mix(in srgb, var(--space-brand-primary-500, #F59E0B) 10%, transparent)'
+          ? 'color-mix(in srgb, var(--space-brand-primary-500, #D4920A) 10%, transparent)'
           : 'transparent',
         opacity: idle ? 0.45 : 1,
         transition: 'opacity 160ms ease',
@@ -85,25 +87,20 @@ function Row(props: { step: PipelineStep; onRetry?: () => void }) {
         ) : null}
 
         {step.error ? (
-          <div
-            style={{
-              marginTop: 9,
-              padding: '10px 12px',
-              borderRadius: 10,
-              border: '1px solid color-mix(in srgb, #991B1B 36%, transparent)',
-              background: 'color-mix(in srgb, #991B1B 10%, transparent)',
-              fontSize: 12.5,
-              lineHeight: 1.55,
-              color: DANGER,
-            }}
-          >
-            {step.error}
-            {props.onRetry ? (
-              <div style={{ marginTop: 10 }}>
-                <GhostButton onClick={props.onRetry}>Retry this step</GhostButton>
-              </div>
-            ) : null}
-          </div>
+          step.id === 'render' ? (
+            <VideoErrorCard
+              error={step.error}
+              subject="the launch film"
+              onRetry={props.onRetry}
+              compact
+              style={{ marginTop: 9 }}
+            />
+          ) : (
+            <div style={{ marginTop: 9, padding: '10px 12px', borderRadius: 10, border: '1px solid color-mix(in srgb, var(--space-semantic-danger, #f87171) 36%, transparent)', background: 'color-mix(in srgb, var(--space-semantic-danger, #f87171) 10%, transparent)', fontSize: 12.5, lineHeight: 1.55, color: DANGER }}>
+              {step.error}
+              {props.onRetry ? <button type="button" onClick={props.onRetry} style={{ display: 'block', marginTop: 10, border: '1px solid ' + BORDER, borderRadius: 8, background: CARD_BG, color: TEXT, padding: '7px 12px', cursor: 'pointer' }}>Retry this step</button> : null}
+            </div>
+          )
         ) : null}
       </div>
     </li>
@@ -149,17 +146,20 @@ export default function PipelineProgress(props: {
         </span>
       </header>
 
-      {!failed && runningStep ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0 20px' }}>
-          <VergeLoader size={120} caption={runningStep.label} />
-        </div>
+      {!failed && runningStep?.id === 'render' ? (
+        <VideoGeneratingState
+          label={runningStep.label}
+          detail={runningStep.detail || `Iteration ${props.iteration}`}
+          elapsedSeconds={elapsed / 1000}
+          style={{ marginBottom: 20 }}
+        />
       ) : null}
 
       <div
         style={{
           height: 3,
           borderRadius: 2,
-          background: 'rgba(180,120,0,0.14)',
+          background: 'rgba(255,255,255,0.07)',
           overflow: 'hidden',
           marginBottom: 14,
         }}

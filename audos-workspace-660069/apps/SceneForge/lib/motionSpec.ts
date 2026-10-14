@@ -1,17 +1,18 @@
 // MOTION SPEC — the structured, deterministic description of a middle visual
 // scene. The single orchestrator LLM writes these specs (agents/orchestrator);
-// the GSAP + SVG motion-graphics engine (components/MotionGraphicPlayer)
-// renders EXACTLY the strings and numbers stored here — no text is ever
+// the deterministic element-composition renderer renders EXACTLY the stored
+// strings and numbers inside the server-side Remotion assembly — no text is
 // generated inside an AI video and nothing is hallucinated at render time.
+
+import type { SceneForgeThemeId } from './styleTokens';
 
 // WHICH KINDS ARE PRODUCT GRAPHICS. Five of these layouts show the PRODUCT, and
 // those are rendered by HeyGen HyperFrames as one finished overlay clip rather
 // than composited as a separate Remotion layer (lib/productGraphics):
-// list_reveal, big_stat, flowchart, annotated_image and comparison. The GSAP
-// renderers for those kinds are now the FALLBACK for an account without
-// HyperFrames — still live, no longer the default path. The rest (timeline,
-// bar_chart, node_graph, branching_diagram, text_reveal) are data visualisation
-// and abstract motion, which the GSAP engine does better; they are untouched.
+// list_reveal, big_stat, flowchart, annotated_image and comparison. Structured
+// Remotion element compositions are the fallback when HyperFrames is absent.
+// The rest (timeline, bar_chart, node_graph, branching_diagram, text_reveal)
+// are data visualisation and abstract motion rendered from the same spec.
 export type MotionKind =
   | 'branching_diagram' // root node fanning out to branches
   | 'flowchart'         // left-to-right steps joined by drawn arrows (product: step sequence)
@@ -37,6 +38,8 @@ export interface MotionStat { value: number; prefix?: string; suffix?: string; l
 
 export interface MotionSpec {
   kind: MotionKind;
+  /** Locked render language for this scene; project style remains the fallback. */
+  theme?: SceneForgeThemeId;
   title?: string;
   subtitle?: string;
   /** branching_diagram: the central/root node label. */
@@ -112,8 +115,10 @@ export function normalizeMotionSpec(raw: any, fallbackText = ''): MotionSpec {
   const kind = KIND_ALIASES[String(source.kind ?? source.layout_kind ?? source.type ?? '').toLowerCase().trim()] || 'text_reveal';
   const rawItems = source.items ?? source.branches ?? source.steps ?? source.beats ?? source.entries ?? source.points ?? source.bars ?? source.nodes ?? source.annotations ?? source.bullets ?? source.events ?? [];
   const items = (Array.isArray(rawItems) ? rawItems : []).map(toItem).filter(Boolean).slice(0, 8) as MotionItem[];
+  const themeValue = String(source.theme ?? source.visual_theme ?? '').toLowerCase();
   const spec: MotionSpec = {
     kind,
+    ...(themeValue === 'vox-paper' || themeValue === 'dark-cinematic' ? { theme: themeValue as SceneForgeThemeId } : {}),
     items,
     title: str(source.title ?? source.headline ?? source.text ?? '', 110) || (kind === 'text_reveal' ? str(fallbackText, 110) : undefined),
     subtitle: str(source.subtitle ?? source.subtext ?? source.supporting_line ?? '', 160) || undefined,
@@ -199,10 +204,9 @@ export function specFromOverlay(overlay: { text?: string; subtext?: string } | n
 }
 
 /**
- * Stable fingerprint of a spec, stored in the scene's video_prompt column when
- * a motion-graphic capture lands. A scene whose fingerprint matches its stored
- * clip is settled; editing the spec changes the fingerprint and the clip is
- * re-captured — never silently reused for different content.
+ * Stable legacy `mg:` fingerprint of a spec. Historical captured clips still
+ * use it; new Remotion compositions derive an `ec:` fingerprint from the same
+ * bytes. Editing the spec therefore invalidates either representation.
  */
 export function motionFingerprint(spec: MotionSpec): string {
   const ordered = JSON.stringify(spec, Object.keys(spec as unknown as Record<string, unknown>).sort());

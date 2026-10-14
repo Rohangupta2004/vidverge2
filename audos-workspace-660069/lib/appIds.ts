@@ -46,14 +46,10 @@ export function isRegisteredAppId(id: unknown): id is AppId {
 // Models
 // ---------------------------------------------------------------------------
 
-/**
- * The proxy's model enum accepts exactly one spelling of each engine. These
- * two are the full ids from the Group A catalog in ./videoEngines.ts — in
- * particular the fast Veo engine is `veo-3.1-fast-generate-preview`; the
- * shorthand `veo-3.1-fast` is not in the enum and answers 400.
- */
-export const OMNI_FLASH_MODEL = 'gemini-omni-flash-preview';
-export const VEO_31_FAST_MODEL = 'veo-3.1-fast-generate-preview';
+/** Canonical, distinct engines only. Retired preview ids remain resolvable in
+ * videoEngines.ts for old saved selections but are never offered here. */
+export const OMNI_FLASH_MODEL = 'gemini-omni-1.1-flash';
+export const VEO_31_FAST_MODEL = 'openrouter/google/veo-3.1-fast';
 
 export interface ModelChoice {
   id: string;
@@ -65,13 +61,13 @@ export interface ModelChoice {
 export const MODEL_CHOICES: ModelChoice[] = [
   {
     id: OMNI_FLASH_MODEL,
-    label: 'Gemini Omni Flash',
-    hint: 'Keeps a face, product or character consistent across shots. Best default.',
+    label: 'Gemini Omni 1.1 Flash',
+    hint: 'The consistency engine: up to ten references plus a seed frame. Output caps at 720p.',
   },
   {
     id: VEO_31_FAST_MODEL,
-    label: 'Veo 3.1 Fast',
-    hint: 'Faster and cheaper per clip. Best for short standalone shots.',
+    label: 'Veo 3.1 Fast (OpenRouter)',
+    hint: 'Fast real Veo 3.1 for text-led or single-seed shots; no reference images and no 4K promise.',
   },
 ];
 

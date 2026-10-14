@@ -30,7 +30,7 @@ const PRESET_HINTS: Record<StylePreset, string> = {
 };
 
 const THEME_SWATCHES: Record<ColorTheme, string> = {
-  Cosmic: 'linear-gradient(135deg, #7c3aed 0%, #22d3ee 100%)',
+  Cosmic: 'linear-gradient(135deg, #B87808 0%, #22d3ee 100%)',
   Monochrome: 'linear-gradient(135deg, #f5f5f5 0%, #525252 100%)',
   Fire: 'linear-gradient(135deg, #f97316 0%, #dc2626 100%)',
   Ice: 'linear-gradient(135deg, #a5f3fc 0%, #2563eb 100%)',

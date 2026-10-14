@@ -23,9 +23,11 @@ import { openAiVoiceLabel } from './pipeline/voiceSource';
 import { AssemblyProgress, sceneTargetDuration } from './pipeline/orchestrator';
 import AudioCards from './AudioCards';
 import VergeLoader from '../../components/VergeLoader';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 
 const fieldStyle = {
-  width: '100%', background: '#FFFFFF', color: T.bone, border: `1px solid ${T.dim}`,
+  width: '100%', background: '#18150A', color: T.bone, border: `1px solid ${T.dim}`,
   borderRadius: 8, padding: '8px 10px', fontSize: 12.5,
 } as const;
 
@@ -80,7 +82,7 @@ function AudioTimeline({ film, scenes }: { film: Film; scenes: FilmScene[] }) {
     cursor += target(s);
     return block;
   });
-  const trackStyle = { position: 'relative' as const, flex: 1, height: 18, background: '#FFFAEB', borderRadius: 5, overflow: 'hidden' };
+  const trackStyle = { position: 'relative' as const, flex: 1, height: 18, background: '#18150A', borderRadius: 5, overflow: 'hidden' };
   const musicOk = !!audio && audio.music?.status === 'ready' && !!audio.music.audioUrl;
   const sfxItems = (audio?.sfx || []).filter((f) => f.status === 'ready' && f.audioUrl);
   return (
@@ -180,14 +182,13 @@ function AssemblyProgressCard({ progress, filmUpdatedAt }: { progress: AssemblyP
   const statusWord = (status: string) => status === 'active' ? 'running' : status;
 
   return (
-    <div style={{ marginTop: 14, background: '#FFFFFF', border: `1px solid ${T.dim}`, borderRadius: 12, padding: '13px 15px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ color: T.live, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>FINAL ASSEMBLY</span>
-        <span style={{ marginLeft: 'auto', color: T.bone, fontSize: 13, fontWeight: 700, fontFamily: T.mono }}>{progress.percent}%</span>
-      </div>
-      <div style={{ marginTop: 8, height: 4, background: T.raised, borderRadius: 2, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${progress.percent}%`, background: progress.steps.some((s) => s.status === 'failed') ? T.fault : T.live, transition: 'width 0.5s ease' }} />
-      </div>
+    <div style={{ marginTop: 14 }}>
+      <VideoGeneratingState
+        label="Final assembly"
+        detail={progress.steps.find((step) => step.status === 'active')?.label || 'Preparing the finished film'}
+        progress={progress.percent}
+        compact
+      />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
         {progress.steps.map((s) => (
           <div key={s.key} className="s2v-row" style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 7, padding: '3px 5px' }}>
@@ -403,12 +404,16 @@ function FinalHeader(props: {
 
       {/* The frame takes the FILM's own shape, so a 9:16 cut is reviewed
           portrait instead of letterboxed inside a widescreen box. */}
-      <div style={{ margin: '16px auto 0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0C0C0F', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(180,120,0,0.14)', boxShadow: '0 20px 50px rgba(120,80,0,0.12)', width: '100%', maxWidth: film.aspect_ratio === '9:16' ? 272 : 820, aspectRatio: videoUrl ? (film.aspect_ratio === '9:16' ? '9 / 16' : '16 / 9') : undefined }}>
+      <div style={{ margin: '16px auto 0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0D0B05', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)', width: '100%', maxWidth: film.aspect_ratio === '9:16' ? 272 : 820, aspectRatio: videoUrl ? (film.aspect_ratio === '9:16' ? '9 / 16' : '16 / 9') : undefined }}>
         {videoUrl ? (
           <video key={videoUrl} src={videoUrl} controls poster={film.final_thumb_url || undefined} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} />
         ) : (
-          <div style={{ color: T.dim, fontSize: 13, padding: 56, textAlign: 'center' }}>
-            {assembling ? <VergeLoader size={140} caption="Assembling your final film" /> : 'Run Final Assembly — the finished film plays here when it lands.'}
+          <div style={{ width: '100%', padding: 24 }}>
+            {assembling ? (
+              <VideoGeneratingState label="Assembling your final film" detail="Reusing the finished clips and audio layers" />
+            ) : (
+              <div style={{ color: T.dim, fontSize: 13, padding: 32, textAlign: 'center' }}>Run Final Assembly — the finished film plays here when it lands.</div>
+            )}
           </div>
         )}
       </div>
@@ -421,23 +426,25 @@ function FinalHeader(props: {
       </div>
 
       {film.error ? (
-        <div style={{ color: T.fault, fontSize: 12.5, lineHeight: 1.5, marginTop: 12, background: 'rgba(153,27,27,0.08)', border: '1px solid rgba(153,27,27,0.25)', borderRadius: 9, padding: '10px 13px' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}><AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> <span>{film.error}</span></div>
+        <div style={{ marginTop: 12 }}>
+          <VideoErrorCard
+            error={film.error}
+            subject="the final assembly"
+            onRetry={() => {
+              if (narrFailed) props.onRetryLayer('narration');
+              else if (musicFailed) props.onRetryLayer('music');
+              else if (sfxFailed) props.onRetryLayer('sfx');
+              else props.onFinalAssembly({ captions });
+            }}
+            compact
+          />
           <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
             {narrFailed ? (<>
-              <button style={smallBtn(true)} disabled={busy} onClick={() => props.onRetryLayer('narration')}><RefreshCw size={12} /> Retry</button>
               <button style={smallBtn()} disabled={busy} onClick={() => props.onSkipLayer('narration')}><SkipForward size={12} /> Continue Without Voiceover</button>
               <button style={smallBtn()} disabled={busy} onClick={() => document.getElementById('s2v-voice-source')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><Mic size={12} /> Change voice source</button>
             </>) : null}
-            {musicFailed ? (<>
-              <button style={smallBtn(true)} disabled={busy} onClick={() => props.onRetryLayer('music')}><RefreshCw size={12} /> Retry</button>
-              <button style={smallBtn()} disabled={busy} onClick={() => props.onSkipLayer('music')}><SkipForward size={12} /> Continue Without Music</button>
-            </>) : null}
-            {sfxFailed ? (<>
-              <button style={smallBtn(true)} disabled={busy} onClick={() => props.onRetryLayer('sfx')}><RefreshCw size={12} /> Retry SFX</button>
-              <button style={smallBtn()} disabled={busy} onClick={() => props.onSkipLayer('sfx')}><SkipForward size={12} /> Continue Without SFX</button>
-            </>) : null}
-            {!narrFailed && !musicFailed && !sfxFailed ? <button style={smallBtn(true)} disabled={!canAssemble} onClick={() => props.onFinalAssembly({ captions })}><RefreshCw size={12} /> Retry Assembly</button> : null}
+            {musicFailed ? <button style={smallBtn()} disabled={busy} onClick={() => props.onSkipLayer('music')}><SkipForward size={12} /> Continue Without Music</button> : null}
+            {sfxFailed ? <button style={smallBtn()} disabled={busy} onClick={() => props.onSkipLayer('sfx')}><SkipForward size={12} /> Continue Without SFX</button> : null}
           </div>
         </div>
       ) : null}

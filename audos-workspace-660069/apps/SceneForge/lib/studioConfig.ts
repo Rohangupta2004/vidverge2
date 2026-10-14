@@ -88,6 +88,8 @@ export interface StudioConfig {
   /** Per-scene speech: the mode, the voice and every clip already paid for. */
   audio: AudioConfig;
   sidebar: SidebarTab;
+  /** Motion / compositor theme for graphics and Remotion assembly. */
+  motion_theme: 'dark-cinematic' | 'vox-paper';
   saved_at: string;
 }
 
@@ -115,6 +117,7 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
   script_draft: '',
   audio: DEFAULT_AUDIO_CONFIG,
   sidebar: 'script',
+  motion_theme: 'dark-cinematic',
   saved_at: '',
 };
 
@@ -197,6 +200,7 @@ export function normalizeStudioConfig(raw: unknown): StudioConfig {
     character_photo_url: /^https?:\/\//i.test(String(source.character_photo_url || '')) ? String(source.character_photo_url) : '',
     script_draft: String(source.script_draft ?? '').slice(0, 24000),
     audio: normalizeAudioConfig(source.audio),
+    motion_theme: source.motion_theme === 'vox-paper' ? 'vox-paper' : 'dark-cinematic',
     sidebar: TABS.includes(sidebar) ? sidebar : 'script',
     saved_at: text(source.saved_at, 40),
   };

@@ -26,7 +26,13 @@ RULES:
 - Only use component names from the SDK list
 - All props must be valid against the SDK type definitions
 - No free-form strings as props where the type specifies a union literal
-- Asset handles must come from ProductContext.assets[].handle — do not invent handles
+- Asset handles must come from the RENDERABLE asset list — do not invent handles
+- Screenshots are visual references only. NEVER use BrowserFrame, Dashboard, Morph, FloatingUI,
+  Grid, FullBleed or Screenshot to place screenshot pixels in the film. Reconstruct UI with
+  SemanticUI and copy the supplied semantic element data verbatim, including each stable id.
+- ProductImage and Logo preserve real non-UI product imagery and brand marks accurately.
+- Set SemanticUI.focusId to an element id when motion should target that UI element.
+- Use beatReactive on SemanticUI; place scene transitions on the supplied strong beat frames.
 - If a FilmSpec scene lists a component you cannot give valid props for, flag it in a
   'warnings' field on that scene rather than guessing
 - Duration for all scenes must sum to FilmSpec.total_duration_frames
@@ -47,7 +53,7 @@ export const COMPONENT_PLAN_CONVENTIONS = `CONVENTIONS THE VALIDATOR ENFORCES
 - A layer with no startFrame begins at the scene start; with no durationFrames it runs to
   the end of the scene.
 - Layers are listed back-to-front: layers[0] is the backdrop, the last entry is on top.
-  A typography layer over a screenshot must come AFTER the screenshot layer.
+  A typography layer over SemanticUI, ProductImage or Logo must come AFTER that layer.
 - Container components (Parallax, Camera, Zoom, BlurMask, Perspective, SplitScreen) take
   children. Express that by giving the container a props.children array of further
   ComponentInstance objects, using the same shape.

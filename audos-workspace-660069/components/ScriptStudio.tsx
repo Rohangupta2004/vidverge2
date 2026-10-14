@@ -192,10 +192,10 @@ export function ScriptStudio({
 
   if (done) {
     return (
-      <div style={{ fontFamily: FONT, color: '#1A1000', padding: 32, textAlign: 'center' }}>
-        <CheckCircle2 size={40} color="#166534" style={{ margin: '0 auto 14px' }} />
+      <div style={{ fontFamily: FONT, color: 'var(--space-text-primary, #F5E9C8)', padding: 32, textAlign: 'center' }}>
+        <CheckCircle2 size={40} color="var(--space-semantic-success, #4ade80)" style={{ margin: '0 auto 14px' }} />
         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Rolling camera 🎬</h3>
-        <p style={{ margin: '8px auto 0', maxWidth: 360, fontSize: 13.5, color: '#7A6030', lineHeight: 1.5 }}>
+        <p style={{ margin: '8px auto 0', maxWidth: 360, fontSize: 13.5, color: 'var(--space-text-muted, #9E8B55)', lineHeight: 1.5 }}>
           Your video is generating. Track it in the chat — the progress card will hand you the
           finished MP4 in a few minutes, and it'll be waiting in My Videos.
         </p>
@@ -204,7 +204,7 @@ export function ScriptStudio({
   }
 
   return (
-    <div style={{ fontFamily: FONT, color: '#1A1000', display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ fontFamily: FONT, color: 'var(--space-text-primary, #F5E9C8)', display: 'flex', flexDirection: 'column', gap: 16 }}>
       <style>{`
         .ss-btn { transition: transform .16s ease, filter .16s ease; }
         .ss-btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
@@ -212,11 +212,11 @@ export function ScriptStudio({
 
       {/* Selections row */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button type="button" className="ss-btn" onClick={openCharacters} style={chipStyle(!!character, '#C8920A')}>
+        <button type="button" className="ss-btn" onClick={openCharacters} style={chipStyle(!!character, 'var(--space-brand-primary, #D4920A)')}>
           <Users size={13} />
           {character ? `Character: ${character.name}` : 'Pick a character'}
         </button>
-        <button type="button" className="ss-btn" onClick={openMockups} style={chipStyle(!!mockup, '#B4720A')}>
+        <button type="button" className="ss-btn" onClick={openMockups} style={chipStyle(!!mockup, 'var(--space-brand-highlight, #F0B429)')}>
           <Smartphone size={13} />
           {mockup ? `Mockup: ${mockup.name}` : 'Pick a mockup'}
         </button>
@@ -236,7 +236,7 @@ export function ScriptStudio({
           placeholder="Tone (e.g. upbeat, cinematic)"
           style={{ ...inputStyle, flex: '1 1 160px' }}
         />
-        <div style={{ display: 'inline-flex', borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(180,120,0,0.14)' }}>
+        <div style={{ display: 'inline-flex', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))' }}>
           {(['16:9', '9:16'] as const).map((a) => {
             const on = aspect === a;
             return (
@@ -250,8 +250,8 @@ export function ScriptStudio({
                   fontWeight: 600,
                   cursor: 'pointer',
                   border: 'none',
-                  color: on ? '#FFFFFF' : '#7A6030',
-                  background: on ? '#C8920A' : 'transparent',
+                  color: on ? '#FFFFFF' : '#9E8B55',
+                  background: on ? '#D4920A' : 'transparent',
                 }}
               >
                 {a}
@@ -268,8 +268,8 @@ export function ScriptStudio({
             key={s.key}
             style={{
               borderRadius: 14,
-              border: '1px solid rgba(180,120,0,0.14)',
-              background: '#FFFFFF',
+              border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+              background: 'var(--space-surface-card, #15120A)',
               padding: 14,
             }}
           >
@@ -286,12 +286,12 @@ export function ScriptStudio({
                     fontSize: 12,
                     fontWeight: 700,
                     color: '#fff',
-                    background: 'linear-gradient(135deg, #C8920A, #B4720A)',
+                    background: 'linear-gradient(135deg, var(--space-brand-primary, #D4920A), var(--space-brand-highlight, #F0B429))',
                   }}
                 >
                   {idx + 1}
                 </span>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#B4720A' }}>Scene {idx + 1}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--space-brand-highlight, #F0B429)' }}>Scene {idx + 1}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <button type="button" onClick={() => moveScene(idx, -1)} disabled={idx === 0} style={iconBtn(idx === 0)} title="Move up">
@@ -331,7 +331,7 @@ export function ScriptStudio({
                   gap: 8,
                   marginTop: 10,
                   fontSize: 12,
-                  color: '#B4720A',
+                  color: 'var(--space-brand-highlight, #F0B429)',
                   cursor: 'pointer',
                 }}
               >
@@ -339,7 +339,7 @@ export function ScriptStudio({
                   type="checkbox"
                   checked={!!s.withMockup}
                   onChange={(e) => updateScene(s.key, { withMockup: e.target.checked })}
-                  style={{ accentColor: '#B4720A' }}
+                  style={{ accentColor: 'var(--space-brand-primary, #D4920A)' }}
                 />
                 Show the “{mockup.name}” mockup on the phone in this scene
               </label>
@@ -353,7 +353,7 @@ export function ScriptStudio({
                   gap: 8,
                   marginTop: 10,
                   fontSize: 12,
-                  color: '#B4720A',
+                  color: 'var(--space-brand-highlight, #F0B429)',
                   cursor: 'pointer',
                 }}
               >
@@ -369,7 +369,7 @@ export function ScriptStudio({
                       ),
                     )
                   }
-                  style={{ accentColor: '#C8920A' }}
+                  style={{ accentColor: 'var(--space-brand-primary, #D4920A)' }}
                 />
                 <ImageIcon size={13} />
                 Use my uploaded screenshot as this scene’s visual reference
@@ -391,8 +391,8 @@ export function ScriptStudio({
             borderRadius: 12,
             fontSize: 13,
             fontWeight: 600,
-            color: scenes.length >= 6 ? '#A08B5F' : '#B4720A',
-            border: '1px dashed rgba(200,146,10,0.4)',
+            color: scenes.length >= 6 ? 'var(--space-text-faint, #6E5F38)' : 'var(--space-brand-highlight, #F0B429)',
+            border: '1px dashed rgba(212,146,10,0.4)',
             background: 'transparent',
             cursor: scenes.length >= 6 ? 'not-allowed' : 'pointer',
           }}
@@ -402,7 +402,7 @@ export function ScriptStudio({
       </div>
 
       {error && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#991B1B', fontSize: 12.5 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--space-semantic-danger, #f87171)', fontSize: 12.5 }}>
           <AlertTriangle size={13} /> {error}
         </div>
       )}
@@ -415,16 +415,16 @@ export function ScriptStudio({
           justifyContent: 'space-between',
           gap: 12,
           flexWrap: 'wrap',
-          borderTop: '1px solid rgba(180,120,0,0.14)',
+          borderTop: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
           paddingTop: 14,
         }}
       >
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontSize: 13, color: '#3D2800', cursor: 'pointer' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontSize: 13, color: 'var(--space-text-secondary, #9E8B55)', cursor: 'pointer' }}>
           <input
             type="checkbox"
             checked={confirmed}
             onChange={(e) => setConfirmed(e.target.checked)}
-            style={{ accentColor: '#C8920A', width: 16, height: 16 }}
+            style={{ accentColor: 'var(--space-brand-primary, #D4920A)', width: 16, height: 16 }}
           />
           This script looks good — I'm ready to generate
         </label>
@@ -446,8 +446,8 @@ export function ScriptStudio({
             border: 'none',
             cursor: !confirmed || submitting ? 'not-allowed' : 'pointer',
             opacity: !confirmed || submitting ? 0.5 : 1,
-            background: 'linear-gradient(90deg, #C8920A 0%, #B4720A 100%)',
-            boxShadow: confirmed ? '0 8px 26px rgba(200,146,10,0.45)' : 'none',
+            background: 'linear-gradient(135deg, var(--space-brand-primary, #D4920A) 0%, var(--space-brand-highlight, #F0B429) 100%)',
+            boxShadow: confirmed ? '0 0 24px rgba(212,146,10,0.28)' : 'none',
           }}
           data-testid="button-generate-video"
         >
@@ -469,8 +469,8 @@ function chipStyle(active: boolean, color: string): React.CSSProperties {
     fontSize: 12.5,
     fontWeight: 600,
     cursor: 'pointer',
-    color: active ? '#1A1000' : '#7A6030',
-    border: `1px solid ${active ? color : 'rgba(180,120,0,0.14)'}`,
+    color: active ? '#1A1000' : '#9E8B55',
+    border: `1px solid ${active ? color : 'rgba(184,120,8,0.14)'}`,
     background: active ? `${color}22` : 'transparent',
   };
 }
@@ -480,9 +480,9 @@ function iconBtn(disabled: boolean): React.CSSProperties {
     padding: 6,
     borderRadius: 8,
     cursor: disabled ? 'not-allowed' : 'pointer',
-    border: '1px solid rgba(180,120,0,0.14)',
+    border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
     background: 'transparent',
-    color: disabled ? '#A08B5F' : '#7A6030',
+    color: disabled ? '#9E8B55' : '#9E8B55',
   };
 }
 
@@ -490,9 +490,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid rgba(180,120,0,0.14)',
-  background: 'rgba(180,120,0,0.06)',
-  color: '#1A1000',
+  border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+  background: 'var(--space-surface-input, #18150A)',
+  color: 'var(--space-text-primary, #F5E9C8)',
   fontSize: 13.5,
   outline: 'none',
   fontFamily: FONT,
@@ -505,7 +505,7 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 600,
   textTransform: 'uppercase',
   letterSpacing: 0.4,
-  color: '#7A6030',
+  color: 'var(--space-text-muted, #9E8B55)',
   marginBottom: 5,
 };
 

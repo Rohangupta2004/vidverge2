@@ -45,7 +45,7 @@ interface AgentChatViewProps {
  * "how can I help".
  */
 const VIDVERGE_HOME_WELCOME =
-  'Welcome to Vidverge — bring me an idea and leave with a video. Paste your product URL and I will read your brand, write you six different ad scripts, storyboard the one you pick and render it in your own colours. In a hurry? MotionLaunch turns that same link into a 30-second launch film on its own. Describe what you are launching instead and I will write the script and build the video — teaser, reveal, demo, explainer, founder-led or social clip — in 16:9, 9:16 or square. Bring footage you already shot and I will transcribe it, hand you a cut plan you can accept edit by edit, then reframe, caption and export it for every platform. Or just give me a topic and I will research, script and film a faceless explainer, documentary or true-crime video end to end. Need the voice rather than the whole film? Voice Studio clones your voice, reads a Hinglish script in it, dubs a finished video into Tamil or Telugu, scores a music bed and lip-syncs an avatar presenter to any of it.';
+  'Welcome to Vidverge — bring me an idea and leave with a video. Paste your product URL and I will read your brand, write you six different ad scripts, storyboard the one you pick and render it in your own colours. Want the whole launch film directed for you? Product Launch takes that same link and decides the concept, the shots and the cut itself. Describe what you are launching instead and I will write the script and build the video — teaser, reveal, demo, explainer, founder-led or social clip — in 16:9, 9:16 or square. Bring footage you already shot and I will transcribe it, hand you a cut plan you can accept edit by edit, then reframe, caption and export it for every platform; or hand the whole thing to CineAgent and it will edit, score and render it without asking you to configure anything. Just give me a topic and I will research, script and film a faceless explainer, documentary or true-crime video end to end. Need the voice rather than the whole film? Voice Studio clones your voice, reads a Hinglish script in it, dubs a finished video into Tamil or Telugu, scores a music bed and lip-syncs an avatar presenter to any of it.';
 
 /**
  * The one-line promise under the logo. The full welcome above is also the
@@ -64,6 +64,9 @@ function leadSentence(text: string, fallback: string): string {
   return first.length > 20 && first.length <= 190 ? first : fallback;
 }
 
+// Every starter has to land in a studio that is actually registered in
+// config.json — a prompt that routes to a retired app is a dead end on the
+// first screen the customer sees.
 const VIDVERGE_STARTERS = [
   'Make a 15-second launch video from my link',
   'Turn my product URL into an ad',
@@ -71,8 +74,8 @@ const VIDVERGE_STARTERS = [
   'Compare my brand with my competitors',
   'Make me a faceless documentary video',
   'Cut, caption and reframe footage I already have',
-  'Design my clip into a vertical short',
-  'Turn my link into a 30-second launch film',
+  'Turn my script into a film, scene by scene',
+  'Edit my raw footage into a finished cut for me',
   'Clone my voice and make an avatar video',
   'Dub my video into Hindi or Tamil',
 ];
@@ -98,7 +101,7 @@ function StarterGrid({
           type="button"
           onClick={() => onPick(prompt)}
           data-testid={`starter-prompt-${prompt.slice(0, 24)}`}
-          className="group flex items-center gap-3 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-4 py-3 text-left text-sm font-medium text-[var(--space-text-secondary)] transition hover:border-[color-mix(in_srgb,var(--space-brand-primary-500)_45%,transparent)] hover:bg-[color-mix(in_srgb,var(--space-brand-primary-500)_9%,transparent)] hover:text-[var(--space-text-primary)]"
+          className="group flex items-center gap-3 rounded-2xl border border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-panel)_72%,transparent)] px-4 py-3 text-left text-sm font-medium text-[var(--space-text-secondary)] shadow-[0_10px_30px_rgba(0,0,0,0.16)] transition hover:-translate-y-0.5 hover:border-[color-mix(in_srgb,var(--space-brand-primary-500)_45%,transparent)] hover:bg-[color-mix(in_srgb,var(--space-brand-primary-500)_9%,transparent)] hover:text-[var(--space-text-primary)]"
         >
           <span
             aria-hidden="true"
@@ -463,7 +466,7 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`rounded-2xl border transition-all overflow-hidden shadow-[0_8px_28px_rgba(0,0,0,0.08),0_1px_3px_rgba(0,0,0,0.05)] focus-within:shadow-[0_10px_34px_rgba(0,0,0,0.11),0_1px_3px_rgba(0,0,0,0.05)] ${
+          className={`rounded-2xl border transition-all overflow-hidden shadow-[0_18px_48px_rgba(0,0,0,0.32),0_1px_0_rgba(255,255,255,0.03)] focus-within:shadow-[0_22px_58px_rgba(0,0,0,0.4),0_0_0_3px_color-mix(in_srgb,var(--space-brand-primary-500)_10%,transparent)] ${
             isDraggingOver
               ? 'border-[var(--space-brand-primary-500)] bg-[var(--space-surface-accent-soft)]'
               : 'border-[var(--space-border-default)] bg-[var(--space-surface-card)]'
@@ -554,7 +557,7 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
       className={`h-full flex flex-col ${
         isBeaconSpace
           ? 'bg-gradient-to-br from-[var(--space-surface-gradient-from)] via-[var(--space-surface-gradient-via)] to-[var(--space-surface-gradient-to)]'
-          : 'bg-[var(--space-surface-card)]'
+          : 'bg-[radial-gradient(ellipse_72%_42%_at_50%_-8%,color-mix(in_srgb,var(--space-brand-primary-500)_12%,transparent),transparent_64%),var(--space-surface-bg)]'
       }`}
     >
       {isHomeView ? (
@@ -562,11 +565,12 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
         <div className="flex-1 overflow-y-auto flex flex-col justify-center">
           <div className="mx-auto w-full max-w-2xl px-6 sm:px-10 py-10" data-testid="home-view">
             <div className="text-center mb-7">
+              <p className="mb-4 text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--space-text-brand)]">AI video production suite</p>
               <div className="mb-4 flex justify-center">
                 <BrandLogo size={176} />
               </div>
               <h1 className="text-2xl font-semibold tracking-tight text-[var(--space-text-primary)] sm:text-[28px]">
-                What are we making today?
+                What are we bringing to screen?
               </h1>
               <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-[var(--space-text-secondary)]">
                 {leadSentence(homeWelcomeText || VIDVERGE_HOME_WELCOME, VIDVERGE_HOME_LEAD)}
@@ -576,7 +580,7 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
             {homeStarters.length > 0 && (
               <div className="mt-7">
                 <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--space-text-muted)]">
-                  Or start with one of these
+                  Choose a production brief
                 </p>
                 <StarterGrid
                   prompts={homeStarters}
@@ -687,12 +691,13 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
             ) : (
               <div className="mx-auto max-w-2xl text-center text-[var(--space-text-secondary)]">
                 <div className="mb-4 flex justify-center"><BrandLogo size={148} /></div>
-                <h2 className="text-xl font-semibold text-[var(--space-text-primary)]">What should we make?</h2>
-                <p className="mx-auto mt-2 max-w-md text-sm leading-6">Bring me a product URL, a script, or a rough idea. I’ll help shape it into a finished VidVerge video.</p>
-                {starterPrompts.length > 0 && (
+                <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--space-text-brand)]">VidVerge Director</p>
+                <h2 className="text-xl font-semibold text-[var(--space-text-primary)]">What are we bringing to screen?</h2>
+                <p className="mx-auto mt-2 max-w-md text-sm leading-6">Bring a product URL, a script, raw footage or a rough idea. I’ll route the brief and help direct it to a publish-ready video.</p>
+                {homeStarters.length > 0 && (
                   <div className="mt-6 text-left">
                     <StarterGrid
-                      prompts={starterPrompts}
+                      prompts={homeStarters}
                       onPick={(prompt) => { void sendMessageWithContent(prompt, []); }}
                     />
                   </div>

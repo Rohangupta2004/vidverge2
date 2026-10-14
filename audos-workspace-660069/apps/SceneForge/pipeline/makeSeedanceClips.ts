@@ -32,6 +32,10 @@ export async function makeSeedanceClips(
 
   for (const target of targets) {
     if (!target.imageUrl) throw new Error(`Missing generated image for ${target.id}`);
+    const duration = Math.round(target.durationSec);
+    if (!Number.isInteger(duration) || duration < 2 || duration > 10) {
+      throw new Error(`${target.id} is ${target.durationSec}s — Seedance 2 accepts whole scenes from 2–10s. Split the scene before generation.`);
+    }
     const response = await fetch('/api/veo/generate/video', {
       method: 'POST',
       headers: {
@@ -43,13 +47,13 @@ export async function makeSeedanceClips(
         prompt: target.motionPrompt || 'Begin on a blank dark frame. Materialize every design element with kinetic typography energy while preserving the exact embedded text.',
         negativePrompt: 'misspelled text, changed wording, new words, warped typography, watermark, logo',
         aspectRatio: '16:9',
-        duration: Math.max(4, Math.min(25, Math.round(target.durationSec))),
+        duration,
         generateAudio: false,
         imageData: target.imageUrl,
       }),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.operationId) throw new Error(data?.error?.message || data?.error || `Seedance generation failed for ${target.id}`);
+    if (!response.ok || !data.operationId || /_error_\d+$/.test(String(data.operationId))) throw new Error(data?.error?.message || data?.error || `Seedance generation failed for ${target.id}`);
     const videoUrl = await poll(data.operationId);
     const index = output.findIndex((overlay) => overlay.id === target.id);
     output[index] = { ...output[index], videoUrl };

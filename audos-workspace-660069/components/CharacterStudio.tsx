@@ -202,26 +202,26 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
   const pad = compact ? 16 : 24;
 
   return (
-    <div style={{ fontFamily: FONT, color: '#1A1000' }}>
+    <div style={{ fontFamily: FONT, color: 'var(--space-text-primary, #F5E9C8)' }}>
       <style>{`
         .cs-btn { transition: transform .16s ease, box-shadow .25s ease, filter .16s ease; }
         .cs-btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
         .cs-card { transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
-        .cs-card:hover { transform: translateY(-3px); border-color: rgba(200,146,10,0.45); }
+        .cs-card:hover { transform: translateY(-3px); border-color: rgba(212,146,10,0.45); }
       `}</style>
 
       {/* New character composer */}
       <div
         style={{
           borderRadius: 18,
-          border: '1px solid rgba(180,120,0,0.14)',
-          background: 'linear-gradient(180deg, rgba(200,146,10,0.10) 0%, rgba(180,120,0,0.04) 100%)',
+          border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+          background: 'linear-gradient(180deg, rgba(212,146,10,0.14) 0%, rgba(212,146,10,0.05) 100%)',
           padding: pad,
           marginBottom: 22,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-          <Sparkles size={16} color="#B4720A" />
+          <Sparkles size={16} color="var(--space-brand-highlight, #F0B429)" />
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Add a character</h3>
         </div>
 
@@ -243,8 +243,8 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                 width: 128,
                 height: 128,
                 borderRadius: 16,
-                border: '1px dashed rgba(180,120,0,0.28)',
-                background: imageUrl ? '#000' : 'rgba(180,120,0,0.06)',
+                border: '1px dashed var(--space-border-strong, rgba(255,255,255,0.18))',
+                background: imageUrl ? '#000' : 'rgba(184,120,8,0.06)',
                 cursor: 'pointer',
                 overflow: 'hidden',
                 display: 'flex',
@@ -264,7 +264,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: '#7A6030' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: 'var(--space-text-muted, #9E8B55)' }}>
                   <Upload size={22} />
                   <span style={{ fontSize: 11, fontWeight: 600 }}>Upload image</span>
                 </div>
@@ -293,7 +293,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                 style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
               />
               {describing && (
-                <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 6, color: '#B4720A', fontSize: 11 }}>
+                <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--space-brand-highlight, #F0B429)', fontSize: 11 }}>
                   <VergeLoader size={40} label="Reading your image" /> describing…
                 </div>
               )}
@@ -313,7 +313,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
               />
             </div>
             {error && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#991B1B', fontSize: 12.5 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--space-semantic-danger, #f87171)', fontSize: 12.5 }}>
                 <AlertTriangle size={13} /> {error}
               </div>
             )}
@@ -335,8 +335,8 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                   border: 'none',
                   cursor: saving || uploading ? 'not-allowed' : 'pointer',
                   opacity: saving || uploading ? 0.6 : 1,
-                  background: 'linear-gradient(90deg, #C8920A 0%, #B4720A 100%)',
-                  boxShadow: '0 6px 20px rgba(200,146,10,0.35)',
+                  background: 'linear-gradient(135deg, var(--space-brand-primary, #D4920A) 0%, var(--space-brand-highlight, #F0B429) 100%)',
+                  boxShadow: '0 0 24px rgba(212,146,10,0.28)',
                 }}
               >
                 {saving ? <VergeLoader size={30} tone="amber" label="Saving your character" /> : <CheckCircle2 size={15} />}
@@ -371,12 +371,12 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
             textAlign: 'center',
             padding: '36px 20px',
             borderRadius: 16,
-            border: '1px solid rgba(180,120,0,0.14)',
-            background: '#FFFFFF',
-            color: '#7A6030',
+            border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+            background: 'var(--space-surface-card, #15120A)',
+            color: 'var(--space-text-muted, #9E8B55)',
           }}
         >
-          <Users size={26} color="rgba(180,120,0,0.55)" />
+          <Users size={26} color="var(--space-text-muted, #9E8B55)" />
           <p style={{ margin: 0, fontSize: 14, maxWidth: 360 }}>
             No characters yet. Upload a face photo or illustration above and Verger will keep that
             character looking like the same person in every shot.
@@ -401,10 +401,10 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                 className="cs-card"
                 style={{
                   borderRadius: 16,
-                  border: isSel ? '1px solid #C8920A' : '1px solid rgba(180,120,0,0.14)',
-                  background: '#FFFFFF',
+                  border: isSel ? '1px solid var(--space-brand-primary, #D4920A)' : '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+                  background: 'var(--space-surface-card, #15120A)',
                   overflow: 'hidden',
-                  boxShadow: isSel ? '0 0 0 1px #C8920A, 0 14px 40px rgba(200,146,10,0.28)' : 'none',
+                  boxShadow: isSel ? '0 0 0 1px var(--space-brand-primary, #D4920A), 0 0 24px rgba(212,146,10,0.28)' : 'none',
                   display: 'flex',
                   flexDirection: 'column',
                 }}
@@ -413,7 +413,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                   {c.image_url ? (
                     <img src={c.image_url} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, #C8920A, #E0A33A)' }}>
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, var(--space-brand-primary, #D4920A), var(--space-brand-highlight, #F0B429))' }}>
                       <ImageIcon size={26} color="rgba(255,255,255,0.6)" />
                     </div>
                   )}
@@ -431,7 +431,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                         fontSize: 10.5,
                         fontWeight: 700,
                         color: '#FFFFFF',
-                        background: 'rgba(200,146,10,0.92)',
+                        background: 'rgba(212,146,10,0.92)',
                       }}
                     >
                       <CheckCircle2 size={11} /> In use
@@ -451,7 +451,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                         fontSize: 10.5,
                         fontWeight: 700,
                         color: '#FFFFFF',
-                        background: 'rgba(180,114,10,0.95)',
+                        background: 'rgba(184,120,8,0.95)',
                       }}
                     >
                       <Star size={11} /> Video default
@@ -463,14 +463,14 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                     {c.name}
                   </h4>
                   {c.description && (
-                    <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.45, color: '#7A6030', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.45, color: 'var(--space-text-muted, #9E8B55)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                       {c.description}
                     </p>
                   )}
                   {(c.style || c.environment) && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                       {c.style && (
-                        <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 600, color: '#B4720A', background: 'rgba(200,146,10,0.12)', border: '1px solid rgba(200,146,10,0.3)' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 600, color: 'var(--space-brand-highlight, #F0B429)', background: 'rgba(212,146,10,0.12)', border: '1px solid rgba(212,146,10,0.3)' }}>
                           {c.style}
                         </span>
                       )}
@@ -493,9 +493,9 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                         fontSize: 12,
                         fontWeight: 600,
                         cursor: 'pointer',
-                        border: isSel ? '1px solid rgba(180,120,0,0.36)' : '1px solid rgba(200,146,10,0.45)',
-                        color: isSel ? '#3D2800' : '#B4720A',
-                        background: isSel ? 'rgba(180,120,0,0.06)' : 'rgba(200,146,10,0.12)',
+                        border: isSel ? '1px solid rgba(184,120,8,0.36)' : '1px solid rgba(212,146,10,0.45)',
+                        color: isSel ? 'var(--space-text-secondary, #9E8B55)' : '#F0B429',
+                        background: isSel ? 'rgba(184,120,8,0.06)' : 'rgba(212,146,10,0.12)',
                       }}
                     >
                       {isSel ? 'Selected' : 'Use this'}
@@ -504,7 +504,7 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                       type="button"
                       onClick={() => void handleDelete(c.id)}
                       title="Delete"
-                      style={{ padding: 7, borderRadius: 9, cursor: 'pointer', border: '1px solid rgba(180,120,0,0.14)', background: 'transparent', color: '#7A6030' }}
+                      style={{ padding: 7, borderRadius: 9, cursor: 'pointer', border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))', background: 'transparent', color: 'var(--space-text-muted, #9E8B55)' }}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -524,9 +524,9 @@ export function CharacterManager({ compact = false }: { compact?: boolean }) {
                       fontSize: 11.5,
                       fontWeight: 600,
                       cursor: 'pointer',
-                      border: isDefault ? '1px solid rgba(200,146,10,0.45)' : '1px solid rgba(180,120,0,0.14)',
-                      color: isDefault ? '#B4720A' : '#7A6030',
-                      background: isDefault ? 'rgba(200,146,10,0.10)' : 'transparent',
+                      border: isDefault ? '1px solid rgba(212,146,10,0.45)' : '1px solid rgba(184,120,8,0.14)',
+                      color: isDefault ? '#F0B429' : '#9E8B55',
+                      background: isDefault ? 'rgba(212,146,10,0.10)' : 'transparent',
                     }}
                   >
                     <Star size={12} />
@@ -546,9 +546,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid rgba(180,120,0,0.14)',
-  background: 'rgba(180,120,0,0.06)',
-  color: '#1A1000',
+  border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+  background: 'var(--space-surface-input, #18150A)',
+  color: 'var(--space-text-primary, #F5E9C8)',
   fontSize: 13.5,
   outline: 'none',
   fontFamily: FONT,
@@ -560,8 +560,8 @@ const ghostBtnStyle: React.CSSProperties = {
   borderRadius: 12,
   fontSize: 13,
   fontWeight: 500,
-  color: '#7A6030',
-  border: '1px solid rgba(180,120,0,0.14)',
+  color: 'var(--space-text-muted, #9E8B55)',
+  border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
   background: 'transparent',
   cursor: 'pointer',
 };

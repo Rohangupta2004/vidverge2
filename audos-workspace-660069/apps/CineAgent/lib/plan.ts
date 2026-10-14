@@ -57,9 +57,9 @@ export function normalizePlan(
   const id = plan.identity || ({} as EditPlan['identity']);
   plan.identity = {
     primary: fixColor(id.primary, '#f59e0b'),
-    secondary: fixColor(id.secondary, '#111120'),
+    secondary: fixColor(id.secondary, '#110E07'),
     accent: fixColor(id.accent, '#22d3ee'),
-    bg: fixColor(id.bg, '#0a0a12'),
+    bg: fixColor(id.bg, '#0D0B05'),
     text: fixColor(id.text, '#ffffff'),
     fontStyle: (['modern', 'editorial', 'bold', 'mono', 'elegant'] as const).includes(id.fontStyle as any)
       ? id.fontStyle : 'modern',

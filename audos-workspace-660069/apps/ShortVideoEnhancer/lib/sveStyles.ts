@@ -2,7 +2,7 @@
  * Short Video Enhancer — Phase 2 stylesheet.
  *
  * Loaded AFTER the Phase 1 redesign's stylesheet, so it extends that look
- * rather than replacing it: same ink (#0A0A0F), same amber accent, same
+ * rather than replacing it: same ink (#0D0B05), same amber accent, same
  * panel geometry. Three things it deliberately overrides:
  *
  *   1. `.preview-copy.caption` — the Phase 1 caption drew a solid plate behind
@@ -63,14 +63,14 @@ export const SVE_PHASE2_STYLES = `
 
 /* --- caption style picker ------------------------------------------------- */
 .sve-cap-styles{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:12px}
-.sve-cap-styles button{position:relative;padding:9px 7px 7px;border:1px solid rgba(180,120,0,0.24);border-radius:9px;background:#14141C;cursor:pointer;text-align:center;transition:all .16s}
+.sve-cap-styles button{position:relative;padding:9px 7px 7px;border:1px solid rgba(180,120,0,0.24);border-radius:9px;background:#15120A;cursor:pointer;text-align:center;transition:all .16s}
 .sve-cap-styles button:hover{border-color:rgba(180,120,0,0.5)}
 .sve-cap-styles button.active{border-color:#C8920A;box-shadow:0 0 0 1px color-mix(in srgb,#C8920A 26%,transparent),0 0 13px color-mix(in srgb,#C8920A 18%,transparent)}
 .sve-cap-styles em{display:block;font-style:normal;font-size:14px;font-weight:900;line-height:1;letter-spacing:-.4px;color:#fff}
 .sve-cap-styles em.gradient{background:linear-gradient(180deg,#fff 10%,#F59E0B 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
 .sve-cap-styles em.outline{color:#fff;text-shadow:-1.5px 0 0 #000,1.5px 0 0 #000,0 -1.5px 0 #000,0 1.5px 0 #000}
 .sve-cap-styles em.boxed{display:inline-block;padding:2px 6px;border-radius:5px;background:rgba(10,10,16,.6)}
-.sve-cap-styles small{display:block;margin-top:6px;font-size:8px;color:#8E8E9A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sve-cap-styles small{display:block;margin-top:6px;font-size:8px;color:#9E8B55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sve-cap-styles button.active small{color:#FCD34D}
 
 /* --- music studio --------------------------------------------------------- */

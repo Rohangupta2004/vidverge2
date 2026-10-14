@@ -1,25 +1,27 @@
 /**
- * OPUS 5 — the single AI brain of the Script-to-Video pipeline.
+ * CREATIVE DIRECTOR — the reasoning brain of the Script-to-Video pipeline.
  *
- * Every AI decision in this pipeline goes through claude-opus-5 on the
- * platform Anthropic proxy (POST /proxy/anthropic/v1/messages, authenticated
- * with X-Workspace-DB-Token): script understanding, scene planning, per-scene
- * visual decisions, Veo prompt generation, graphic/diagram specs, asset
- * selection, continuity management, timing, and post-render validation.
+ * Every browser-side planning decision runs through the shared interactive
+ * OpenAI planner (gpt-6.1-sol, medium reasoning, 6,000 completion tokens):
+ * script understanding, scene division, per-scene visual decisions, prompt
+ * generation, continuity management, timing and post-render validation.
  *
- * Contract notes (platform docs): Opus 5 cannot disable thinking — pair
- * thinking:{type:'adaptive'} with output_config:{effort}. max_tokens ≤ 8192.
- * Never send temperature/top_p/top_k. `system` is a top-level string.
+ * The exported askOpus* names remain as compatibility aliases for callers;
+ * provider choice lives in lib/creativePlanner.ts, not in this feature.
  */
 
 import {
   AssetRow, AudioMusicPlan, AudioNarrationEntry, AudioSfxItem, Film,
   FilmCharacter, FilmPlan, FilmScene, FilmStyle, PlanScene, ReferenceType,
-  SceneDialogue, SceneType, VeoSpec, VoicePlan, newSceneKey, wsToken,
+  SceneDialogue, SceneType, VeoSpec, VoicePlan, newSceneKey,
 } from '../api';
+import { askCreativePlanner } from '../../../lib/creativePlanner';
+import {
+  DEFAULT_MAX_SCENES, OMNI_MODEL_ID, planScenes, resolveEngineId,
+  routeShotIntent, splitSegmentForModel, validateSceneDurations,
+  type ShotIntent,
+} from '../../../lib/videoEngines';
 import { resolveVideoModel } from './videoModelService';
-
-const MODEL = 'claude-opus-5';
 
 interface OpusCall {
   system: string;
@@ -42,45 +44,11 @@ export async function askOpus(call: OpusCall): Promise<string> {
   return (await askOpusRaw(call)).text;
 }
 
-/** askOpus plus the stop reason, for callers that must know whether the
- * reply was cut off by the token ceiling. */
-export async function askOpusRaw({ system, user, images = [], maxTokens = 4096, effort = 'medium' }: OpusCall): Promise<OpusReply> {
-  const token = wsToken();
-  if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
-  const content: any[] = images
-    .filter((u) => typeof u === 'string' && u.startsWith('https://'))
-    .map((url) => ({ type: 'image', source: { type: 'url', url } }));
-  content.push({ type: 'text', text: user });
-  const res = await fetch('/proxy/anthropic/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: Math.min(8192, maxTokens),
-      thinking: { type: 'adaptive' },
-      output_config: { effort },
-      system,
-      messages: [{ role: 'user', content }],
-    }),
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok || data?.error) {
-    const detail = String(data?.error?.message || data?.error || `The director did not answer (HTTP ${res.status})`);
-    // Provider-account failures (exhausted credit, invalidated key) are the
-    // PLATFORM's shared AI account — not this workspace, the wallet, or a
-    // usage limit in this app. Say that instead of relaying the provider's
-    // misleading "go to Plans & Billing" instruction.
-    if (/credit balance is too low|api key is invalid|api key has been invalidated|authentication_error|token_invalidated/i.test(detail)) {
-      throw new Error(`The AI provider behind Audos is temporarily unavailable (provider answered: ${detail.slice(0, 120)}). This is a platform-side account issue — not your account, your wallet, or a limit in this app. Try again shortly.`);
-    }
-    const code = data?.code ? ` [${data.code}]` : '';
-    throw new Error(`${detail}${code}`);
-  }
-  const text = (Array.isArray(data?.content) ? data.content : [])
-    .filter((b: any) => b?.type === 'text')
-    .map((b: any) => String(b.text || ''))
-    .join('');
-  return { text, stopReason: String(data?.stop_reason || '') };
+/** askOpus plus the completion state. The shared planner checks truncation
+ * before returning, so a partial JSON object can never be repaired and kept. */
+export async function askOpusRaw({ system, user, images = [] }: OpusCall): Promise<OpusReply> {
+  const reply = await askCreativePlanner({ system, user, images });
+  return { text: reply.text, stopReason: reply.finishReason };
 }
 
 /**
@@ -330,8 +298,8 @@ export async function extractVisualAttributes(frameUrl: string): Promise<any> {
 // Stage 4 — post-render validation
 // ---------------------------------------------------------------------------
 
-const VALIDATE_SYSTEM = `You are the quality judge of a script-to-video pipeline. You see 1-2 frames from a rendered scene plus the script segment it must illustrate. Reply with ONE JSON object: { "pass": bool, "issues": str }.
-Fail ONLY on real errors: the frame clearly shows the wrong subject/scene for the segment, a broken/black/empty frame, garbled or misspelled on-screen text, or a different person than the segment implies. Reasonable artistic interpretation, staging variation and abstract b-roll PASS. "issues" is one short sentence (empty when pass).`;
+const VALIDATE_SYSTEM = `You are the semantic quality judge of a script-to-video pipeline. The original script is the source of truth. You see 1-2 frames from a rendered scene plus the script segment it must illustrate. Reply with ONE JSON object: { "pass": bool, "issues": str }.
+Fail ONLY on real errors: wrong product/brand/character identity, wrong visible numbers or statistics, a dropped key concept, the wrong subject/scene, a different recurring person, a broken/black/empty frame, or garbled on-screen text. Paraphrased staging with the same meaning, reasonable artistic interpretation, and minor framing/lighting/timing variation PASS. "issues" is one short sentence naming the concrete mismatch (empty when pass).`;
 
 export async function validateScene(scene: FilmScene, frameUrls: string[]): Promise<{ pass: boolean; issues: string; method: string }> {
   try {
@@ -394,6 +362,9 @@ const PROXY_INPUT_CHARS = 200000;
 const PROXY_BODY_BYTES = 256 * 1024;
 /** Room kept for JSON encoding, the reply envelope and small prompt parts. */
 const PROXY_HEADROOM_CHARS = 12000;
+/** Keeps one agent response within the interactive planner's 6,000-token cap;
+ * coverage-driven continuation plans the rest, so no script text is dropped. */
+const PLANNER_SCRIPT_CHUNK_CHARS = 12000;
 
 const utf8Length = (s: string) => new TextEncoder().encode(s).length;
 
@@ -428,12 +399,20 @@ export interface SegmentedPlan {
   world: string;
   visual_style: string;
   characters: { id: string; name: string; appearance: string }[];
-  scenes: { script_segment: string; summary: string; visual_goal: string; duration_s: number; characters: string[]; dialogue: SceneDialogue | null }[];
+  scenes: {
+    script_segment: string; summary: string; visual_goal: string;
+    duration_s: number; characters: string[]; dialogue: SceneDialogue | null;
+    shot_intent: ShotIntent; workflow_kind: 'engine' | 'recipe' | 'code' | 'unavailable';
+    engine_id: string | null; engine_reason: string; duration_notes: string[];
+  }[];
+  notes: string[];
 }
 
 const SEGMENT_RULES = `RULES:
 - Every clip is AI-generated video footage. There are no graphics, text cards or overlays — pure visual storytelling.
-- Clip durations are a WHOLE NUMBER of seconds from 4 to 10 (the video models render any length in that range). Pick the duration that actually fits the beat — 7 and 9 are just as valid as 8, so never pad or trim a beat to hit a round number.
+- For every clip choose one shot_intent from: cinematic_hero, fast_broll, character_consistency, product_consistency, motion_background, stills_to_motion, surreal_stylized. Choose the INTENT from the shot's job; shared routeShotIntent() resolves the actual engine.
+- MODEL FACTS: Gemini Omni 1.1 Flash is the platform default and the ONLY engine here that accepts reference images (up to ten, combinable with a seed frame, plus last-frame interpolation); it is the character/product consistency engine and caps output at 720p. Retired preview ids are aliases of Omni, not engines. Real Veo 3.1 exists only at openrouter/google/veo-3.1, -fast and -lite; those accept one seed image and no references. openrouter/bytedance/seedance-2.0-fast works; Seedance 2.5 Fast is a hard 400. No engine is confirmed to deliver 4K — never promise it.
+- Clip durations are WHOLE seconds. Choose the duration the beat needs; the shared model-duration contract will split an over-long beat at sentence/clause boundaries rather than dropping words. Return at most ${DEFAULT_MAX_SCENES} clips in one response; continuation passes will plan any remainder.
 - A long continuous action becomes MULTIPLE consecutive clips (e.g. a player dribbling up the court and scoring = dribble start → drive → jump → ball through hoop — each its own clip that will later continue from the previous clip's extracted final frame).
 - The script is the source of truth. Never rewrite it. Split it into contiguous script_segment slices that together cover the whole script in order.
 - VERBATIM AND CONTIGUOUS (the pipeline verifies this against the script text): every script_segment is copied character-for-character from the script — never paraphrased, cleaned up, summarized or reordered. The first clip starts at the script's very first words and each next clip starts exactly where the previous one ended, so no word of the script is skipped; the last clip ends at the script's very last words. Title lines, headings, speaker labels and stage directions are part of the script and belong inside the clips' segments (they inform the visuals; they are never shown as text). A segment that cannot be found verbatim in the script is rejected and re-planned.
@@ -447,7 +426,7 @@ const SEGMENT_SYSTEM = `You are the director of a sequential script-to-video pip
 ${SEGMENT_RULES}
 
 OUTPUT SHAPE:
-{ "title": str, "story_summary": str (the complete story in 3-6 sentences), "world": str (the shared setting/world), "visual_style": str (film-wide look: palette, lens language, lighting, mood), "characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "duration_s": whole seconds 4–10, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
+{ "title": str, "story_summary": str (the complete story in 3-6 sentences), "world": str (the shared setting/world), "visual_style": str (film-wide look: palette, lens language, lighting, mood), "characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "shot_intent": str, "duration_s": whole seconds, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
 
 const SEGMENT_CONTINUE_SYSTEM = `You are the director of a sequential script-to-video pipeline, CONTINUING a clip plan that is already underway. The story, world, visual style and characters are decided and given to you, and the earlier clips are already planned. Segment ONLY the REMAINING SCRIPT into further clips, continuing the sequence exactly where it left off. Reply with ONE JSON object and nothing else.
 
@@ -456,7 +435,7 @@ ${SEGMENT_RULES}
 - Never stop early and never answer with an empty "scenes" list: every word of the REMAINING SCRIPT lands in a clip — a one-word line, a closing sentence, credits or an end marker included (film those as a brief closing shot). The pipeline checks the clips against the script text and rejects a plan that leaves any of it uncovered.
 
 OUTPUT SHAPE:
-{ "new_characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "duration_s": whole seconds 4–10, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
+{ "new_characters": [{ "id": snake_case str, "name": str, "appearance": str }], "scenes": [{ "script_segment": str, "summary": str (what happens — one line), "visual_goal": str (the image this clip must land), "shot_intent": str, "duration_s": whole seconds, "characters": [character ids appearing], "dialogue": null | { "line": str (EXACT spoken words from the script), "speaker": character id, "delivery": str (tone/emotion/energy), "language": str, "accent": str } }] }`;
 
 /** Consecutive clips may overlap by a few words (the model repeats a phrase
  * at a boundary): a clip may begin up to this many source words BEFORE the
@@ -556,7 +535,7 @@ export async function segmentScript(params: {
   // script longer than one request may carry is not cut: the first pass reads
   // as much as fits and the coverage loop below brings the rest, so the plan
   // still ends at the script's final words.
-  const firstExcerpt = excerptAt(script, scriptBudgetChars(script, SEGMENT_SYSTEM + header));
+  const firstExcerpt = excerptAt(script, Math.min(PLANNER_SCRIPT_CHUNK_CHARS, scriptBudgetChars(script, SEGMENT_SYSTEM + header)));
   const user = [
     header,
     firstExcerpt.length < script.length
@@ -570,7 +549,8 @@ export async function segmentScript(params: {
   const world = String(raw?.world || '').slice(0, 800);
   const visual_style = String(raw?.visual_style || '').slice(0, 800);
   const characters = normalizeSegmentCharacters(raw?.characters);
-  const scenes = normalizeSegmentScenes(raw?.scenes);
+  const planningNotes: string[] = [];
+  const scenes = guardAgentBatch(normalizeSegmentScenes(raw?.scenes), planningNotes);
   // A cut-off reply's last clip may be half-written — re-plan it from the script.
   if (first.truncated && scenes.length > 1) scenes.pop();
 
@@ -623,7 +603,7 @@ export async function segmentScript(params: {
     // The remainder goes whole whenever the proxy allows it; otherwise this
     // pass takes as much as one request may carry and the next pass continues
     // from wherever coverage reaches.
-    const part = excerptAt(remaining, scriptBudgetChars(remaining, SEGMENT_CONTINUE_SYSTEM + context));
+    const part = excerptAt(remaining, Math.min(PLANNER_SCRIPT_CHUNK_CHARS, scriptBudgetChars(remaining, SEGMENT_CONTINUE_SYSTEM + context)));
     const label = part.length < remaining.length
       ? `REMAINING SCRIPT — NEXT PART (${part.length} of ${remaining.length} remaining characters; the rest follows in a later pass). Segment ALL of this part, in order, from its first words to its last:`
       : 'REMAINING SCRIPT (segment ALL of it, in order, from its first words to its last):';
@@ -633,7 +613,7 @@ export async function segmentScript(params: {
       maxTokens: 8192,
       effort: 'medium',
     });
-    const added = normalizeSegmentScenes(more.value?.scenes);
+    const added = guardAgentBatch(normalizeSegmentScenes(more.value?.scenes), planningNotes);
     if (more.truncated && added.length > 1) added.pop(); // half-written last clip — re-planned next pass
     // Nothing the director SAYS ends the plan — only the coverage check at the
     // top of the loop does, against the script text. An empty or unverifiable
@@ -644,7 +624,7 @@ export async function segmentScript(params: {
     }
   }
   if (!scenes.length) throw new Error('The director produced an empty clip plan — try again.');
-  return { title, story_summary, world, visual_style, characters, scenes };
+  return { title, story_summary, world, visual_style, characters, scenes, notes: Array.from(new Set(planningNotes)) };
 }
 
 function normalizeSegmentCharacters(list: unknown): SegmentedPlan['characters'] {
@@ -670,6 +650,13 @@ function normalizeSegmentScenes(list: unknown): SegmentedPlan['scenes'] {
       summary: String(s.summary || '').slice(0, 300),
       visual_goal: String(s.visual_goal || '').slice(0, 400),
       duration_s: snap(s.duration_s),
+      shot_intent: (['cinematic_hero', 'fast_broll', 'character_consistency', 'product_consistency', 'motion_background', 'stills_to_motion', 'surreal_stylized'].includes(s.shot_intent)
+        ? s.shot_intent
+        : 'cinematic_hero') as ShotIntent,
+      workflow_kind: 'engine' as const,
+      engine_id: null,
+      engine_reason: '',
+      duration_notes: [],
       characters: (Array.isArray(s.characters) ? s.characters : []).map(String),
       dialogue: s?.dialogue && String(s.dialogue.line || '').trim()
         ? {
@@ -681,6 +668,77 @@ function normalizeSegmentScenes(list: unknown): SegmentedPlan['scenes'] {
           } as SceneDialogue
         : null,
     }));
+}
+
+/** Apply shared routing and duration contracts to one model response. The
+ * planner owns the creative choice; these functions only bound it. */
+function guardAgentBatch(
+  input: SegmentedPlan['scenes'],
+  notes: string[],
+): SegmentedPlan['scenes'] {
+  if (!input.length) return [];
+  const total = input.reduce((sum, scene) => sum + scene.duration_s, 0);
+  const countGuard = planScenes({
+    modelId: 'openrouter/bytedance/seedance-2.0-fast',
+    totalDurationS: total,
+    requestedSceneCount: input.length,
+    minScenes: 1,
+    maxScenes: DEFAULT_MAX_SCENES,
+  });
+  notes.push(...countGuard.notes);
+  const bounded = input.slice(0, countGuard.scenes.length);
+
+  return bounded.flatMap((scene) => {
+    const route = routeShotIntent(scene.shot_intent);
+    const engineId = resolveEngineId(route.kind === 'engine' && route.engineId ? route.engineId : OMNI_MODEL_ID);
+    const durationPlan = planScenes({
+      modelId: engineId,
+      totalDurationS: scene.duration_s,
+      requestedSceneCount: 1,
+      minScenes: 1,
+      maxScenes: DEFAULT_MAX_SCENES,
+    });
+    const parts = splitSegmentForModel(engineId, scene.script_segment, scene.duration_s);
+    const sourceWords = segmentWords(scene.script_segment);
+    const splitWords = parts.flatMap((part) => segmentWords(part.text));
+    if (sourceWords.length !== splitWords.length || sourceWords.some((word, index) => word !== splitWords[index])) {
+      throw new Error(`The duration guard could not split “${scene.summary || 'this beat'}” without duplicating or dropping words. Re-plan that beat with a cleaner sentence or clause boundary.`);
+    }
+    const problems = validateSceneDurations(engineId, parts.map((part) => part.durationS), {
+      expectedTotalS: durationPlan.totalDurationS,
+      maxScenes: DEFAULT_MAX_SCENES,
+    });
+    const durationNotes = Array.from(new Set([...durationPlan.notes, ...problems]));
+    notes.push(...durationNotes.map((note) => `“${scene.summary || 'Scene'}”: ${note}`));
+
+    const dialogueParts = scene.dialogue
+      ? splitSegmentForModel(engineId, scene.dialogue.line, scene.duration_s)
+      : [];
+    if (scene.dialogue) {
+      const dialogueWords = segmentWords(scene.dialogue.line);
+      const splitDialogueWords = dialogueParts.flatMap((part) => segmentWords(part.text));
+      if (dialogueWords.length !== splitDialogueWords.length || dialogueWords.some((word, index) => word !== splitDialogueWords[index])) {
+        throw new Error(`The duration guard could not split ${scene.dialogue.speaker}'s dialogue without duplicating or dropping words. Re-plan the line with a sentence or clause boundary.`);
+      }
+    }
+
+    return parts.map((part, index) => {
+      const dialogue = scene.dialogue && dialogueParts[index]?.text
+        ? { ...scene.dialogue, line: dialogueParts[index].text }
+        : null;
+      return {
+        ...scene,
+        script_segment: part.text,
+        summary: parts.length > 1 ? `${scene.summary} (part ${index + 1}/${parts.length})` : scene.summary,
+        duration_s: part.durationS,
+        dialogue,
+        workflow_kind: route.kind,
+        engine_id: route.engineId ? resolveEngineId(route.engineId) : null,
+        engine_reason: route.reason,
+        duration_notes: durationNotes,
+      };
+    });
+  });
 }
 
 export interface PreparedScene {
@@ -769,6 +827,7 @@ export async function prepareScenePrompt(params: {
   const sceneLines = [
     `\n=== SCENE CONTEXT (this clip) ===`,
     `CLIP ${scene.idx + 1}, duration ${scene.duration_s || planScene?.duration_s || 6}s, aspect ${film.aspect_ratio || '16:9'}.`,
+    spec.shot_intent ? `SHOT INTENT: ${spec.shot_intent}. SHARED ROUTE: ${spec.workflow_kind || 'engine'}${spec.engine_id ? ` on ${spec.engine_id}` : ''}. ${spec.engine_reason || ''}` : '',
     `SCRIPT SEGMENT: "${scene.script_segment}"`,
     (spec.summary || planScene?.summary) ? `WHAT HAPPENS: ${spec.summary || planScene?.summary}` : '',
     (spec.visual_goal || planScene?.visual_goal) ? `VISUAL GOAL: ${spec.visual_goal || planScene?.visual_goal}` : '',
@@ -821,7 +880,7 @@ export async function prepareScenePrompt(params: {
   // THE PROMPT BUDGET IS THE MODEL'S OWN LIMIT, not a fixed 1000 characters:
   // Seedance carries 2500, and trimming its prompts to Omni Flash's ceiling
   // was cutting prepared scenes off mid-sentence.
-  const maxChars = Math.max(500, resolveVideoModel(film.video_model).promptMaxChars);
+  const maxChars = Math.max(500, resolveVideoModel(spec.engine_id || film.video_model).promptMaxChars);
 
   if (dialogue) {
     const block = buildDialogueBlock(dialogue, film);

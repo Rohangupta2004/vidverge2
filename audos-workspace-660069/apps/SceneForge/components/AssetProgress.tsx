@@ -72,7 +72,7 @@ function QaBadge({ scene }: { scene: Scene }) {
 
 function kindBadge(scene: Scene) {
   const kind = sceneKind(scene);
-  if (kind === 'legacy') return { icon: Eye, label: 'Legacy', color: '#7A6030' };
+  if (kind === 'legacy') return { icon: Eye, label: 'Legacy', color: '#9E8B55' };
   const icon = kind === 'ai_video' ? Clapperboard : kind === 'motion_graphic' ? GitBranch : kind === 'image' ? ImageIcon : Type;
   return { icon, label: KIND_LABELS[kind], color: KIND_COLORS[kind] };
 }
@@ -208,7 +208,7 @@ export default function AssetProgress({ scenes, busy, note, project, onAssemble,
     })}</div>
 
     {previewScene ? <RemotionCodePreview scene={previewScene} project={project} onClose={() => setPreviewSceneId(null)} /> : null}
-    {videoScene ? <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(26,16,0,0.35)] p-6" role="dialog" aria-label={`Scene ${videoScene.scene_index} video preview`} onClick={() => setVideoSceneId(null)}>
+    {videoScene ? <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(0,0,0,0.58)] p-6" role="dialog" aria-label={`Scene ${videoScene.scene_index} video preview`} onClick={() => setVideoSceneId(null)}>
       <div className="relative w-full max-w-3xl rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between"><p className="font-semibold text-[var(--space-text-primary)]">Scene {videoScene.scene_index} · AI clip</p><button aria-label="Close preview" onClick={() => setVideoSceneId(null)} className="rounded-lg p-1.5 transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_7%,transparent)]"><X className="h-5 w-5 text-[var(--space-text-primary)]" /></button></div>
         <video src={videoScene.render_url} controls autoPlay muted className="max-h-[70vh] w-full rounded-xl bg-black object-contain" />

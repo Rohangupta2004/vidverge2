@@ -123,6 +123,14 @@ function checkValue(prop: string, spec: PropSpec, value: unknown): PropProblem |
         && !value.every((entry) => typeof (entry as Record<string, unknown>).label === 'string')) {
         return bad('metrics entries need a string label.');
       }
+      if (prop === 'elements' && !value.every((entry) => {
+        const item = entry as Record<string, unknown>;
+        return typeof item.id === 'string' && Boolean(item.id)
+          && typeof item.type === 'string' && typeof item.label === 'string'
+          && hasNumbers(item, ['x', 'y', 'width', 'height']);
+      })) {
+        return bad('elements entries need stable string id/type/label fields and numeric x, y, width and height.');
+      }
       return null;
     }
 

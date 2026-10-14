@@ -31,6 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Rocket } from 'lucide-react';
 
 import { errorMessage } from './lib/ai-client';
+import { prepareAudio, type PreparedAudio } from './lib/audio';
 import {
   bestIteration,
   MAX_ITERATIONS,
@@ -39,6 +40,7 @@ import {
   type IterationRecord,
 } from './lib/iteration-manager';
 import { isLikelyUrl, normalizeUrl } from './lib/platform';
+import { uploadLaunchAsset, type LaunchUpload } from './lib/uploads';
 import {
   PipelineTracker,
   formatMs,
@@ -63,6 +65,7 @@ import type { ProductContext } from './types/product-context.types';
 
 import AppShell from '../../components/ui/AppShell';
 import Badge from '../../components/ui/Badge';
+import { withBrandContext } from '../../components/BrandContextLayer';
 import { ProgressBar, Stepper } from '../../components/ui/primitives';
 import ConceptSelector from './components/ConceptSelector';
 import CriticReport from './components/CriticReport';
@@ -104,10 +107,17 @@ interface BuildOutcome {
   stopReason: string;
 }
 
-export default function App() {
+const BrandedProductLaunch = withBrandContext(App, 'Product Launch');
+export default BrandedProductLaunch;
+function App() {
   const [view, setView] = useState<View>('input');
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [productFile, setProductFile] = useState<File | null>(null);
+  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
+  const [narrationEnabled, setNarrationEnabled] = useState(false);
+  const [narrationFile, setNarrationFile] = useState<File | null>(null);
 
   const trackerRef = useRef<PipelineTracker | null>(null);
   if (!trackerRef.current) trackerRef.current = new PipelineTracker();
@@ -135,6 +145,9 @@ export default function App() {
   const specRef = useRef<FilmSpec | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const runningRef = useRef(false);
+  const audioRef = useRef<PreparedAudio | null>(null);
+  const narrationFileRef = useRef<File | null>(null);
+  narrationFileRef.current = narrationFile;
 
   // A gate the pipeline awaits while the creator looks at a concept list or a
   // critique. Resolving it is what lets one async function span a decision
@@ -179,10 +192,20 @@ export default function App() {
       if (iteration > 1) tracker.beginIteration(iteration);
       setView('running');
 
-      // 4 — component plan
+      // 4 — mandatory score + beat-aware component plan. Audio is generated
+      // once and reused across critique iterations so a revision never buys a
+      // second track or changes the rhythmic foundation under the edit.
       tracker.start('plan');
+      let preparedAudio = audioRef.current;
+      if (!preparedAudio) {
+        tracker.note('plan', 'Generating the mandatory music bed and analysing its beats…');
+        preparedAudio = await prepareAudio(current, narrationFileRef.current, signal);
+        audioRef.current = preparedAudio;
+        preparedAudio.warnings.forEach((warning) => tracker.note('plan', warning));
+      }
       const builtPlan = await generateComponentPlan(current, ctx, {
         signal,
+        beatMap: preparedAudio.beatMap,
         onProgress: (detail, attempt) => tracker.note('plan', detail, attempt),
       });
       const warnings = planWarnings(builtPlan);
@@ -232,6 +255,7 @@ export default function App() {
       const render = await renderFilm(code, {
         frameCount: builtPlan.total_frames,
         theme,
+        audio: preparedAudio,
         onProgress: (phase, elapsedMs) => tracker.note(
           'render',
           phase === 'pending' ? 'Queued…' : 'Rendering 1920x1080 at 30fps — ' + formatMs(elapsedMs),
@@ -290,7 +314,8 @@ export default function App() {
       setView('running');
       tracker.note('critic', 'Scored ' + verdict.overall_score.toFixed(2)
         + ' — revising the spec from the critique…');
-      current = await reviseFilmSpec(current, verdict, ctx, { iteration: iteration + 1, signal });
+      const revised = await reviseFilmSpec(current, verdict, ctx, { iteration: iteration + 1, signal });
+      current = { ...revised, narration_enabled: startSpec.narration_enabled };
       lastScore = verdict.overall_score;
       iteration += 1;
     }
@@ -323,6 +348,7 @@ export default function App() {
     setCritic(null);
     setHistory([]);
     setOutcome(null);
+    audioRef.current = null;
     setView('running');
 
     try {
@@ -333,8 +359,20 @@ export default function App() {
 
       // 1 — extraction
       tracker.start('extract', 'Reading ' + normalizeUrl(target) + '…');
+      const uploads: LaunchUpload[] = [];
+      const requestedUploads: Array<{ file: File | null; kind: LaunchUpload['kind'] }> = [
+        { file: logoFile, kind: 'logo' },
+        { file: productFile, kind: 'product_image' },
+        { file: screenshotFile, kind: 'screenshot' },
+      ];
+      for (const requested of requestedUploads) {
+        if (!requested.file) continue;
+        tracker.note('extract', 'Uploading ' + requested.kind.replace('_', ' ') + ' without altering it…');
+        uploads.push(await uploadLaunchAsset(requested.file, requested.kind, signal));
+      }
       const ctx = await extractProductContext(target, {
         signal,
+        uploads,
         onProgress: (detail) => tracker.note('extract', detail),
       });
       setContext(ctx);
@@ -359,7 +397,8 @@ export default function App() {
       tracker.start('select', 'Waiting on the concept choice…');
       setView('concepts');
       const chosen = await openGate<FilmSpec>();
-      const winner = chosen || selectBestConcept(concepts, ctx);
+      const selected = chosen || selectBestConcept(concepts, ctx);
+      const winner: FilmSpec = { ...selected, narration_enabled: narrationEnabled };
       tracker.done('select', winner.narrative_arc + '  (score '
         + winner.concept_score.toFixed(2) + ')');
 
@@ -376,7 +415,7 @@ export default function App() {
     } finally {
       runningRef.current = false;
     }
-  }, [buildLoop, finish, openGate, tracker]);
+  }, [buildLoop, finish, logoFile, narrationEnabled, openGate, productFile, screenshotFile, tracker]);
 
   /**
    * Retry from where it broke rather than from the top.
@@ -435,6 +474,7 @@ export default function App() {
       eyebrow="Launch film agent"
       subtitle="Opus decides the film. This app executes it — reads your page, designs competing concepts, builds the winner, then watches it back and fixes what it got wrong."
       maxWidth={1040}
+      beamIntensity={0.18}
       watermark={false}
       icon={(
         <span
@@ -445,7 +485,7 @@ export default function App() {
             width: 38,
             height: 38,
             borderRadius: 12,
-            background: 'linear-gradient(140deg, rgba(200,146,10,0.22) 0%, rgba(224,163,58,0.14) 100%)',
+            background: 'linear-gradient(140deg, color-mix(in srgb, var(--space-brand-primary-500) 22%, transparent) 0%, color-mix(in srgb, var(--space-brand-highlight-500) 10%, transparent) 100%)',
             border: '1px solid ' + BORDER,
           }}
         >
@@ -496,6 +536,37 @@ export default function App() {
             style={{ ...INPUT_STYLE, fontSize: 17, padding: '17px 20px', textAlign: 'center' }}
           />
 
+          <div style={{ marginTop: 18, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, textAlign: 'left' }}>
+            {([
+              ['Logo', logoFile, setLogoFile],
+              ['Product image', productFile, setProductFile],
+              ['UI screenshot', screenshotFile, setScreenshotFile],
+            ] as const).map(([label, file, setter]) => (
+              <label key={label} style={{ padding: '12px 13px', border: '1px solid ' + BORDER, borderRadius: 12, color: file ? TEXT : MUTED, fontSize: 12, cursor: 'pointer' }}>
+                <span style={{ display: 'block', fontWeight: 700 }}>{label}</span>
+                <span style={{ display: 'block', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file?.name || 'Optional'}</span>
+                <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={(event) => setter(event.target.files?.[0] || null)} />
+              </label>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 12, padding: 14, border: '1px solid ' + BORDER, borderRadius: 12, textAlign: 'left' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 9, color: TEXT, fontSize: 13, fontWeight: 700 }}>
+              <input type="checkbox" checked={narrationEnabled} onChange={(event) => setNarrationEnabled(event.target.checked)} />
+              Add optional narration
+            </label>
+            {narrationEnabled ? (
+              <label style={{ display: 'block', marginTop: 10, color: MUTED, fontSize: 12, cursor: 'pointer' }}>
+                Fallback MP3/WAV: {narrationFile?.name || 'choose a file'}
+                <input type="file" accept="audio/mpeg,audio/wav,audio/x-wav" style={{ display: 'none' }} onChange={(event) => setNarrationFile(event.target.files?.[0] || null)} />
+              </label>
+            ) : null}
+          </div>
+
+          <p style={{ margin: '12px 0 0', fontSize: 11.5, lineHeight: 1.5, color: MUTED, textAlign: 'left' }}>
+            Screenshots guide a semantic React reconstruction; screenshot pixels are never embedded. Music is always generated and motion is aligned to its beat map.
+          </p>
+
           <div style={{ marginTop: 18 }}>
             <PrimaryButton onClick={() => startRun(url)} disabled={!ready} width="100%">
               Generate SaaS Launch Film <ArrowRight size={16} />
@@ -520,11 +591,8 @@ export default function App() {
             onRetry={retry}
           />
           {error ? (
-            <div style={{ maxWidth: 760, margin: '18px auto 0' }}>
-              <ErrorNote>{error}</ErrorNote>
-              <div style={{ marginTop: 14 }}>
-                <PrimaryButton onClick={restart}>Start over</PrimaryButton>
-              </div>
+            <div style={{ maxWidth: 760, margin: '14px auto 0' }}>
+              <PrimaryButton onClick={restart}>Start over</PrimaryButton>
             </div>
           ) : null}
         </>

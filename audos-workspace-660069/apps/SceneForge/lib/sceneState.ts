@@ -1,6 +1,9 @@
 import type { Scene } from './supabase';
 import { visualKindOf, type VisualKind } from './effects';
-import { hasFreshMotionClip } from './motionCapture';
+import { hasFreshElementComposition } from './elementComposition';
+import { legacyMotionFingerprint, sceneMotionSpec } from './motionScene';
+import { motionFingerprint } from './motionSpec';
+import { hasFreshVideoBackedGraphic } from './videoBackedGraphic';
 
 export const isVideoUrl = (url?: string | null) => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(String(url || ''));
 
@@ -31,9 +34,9 @@ export function sceneStillUrl(scene: Scene): string {
  *  - a scene mid-generation or in error is not settled (error is resolved by
  *    one click: retry, switch type, or skip),
  *  - ai_video scenes settle when their generated clip exists,
- *  - motion_graphic / text_overlay scenes settle when the motion-graphics
- *    engine has captured a clip of the CURRENT spec (an edited spec always
- *    re-captures — stale text is never shipped),
+ *  - motion_graphic / text_overlay scenes settle when their structured
+ *    Remotion composition matches the CURRENT spec. Historical `mg:` browser
+ *    captures remain readable, but new and edited scenes use `ec:` specs,
  *  - image scenes settle when they have a still,
  *  - legacy text_graphics scenes settle immediately — their overlay is
  *    composed inside the final assembly render, nothing to pre-render,
@@ -44,10 +47,17 @@ export function sceneSettled(scene: Scene): boolean {
   if (scene.status === 'generating' || scene.status === 'error') return false;
   const kind = sceneKind(scene);
   if (kind === 'ai_video') return isVideoUrl(scene.render_url);
+  if (kind === 'video_backed_graphic') return hasFreshVideoBackedGraphic(scene);
   // An over-avatar text overlay is composed directly at final assembly (the
   // presenter stays visible underneath), so there is no clip to capture.
   if (kind === 'text_overlay' && scene.overlay_config?.overAvatar === true) return true;
-  if (kind === 'motion_graphic' || kind === 'text_overlay') return hasFreshMotionClip(scene);
+  if (kind === 'motion_graphic' || kind === 'text_overlay') {
+    const productPrefix = `${motionFingerprint(sceneMotionSpec(scene))}:hf:`;
+    if (isVideoUrl(scene.render_url) && String(scene.video_prompt || '').startsWith(productPrefix)) return true;
+    if (hasFreshElementComposition(scene)) return true;
+    // Backward compatibility only: old rows keep playing their captured clip.
+    return isVideoUrl(scene.render_url) && String(scene.video_prompt || '') === legacyMotionFingerprint(scene);
+  }
   if (kind === 'image') return Boolean(sceneStillUrl(scene));
   if (kind === 'legacy') return Boolean(scene.render_url);
   return true;
@@ -58,9 +68,17 @@ export function sceneNeedsGeneration(scene: Scene): boolean {
   if (scene.status === 'skipped') return false;
   const kind = sceneKind(scene);
   if (kind === 'ai_video') return !isVideoUrl(scene.render_url);
+  if (kind === 'video_backed_graphic') return !hasFreshVideoBackedGraphic(scene);
   // Over-avatar text overlays are composed at assembly — nothing to capture.
   if (kind === 'text_overlay' && scene.overlay_config?.overAvatar === true) return false;
-  if (kind === 'motion_graphic' || kind === 'text_overlay') return !hasFreshMotionClip(scene);
+  if (kind === 'motion_graphic' || kind === 'text_overlay') {
+    const productPrefix = `${motionFingerprint(sceneMotionSpec(scene))}:hf:`;
+    if (isVideoUrl(scene.render_url) && String(scene.video_prompt || '').startsWith(productPrefix)) return false;
+    if (hasFreshElementComposition(scene)) return false;
+    // An untouched historical capture is still usable; any spec edit changes
+    // the legacy fingerprint and moves the scene onto the Remotion path.
+    return !(isVideoUrl(scene.render_url) && String(scene.video_prompt || '') === legacyMotionFingerprint(scene));
+  }
   if (kind === 'image') return !sceneStillUrl(scene);
   if (kind === 'legacy') return !scene.render_url;
   // Legacy text/graphics: only when the scene wants a visual asset it doesn't have.

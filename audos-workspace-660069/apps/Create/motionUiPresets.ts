@@ -37,7 +37,7 @@ export const MOTION_PRESETS: MotionPreset[] = [
   {
     id: 'premium_saas',
     name: 'Premium SaaS',
-    blurb: 'Clean, confident, blue-forward product motion.',
+    blurb: 'Clean, confident, product-forward motion.',
     guidance:
       'Premium SaaS: restrained, confident motion. Long slow camera pushes and lateral pans between UI screens, ' +
       'generous negative space, crisp headline typography that slides up, subtle depth and soft shadows.',

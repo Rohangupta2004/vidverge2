@@ -268,17 +268,17 @@ export const RUNWAY_MODES: RunwayModeDef[] = [
   {
     id: 'product_ugc', label: 'UGC Video', recipeId: 'product_ugc', kind: 'video',
     blurb: 'Creator-style product footage that reads as a real person talking about your product.',
-    inputs: 'A product image, optionally a creator reference image, and the persona or script direction.',
+    inputs: 'A product image, a creator reference image, and the persona or script direction.',
   },
   {
     id: 'multi_shot_video', label: 'Multi-Shot', recipeId: 'multi_shot_video', kind: 'video',
     blurb: 'Several directed shots composed into one continuous video.',
-    inputs: 'Two to six shot descriptions plus an overall style, duration and ratio.',
+    inputs: 'Three to five shot descriptions plus an overall style, duration and ratio.',
   },
   {
-    id: 'ad_localization', label: 'Ad Localization', recipeId: 'ad_localization', kind: 'video',
-    blurb: 'Localize an existing ad into another language, keeping the creative intact.',
-    inputs: 'The source ad (video or still) and the target language.',
+    id: 'ad_localization', label: 'Ad Localization', recipeId: 'ad_localization', kind: 'image',
+    blurb: 'Localize an existing still ad into another language, keeping the creative intact.',
+    inputs: 'The source ad image and the target language.',
   },
   {
     id: 'product_campaign_image', label: 'Campaign Images', recipeId: 'product_campaign_image', kind: 'image',
@@ -379,7 +379,10 @@ function normaliseCapabilities(raw: any): RunwayCapabilities {
   const recipeNodes = asArray(raw?.recipes ?? findArray(raw, ['recipes']));
   const recipes: RunwayRecipeInfo[] = recipeNodes.map((r: any) => {
     const id = String(r?.id || r?.recipeId || r?.name || '');
-    const fields = strings(asArray(r?.fields ?? r?.inputs ?? r?.required ?? r?.inputFields));
+    const declaredInputs = r?.inputs && !Array.isArray(r.inputs) && typeof r.inputs === 'object'
+      ? [...asArray(r.inputs.required), ...asArray(r.inputs.optional)]
+      : asArray(r?.fields ?? r?.inputs ?? r?.required ?? r?.inputFields);
+    const fields = strings(declaredInputs);
     return {
       id,
       label: String(r?.label || r?.displayName || id.replace(/_/g, ' ')),
@@ -536,7 +539,11 @@ export interface RunwaySubmission {
  * (a leading `/api/generate/runway/` is accepted too). A 202 `uncertain`
  * answer is returned like any other — poll it, never resubmit it.
  */
-export async function runwayGenerate(endpoint: string, body: Record<string, any>): Promise<RunwaySubmission> {
+export async function runwayGenerate(
+  endpoint: string,
+  body: Record<string, any>,
+  options: { idempotencyKey?: string } = {},
+): Promise<RunwaySubmission> {
   const path = endpoint.indexOf('/api/') === 0 ? endpoint : `${BASE}/${endpoint.replace(/^\/+/, '')}`;
   const token = runwayToken();
   if (!token) return fail('You need to be signed in before Runway can generate anything.', 'no_credentials', 401);
@@ -547,7 +554,7 @@ export async function runwayGenerate(endpoint: string, body: Record<string, any>
       headers: {
         'Content-Type': 'application/json',
         'X-Workspace-DB-Token': token,
-        'Idempotency-Key': idempotencyKey(),
+        'Idempotency-Key': options.idempotencyKey || idempotencyKey(),
       },
       body: JSON.stringify(body),
     });
@@ -564,12 +571,19 @@ export async function runwayGenerate(endpoint: string, body: Record<string, any>
   return { taskId, status: String(data?.status || 'queued'), raw: data };
 }
 
-export function runwaySubmitRecipe(recipeId: RunwayRecipeId, body: Record<string, any>): Promise<RunwaySubmission> {
-  return runwayGenerate(`recipes/${encodeURIComponent(recipeId)}`, body);
+export function runwaySubmitRecipe(
+  recipeId: RunwayRecipeId,
+  body: Record<string, any>,
+  options: { idempotencyKey?: string } = {},
+): Promise<RunwaySubmission> {
+  return runwayGenerate(`recipes/${encodeURIComponent(recipeId)}`, body, options);
 }
 
-export function runwaySubmitVideo(body: Record<string, any>): Promise<RunwaySubmission> {
-  return runwayGenerate('video', body);
+export function runwaySubmitVideo(
+  body: Record<string, any>,
+  options: { idempotencyKey?: string } = {},
+): Promise<RunwaySubmission> {
+  return runwayGenerate('video', body, options);
 }
 
 // ---------------------------------------------------------------------------

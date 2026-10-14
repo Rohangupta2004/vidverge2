@@ -11,11 +11,11 @@
 // generated Film.tsx imports from.
 
 import type {
-  BrowserFrameProps, DashboardProps, CursorProps, HighlightProps, TooltipProps,
+  BrowserFrameProps, DashboardProps, CursorProps, HighlightProps, TooltipProps, SemanticUIProps,
   MassiveTypeProps, KineticTextProps, WordRevealProps, SplitTextProps, TypeOnProps,
   ParallaxProps, CameraProps, ZoomProps, BlurMaskProps, MorphProps, ParticleProps,
   SplitScreenProps, FloatingUIProps, PerspectiveProps, GridProps, FullBleedProps,
-  ScreenshotProps, LogoProps, MetricCounterProps,
+  ScreenshotProps, LogoProps, ProductImageProps, MetricCounterProps,
 } from '../component-sdk.types';
 
 const FONT = "'Inter', system-ui, sans-serif";
@@ -228,6 +228,32 @@ export function Tooltip(props: TooltipProps) {
     >
       {props.text}
     </div>
+  );
+}
+
+export function SemanticUI(props: SemanticUIProps) {
+  return (
+    <Fill pad={10}>
+      <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', borderRadius: 8, background: props.background || '#0B1020', border: '1px solid ' + DEFAULT_PREVIEW_THEME.border }}>
+        {(props.elements || []).map((element) => (
+          <div
+            key={element.id}
+            data-ui-id={element.id}
+            style={{
+              position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%',
+              borderRadius: element.type === 'button' || element.type === 'badge' ? 999 : 4,
+              background: element.type === 'button' ? (props.accent || DEFAULT_PREVIEW_THEME.accent) : (props.surface || 'rgba(255,255,255,0.07)'),
+              color: element.type === 'button' ? '#07111F' : (props.textColor || '#F8FAFC'),
+              border: '1px solid rgba(255,255,255,0.1)', fontFamily: FONT, fontSize: 6, fontWeight: element.type === 'heading' ? 800 : 600,
+              display: 'flex', alignItems: 'center', padding: '0 4px', overflow: 'hidden',
+              outline: props.focusId === element.id ? '2px solid ' + (props.accent || DEFAULT_PREVIEW_THEME.accent) : 'none',
+            }}
+          >
+            {element.value || element.label}
+          </div>
+        ))}
+      </div>
+    </Fill>
   );
 }
 
@@ -534,6 +560,10 @@ export function Logo(props: LogoProps) {
   );
 }
 
+export function ProductImage(props: ProductImageProps) {
+  return <Fill pad={12}><Plate label={props.src} radius={props.cornerRadius === undefined ? 8 : props.cornerRadius} /></Fill>;
+}
+
 export function MetricCounter(props: MetricCounterProps) {
   return (
     <Fill>
@@ -579,6 +609,7 @@ export const PREVIEW_REGISTRY: Record<string, PreviewComponent> = {
   Cursor: asPreview(Cursor),
   Highlight: asPreview(Highlight),
   Tooltip: asPreview(Tooltip),
+  SemanticUI: asPreview(SemanticUI),
   MassiveType: asPreview(MassiveType),
   KineticText: asPreview(KineticText),
   WordReveal: asPreview(WordReveal),
@@ -597,5 +628,6 @@ export const PREVIEW_REGISTRY: Record<string, PreviewComponent> = {
   FullBleed: asPreview(FullBleed),
   Screenshot: asPreview(Screenshot),
   Logo: asPreview(Logo),
+  ProductImage: asPreview(ProductImage),
   MetricCounter: asPreview(MetricCounter),
 };

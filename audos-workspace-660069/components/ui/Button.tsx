@@ -70,13 +70,13 @@ const Button: React.FC<ButtonProps> = function Button({
     visual = {
       background: GRADIENT.brand,
       color: '#ffffff',
-      border: '1px solid rgba(252,211,77,0.55)',
+      border: '1px solid rgba(255,209,104,0.55)',
       boxShadow: hover && !off ? SHADOW.glow : 'none',
       fontWeight: 600,
     };
   } else if (variant === 'secondary') {
     visual = {
-      background: hover && !off ? 'rgba(245,158,11,0.12)' : 'transparent',
+      background: hover && !off ? 'rgba(212,146,10,0.12)' : 'transparent',
       color: COLORS.primaryGlow,
       border: '1px solid ' + (hover && !off ? COLORS.borderHover : COLORS.border),
       boxShadow: 'none',
@@ -92,7 +92,7 @@ const Button: React.FC<ButtonProps> = function Button({
     };
   } else {
     visual = {
-      background: hover && !off ? 'rgba(245,158,11,0.08)' : 'transparent',
+      background: hover && !off ? 'rgba(212,146,10,0.08)' : 'transparent',
       color: hover && !off ? COLORS.text : COLORS.textMuted,
       border: '1px solid transparent',
       boxShadow: 'none',

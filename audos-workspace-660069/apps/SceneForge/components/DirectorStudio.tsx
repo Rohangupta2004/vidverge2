@@ -35,7 +35,7 @@ interface LogLine {
   state: 'running' | 'done' | 'failed';
 }
 
-const ACCENTS = ['#4FC3F7', '#F2C14E', '#7C5CFF', '#38D39F', '#FF6B6B'];
+const ACCENTS = ['#4FC3F7', '#F2C14E', '#D4920A', '#38D39F', '#FF6B6B'];
 
 const panel = 'rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)]';
 

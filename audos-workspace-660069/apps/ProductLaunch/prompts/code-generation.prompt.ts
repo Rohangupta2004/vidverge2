@@ -22,6 +22,8 @@ CODE REQUIREMENTS:
 - No console.log, no debug code
 - No imports of components not in the SDK
 - No hardcoded URLs — all assets go through resolveAsset(handle)
+- Screenshot pixels are reference-only: never add BrowserFrame, Dashboard, Morph, FloatingUI,
+  Grid, FullBleed or Screenshot. Preserve UI through SemanticUI data-ui-id elements.
 - TypeScript strict mode compatible
 - Export default composition registered with Remotion's registerRoot
 
@@ -49,8 +51,9 @@ export const CODE_GENERATION_HOUSE_RULES = `HOW THIS FILE IS COMPILED — follow
 - Every scene is a <Sequence from={ABSOLUTE_START} durationInFrames={SCENE_DURATION}>.
   Inside a Sequence, useCurrentFrame() is already rebased to 0, so a layer's startFrame is
   expressed as a nested <Sequence>, never by adding offsets by hand.
-- Wrap each scene's layers in <Stage> so a scene always has the film's background behind it.
-  Stage is provided by the runtime; do not define or import it.
+- Wrap each scene's layers in <Stage startFrame={ABSOLUTE_START} durationFrames={SCENE_DURATION}
+  transitionOut="PLAN_TRANSITION">. Stage is provided by the runtime; do not define or import it.
+  These props drive beat-aligned transitions and give nested semantic UI the global music frame.
 - Container components receive their children as JSX children, not as a prop.
 - Asset handles: write resolveAsset('exact_handle_from_the_plan'). Never a literal URL,
   never a template string, never a variable built at render time.

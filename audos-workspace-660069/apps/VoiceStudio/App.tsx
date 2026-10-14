@@ -16,6 +16,7 @@ import { StudioStyles, T, ToastProvider } from './components/Ui';
 import { useKeyVerdict } from './hooks/useKeyVerdict';
 import AppShell from '../../components/ui/AppShell';
 import Badge from '../../components/ui/Badge';
+import { withBrandContext } from '../../components/BrandContextLayer';
 import TextToSpeechTab from './tabs/TextToSpeechTab';
 import VoiceCloneTab from './tabs/VoiceCloneTab';
 import SpeechToSpeechTab from './tabs/SpeechToSpeechTab';
@@ -76,7 +77,9 @@ function KeyStatus() {
   );
 }
 
-export default function VoiceStudio() {
+const BrandedVoiceStudio = withBrandContext(VoiceStudio, 'Voice Studio');
+export default BrandedVoiceStudio;
+function VoiceStudio() {
   const [active, setActive] = useState(TABS[0].id);
   const current = TABS.find((tab) => tab.id === active) || TABS[0];
   const ActiveTab = current.Component;
@@ -94,14 +97,14 @@ export default function VoiceStudio() {
           <span
             className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
             style={{
-              background: `linear-gradient(135deg, ${T.accent}, ${T.cyan})`,
-              boxShadow: '0 8px 22px rgba(200,146,10,0.4)',
+              background: `linear-gradient(135deg, ${T.accent}, ${T.highlight})`,
+              boxShadow: '0 8px 22px rgba(212,146,10,0.4)',
             }}
           >
             <Mic className="h-5 w-5" style={{ color: '#FFFFFF' }} />
           </span>
         )}
-        actions={<Badge variant="violet">{current.label}</Badge>}
+        actions={<Badge variant="brand">{current.label}</Badge>}
       >
         <div className="flex flex-col gap-5 lg:flex-row lg:gap-6">
           {/* Rail: a left sidebar on desktop, a horizontally scrolling strip on mobile. */}

@@ -74,7 +74,7 @@ export default function HeygenAvatarPicker({ active, selected, onSelect }: Heyge
         <button
           type="button"
           onClick={() => setAttempt((value) => value + 1)}
-          className="shrink-0 rounded-full border border-[var(--vv-border)] px-3 py-1 text-[11px] text-[#3D2800] transition-colors hover:text-[#1A1000]"
+          className="shrink-0 rounded-full border border-[var(--vv-border)] px-3 py-1 text-[11px] text-[#9E8B55] transition-colors hover:text-[#F5E9C8]"
         >
           Try again
         </button>
@@ -86,12 +86,12 @@ export default function HeygenAvatarPicker({ active, selected, onSelect }: Heyge
     <div>
       <div className="mb-3 flex items-center gap-2">
         <span className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-[var(--vv-border)] px-3 py-1.5">
-          <Search size={13} className="shrink-0 text-[#A08B5F]" />
+          <Search size={13} className="shrink-0 text-[#6E5F38]" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search characters"
-            className="min-w-0 flex-1 bg-transparent text-[12px] text-[#1A1000] outline-none placeholder:text-[#A08B5F]"
+            className="min-w-0 flex-1 bg-transparent text-[12px] text-[#F5E9C8] outline-none placeholder:text-[#6E5F38]"
             aria-label="Search HeyGen characters"
           />
         </span>
@@ -99,7 +99,7 @@ export default function HeygenAvatarPicker({ active, selected, onSelect }: Heyge
           <button
             type="button"
             onClick={() => onSelect(null)}
-            className="shrink-0 rounded-full border border-[var(--vv-border)] px-3 py-1.5 text-[11px] text-[#3D2800] transition-colors hover:text-[#1A1000]"
+            className="shrink-0 rounded-full border border-[var(--vv-border)] px-3 py-1.5 text-[11px] text-[#9E8B55] transition-colors hover:text-[#F5E9C8]"
           >
             Skip character
           </button>
@@ -128,7 +128,7 @@ export default function HeygenAvatarPicker({ active, selected, onSelect }: Heyge
                   }}
                   title={avatar.name}
                 >
-                  <span className="block aspect-[3/4] w-full bg-[rgba(180,120,0,0.06)]">
+                  <span className="block aspect-[3/4] w-full bg-[rgba(255,255,255,0.04)]">
                     {avatar.previewImage ? (
                       <img
                         src={avatar.previewImage}
@@ -137,7 +137,7 @@ export default function HeygenAvatarPicker({ active, selected, onSelect }: Heyge
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      <span className="flex h-full w-full items-center justify-center text-[#A08B5F]">
+                      <span className="flex h-full w-full items-center justify-center text-[#6E5F38]">
                         <User size={18} />
                       </span>
                     )}
@@ -145,7 +145,7 @@ export default function HeygenAvatarPicker({ active, selected, onSelect }: Heyge
 
                   {chosen && (
                     <span
-                      className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full text-[#1a1203]"
+                      className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full text-white"
                       style={{ background: 'var(--vv-gold)' }}
                     >
                       <Check size={12} />

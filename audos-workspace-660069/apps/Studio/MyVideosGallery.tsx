@@ -90,7 +90,7 @@ function VideoCard({ job }: { job: any }) {
                 position: 'absolute',
                 inset: 0,
                 background:
-                  'radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--space-brand-primary-600) 28%, transparent), transparent 62%), linear-gradient(180deg, #101014 0%, #050507 100%)',
+                  'radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--space-brand-primary-600) 28%, transparent), transparent 62%), linear-gradient(180deg, #0D0B05 0%, #050507 100%)',
               }}
             />
             {ready ? (

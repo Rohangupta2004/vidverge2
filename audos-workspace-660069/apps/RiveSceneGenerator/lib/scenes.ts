@@ -102,15 +102,15 @@ export function describeInput(i: MachineInputSpec): string {
 /* --------------------------------- theme --------------------------------- */
 
 export const THEME = {
-  bg0: '#0a0a0f',
-  bg1: '#13131f',
-  panel: 'rgba(19,19,31,0.88)',
-  panelStrong: 'rgba(24,24,40,0.95)',
-  card: 'rgba(28,28,46,0.92)',
-  border: 'rgba(148,148,180,0.18)',
+  bg0: '#0D0B05',
+  bg1: '#110E07',
+  panel: 'rgba(17,14,7,0.88)',
+  panelStrong: 'rgba(24,21,10,0.95)',
+  card: 'rgba(28,24,8,0.92)',
+  border: 'rgba(158,139,85,0.18)',
   borderStrong: 'rgba(252,211,77,0.34)',
-  text: '#f4f4f8',
-  muted: '#9b9bb4',
+  text: '#F5E9C8',
+  muted: '#9E8B55',
   violet: '#f59e0b',
   violetBright: '#fcd34d',
   violetDeep: '#b45309',
@@ -435,7 +435,7 @@ export function drawBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number
 
   ctx.save();
   ctx.globalAlpha = 0.045;
-  ctx.strokeStyle = '#b4b4d0';
+  ctx.strokeStyle = '#C8AA6E';
   ctx.lineWidth = 1;
   const step = 48;
   const off = (nowMs / 70) % step;
@@ -458,7 +458,7 @@ export function drawEmptyStage(ctx: CanvasRenderingContext2D, w: number, h: numb
   drawBackdrop(ctx, w, h, nowMs);
   ctx.save();
   ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(244,244,248,0.82)';
+  ctx.fillStyle = 'rgba(245,233,200,0.82)';
   ctx.font = '600 30px Inter, system-ui, sans-serif';
   ctx.fillText('Describe an animation, then press Generate Animation', w / 2, h / 2 - 6);
   ctx.fillStyle = THEME.muted;
@@ -546,7 +546,7 @@ function drawShell(ctx: CanvasRenderingContext2D, tl: Timeline, nowMs: number, b
     ctx.save();
     ctx.globalAlpha = 0.9 * (1 - easeInOutCubic(Math.max(0, (nowMs - loadEnd + 260) / 260)));
     roundRect(ctx, P.x + 28, P.y + LAYOUT.headerH + 18, barW, 4, 999);
-    ctx.fillStyle = 'rgba(148,148,180,0.18)';
+    ctx.fillStyle = 'rgba(158,139,85,0.18)';
     ctx.fill();
     roundRect(ctx, P.x + 28, P.y + LAYOUT.headerH + 18, Math.max(6, barW * easeOutCubic(k)), 4, 999);
     ctx.fillStyle = THEME.violetBright;
@@ -626,7 +626,7 @@ function drawChart(ctx: CanvasRenderingContext2D, tl: Timeline, nowMs: number) {
 
   ctx.save();
   ctx.globalAlpha = frame;
-  glass(ctx, R.x, R.y, R.w, R.h, 16, { fill: 'rgba(16,16,28,0.9)', border: THEME.border });
+  glass(ctx, R.x, R.y, R.w, R.h, 16, { fill: 'rgba(17,14,7,0.9)', border: THEME.border });
 
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = THEME.muted;
@@ -637,7 +637,7 @@ function drawChart(ctx: CanvasRenderingContext2D, tl: Timeline, nowMs: number) {
   const gx1 = R.x + R.w - 22;
   const gy0 = R.y + 52;
   const gy1 = R.y + R.h - 26;
-  ctx.strokeStyle = 'rgba(148,148,180,0.1)';
+  ctx.strokeStyle = 'rgba(158,139,85,0.1)';
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     const gy = gy0 + ((gy1 - gy0) * i) / 4;
@@ -826,7 +826,7 @@ function drawCursor(ctx: CanvasRenderingContext2D, tl: Timeline, nowMs: number) 
   ctx.fill();
   ctx.shadowBlur = 0;
   ctx.lineWidth = 1.2;
-  ctx.strokeStyle = '#0a0a0f';
+  ctx.strokeStyle = '#0D0B05';
   ctx.stroke();
   ctx.restore();
 }

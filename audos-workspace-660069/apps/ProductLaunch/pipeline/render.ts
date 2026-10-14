@@ -11,6 +11,7 @@
 // Player, which is what makes the preview binding rather than decorative.
 
 import { registrySnapshot } from '../lib/asset-registry';
+import type { BeatMap, PreparedAudio } from '../lib/audio';
 import { WORKSPACE_ID } from '../lib/platform';
 import { REMOTION_IMPORTS, SDK_RUNTIME_SOURCE } from '../sdk/runtime-source';
 import { RENDER_CONSTRAINTS } from '../sdk/component-sdk.types';
@@ -97,12 +98,32 @@ export function stripRegisterRoot(code: string): string {
 export interface BundleOptions {
   theme?: FilmTheme;
   assets?: Record<string, string>;
+  audio?: PreparedAudio;
+}
+
+function wrapWithAudio(body: string, audio?: PreparedAudio): string {
+  if (!audio?.musicUrl) return body;
+  const match = body.match(/export\s+default\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;?\s*$/);
+  if (!match) throw new Error('The film default export could not be wrapped with mandatory audio.');
+  const generatedName = match[1];
+  const withoutExport = body.slice(0, match.index).trim();
+  const music = JSON.stringify(audio.musicUrl);
+  const narration = audio.narrationUrl ? JSON.stringify(audio.narrationUrl) : '';
+  return [
+    withoutExport,
+    'const ProductLaunchOutput = () => React.createElement(AbsoluteFill, null,',
+    '  React.createElement(' + generatedName + ', null),',
+    '  React.createElement(Audio, { src: ' + music + ', volume: 0.34 }),',
+    narration ? '  React.createElement(Audio, { src: ' + narration + ', volume: 1 })' : '  null',
+    ');',
+    'export default ProductLaunchOutput;',
+  ].join('\n');
 }
 
 export function buildFilmBundle(filmTsx: string, options: BundleOptions = {}): string {
   const theme = options.theme || DEFAULT_FILM_THEME;
   const assets = options.assets || registrySnapshot();
-  const body = stripRegisterRoot(stripImports(filmTsx)).trim();
+  const body = wrapWithAudio(stripRegisterRoot(stripImports(filmTsx)).trim(), options.audio);
 
   const preamble = [
     "import React from 'react';",
@@ -121,6 +142,8 @@ export function buildFilmBundle(filmTsx: string, options: BundleOptions = {}): s
     '}',
     '',
     'const FILM_THEME = ' + JSON.stringify(theme, null, 2) + ';',
+    '',
+    'const BEAT_MAP = ' + JSON.stringify(options.audio?.beatMap || ({ bpm: 120, beats: [], source: 'estimated' } as BeatMap), null, 2) + ';',
     '',
     'const RENDER_CONSTRAINTS = ' + JSON.stringify(RENDER_CONSTRAINTS, null, 2) + ';',
   ].join('\n');
@@ -149,6 +172,7 @@ export interface RenderOptions {
   frameCount?: number;
   theme?: FilmTheme;
   assets?: Record<string, string>;
+  audio?: PreparedAudio;
   onProgress?: (phase: RenderPhase, elapsedMs: number) => void;
   intervalMs?: number;
   timeoutMs?: number;
@@ -220,7 +244,8 @@ export async function renderFilm(
     RENDER_CONSTRAINTS.maxDurationFrames,
     Math.max(1, Math.round(options.frameCount || RENDER_CONSTRAINTS.fps * 20)),
   );
-  const bundle = buildFilmBundle(filmTsx, { theme: options.theme, assets: options.assets });
+  if (!options.audio?.musicUrl) throw new Error('Music is mandatory for Product Launch renders.');
+  const bundle = buildFilmBundle(filmTsx, { theme: options.theme, assets: options.assets, audio: options.audio });
   const onProgress = options.onProgress || (() => undefined);
 
   const started = Date.now();

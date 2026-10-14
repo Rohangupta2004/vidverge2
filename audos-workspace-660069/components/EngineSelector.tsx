@@ -6,12 +6,9 @@
  *                  Video Enhancer and Ads Studio next to their generate
  *                  buttons.
  *
- * EVERY RUNWAY ENTRY IS SELECTABLE. The roster beyond gen4.5 / gen4_turbo used
- * to render disabled, which left the customer staring at a greyed-out button
- * with nothing to do about it. Those entries are now choosable and labelled
- * with where they actually run: lib/runwayAdapter re-films the shot on
- * Omni Flash 1.1 when the proxy refuses the model, and the host app says so in
- * a toast (see lib/omniFallback.ts).
+ * Health-probe failures stay visible but disabled with an Unavailable badge
+ * and the real probe reason. Runway catalog entries that have a documented
+ * Omni fallback remain selectable because they still produce a clip.
  *
  * Kling and Higgsfield route through /api/generate/kling/* and
  * /api/generate/higgsfield/* with X-Workspace-DB-Token on every call.
@@ -21,8 +18,9 @@
  */
 import { CSSProperties, useCallback, useEffect, useState } from 'react';
 import {
-  GROUP_A_MODELS, HIGGSFIELD_VIDEO_MODELS, IMAGE_MODELS, KLING_MODELS, KLING_COMING_SOON_MESSAGE, RUNWAY_MODELS,
-  groupAModel, isKlingModel, runwayInputLabel, runwayModel, runwayVideoModel,
+  DEFAULT_ENGINE_ID, GROUP_A_MODELS, HIGGSFIELD_VIDEO_MODELS, IMAGE_MODELS, KLING_MODELS, KLING_COMING_SOON_MESSAGE, RUNWAY_MODELS,
+  engineAvailabilityBadge, engineHealthWarning, groupAModel, isEngineAvailable, isKlingModel,
+  runwayInputLabel, runwayModel, runwayVideoModel,
   subscribeRunwayCatalog, syncRunwayCatalog, tierColor, EngineTier,
 } from '../lib/videoEngines';
 import { OMNI_FALLBACK_LABEL } from '../lib/omniFallback';
@@ -30,6 +28,20 @@ import { OMNI_FALLBACK_LABEL } from '../lib/omniFallback';
 /** What a Runway entry the proxy does not accept today is labelled with,
  * instead of being greyed out: it still generates, just on the stand-in. */
 const VIA_FALLBACK = ` — via ${OMNI_FALLBACK_LABEL}`;
+
+/**
+ * The suffix an option carries when the last health sweep could not run that
+ * model. A native <select> cannot render a badge element, so the state has to
+ * travel in the option text — otherwise the only place it shows up is after
+ * the customer has already spent a generation on it.
+ *
+ * Failed options remain visible so customers can see the catalog, but they are
+ * disabled until a later health snapshot marks them working again.
+ */
+function availabilitySuffix(id: string): string {
+  const badge = engineAvailabilityBadge(id);
+  return badge ? ` — ⚠ ${badge.label}` : '';
+}
 
 /** Keep the Runway roster live: kick one capabilities sync on mount and
  * re-render whenever the catalog moves (a model was enabled or disabled
@@ -51,12 +63,18 @@ function useRunwayCatalog(): void {
 export function usePersistentEngine(storageKey: string, defaultId: string): [string, (id: string) => void] {
   const key = `engine:${storageKey}`;
   const [value, setValue] = useState<string>(() => {
-    try { return window.sessionStorage.getItem(key) || defaultId; } catch { return defaultId; }
+    try {
+      const stored = window.sessionStorage.getItem(key) || defaultId;
+      return isEngineAvailable(stored) ? stored : (isEngineAvailable(defaultId) ? defaultId : DEFAULT_ENGINE_ID);
+    } catch {
+      return isEngineAvailable(defaultId) ? defaultId : DEFAULT_ENGINE_ID;
+    }
   });
   const set = useCallback((id: string) => {
-    setValue(id);
-    try { window.sessionStorage.setItem(key, id); } catch { /* preference only */ }
-  }, [key]);
+    const next = isEngineAvailable(id) ? id : (isEngineAvailable(defaultId) ? defaultId : DEFAULT_ENGINE_ID);
+    setValue(next);
+    try { window.sessionStorage.setItem(key, next); } catch { /* preference only */ }
+  }, [defaultId, key]);
   return [value, set];
 }
 
@@ -64,7 +82,7 @@ export function EngineBadge({ tier, label, style }: { tier: EngineTier | 'Coming
   const c = tier === 'Coming Soon' || tier === 'Unavailable'
     ? { bg: 'rgba(148,163,184,0.18)', fg: '#94A3B8' }
     : tier === 'Gated'
-      ? { bg: 'rgba(232,163,60,0.16)', fg: '#E8A33C' }
+      ? { bg: 'rgba(240,180,41,0.16)', fg: '#F0B429' }
       : tierColor(tier);
   return (
     <span style={{ display: 'inline-block', background: c.bg, color: c.fg, borderRadius: 6, padding: '2px 7px', fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', whiteSpace: 'nowrap', ...style }}>
@@ -119,6 +137,10 @@ export function EnginePicker(props: EnginePickerProps) {
       ? (selectedRunway.speed === 'fast' ? 'Fast' : selectedRunway.type === 'image' ? 'Recipe' : 'Cinematic')
       : undefined);
   const viaFallback = Boolean(selectedRunway && !selectedRunway.available);
+  // Health of the id that is actually selected, so the warning sits next to
+  // the generate button rather than only inside the dropdown list.
+  const selectedBadge = engineAvailabilityBadge(props.value);
+  const selectedWarning = isEngineAvailable(props.value) ? null : engineHealthWarning(props.value);
 
   // Capability + comparison line (folded in from the retired Model Lab):
   // alongside the input rules, each model shows its clip ceiling and cost
@@ -151,15 +173,17 @@ export function EnginePicker(props: EnginePickerProps) {
           disabled={props.disabled}
           onChange={(e) => props.onChange(e.target.value)}
           style={{
-            background: 'var(--space-surface-card, #10182A)', color: 'var(--space-text-primary, #F8FAFC)',
-            border: '1px solid var(--space-border-default, rgba(148,163,184,0.16))', borderRadius: 9,
+            background: 'var(--space-surface-muted, #18150A)', color: 'var(--space-text-primary, #F5E9C8)',
+            border: '1px solid var(--space-border-default, rgba(255,255,255,0.1))', borderRadius: 8,
             padding: '8px 10px', fontSize: 12.5, fontWeight: 600, cursor: props.disabled ? 'default' : 'pointer',
             maxWidth: '100%', minWidth: 0,
           }}
         >
           <optgroup label="Google / OpenAI / OpenRouter">
             {groupA.map((m) => (
-              <option key={m.id} value={m.id}>{m.name} — {m.tier}</option>
+              <option key={m.id} value={m.id} disabled={!isEngineAvailable(m.id)} title={engineHealthWarning(m.id) || undefined}>
+                {m.name} — {m.tier}{availabilitySuffix(m.id)}
+              </option>
             ))}
           </optgroup>
           {props.includeRunway ? (
@@ -174,14 +198,18 @@ export function EnginePicker(props: EnginePickerProps) {
           {includeKling ? (
             <optgroup label="Kling">
               {KLING_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>{m.name} — {m.tier}</option>
+                <option key={m.id} value={m.id} disabled={!isEngineAvailable(m.id)} title={engineHealthWarning(m.id) || undefined}>
+                  {m.name} — {m.tier}{availabilitySuffix(m.id)}
+                </option>
               ))}
             </optgroup>
           ) : null}
           {includeHiggsfield ? (
             <optgroup label="Higgsfield">
               {HIGGSFIELD_VIDEO_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+                <option key={m.id} value={m.id} disabled={!isEngineAvailable(m.id)} title={engineHealthWarning(m.id) || undefined}>
+                  {m.name}{availabilitySuffix(m.id)}
+                </option>
               ))}
             </optgroup>
           ) : null}
@@ -189,9 +217,17 @@ export function EnginePicker(props: EnginePickerProps) {
         {tier ? <EngineBadge tier={tier} label={selectedRunway?.speed === 'fast' ? '⚡ Fast' : undefined} /> : null}
         {viaFallback ? <EngineBadge tier="Gated" label={OMNI_FALLBACK_LABEL} /> : null}
         {selectedKling ? <EngineBadge tier="Coming Soon" /> : null}
+        {selectedBadge ? <EngineBadge tier="Unavailable" label={selectedBadge.label} /> : null}
       </div>
+      {/* The health warning goes ABOVE the capability line: what a model can
+          accept does not matter if the proxy will refuse it. */}
+      {selectedWarning ? (
+        <div style={{ fontSize: 11, color: 'var(--space-semantic-danger, #f87171)', marginTop: 5, lineHeight: 1.45 }}>
+          {selectedWarning}
+        </div>
+      ) : null}
       {capabilityNote ? (
-        <div style={{ fontSize: 11, color: 'var(--space-text-muted, #94A3B8)', marginTop: 5, lineHeight: 1.45 }}>{capabilityNote}</div>
+        <div style={{ fontSize: 11, color: 'var(--space-text-muted, #9E8B55)', marginTop: 5, lineHeight: 1.45 }}>{capabilityNote}</div>
       ) : null}
       {props.note ? (
         <div style={{ fontSize: 11, color: 'var(--space-text-muted, #94A3B8)', marginTop: 3, lineHeight: 1.45 }}>{props.note}</div>
@@ -265,8 +301,8 @@ export function ImageEnginePicker(props: ImageEnginePickerProps) {
             props.onChange(id);
           }}
           style={{
-            background: 'var(--space-surface-card, #10182A)', color: 'var(--space-text-primary, #F8FAFC)',
-            border: '1px solid var(--space-border-default, rgba(148,163,184,0.16))', borderRadius: 9,
+            background: 'var(--space-surface-muted, #18150A)', color: 'var(--space-text-primary, #F5E9C8)',
+            border: '1px solid var(--space-border-default, rgba(255,255,255,0.1))', borderRadius: 8,
             padding: '8px 10px', fontSize: 12.5, fontWeight: 600, cursor: props.disabled ? 'default' : 'pointer',
             maxWidth: '100%', minWidth: 0,
           }}

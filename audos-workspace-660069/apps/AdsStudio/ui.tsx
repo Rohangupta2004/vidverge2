@@ -13,15 +13,18 @@ import { T } from './api';
 export const card: CSSProperties = {
   background: T.card,
   border: `1px solid ${T.line}`,
-  borderRadius: 14,
+  borderRadius: 12,
   padding: 16,
+  boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
 };
 
 export const inputStyle: CSSProperties = {
   width: '100%',
-  background: T.panel,
-  border: `1px solid ${T.line}`,
-  borderRadius: 10,
+  // The input well sits BELOW the card it is in, not level with it, so a
+  // field still reads as a field on a dark ground.
+  background: T.input,
+  border: '1px solid rgba(255,255,255,0.1)',
+  borderRadius: 8,
   padding: '10px 12px',
   color: T.ink,
   fontSize: 14,
@@ -50,8 +53,13 @@ export function Btn(props: {
   className?: string;
 }) {
   const { kind = 'ghost', small } = props;
-  const bg = kind === 'primary' ? T.accent : kind === 'danger' ? 'rgba(239,68,68,0.14)' : T.panel;
-  const color = kind === 'primary' ? '#fff' : kind === 'danger' ? T.bad : T.soft;
+  const bg =
+    kind === 'primary'
+      ? 'linear-gradient(135deg, var(--space-brand-primary-500) 0%, var(--space-brand-highlight-500) 100%)'
+      : kind === 'danger'
+        ? 'rgba(248,113,113,0.14)'
+        : 'var(--space-surface-panel-strong)';
+  const color = kind === 'primary' ? 'var(--space-text-on-primary)' : kind === 'danger' ? T.bad : T.soft;
   return (
     <button
       type="button"
@@ -61,7 +69,7 @@ export function Btn(props: {
       disabled={props.disabled}
       style={{
         background: bg, color, border: `1px solid ${kind === 'ghost' ? T.line : 'transparent'}`,
-        borderRadius: 10, padding: small ? '6px 10px' : '10px 16px', fontSize: small ? 12 : 14,
+        borderRadius: 8, padding: small ? '6px 10px' : '10px 16px', fontSize: small ? 12 : 14,
         fontWeight: 600, fontFamily: T.sans, cursor: props.disabled ? 'not-allowed' : 'pointer',
         opacity: props.disabled ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', gap: 7,
       }}

@@ -58,9 +58,9 @@ export function useToasts(): ToastController {
 }
 
 function toneColour(tone: ToastTone): string {
-  if (tone === 'warn') return 'var(--space-semantic-warning-500, #f59e0b)';
+  if (tone === 'warn') return 'var(--space-semantic-warning-500, #fbbf24)';
   if (tone === 'success') return 'var(--space-semantic-success-500, #22c55e)';
-  return 'var(--space-brand-primary-500, #f59e0b)';
+  return 'var(--space-brand-primary-500, #D4920A)';
 }
 
 function ToneIcon({ tone }: { tone: ToastTone }) {
@@ -82,9 +82,9 @@ export function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: 
             role="status"
             className="pointer-events-auto flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed shadow-lg backdrop-blur"
             style={{
-              background: 'color-mix(in srgb, var(--space-surface-panel, #101623) 92%, transparent)',
+              background: 'color-mix(in srgb, var(--space-surface-panel, #15120A) 92%, transparent)',
               borderColor: `color-mix(in srgb, ${colour} 38%, transparent)`,
-              color: 'var(--space-text-secondary, #CBD5E1)',
+              color: 'var(--space-text-secondary, #9E8B55)',
             }}
           >
             <span className="mt-0.5" style={{ color: colour }}>

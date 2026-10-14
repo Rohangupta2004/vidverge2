@@ -3,13 +3,19 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { Clapperboard, Copy, Eye, GitBranch, Image, Plus, Scissors, Trash2, Type, Upload, Video, Volume2, VolumeX, X } from 'lucide-react';
 import { IMAGE_MODELS } from '../lib/imageTool';
 import { AVATAR_SAFE_POSITIONS, COMPOSITION_MODES, EFFECT_PRESETS, KIND_COLORS, KIND_LABELS, MEDIA_LAYOUTS, OVERLAY_POSITIONS, OVERLAY_SIZES, TEXT_ANIMATIONS, defaultOverlay, effectPresetMeta, effectiveComposition, normalizeEffect, visualKindOf, type CompositionPosition, type CompositionSpec, type EffectSetting, type MediaLayout, type OverlayConfig, type VisualKind } from '../lib/effects';
-import { isVideoUrl } from '../lib/sceneState';
-import { hasFreshMotionClip, portraitPlacement, sceneDirection, sceneMotionDuration, sceneMotionSpec } from '../lib/motionCapture';
+import { isVideoUrl, sceneSettled } from '../lib/sceneState';
+import { portraitPlacement } from '../lib/motionCapture';
+import { sceneMotionDuration, sceneMotionSpec } from '../lib/motionScene';
 import { MOTION_KINDS, normalizeMotionSpec, type MotionItem, type MotionSpec } from '../lib/motionSpec';
-import MotionGraphicPlayer from './MotionGraphicPlayer';
+import { fallbackElementComposition, sceneElementComposition } from '../lib/elementComposition';
+import { ElementCompositionPlayer } from './ElementCompositionView';
+import { sceneVideoEngine } from '../lib/videoTool';
+import { sceneForgeDurationLimits } from '../lib/providers';
+import { formatSceneDurationHint, validateSceneDurations } from '../../../lib/videoEngines';
 import VergeLoader from '../../../components/VergeLoader';
 import { getProject, type Asset, type Scene } from '../lib/supabase';
 import { forgeApi } from '../lib/forge';
+import { hasFreshVideoBackedGraphic, sceneVideoBackedSpec } from '../lib/videoBackedGraphic';
 
 interface Props {
   scenes: Scene[];
@@ -70,10 +76,11 @@ const PREVIEW_KEYFRAMES = `
 `;
 
 const KIND_CHOICES: { id: VisualKind; icon: typeof Clapperboard; hint: string }[] = [
+  { id: 'video_backed_graphic', icon: Video, hint: 'Looped cinematic footage with independent infographic depth layers' },
   { id: 'ai_video', icon: Clapperboard, hint: 'Real generated footage — places, actions, cinematic motion' },
-  { id: 'motion_graphic', icon: GitBranch, hint: 'GSAP diagram / chart / timeline — exact text, captured to a clip' },
+  { id: 'motion_graphic', icon: GitBranch, hint: 'Remotion diagram / chart / timeline — exact text, rendered server-side' },
   { id: 'image', icon: Image, hint: 'One strong still for the window' },
-  { id: 'text_overlay', icon: Type, hint: 'A deterministic animated headline, captured to a clip' },
+  { id: 'text_overlay', icon: Type, hint: 'A deterministic animated headline, rendered in the final Remotion pass' },
 ];
 
 function itemsToText(items: MotionItem[]): string {
@@ -120,6 +127,9 @@ export default function ScenePlanner(props: Props) {
   const approved = scenes.filter((scene) => scene.approved).length;
   const pickableAssets = assets.filter((asset) => asset.public_url && (asset.asset_type === 'scene_image' || asset.asset_type === 'user_upload'));
   void timelineRevision;
+  const durationModel = sceneVideoEngine();
+  const durationLimits = sceneForgeDurationLimits(durationModel);
+  const durationHint = formatSceneDurationHint(durationLimits);
 
   useEffect(() => {
     const projectId = scenes[0]?.project_id;
@@ -169,7 +179,7 @@ export default function ScenePlanner(props: Props) {
     void onPatch(scene.id, { qc_weak: false, qc_suggestion: null });
     const kind = visualKindOf(scene.visual_kind);
     if (kind === 'ai_video') onGenerateVideo(scene);
-    else if (kind === 'motion_graphic' || kind === 'text_overlay') onGenerateMotion(scene);
+    else if (kind === 'video_backed_graphic' || kind === 'motion_graphic' || kind === 'text_overlay') onGenerateMotion(scene);
     else onGenerateImage(scene);
   };
   useEffect(() => {
@@ -221,7 +231,7 @@ export default function ScenePlanner(props: Props) {
     <style>{PREVIEW_KEYFRAMES}</style>
     <p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Step 5 · Video blueprint</p>
     <h1 className="mt-2 text-3xl font-bold text-[var(--space-text-primary)]">Talking head, cut with middle visuals</h1>
-    <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--space-text-secondary)]">Your presenter carries the film and their narration never stops. Each middle scene is <strong>composited around the presenter</strong> — small stats and callouts ride over them as transparent overlays, diagrams take a central panel while they stay visible, and only cinematic beats cut away full-screen. Choose <strong>AI Video</strong> for real footage, <strong>Motion Graphic</strong> for diagrams, timelines, charts and exact text, <strong>Image</strong> for a strong still, or <strong>Text Overlay</strong> for an animated headline; the composition mode on each scene decides how it sits against the presenter.</p>
+    <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--space-text-secondary)]">Your presenter carries the film and their narration never stops. Each middle scene is <strong>composited around the presenter</strong> — small stats and callouts ride over them as transparent overlays, diagrams take a central panel while they stay visible, and only cinematic beats cut away full-screen. Choose <strong>Video + Graphics</strong> for footage with layered explanation, <strong>AI Video</strong> for pure footage, <strong>Motion Graphic</strong> for diagrams, timelines, charts and exact text, <strong>Image</strong> for a strong still, or <strong>Text Overlay</strong> for an animated headline; the composition mode on each scene decides how it sits against the presenter.</p>
     <div className="mt-6 rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-5">
       <div className="mb-3 flex items-center justify-between text-sm text-[var(--space-text-secondary)]"><span>Timeline · {duration.toFixed(1)} seconds</span><span>{approved} of {scenes.length} approved</span></div>
       <div ref={timelineRef} className="overflow-x-auto rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-muted)] p-2 select-none">
@@ -231,6 +241,7 @@ export default function ScenePlanner(props: Props) {
           {[
             { id: 'avatar', label: 'Avatar / video', match: (_scene: Scene) => false, base: true },
             { id: 'broll', label: 'AI B-roll', match: (scene: Scene) => ['ai_video', 'image'].includes(visualKindOf(scene.visual_kind)) },
+            { id: 'layered', label: 'Video + graphics', match: (scene: Scene) => visualKindOf(scene.visual_kind) === 'video_backed_graphic' },
             { id: 'motion', label: 'Motion graphics', match: (scene: Scene) => visualKindOf(scene.visual_kind) === 'motion_graphic' },
             { id: 'text', label: 'Text overlays', match: (scene: Scene) => ['text_overlay', 'text_graphics'].includes(visualKindOf(scene.visual_kind)) },
           ].map((track) => <div key={track.id} className="contents">
@@ -243,7 +254,7 @@ export default function ScenePlanner(props: Props) {
         </div>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-4 text-[11px] text-[var(--space-text-muted)]">
-        {(['heygen', 'ai_video', 'motion_graphic', 'image', 'text_overlay'] as const).map((kind) => <span key={kind} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: KIND_COLORS[kind] }} />{kind === 'heygen' ? 'HeyGen talking head' : KIND_LABELS[kind]}</span>)}
+        {(['heygen', 'video_backed_graphic', 'ai_video', 'motion_graphic', 'image', 'text_overlay'] as const).map((kind) => <span key={kind} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: KIND_COLORS[kind] }} />{kind === 'heygen' ? 'HeyGen talking head' : KIND_LABELS[kind]}</span>)}
         <span className="ml-auto">First 5 seconds and the CTA always stay on the presenter</span>
       </div>
       <div className="mt-4 flex gap-2">{(['low', 'medium', 'high'] as const).map((value) => <button key={value} onClick={() => onShare(value)} className={share === value ? 'rounded-lg bg-[var(--space-brand-primary-600)] px-3 py-2 text-sm font-medium capitalize text-white shadow-[0_2px_8px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all' : 'rounded-lg bg-[var(--space-surface-card)] px-3 py-2 text-sm capitalize text-[var(--space-text-secondary)] transition-all hover:bg-[color-mix(in_srgb,var(--space-text-primary)_7%,var(--space-surface-card))] hover:text-[var(--space-text-primary)]'}>{value} · {value === 'low' ? '30%' : value === 'medium' ? '50%' : '65%'}</button>)}</div>
@@ -259,10 +270,15 @@ export default function ScenePlanner(props: Props) {
       const effectMeta = effectPresetMeta(effect.preset);
       const busyHere = generatingSceneId === scene.id;
       const hasVideo = isVideoUrl(scene.render_url);
-      const isMotionKind = kind === 'motion_graphic' || kind === 'text_overlay';
-      const freshMotion = isMotionKind && hasFreshMotionClip(scene);
+      const isMotionKind = kind === 'video_backed_graphic' || kind === 'motion_graphic' || kind === 'text_overlay';
+      const freshMotion = kind === 'video_backed_graphic' ? hasFreshVideoBackedGraphic(scene) : isMotionKind && sceneSettled(scene);
+      const durationProblems = ['ai_video', 'video_backed_graphic'].includes(kind)
+        ? validateSceneDurations(durationModel, [Math.round(Number(scene.script_end_sec) - Number(scene.script_start_sec))], { limits: durationLimits })
+          .map((problem) => problem.replace(/^Scene 1\b/, `Scene ${scene.scene_index}`))
+        : [];
       const overAvatarOn = kind === 'text_overlay' && overlay.overAvatar === true;
       const spec = isMotionKind ? specOf(scene) : null;
+      const videoBacked = kind === 'video_backed_graphic' ? sceneVideoBackedSpec(scene) : null;
       const stillUrl = !hasVideo ? ((overlay.showAsset !== false && overlay.assetUrl) || scene.render_url) : '';
       return <div key={scene.id} id={`sceneforge-scene-${scene.scene_index}`} className="rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4 transition-colors hover:border-[var(--space-border-strong)]">
         <div className="flex flex-wrap items-center gap-3">
@@ -272,6 +288,9 @@ export default function ScenePlanner(props: Props) {
           <span className="text-[var(--space-text-muted)]">to</span>
           <input type="number" step={0.1} value={scene.script_end_sec} onChange={(e) => onPatch(scene.id, { script_end_sec: Number(e.target.value) })} className="input w-24" />
           <input value={scene.scene_type} onChange={(e) => onPatch(scene.id, { scene_type: e.target.value })} className="input w-36" />
+          <span className={`basis-full text-[11px] ${durationProblems.length ? 'text-[var(--space-semantic-danger)]' : 'text-[var(--space-text-muted)]'}`}>
+            {durationProblems[0] || durationHint}
+          </span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <button type="button" disabled={timelineBusy === scene.id} onClick={() => void splitScene(scene)} className="flex items-center gap-1 rounded-lg border border-[var(--space-border-default)] px-2 py-1.5 text-xs text-[var(--space-text-secondary)]"><Scissors className="h-3.5 w-3.5" />Split</button>
             <button type="button" disabled={timelineBusy === scene.id} onClick={() => void duplicateScene(scene)} className="flex items-center gap-1 rounded-lg border border-[var(--space-border-default)] px-2 py-1.5 text-xs text-[var(--space-text-secondary)]"><Copy className="h-3.5 w-3.5" />Duplicate</button>
@@ -307,10 +326,11 @@ export default function ScenePlanner(props: Props) {
 
         {isMotionKind ? <div className="mt-3 rounded-xl border bg-[var(--space-surface-panel)] p-3" style={{ borderColor: `color-mix(in srgb, ${KIND_COLORS[kind]} 45%, transparent)` }}>
           <div className="flex flex-wrap items-center gap-2">
-            <label className="text-xs font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">{kind === 'motion_graphic' ? 'Motion graphic spec — every string renders exactly as written' : 'Text overlay — exact animated text'}</label>
+            <label className="text-xs font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">{kind === 'video_backed_graphic' ? 'Video + graphics — footage below, exact directed layers above' : kind === 'motion_graphic' ? 'Motion graphic spec — every string renders exactly as written' : 'Text overlay — exact animated text'}</label>
             <span className="ml-auto text-[11px] text-[var(--space-text-muted)]">{sceneMotionDuration(scene).toFixed(1)}s clip · {aspect}</span>
           </div>
-          {kind === 'motion_graphic' && spec ? <>
+          {kind === 'video_backed_graphic' ? <textarea value={videoBacked?.background_prompt || ''} onChange={(event) => onPatch(scene.id, { composition_spec: { ...(scene.composition_spec || {}), version: 1, type: 'video_backed_graphic', background_prompt: event.target.value }, video_prompt: '', status: 'pending' })} rows={3} placeholder="Motion-rich cinematic background brief — no words, logos or watermark" className="mt-2 w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-3 text-sm text-[var(--space-text-primary)]" /> : null}
+          {(kind === 'motion_graphic' || kind === 'video_backed_graphic') && spec ? <>
             <div className="mt-2 flex flex-wrap gap-2">
               <select value={spec.kind} onChange={(e) => patchSpec(scene, { kind: e.target.value as MotionSpec['kind'] })} className={inputClass} aria-label="Layout kind">{MOTION_KINDS.map((meta) => <option key={meta.id} value={meta.id}>{meta.label}</option>)}</select>
               <span className="self-center text-[11px] text-[var(--space-text-muted)]">{MOTION_KINDS.find((meta) => meta.id === spec.kind)?.detail}</span>
@@ -347,8 +367,8 @@ export default function ScenePlanner(props: Props) {
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button type="button" onClick={() => { setPreviewOnVideo(false); setPreviewSceneId(scene.id); }} className="flex items-center gap-1.5 rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-xs font-semibold text-[var(--space-text-primary)] transition-colors hover:border-[var(--space-border-strong)]"><Eye className="h-3.5 w-3.5" />Preview animation</button>
             {avatarUrl ? <button type="button" onClick={() => { setPreviewOnVideo(true); setPreviewSceneId(scene.id); }} className="flex items-center gap-1.5 rounded-lg border border-[var(--space-border-default)] px-3 py-2 text-xs font-semibold text-[var(--space-text-primary)] transition-colors hover:border-[var(--space-border-strong)]"><Clapperboard className="h-3.5 w-3.5" />Preview on video</button> : null}
-            <button type="button" disabled={Boolean(generatingSceneId)} onClick={() => onGenerateMotion(scene)} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition-all disabled:opacity-40" style={{ background: KIND_COLORS[kind] }}>{busyHere ? <VergeLoader size={30} label="Recording the animation" /> : <Video className="h-3.5 w-3.5" />}{freshMotion ? 'Re-capture clip' : 'Capture clip'}</button>
-            <span className="text-xs text-[var(--space-text-muted)]">{busyHere ? 'Recording the animation in this browser…' : freshMotion ? 'Clip captured — an unchanged spec reuses it' : 'Not captured yet — the batch run records it, or capture now'}</span>
+            <button type="button" disabled={Boolean(generatingSceneId)} onClick={() => onGenerateMotion(scene)} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition-all disabled:opacity-40" style={{ background: KIND_COLORS[kind] }}>{busyHere ? <VergeLoader size={30} label="Producing the layered scene" /> : <Video className="h-3.5 w-3.5" />}{kind === 'video_backed_graphic' ? (freshMotion ? 'Regenerate depth scene' : 'Generate depth scene') : (freshMotion ? 'Rebuild composition' : 'Build composition')}</button>
+            <span className="text-xs text-[var(--space-text-muted)]">{busyHere ? (kind === 'video_backed_graphic' ? 'Generating footage and directing layers…' : 'Building the deterministic Remotion composition…') : freshMotion ? (kind === 'video_backed_graphic' ? 'Footage and depth layers are current — unchanged work is reused' : 'Composition current — an unchanged spec reuses it') : (kind === 'video_backed_graphic' ? 'Not produced yet — the batch run builds footage and layers together' : 'Not composed yet — the final server render animates these layers')}</span>
           </div>
           {hasVideo && freshMotion ? <video src={scene.render_url} controls muted className="mt-3 max-h-56 w-full rounded-xl border border-[var(--space-border-default)] bg-black object-contain" /> : null}</>}
         </div> : null}
@@ -403,7 +423,7 @@ export default function ScenePlanner(props: Props) {
 
         {scene.qc_weak && scene.qc_suggestion ? <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-warning-500)_45%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-warning-500)_10%,transparent)] p-3"><div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-wide text-[var(--space-text-primary)]">Opus QC · weak element</p><p className="mt-1 text-sm text-[var(--space-text-secondary)]">{scene.qc_suggestion}</p></div><button type="button" disabled={Boolean(generatingSceneId)} onClick={() => retryWeakScene(scene)} className="rounded-lg bg-[var(--space-brand-primary-600)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Regenerate only Scene {scene.scene_index}</button></div> : null}
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <span className="text-xs text-[var(--space-text-muted)]">{scene.status === 'error' ? 'last generation failed — retry it or switch the scene type' : scene.status === 'skipped' ? 'skipped — excluded from the film' : isMotionKind ? (overAvatarOn ? 'presenter callout — composed at final assembly, nothing to capture' : freshMotion ? 'motion clip ready' : 'animation defined — clip captures on generate') : hasVideo ? 'AI clip ready' : stillUrl ? 'visual ready' : kind === 'text_graphics' ? 'text overlay ready — no render needed' : kind === 'image' ? 'still not generated yet' : 'clip not generated yet'}</span>
+          <span className="text-xs text-[var(--space-text-muted)]">{scene.status === 'error' ? 'last generation failed — retry it or switch the scene type' : scene.status === 'skipped' ? 'skipped — excluded from the film' : isMotionKind ? (overAvatarOn ? 'presenter callout — composed at final assembly' : freshMotion ? 'Remotion composition ready' : 'animation defined — composition builds on generate') : hasVideo ? 'AI clip ready' : stillUrl ? 'visual ready' : kind === 'text_graphics' ? 'text overlay ready — no render needed' : kind === 'image' ? 'still not generated yet' : 'clip not generated yet'}</span>
           <button onClick={() => onRemove(scene.id)} className="ml-auto text-sm text-[var(--space-semantic-danger)]"><Trash2 className="mr-1 inline h-4 w-4" />Remove</button>
         </div>
       </div>;
@@ -414,14 +434,10 @@ export default function ScenePlanner(props: Props) {
       const previewComp = compositionOf(previewScene);
       const previewSpec = sceneMotionSpec(previewScene);
       const previewDuration = sceneMotionDuration(previewScene);
-      // The Motion Director's timeline (when current) drives the preview too,
-      // so what plays here is exactly what the capture will record.
-      const previewDirected = sceneDirection(previewScene);
+      const previewComposition = sceneElementComposition(previewScene) || fallbackElementComposition(previewSpec, previewDuration, previewSpec.imageUrl);
       const onVideo = previewOnVideo && Boolean(avatarUrl);
       const portraitPreview = aspect === '9:16';
       const rect = portraitPreview ? portraitPlacement(previewComp, { tall: true }) : null;
-      const compact = previewSpec.kind === 'big_stat' || previewSpec.kind === 'text_reveal';
-      const unitScale = previewComp.mode === 'central' ? 1.12 : compact ? 1.5 : 1.25;
       return <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(26,16,0,0.35)] p-6" role="dialog" aria-label={`Scene ${previewScene.scene_index} motion preview`} onClick={() => setPreviewSceneId(null)}>
       <div className="relative w-full max-w-3xl rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -436,12 +452,12 @@ export default function ScenePlanner(props: Props) {
           ? <div className="relative mx-auto overflow-hidden rounded-xl border border-[var(--space-border-default)] bg-black" style={portraitPreview ? { aspectRatio: '9 / 16', height: '68vh' } : { aspectRatio: '16 / 9', width: '100%' }}>
             <video src={avatarUrl} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover" />
             {previewComp.mode === 'fullscreen'
-              ? <div className="absolute inset-0"><MotionGraphicPlayer spec={previewSpec} directed={previewDirected} aspect={aspect} durationSec={previewDuration} tileWidth={portraitPreview ? 1080 : 1920} tileHeight={portraitPreview ? 1920 : 1080} className="h-full w-full" /></div>
+              ? <div className="absolute inset-0"><ElementCompositionPlayer composition={previewComposition} /></div>
               : portraitPreview && rect
-                ? <div style={previewRectStyle(previewComp)}><MotionGraphicPlayer spec={previewSpec} directed={previewDirected} aspect={aspect} durationSec={previewDuration} transparent tileWidth={rect.w} tileHeight={rect.h} unitScale={unitScale} className="h-full w-full" /></div>
-                : <div className="overflow-hidden rounded-2xl border-2 border-white/20 shadow-2xl" style={previewRectStyle(previewComp)}><MotionGraphicPlayer spec={previewSpec} directed={previewDirected} aspect="16:9" durationSec={previewDuration} tileWidth={1920} tileHeight={1080} className="h-full w-full" /></div>}
+                ? <div style={previewRectStyle(previewComp)}><ElementCompositionPlayer composition={{ ...previewComposition, background: 'transparent' }} /></div>
+                : <div className="overflow-hidden rounded-2xl border-2 border-white/20 shadow-2xl" style={previewRectStyle(previewComp)}><ElementCompositionPlayer composition={{ ...previewComposition, background: 'transparent' }} /></div>}
           </div>
-          : <MotionGraphicPlayer spec={previewSpec} directed={previewDirected} aspect={aspect} durationSec={previewDuration} className="mx-auto max-h-[70vh] w-full overflow-hidden rounded-xl border border-[var(--space-border-default)]" />}
+          : <ElementCompositionPlayer composition={previewComposition} />}
         <p className="mt-2 text-xs text-[var(--space-text-muted)]">{onVideo ? 'This is the real composition: your actual avatar footage with the graphic at its final position and size — what you see here is what assembly ships.' : 'The isolated animation. Use “Preview on video” to judge it against the real presenter footage.'}</p>
       </div>
     </div>; })() : null}

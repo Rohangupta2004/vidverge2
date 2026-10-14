@@ -65,8 +65,8 @@ export function AgentThinkingShowcase() {
 
   return (
     <section style={{ padding: '84px 24px' }}>
-      <div style={{ maxWidth: 640, margin: '0 auto', borderRadius: 21, padding: 1, background: 'linear-gradient(135deg, rgba(217, 119, 6, 0.75), rgba(236, 72, 153, 0.65), rgba(245, 158, 11, 0.6))', boxShadow: '0 30px 80px rgba(217, 119, 6, 0.22)' }}>
-        <div style={{ borderRadius: 20, background: '#0f0f1a', padding: 'clamp(28px, 6vw, 48px)', textAlign: 'center' }}>
+      <div style={{ maxWidth: 640, margin: '0 auto', borderRadius: 21, padding: 1, background: 'linear-gradient(135deg, rgba(184, 120, 8, 0.75), rgba(236, 72, 153, 0.65), rgba(212, 146, 10, 0.6))', boxShadow: '0 30px 80px rgba(184, 120, 8, 0.22)' }}>
+        <div style={{ borderRadius: 20, background: '#0D0B05', padding: 'clamp(28px, 6vw, 48px)', textAlign: 'center' }}>
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
             <GradientOrb size="lg" thinking />
           </div>

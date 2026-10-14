@@ -6,7 +6,7 @@
  *
  * GROUPS
  *  A — standard platform video proxy   POST /api/veo/generate/video
- *      (Google Omni/Veo, OpenAI Sora, OpenRouter-hosted models)
+ *      (Google Omni/Veo and OpenRouter-hosted models)
  *  B — Runway proxy                    POST /api/generate/runway/video
  *      + 7 Runway Recipes              POST /api/generate/runway/recipes/:id
  *  C — Kling                           POST /api/generate/kling/text-to-video
@@ -14,19 +14,61 @@
  *  D — image companions                POST /api/veo/generate/image
  *                                      POST /api/generate/image
  *
- * KLING IS NOT REACHABLE (re-verified live 9 Oct 2026, superseding the
- * 27 Sep note that said it was). The catalogue endpoint is NOT a liveness
- * check: GET /api/generate/kling/models still answers 200 with kling-v1,
- * v1-5, v1-6 and v2-master, but it serves a STATIC list, and an actual submit
- * to POST /api/generate/kling/text-to-video answers
- *   503 "Kling is not configured on this platform (KLING_API_KEY missing)."
- * So a surface must never conclude Kling is usable from the 200 on /models —
- * only a submit tells the truth. Treat 503 as the expected answer today and
- * fall back to Omni Flash.
+ * KLING IS LIVE (verified 14 Oct 2026 — the founder's credit pack is active,
+ * superseding the 9 Oct note that said KLING_API_KEY was missing: a real
+ * submit now reaches Kling's API and bills/refunds correctly). Two facts:
+ *  1. kling-v2-master is DISCONTINUED upstream — a live submit answers 502
+ *     wrapping "Kling API error (404, code 1203): The model 'kling-v2-master'
+ *     has been discontinued". Never offer it as runnable.
+ *  2. Kling's own API docs (kling.ai/document-api, read 14 Oct 2026) now use
+ *     model-scoped endpoints with a NEW roster — kling-2.5-turbo, kling-2.6,
+ *     kling-3.0 and kling-3.0-omni — alongside the legacy kling-v1* ids.
+ *     GET /api/generate/kling/models is still a STATIC list (it still names
+ *     v2-master), so it is NOT a liveness oracle — only a submit tells the
+ *     truth. The platform proxy docs also say an id the proxy does not
+ *     recognise falls back to its default with a modelFallback note, so any
+ *     result surface must print the model that actually rendered.
  *
  * Higgsfield video models live in HIGGSFIELD_VIDEO_MODELS below (native
- * /api/generate/higgsfield/* proxy) and are the only non-Google provider
- * verified working end to end on 9 Oct 2026.
+ * /api/generate/higgsfield/* proxy). Live sweep 13 Oct 2026: Hailuo 02 and
+ * the three DoP models rendered real clips end to end. Six Higgsfield
+ * marketplace ids (genjutsu, kling-3.0, minimax-h3, wan-3.0-prime,
+ * seedance-2.5, seedance-2.0) were trialled the same day and REMOVED: the
+ * proxy does not route them — a submit answers 200 but silently falls back
+ * to minimax-hailuo-02 and bills for it. Re-add an id only after a live
+ * submit accepts it as itself. Also: Higgsfield refuses inline (data:)
+ * source images today — stage the image to a public URL first (the shared
+ * client does this automatically).
+ *
+ * REMOVED 13 Oct 2026 — the ids the 9 Oct 2026 sweep confirmed broken are no
+ * longer catalogued at all: sora-2, sora-2-pro, veo-3.0-generate-001,
+ * veo-3.0-fast-generate-001 and veo-2.0-generate-001 (the proxy answered 200
+ * with a synthetic *_error_* id instead of a real job) and
+ * openrouter/bytedance/seedance-2.5-fast (hard 400 — not in the proxy model
+ * enum). They are gone from GROUP_A_MODELS and every list derived from it.
+ *
+ * CORRECTED 13 Oct 2026 (second pass) from the platform integration catalog,
+ * integrations/image-and-video-generation/docs.md, which is the authoritative
+ * contract for /api/veo/generate/video. Three things this file had wrong:
+ *
+ *   1. THE OMNI ID IS VERSIONED NOW. `gemini-omni-1.1-flash` is the proxy's
+ *      default and the id to use in new code. This file carried a TODO saying
+ *      the enum had no versioned spelling; it does.
+ *   2. THE VEO 3.1 PREVIEW IDS ARE ALIASES, NOT ENGINES. The catalog states
+ *      that the retired ids — the Veo 3.x / 2.0 previews, Sora 2 and the Omni
+ *      Flash preview — are still accepted and "every one of them is served by
+ *      gemini-omni-1.1-flash". So the pickers were offering three names for
+ *      one model, and the "up to 4K" promise on two of them was unreachable:
+ *      Omni output caps at 720p. They are kept here with `aliasOf` set, so a
+ *      saved selection still routes, and filtered out of every list a customer
+ *      chooses from. REAL Veo 3.1 is still reachable through the separate,
+ *      NOT-retired `openrouter/google/veo-3.1*` enum entries.
+ *   3. OMNI TAKES TEN REFERENCE IMAGES, not three. The flat `refs > 3` check
+ *      was discarding the character-consistency headroom this workspace picked
+ *      Omni for.
+ *
+ * None of that was re-probed: a sweep spends the wallet, and a catalog that
+ * names its own retirements does not need a paid confirmation to be believed.
  *
  * See ENGINE_HEALTH near the bottom of this file for the per-model outcome of
  * that sweep — which ids actually produced a clip, and which ones the proxy
@@ -53,14 +95,18 @@ export interface GroupAModel {
   blurb: string;
   /** Single seed image (imageData). Every Group A model accepts one. */
   supportsImageData: true;
-  /** referenceImages (max 3) — Omni Flash + Veo 3.1 / 3.1 Fast only. */
+  /** referenceImages at all. See `maxReferenceImages` for how many. */
   supportsReferenceImages: boolean;
-  /** On Veo 3.1 models referenceImages is mutually exclusive with
-   * imageData AND lastFrameImage. Omni Flash allows refs + imageData. */
+  /** How many referenceImages the proxy accepts. Omni 1.1 takes TEN — the
+   * live Interactions API image cap — which is what makes it the character
+   * and product consistency engine. */
+  maxReferenceImages: number;
+  /** True when referenceImages cannot be combined with imageData /
+   * lastFrameImage. Omni allows refs + a seed. */
   refsExclusiveWithSeed: boolean;
-  /** lastFrameImage — Veo 3.1 / 3.1 Fast only (first/last-frame flow). */
+  /** lastFrameImage (first/last-frame interpolation). */
   supportsLastFrame: boolean;
-  /** '4k' resolution honored — veo-3.1-generate-preview + fast only. */
+  /** '4k' resolution actually honored. See FOUR_K_MODELS. */
   supports4k: boolean;
   supportsAudio: boolean;
   supportsNegativePrompt: boolean;
@@ -68,71 +114,85 @@ export interface GroupAModel {
   maxDurationS: number;
   defaultDurationS: number;
   costHint: string;
+  /**
+   * Set when the proxy accepts this id only for backwards compatibility and
+   * serves it on ANOTHER model. Such an entry is kept so a saved selection
+   * still routes, but it is never offered as a distinct choice and never
+   * claims a capability the model it resolves to does not have.
+   */
+  aliasOf?: string;
 }
 
-const gA = (m: Omit<GroupAModel, 'group' | 'supportsImageData' | 'supportsNegativePrompt'>): GroupAModel =>
-  ({ group: 'group-a', supportsImageData: true, supportsNegativePrompt: true, ...m });
+const gA = (
+  m: Omit<GroupAModel, 'group' | 'supportsImageData' | 'supportsNegativePrompt' | 'maxReferenceImages'>
+    & { maxReferenceImages?: number },
+): GroupAModel =>
+  ({ group: 'group-a', supportsImageData: true, supportsNegativePrompt: true, maxReferenceImages: 0, ...m });
+
+/**
+ * CANONICAL OMNI ID (corrected 13 Oct 2026 from the platform integration
+ * catalog, `integrations/image-and-video-generation/docs.md`).
+ *
+ * This file used to carry `// TODO: upgrade to 1.1 when platform key is
+ * confirmed` and a note that the proxy's enum listed no versioned Omni id.
+ * The catalog now documents the opposite, and it is the authoritative contract
+ * for `/api/veo/generate/video`:
+ *
+ *   · `gemini-omni-1.1-flash` is the DEFAULT and the id to use in new code.
+ *   · It accepts up to TEN referenceImages (not three), refs combined with an
+ *     imageData seed, lastFrameImage interpolation, and `videoData` editing.
+ *   · "Retired model ids still work" — the Veo 3.x / 2.0 previews, Sora 2 AND
+ *     the Omni Flash preview are still accepted, but every one of them is
+ *     SERVED BY `gemini-omni-1.1-flash`.
+ *
+ * That last line is why the entries below changed rather than simply gaining a
+ * sibling. `veo-3.1-generate-preview` and `veo-3.1-fast-generate-preview` are
+ * not separate engines on this platform any more: they are aliases, so the
+ * picker was offering three names for one model, and the "up to 4K" promise on
+ * two of them was unachievable — Omni output is capped at 720p. The 9 Oct
+ * sweep recorded them as `working` because a clip came back; a clip coming back
+ * from a DIFFERENT model is not the same thing as the model existing.
+ *
+ * Not re-probed here: the sweep spends the wallet, and a catalog contract that
+ * explicitly names its own retirements does not need a paid confirmation.
+ */
+export const OMNI_MODEL_ID = 'gemini-omni-1.1-flash';
 
 export const GROUP_A_MODELS: GroupAModel[] = [
-  // Omni Flash has exactly one accepted spelling on this platform: the proxy's
-  // model enum lists `gemini-omni-flash-preview` and nothing versioned, so
-  // `gemini-omni-flash-1.1` / `-1.5` / `-2.0` answer 400 invalid_enum_value.
-  // TODO: upgrade to 1.1 when platform key is confirmed
   gA({
-    id: 'gemini-omni-flash-preview', name: 'Gemini Omni Flash', provider: 'Google', tier: 'Character',
-    blurb: 'Character consistency champion — send the same reference images with every scene and the same face, product or mascot carries across cuts. Refs + seed image may combine.',
-    supportsReferenceImages: true, refsExclusiveWithSeed: false, supportsLastFrame: false,
-    supports4k: false, supportsAudio: true, maxDurationS: 8, defaultDurationS: 8,
+    id: OMNI_MODEL_ID, name: 'Gemini Omni 1.1 Flash', provider: 'Google', tier: 'Character',
+    blurb: 'Character and product consistency engine — send the same reference images with every scene (up to ten) and the same face, product or mascot carries across every cut. References combine with a seed frame, and a locked last frame interpolates the motion between two stills. Output caps at 720p.',
+    supportsReferenceImages: true, maxReferenceImages: 10, refsExclusiveWithSeed: false,
+    supportsLastFrame: true, supports4k: false, supportsAudio: true,
+    maxDurationS: 8, defaultDurationS: 8,
     costHint: '≈ $0.40 / clip',
   }),
   gA({
-    id: 'veo-3.1-generate-preview', name: 'Veo 3.1', provider: 'Google', tier: 'Cinematic',
-    blurb: 'Hero cinematic quality up to 4K. Ingredients workflow: up to 3 reference images OR a first-frame seed + locked last frame (the two groups are mutually exclusive).',
-    supportsReferenceImages: true, refsExclusiveWithSeed: true, supportsLastFrame: true,
-    supports4k: true, supportsAudio: true, maxDurationS: 8, defaultDurationS: 8,
-    costHint: '≈ $0.40–0.80 / clip',
-  }),
-  gA({
-    id: 'veo-3.1-fast-generate-preview', name: 'Veo 3.1 Fast', provider: 'Google', tier: 'Fast',
-    blurb: 'Same Veo 3.1 ingredient rules, faster and cheaper — the workhorse for quality-with-turnaround. 4K capable.',
-    supportsReferenceImages: true, refsExclusiveWithSeed: true, supportsLastFrame: true,
-    supports4k: true, supportsAudio: true, maxDurationS: 8, defaultDurationS: 8,
-    costHint: '≈ $0.25–0.50 / clip',
-  }),
-  gA({
-    id: 'veo-3.0-generate-001', name: 'Veo 3.0', provider: 'Google', tier: 'Standard',
-    blurb: 'Solid previous-generation Veo. Single seed image only — no reference images, no last frame.',
-    supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
-    supports4k: false, supportsAudio: true, maxDurationS: 8, defaultDurationS: 8,
+    id: 'gemini-omni-flash-preview', name: 'Gemini Omni Flash (preview id)', provider: 'Google', tier: 'Character',
+    blurb: 'The pre-1.1 Omni spelling. Still accepted, and served by Gemini Omni 1.1 Flash — pick that instead.',
+    aliasOf: OMNI_MODEL_ID,
+    supportsReferenceImages: true, maxReferenceImages: 10, refsExclusiveWithSeed: false,
+    supportsLastFrame: true, supports4k: false, supportsAudio: true,
+    maxDurationS: 8, defaultDurationS: 8,
     costHint: '≈ $0.40 / clip',
   }),
   gA({
-    id: 'veo-3.0-fast-generate-001', name: 'Veo 3.0 Fast', provider: 'Google', tier: 'Fast',
-    blurb: 'Faster, cheaper Veo 3.0. Seed image only.',
-    supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
-    supports4k: false, supportsAudio: true, maxDurationS: 8, defaultDurationS: 8,
-    costHint: '≈ $0.20 / clip',
+    id: 'veo-3.1-generate-preview', name: 'Veo 3.1 (retired id)', provider: 'Google', tier: 'Cinematic',
+    blurb: 'Retired platform-side. Still accepted, and served by Gemini Omni 1.1 Flash — so it is not a separate engine, and it does not render 4K.',
+    aliasOf: OMNI_MODEL_ID,
+    supportsReferenceImages: true, maxReferenceImages: 10, refsExclusiveWithSeed: false,
+    supportsLastFrame: true, supports4k: false, supportsAudio: true,
+    maxDurationS: 8, defaultDurationS: 8,
+    costHint: '≈ $0.40 / clip',
   }),
   gA({
-    id: 'veo-2.0-generate-001', name: 'Veo 2.0', provider: 'Google', tier: 'Standard',
-    blurb: 'Legacy Veo — kept for continuity with older projects. Seed image only.',
-    supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
-    supports4k: false, supportsAudio: false, maxDurationS: 8, defaultDurationS: 6,
-    costHint: '≈ $0.30 / clip',
-  }),
-  gA({
-    id: 'sora-2', name: 'Sora 2', provider: 'OpenAI', tier: 'Cinematic',
-    blurb: 'OpenAI Sora — strongest at surreal, stylized and complex multi-subject scenes. Single seed image only.',
-    supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
-    supports4k: false, supportsAudio: true, maxDurationS: 12, defaultDurationS: 8,
-    costHint: '≈ $0.50 / clip',
-  }),
-  gA({
-    id: 'sora-2-pro', name: 'Sora 2 Pro', provider: 'OpenAI', tier: 'Pro',
-    blurb: 'Higher-quality Sora tier for showcase pieces. Single seed image only.',
-    supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
-    supports4k: false, supportsAudio: true, maxDurationS: 12, defaultDurationS: 8,
-    costHint: '≈ $1.00+ / clip',
+    id: 'veo-3.1-fast-generate-preview', name: 'Veo 3.1 Fast (retired id)', provider: 'Google', tier: 'Fast',
+    blurb: 'Retired platform-side. Still accepted, and served by Gemini Omni 1.1 Flash — so it is not a separate engine, and it does not render 4K.',
+    aliasOf: OMNI_MODEL_ID,
+    supportsReferenceImages: true, maxReferenceImages: 10, refsExclusiveWithSeed: false,
+    supportsLastFrame: true, supports4k: false, supportsAudio: true,
+    maxDurationS: 8, defaultDurationS: 8,
+    costHint: '≈ $0.40 / clip',
   }),
   gA({
     id: 'openrouter/bytedance/seedance-2.0-fast', name: 'Seedance 2.0 Fast', provider: 'ByteDance · OpenRouter', tier: 'Fast',
@@ -140,13 +200,6 @@ export const GROUP_A_MODELS: GroupAModel[] = [
     supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
     supports4k: false, supportsAudio: false, maxDurationS: 10, defaultDurationS: 6,
     costHint: 'lowest cost / clip',
-  }),
-  gA({
-    id: 'openrouter/bytedance/seedance-2.5-fast', name: 'Seedance 2.5 Fast', provider: 'ByteDance · OpenRouter', tier: 'Fast',
-    blurb: 'Newer Seedance generation, same fast OpenRouter path. Seed image only — reference images and last frame answer 400 on OpenRouter models.',
-    supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
-    supports4k: false, supportsAudio: false, maxDurationS: 10, defaultDurationS: 6,
-    costHint: 'low cost / clip',
   }),
   gA({
     id: 'openrouter/google/veo-3.1', name: 'Veo 3.1 (OpenRouter)', provider: 'Google · OpenRouter', tier: 'Cinematic',
@@ -175,8 +228,31 @@ export function groupAModel(id: string | null | undefined): GroupAModel | null {
   return GROUP_A_MODELS.find((m) => m.id === String(id || '')) || null;
 }
 
-/** Models whose 4K request is actually honored. */
-export const FOUR_K_MODELS = ['veo-3.1-generate-preview', 'veo-3.1-fast-generate-preview'];
+/**
+ * Models whose 4K request is actually honored.
+ *
+ * EMPTY, deliberately (corrected 13 Oct 2026). This list used to name the two
+ * `veo-3.1-*-generate-preview` ids, and every surface that read it offered the
+ * customer a 4K toggle on them. Those ids are retired platform-side and served
+ * by `gemini-omni-1.1-flash`, whose output is capped at 720p, so the toggle
+ * promised a resolution that could not arrive. The integration catalog says
+ * `"4k"` is "honored only on some OpenRouter models" without naming which, and
+ * an unnamed maybe is not something to sell — so nothing claims 4K here until
+ * one id is confirmed to deliver it.
+ */
+export const FOUR_K_MODELS: string[] = [];
+
+/** True for an id the proxy only accepts for compatibility and serves on
+ * another model. A picker lists these last, or not at all. */
+export function isAliasEngine(id: string | null | undefined): boolean {
+  return Boolean(groupAModel(id)?.aliasOf);
+}
+
+/** The id a selection really runs on — itself, unless it is a retired alias. */
+export function resolveEngineId(id: string | null | undefined): string {
+  const model = groupAModel(id);
+  return model?.aliasOf || model?.id || String(id || '');
+}
 
 /**
  * COMBINING RULES — enforced client-side before submit (the proxy enforces
@@ -184,7 +260,7 @@ export const FOUR_K_MODELS = ['veo-3.1-generate-preview', 'veo-3.1-fast-generate
  *   1. Veo 3.1 / 3.1 Fast: referenceImages XOR (imageData / lastFrameImage)
  *   2. Veo 3.1 / 3.1 Fast: imageData + lastFrameImage = first/last-frame flow (valid)
  *   3. Omni Flash: referenceImages + imageData OK; lastFrameImage never
- *   4. Sora / OpenRouter / Veo 3.0 / 2.0: imageData only
+ *   4. OpenRouter-hosted models: imageData only
  */
 export function validateGroupAInputs(modelId: string, inputs: {
   prompt?: string;
@@ -200,8 +276,13 @@ export function validateGroupAInputs(modelId: string, inputs: {
   const refs = (inputs.referenceImages || []).length;
   const seed = Boolean(inputs.imageData);
   const last = Boolean(inputs.lastFrameImage);
-  if (refs > 3) return 'At most 3 reference images are allowed.';
+  // The cap is per-model, not a flat three. Omni 1.1 accepts ten, and holding
+  // it to three was quietly throwing away the character-consistency headroom
+  // this workspace chose Omni for in the first place.
   if (refs > 0 && !m.supportsReferenceImages) return `${m.name} does not support reference images — use a single seed image instead.`;
+  if (refs > m.maxReferenceImages) {
+    return `${m.name} accepts at most ${m.maxReferenceImages} reference image${m.maxReferenceImages === 1 ? '' : 's'}.`;
+  }
   if (last && !m.supportsLastFrame) return `${m.name} does not support a last-frame image.`;
   if (refs > 0 && m.refsExclusiveWithSeed && (seed || last)) {
     return `${m.name}: reference images are mutually exclusive with the seed image and last frame — pick one workflow.`;
@@ -387,16 +468,33 @@ export const RUNWAY_DISABLED_MESSAGE = 'Runway is temporarily unavailable (503) 
 // The marketing_stock_image and product_campaign_image recipes are the image
 // path, so they appear below as recipe-backed image entries.
 //
-// FULL ROSTER (29 Sep 2026): the catalog now lists Runway's complete announced
-// video-model roster (veo3.1, veo3.1_fast, seedance2.5, seedance2, wan3,
-// hailuo3, aleph2, gemini_omni_flash, grok_imagine_1_5) alongside gen4.5,
-// gen4_turbo and act_two. A LIVE re-probe on 29 Sep 2026 confirmed the proxy
-// still accepts exactly gen4.5 and gen4_turbo (quoting any other id answers
-// 400 "model must be one of: gen4.5, gen4_turbo"), so the extra entries ship
-// available:false with that reason. syncRunwayCatalog() below re-reads
-// GET /api/generate/runway/capabilities at runtime and flips entries live —
-// with their real modes, ratios, durations and prices — the moment the
-// platform lists them. No code change is needed when that happens.
+// ROSTER POLICY (revised 13 Oct 2026): ONLY MODELS THAT WORK ARE LISTED.
+//
+// This catalog previously also carried twelve Runway ids the proxy does not
+// accept (veo3.1, veo3.1_fast, seedance2.5, seedance2, wan3, hailuo3, aleph2,
+// gemini_omni_flash, grok_imagine_1_5, act_two, gen4_image, gen4_image_turbo)
+// as greyed-out `available:false` entries, on the theory that showing the gap
+// was better than hiding it. In practice that filled every model picker in the
+// product with a dozen rows a customer can never choose, which reads as a
+// broken tool rather than an honest one — so they are gone, and the only
+// Runway entries here are the ones a submit actually succeeds on:
+//
+//   gen4.5      text-to-video + image-to-video   12 credits/s
+//   gen4_turbo  image-to-video ONLY               5 credits/s
+//   plus the two REAL recipe-backed image paths (marketing_stock_image,
+//   product_campaign_image), which are not addressed by a model id at all.
+//
+// NOTHING IS LOST BY REMOVING THEM. applyRunwayCapabilities() below now ADDS
+// any model the live capabilities endpoint reports and this file has never
+// heard of, so a model the platform switches on still appears by itself, with
+// its real modes, ratios, durations and prices, and still needs no code
+// change. The difference is that an id nobody serves is simply absent instead
+// of occupying a row in every picker.
+//
+// Probe history behind the two survivors: GET /api/generate/runway/capabilities
+// answered 200 with exactly gen4.5 and gen4_turbo on 29 Sep and again on
+// 9 Oct 2026; every other spelling answers 400 "model must be one of: gen4.5,
+// gen4_turbo", and gen4_turbo additionally answers 400 on a text-only quote.
 // ---------------------------------------------------------------------------
 
 export type RunwayInputType = 'text' | 'image' | 'both';
@@ -430,26 +528,27 @@ export interface RunwayModel {
 
 const RW_VIDEO_RATIOS = ['1280:720', '720:1280', '1104:832', '832:1104', '960:960', '1584:672'];
 
-/** Roster entries the platform proxy does not accept yet (re-probed live
- * 29 Sep 2026: the quote endpoint answers 400 "model must be one of: gen4.5,
- * gen4_turbo" for every one of them). They are catalogued so every picker
- * shows the full Runway roster with an honest reason, and syncRunwayCatalog()
- * flips them selectable the moment the capabilities endpoint lists them. */
-const rwRoster = (m: { id: string; label: string; inputType: RunwayInputType; speed?: RunwaySpeed; blurb: string; alt: string }): RunwayModel => ({
-  id: m.id,
-  label: m.label,
-  inputType: m.inputType,
+/**
+ * Shape a model the LIVE capabilities endpoint reported but this file does not
+ * know about, so the roster can grow without a code change. Deliberately
+ * conservative: the entry is created disabled, and applyRunwayCapabilities
+ * immediately fills in the real modes, ratios, durations and price from the
+ * same payload that produced it.
+ */
+const rwDiscovered = (id: string): RunwayModel => ({
+  id,
+  label: `Runway ${id}`,
+  inputType: 'both',
   type: 'video',
-  speed: m.speed || 'standard',
+  speed: 'standard',
   available: false,
   route: 'none',
   ratios: RW_VIDEO_RATIOS,
   minDurationS: 2,
   maxDurationS: 10,
   defaultDurationS: 5,
-  priceNote: 'priced by the live Runway quote once the platform lists it',
-  unavailableReason: `The Audos Runway proxy accepts only the models its live capabilities catalog lists (today: gen4.5 and gen4_turbo — submitting ${m.id} answers 400 invalid_request). This entry unlocks automatically when the platform adds it; until then ${m.alt}.`,
-  blurb: m.blurb,
+  priceNote: 'priced by the live Runway quote',
+  blurb: 'Reported live by the platform\u2019s Runway capabilities catalog.',
 });
 
 export const RUNWAY_MODELS: RunwayModel[] = [
@@ -466,72 +565,6 @@ export const RUNWAY_MODELS: RunwayModel[] = [
     minDurationS: 2, maxDurationS: 10, defaultDurationS: 5,
     priceNote: '5 credits / second (≈ $0.05/s)',
     blurb: 'Image-to-video only, and the cheapest way to animate a single still.',
-  },
-  rwRoster({
-    id: 'veo3.1', label: 'Runway Veo 3.1', inputType: 'both',
-    blurb: 'Google Veo 3.1 served through Runway — text-to-video or image-to-video.',
-    alt: 'use Veo 3.1 in the Google group of the same picker, which runs today',
-  }),
-  rwRoster({
-    id: 'veo3.1_fast', label: 'Runway Veo 3.1 Fast', inputType: 'both', speed: 'fast',
-    blurb: 'The faster Veo tier through Runway — text-to-video or image-to-video.',
-    alt: 'use Veo 3.1 Fast in the Google group of the same picker, which runs today',
-  }),
-  rwRoster({
-    id: 'seedance2.5', label: 'Runway Seedance 2.5', inputType: 'both',
-    blurb: 'High-quality Seedance through Runway — text, image or video input.',
-    alt: 'use Seedance 2.0 Fast in the Google/OpenRouter group of the same picker',
-  }),
-  rwRoster({
-    id: 'seedance2', label: 'Runway Seedance 2', inputType: 'both',
-    blurb: 'The stable Seedance tier through Runway — text, image or video input.',
-    alt: 'use Seedance 2.0 Fast in the Google/OpenRouter group of the same picker',
-  }),
-  rwRoster({
-    id: 'wan3', label: 'Runway Wan 3', inputType: 'both',
-    blurb: 'Wan 3 through Runway — text-to-video or image-to-video.',
-    alt: 'use Runway Gen 4.5 or a Veo engine',
-  }),
-  rwRoster({
-    id: 'hailuo3', label: 'Runway Hailuo 3', inputType: 'both',
-    blurb: 'MiniMax Hailuo 3 through Runway — text, image or video input.',
-    alt: 'use Runway Gen 4.5 or a Veo engine',
-  }),
-  rwRoster({
-    id: 'aleph2', label: 'Runway Aleph 2', inputType: 'image',
-    blurb: 'Video-to-video transformation with ProRes support — feeds existing footage plus text/image direction.',
-    alt: 'use the Product Swap recipe (Ads Studio → Recipes), the platform\u2019s real video-to-video path',
-  }),
-  rwRoster({
-    id: 'gemini_omni_flash', label: 'Runway Gemini Omni Flash', inputType: 'both', speed: 'fast',
-    blurb: 'Gemini Omni Flash served through Runway — fast and efficient; text, image or video input.',
-    alt: 'use Gemini Omni Flash in the Google group of the same picker, which runs today',
-  }),
-  rwRoster({
-    id: 'grok_imagine_1_5', label: 'Runway Grok Imagine 1.5', inputType: 'both',
-    blurb: 'xAI Grok Imagine 1.5 through Runway — text-to-video or image-to-video.',
-    alt: 'use Runway Gen 4.5 or a Veo engine',
-  }),
-  {
-    id: 'act_two', label: 'Runway Act Two', inputType: 'image', type: 'video', speed: 'standard',
-    available: false, route: 'none', ratios: [],
-    unavailableReason: 'The Audos Runway proxy accepts only gen4.5 and gen4_turbo — act_two answers 400 invalid_request. For motion on a character image use Gen 4 Turbo, or the UGC Creator recipe for a performing presenter.',
-    priceNote: 'not priced — not exposed by the platform proxy',
-    blurb: 'Motion/action transfer onto a character image. Not reachable through Audos today.',
-  },
-  {
-    id: 'gen4_image', label: 'Runway Gen 4 Image', inputType: 'both', type: 'image', speed: 'standard',
-    available: false, route: 'none', ratios: [],
-    unavailableReason: 'The Audos Runway proxy has no image model route — gen4_image answers 400 invalid_request and POST /api/generate/runway/image is a 404. Use Runway Stock Image or Runway Campaign Images below, which are the platform\u2019s real Runway image path.',
-    priceNote: 'not priced — not exposed by the platform proxy',
-    blurb: 'Runway text/image-to-image. Not reachable through Audos today.',
-  },
-  {
-    id: 'gen4_image_turbo', label: 'Runway Gen 4 Image Turbo', inputType: 'both', type: 'image', speed: 'fast',
-    available: false, route: 'none', ratios: [],
-    unavailableReason: 'Same as Gen 4 Image — no image model route exists on the Audos Runway proxy (400 invalid_request). Runway Stock Image at quality \u201clow\u201d is the fast, cheap stand-in (1 credit per output).',
-    priceNote: 'not priced — not exposed by the platform proxy',
-    blurb: 'Fast Runway image generation. Not reachable through Audos today.',
   },
   {
     id: 'runway_stock_image', label: 'Runway Stock Image', inputType: 'both', type: 'image', speed: 'fast',
@@ -551,11 +584,29 @@ export function runwayModel(id: string | null | undefined): RunwayModel | null {
   return RUNWAY_MODELS.find((m) => m.id === String(id || '')) || null;
 }
 
-/** True for any Runway-native id in the catalog, available or not. Callers
- * use this to decide that a generation belongs on the Runway proxy rather
- * than on /api/veo/generate/video. */
+/**
+ * Runway ids this catalog used to list and no longer does (see ROSTER POLICY
+ * above). They are kept ONLY so a stale selection — a saved project, a stored
+ * picker preference, a half-finished draft — is still recognised as a Runway
+ * request and answered with runwayUnsupportedMessage(), instead of falling
+ * through `isRunwayModel() === false` and being routed to the Google video
+ * proxy, which would answer 400 for an id it has never heard of.
+ */
+const RETIRED_RUNWAY_IDS = [
+  'veo3.1', 'veo3.1_fast', 'seedance2.5', 'seedance2', 'wan3', 'hailuo3',
+  'aleph2', 'gemini_omni_flash', 'grok_imagine_1_5', 'act_two',
+  'gen4_image', 'gen4_image_turbo',
+];
+
+export function isRetiredRunwayModel(id: string | null | undefined): boolean {
+  return RETIRED_RUNWAY_IDS.indexOf(String(id || '')) >= 0;
+}
+
+/** True for any Runway-native id — listed today, or one this catalog has
+ * retired. Callers use this to decide that a generation belongs on the Runway
+ * proxy rather than on /api/veo/generate/video. */
 export function isRunwayModel(id: string | null | undefined): boolean {
-  return !!runwayModel(id);
+  return !!runwayModel(id) || isRetiredRunwayModel(id);
 }
 
 /** True only when the id is one the platform proxy will actually accept. */
@@ -622,6 +673,13 @@ export function applyRunwayCapabilities(raw: any): void {
   const live = new Map<string, any>();
   nodes.forEach((n) => { const id = String(n?.id || n?.model || ''); if (id) live.set(id, n); });
   const liveIds = Array.from(live.keys());
+  // A model the platform serves but this file has never heard of is ADDED
+  // rather than ignored. That is what lets the static roster stay honest
+  // (working models only) without freezing it: the loop below then fills in
+  // the new entry's real modes, ratios, durations and price from this payload.
+  liveIds.forEach((id) => {
+    if (!RUNWAY_MODELS.some((m) => m.id === id)) RUNWAY_MODELS.push(rwDiscovered(id));
+  });
   for (const m of RUNWAY_MODELS) {
     if (m.type !== 'video' || m.route === 'recipe') continue;
     const node = live.get(m.id);
@@ -728,7 +786,11 @@ export function runwayRoute(id: string | null | undefined): RunwayRoute {
  * Runway entry — it always names a working alternative. */
 export function runwayUnsupportedMessage(id: string | null | undefined): string {
   const m = runwayModel(id);
-  return m?.unavailableReason || 'That Runway model is not available on this platform — pick another engine.';
+  if (m?.unavailableReason) return m.unavailableReason;
+  if (isRetiredRunwayModel(id)) {
+    return `Runway “${String(id)}” is not served on this platform. The Runway models that work here are Gen 4.5 (text or image to video) and Gen 4 Turbo (image to video) — pick one of those, or a Veo engine.`;
+  }
+  return 'That Runway model is not available on this platform — pick another engine.';
 }
 
 /**
@@ -783,7 +845,8 @@ export function clampRunwayDuration(seconds: number | null | undefined, modelId?
 }
 
 // ---------------------------------------------------------------------------
-// GROUP C — Kling (documented, platform key pending → Coming Soon, disabled)
+// GROUP C — Kling (LIVE since 14 Oct 2026 via credit pack; v2-master
+// discontinued upstream; new 2.5/2.6/3.0 roster unverified through the proxy)
 // ---------------------------------------------------------------------------
 
 export interface KlingModel {
@@ -792,24 +855,61 @@ export interface KlingModel {
   name: string;
   tier: EngineTier;
   blurb: string;
-  /** When true the picker greys the model out (platform key missing). */
+  /** When true a general picker greys the model out (unverified through the
+   *  platform proxy, or discontinued). The Video Provider Lab deliberately
+   *  ignores this flag so the founder can test every id. */
   comingSoon?: boolean;
+  /** Kling retired this id upstream — a submit is a guaranteed 502. */
+  discontinued?: boolean;
+  /** std/pro quality modes (legacy model_name roster only — the 2.5+ ids take no mode). */
+  modes?: Array<'std' | 'pro'>;
+  /** Clip lengths offered through the platform proxy (its contract is "5" | "10"). */
+  durations?: number[];
+  /** The model renders native audio upstream (the proxy exposes no audio field yet). */
+  audio?: boolean;
 }
 
 export const KLING_COMING_SOON_MESSAGE =
-  'Kling is not reachable from this workspace yet — a submit answers 503 "Kling is not configured on this '
-  + 'platform (KLING_API_KEY missing)" (verified 9 Oct 2026). The models catalogue answering 200 does not mean '
-  + 'it is usable. Pick another engine, or ask the platform to add the Kling key.';
+  'Kling is LIVE on this platform as of 14 Oct 2026 (credit pack active), but this model is not yet verified '
+  + 'end to end through the proxy, so general pickers keep it greyed until a Video Provider Lab run proves it. '
+  + 'Note: kling-v2-master is permanently discontinued upstream (502 wrapping Kling API error 404, code 1203); '
+  + "Kling's current ids are kling-2.5-turbo, kling-2.6, kling-3.0 and kling-3.0-omni.";
 
+// The roster mixes the two Kling API generations. The NEW ids (kling-2.5-turbo
+// and later) come from Kling's own API docs, read live 14 Oct 2026 at
+// kling.ai/document-api (model-scoped endpoints such as
+// /text-to-video/kling-2.5-turbo); the kling-v1* ids are the legacy
+// model_name roster the platform proxy's static catalogue lists. The key is
+// LIVE (credit pack, 14 Oct 2026), but every entry stays comingSoon — greyed
+// in general pickers — until a Video Provider Lab run proves that id end to
+// end, because the proxy may substitute its default for ids it does not
+// recognise. kling-v2-master is discontinued upstream: permanently dead, not
+// pending.
 export const KLING_MODELS: KlingModel[] = [
-  { group: 'kling', id: 'kling-v2-master', name: 'Kling v2 Master', tier: 'Cinematic',
-    blurb: 'Best Kling quality. Text-to-video, image-to-video, multi-image, video-extend and lip-sync. Modes std/pro, durations "5"/"10".' },
-  { group: 'kling', id: 'kling-v1-6', name: 'Kling v1.6', tier: 'Standard',
-    blurb: 'Balanced Kling generation — text-to-video and image-to-video.' },
-  { group: 'kling', id: 'kling-v1-5', name: 'Kling v1.5', tier: 'Standard',
-    blurb: 'Default Kling tier — text-to-video, image-to-video, and Elements.' },
-  { group: 'kling', id: 'kling-v1', name: 'Kling v1', tier: 'Lite',
-    blurb: 'First-generation Kling.' },
+  { group: 'kling', id: 'kling-3.0-omni', name: 'Kling 3.0 Omni', tier: 'Cinematic', comingSoon: true,
+    durations: [5, 10], audio: true,
+    blurb: "Kling's omni multi-modal flagship (14 Oct 2026 API docs): prompt, first/last frame, reference images and source-video inputs; native audio; up to 4K and 3–15s upstream. Untested through the platform proxy — prove it in the Video Provider Lab." },
+  { group: 'kling', id: 'kling-3.0', name: 'Kling 3.0', tier: 'Cinematic', comingSoon: true,
+    durations: [5, 10], audio: true,
+    blurb: 'Current Kling flagship: text-to-video and image-to-video with native audio, multi-shot prompts, up to 4K and 3–15s upstream. Untested through the platform proxy.' },
+  { group: 'kling', id: 'kling-2.6', name: 'Kling 2.6', tier: 'Standard', comingSoon: true,
+    durations: [5, 10], audio: true,
+    blurb: 'Kling 2.6 text-to-video and image-to-video with native audio ("native"/"off"), 720p/1080p, 5s/10s. Untested through the platform proxy.' },
+  { group: 'kling', id: 'kling-2.5-turbo', name: 'Kling 2.5 Turbo', tier: 'Fast', comingSoon: true,
+    durations: [5, 10],
+    blurb: 'Fast tier of the current Kling API: text-to-video and image-to-video, 720p/1080p, 5s/10s, silent. Untested through the platform proxy.' },
+  { group: 'kling', id: 'kling-v2-master', name: 'Kling v2 Master', tier: 'Cinematic', comingSoon: true, discontinued: true,
+    modes: ['std'], durations: [5, 10],
+    blurb: 'DISCONTINUED upstream: a live 14 Oct 2026 submit answered 502 wrapping Kling API error (404, code 1203) "has been discontinued". Use Kling 2.6 or 3.0 instead.' },
+  { group: 'kling', id: 'kling-v1-6', name: 'Kling v1.6', tier: 'Standard', comingSoon: true,
+    modes: ['std', 'pro'], durations: [5, 10],
+    blurb: 'Legacy roster — balanced Kling generation, text-to-video and image-to-video, std/pro modes. May be retired upstream like v2-master; verify in the lab.' },
+  { group: 'kling', id: 'kling-v1-5', name: 'Kling v1.5', tier: 'Standard', comingSoon: true,
+    modes: ['std', 'pro'], durations: [5, 10],
+    blurb: 'Legacy roster — the proxy default tier; text-to-video, image-to-video and Elements, std/pro modes.' },
+  { group: 'kling', id: 'kling-v1', name: 'Kling v1', tier: 'Lite', comingSoon: true,
+    modes: ['std', 'pro'], durations: [5, 10],
+    blurb: 'Legacy roster — first-generation Kling, std/pro modes.' },
 ];
 
 export interface HiggsfieldVideoModel {
@@ -917,7 +1017,7 @@ export function recommendEngine(input: RecommendInput): Recommendation {
   }
   // Character consistency.
   if (input.hasCharacterImage || has(/same (face|person|character)|consistent (face|character|person)|persona|mascot|recurring character|across (every |all )?scenes?/)) {
-    return { engineId: 'gemini-omni-flash-preview', group: 'group-a', name: 'Gemini Omni Flash', reason: 'Best for character consistency — same face across every scene via reference images.' };
+    return { engineId: OMNI_MODEL_ID, group: 'group-a', name: 'Gemini Omni 1.1 Flash', reason: 'Best for character consistency — the same face across every scene, from up to ten reference images sent with each one.' };
   }
   // Product photos + wants a finished polished ad.
   if (runwayOk && input.hasProductImages && has(/\bad\b|advert|commercial|promo|polished|campaign/)) {
@@ -929,12 +1029,12 @@ export function recommendEngine(input: RecommendInput): Recommendation {
   }
   // Surreal / stylized / complex multi-subject.
   if (has(/surreal|dream|stylized|abstract|impossible|morph|fantastical|multi.?subject|crowd of|complex scene/)) {
-    return { engineId: 'sora-2', group: 'group-a', name: 'Sora 2', reason: 'Sora 2 is the strongest engine for surreal, stylized and complex multi-subject scenes.' };
+    return { engineId: VEO_31, group: 'group-a', name: 'Veo 3.1 (OpenRouter)', reason: 'Veo 3.1 is suited to surreal, stylized and complex multi-subject scenes, and OpenRouter is where real Veo 3.1 lives on this platform.' };
   }
   // One image, cheapest image-to-video.
   if (images === 1 && (input.budgetSensitive || has(/cheap|budget|low.?cost|inexpensive/))) {
     if (runwayOk) return { engineId: 'gen4_turbo', group: 'runway-video', name: 'Runway Gen 4 Turbo', reason: 'One image + lowest price image-to-video: Gen 4 Turbo at $0.05/second.', caveat: RUNWAY_CAVEAT };
-    return { engineId: 'veo-3.1-generate-preview', group: 'group-a', name: 'Veo 3.1', reason: 'Runway is unavailable right now — Veo 3.1 is the best image-to-video fallback.' };
+    return { engineId: VEO_31, group: 'group-a', name: 'Veo 3.1 (OpenRouter)', reason: 'Runway is unavailable right now — Veo 3.1 is the best image-to-video fallback.' };
   }
   // Lowest-cost Veo.
   if (has(/cheapest veo|lowest.?cost veo|veo.*cheap/)) {
@@ -944,17 +1044,23 @@ export function recommendEngine(input: RecommendInput): Recommendation {
   if ((images === 0 && has(/b.?roll|filler|background (footage|clips)|quick clips?|fast|cheap/)) || input.budgetSensitive) {
     return { engineId: 'openrouter/bytedance/seedance-2.0-fast', group: 'group-a', name: 'Seedance 2.0 Fast', reason: 'Fast, cheap B-roll with solid quality — the budget pick for any content type.' };
   }
-  // Cinematic hero / 4K / brand references.
-  if (has(/cinematic|hero|4k|premium|film|trailer|epic/) || images > 1) {
-    return { engineId: 'veo-3.1-generate-preview', group: 'group-a', name: 'Veo 3.1', reason: 'Hero cinematic quality with 4K and brand reference images (up to 3 ingredients).' };
+  // Cinematic hero with brand references. Reference images are an OMNI
+  // capability on this platform — the OpenRouter Veo ids take a seed frame and
+  // nothing else — so a brief carrying several brand images goes to Omni, and
+  // only a text-led cinematic brief goes to Veo.
+  if (images > 1) {
+    return { engineId: OMNI_MODEL_ID, group: 'group-a', name: 'Gemini Omni 1.1 Flash', reason: 'Several brand images to stay on-model: Omni 1.1 is the only engine here that takes reference images (up to ten) alongside a seed frame.' };
+  }
+  if (has(/cinematic|hero|4k|premium|film|trailer|epic/)) {
+    return { engineId: VEO_31, group: 'group-a', name: 'Veo 3.1 (OpenRouter)', reason: 'Hero cinematic quality for a text-led brief. Note that reference images are not available on this path — pick Omni 1.1 if the shot must match supplied brand assets.' };
   }
   // Image-to-video default when an image exists.
   if (images >= 1) {
     if (runwayOk) return { engineId: 'gen4_turbo', group: 'runway-video', name: 'Runway Gen 4 Turbo', reason: 'You have one image — Gen 4 Turbo is the cheapest way to bring it to life.', caveat: RUNWAY_CAVEAT };
-    return { engineId: 'veo-3.1-generate-preview', group: 'group-a', name: 'Veo 3.1', reason: 'Runway is unavailable right now — Veo 3.1 handles image-to-video beautifully.' };
+    return { engineId: OMNI_MODEL_ID, group: 'group-a', name: 'Gemini Omni 1.1 Flash', reason: 'Runway is unavailable right now — Omni 1.1 animates a seed frame and can hold the subject steady with reference images.' };
   }
   // Default all-rounder.
-  return { engineId: 'veo-3.1-fast-generate-preview', group: 'group-a', name: 'Veo 3.1 Fast', reason: 'The best quality-to-speed all-rounder for a text-only brief.' };
+  return { engineId: OMNI_MODEL_ID, group: 'group-a', name: 'Gemini Omni 1.1 Flash', reason: 'The platform default: the best quality-to-speed all-rounder, with audio and reference images available when the brief grows.' };
 }
 
 // ---------------------------------------------------------------------------
@@ -993,20 +1099,13 @@ export function tierColor(tier: EngineTier): { bg: string; fg: string } {
 // { id, label, tier, family } list is needed (selectors, badges, routing).
 // ---------------------------------------------------------------------------
 
-export type EngineFamily = 'veo' | 'gemini' | 'sora' | 'seedance';
+export type EngineFamily = 'veo' | 'gemini' | 'seedance';
 
 /** Quality tiers used by ModelBadge chips: Ultra / Cinema / Fast / Standard. */
 export type EngineQualityTier = 'ultra' | 'cinema' | 'fast' | 'standard';
 
 const QUALITY_TIER_BY_ID: Record<string, EngineQualityTier> = {
-  'veo-3.1-generate-preview': 'ultra',
-  'veo-3.1-fast-generate-preview': 'cinema',
-  'veo-3.0-generate-001': 'cinema',
-  'veo-3.0-fast-generate-001': 'fast',
-  'veo-2.0-generate-001': 'standard',
-  'gemini-omni-flash-preview': 'fast',
-  'sora-2': 'cinema',
-  'sora-2-pro': 'ultra',
+  'gemini-omni-1.1-flash': 'cinema',
   'openrouter/bytedance/seedance-2.0-fast': 'fast',
   'openrouter/google/veo-3.1': 'ultra',
   'openrouter/google/veo-3.1-fast': 'cinema',
@@ -1015,7 +1114,6 @@ const QUALITY_TIER_BY_ID: Record<string, EngineQualityTier> = {
 
 function engineFamilyOf(id: string): EngineFamily {
   if (id.includes('seedance')) return 'seedance';
-  if (id.startsWith('sora')) return 'sora';
   if (id.startsWith('gemini')) return 'gemini';
   return 'veo';
 }
@@ -1031,24 +1129,39 @@ export interface VideoEngine {
   defaultDurationS: number;
 }
 
-/** NOTE: Kling is platform-disabled (missing API key). HeyGen is configured
- * but unused here. Higgsfield is excluded by founder ruling. None of them
- * belong in this list. */
-export const VIDEO_ENGINES: VideoEngine[] = GROUP_A_MODELS.map((m) => ({
-  id: m.id,
-  label: m.name,
-  tier: QUALITY_TIER_BY_ID[m.id] || 'standard',
-  family: engineFamilyOf(m.id),
-  supportsRef: m.supportsReferenceImages,
-  supports4k: m.supports4k,
-  maxDurationS: m.maxDurationS,
-  defaultDurationS: m.defaultDurationS,
-}));
+/** NOTE: Kling went live 14 Oct 2026 (credit pack) but rides its own
+ * /api/generate/kling/* proxy — see KLING_MODELS; it is not a Group A engine.
+ * HeyGen is configured but unused here. Higgsfield is excluded by founder
+ * ruling. None of them belong in this list. */
+export const VIDEO_ENGINES: VideoEngine[] = GROUP_A_MODELS
+  // Retired aliases are REACHABLE (a saved selection still routes) but never
+  // OFFERED: a picker showing three names for one model reads as a broken tool.
+  .filter((m) => !m.aliasOf)
+  .map((m) => ({
+    id: m.id,
+    label: m.name,
+    tier: QUALITY_TIER_BY_ID[m.id] || 'standard',
+    family: engineFamilyOf(m.id),
+    supportsRef: m.supportsReferenceImages,
+    supports4k: m.supports4k,
+    maxDurationS: m.maxDurationS,
+    defaultDurationS: m.defaultDurationS,
+  }));
 
-export const DEFAULT_ENGINE_ID = 'veo-3.1-fast-generate-preview';
+/** The platform's own default, and this workspace's consistency engine. */
+export const DEFAULT_ENGINE_ID = OMNI_MODEL_ID;
 
 export function videoEngine(id: string | null | undefined): VideoEngine | null {
-  return VIDEO_ENGINES.find((e) => e.id === String(id || '')) || null;
+  const wanted = String(id || '');
+  const direct = VIDEO_ENGINES.find((e) => e.id === wanted);
+  if (direct) return direct;
+  // A retired alias is no longer IN this list, but a stored selection still
+  // names one. Resolving it keeps every label, badge and duration lookup
+  // working instead of coming back null and rendering a blank chip.
+  const resolved = resolveEngineId(wanted);
+  return resolved && resolved !== wanted
+    ? VIDEO_ENGINES.find((e) => e.id === resolved) || null
+    : null;
 }
 
 /**
@@ -1057,12 +1170,16 @@ export function videoEngine(id: string | null | undefined): VideoEngine | null {
  * seedance — and try once more. Returns null when there is nowhere left to go.
  */
 export function fallbackEngineFor(id: string): string | null {
-  const e = videoEngine(id);
+  // A retired alias falls back from the model it REALLY runs on, so the step
+  // down is a genuine change of engine rather than the same one twice.
+  const e = videoEngine(resolveEngineId(id)) || videoEngine(id);
   if (!e) return DEFAULT_ENGINE_ID;
   if (e.id === 'openrouter/bytedance/seedance-2.0-fast') return null;
   switch (e.tier) {
-    case 'ultra': return 'veo-3.1-fast-generate-preview';
-    case 'cinema': return 'veo-3.0-fast-generate-001';
+    case 'ultra': return 'openrouter/google/veo-3.1-fast';
+    case 'cinema': return e.id === OMNI_MODEL_ID
+      ? 'openrouter/bytedance/seedance-2.0-fast'
+      : OMNI_MODEL_ID;
     case 'fast':
     case 'standard':
       return 'openrouter/bytedance/seedance-2.0-fast';
@@ -1086,27 +1203,23 @@ export type EngineHealth = 'working' | 'broken' | 'rejected' | 'unconfigured';
 export const ENGINE_HEALTH_CHECKED_AT = '2026-10-09';
 
 export const ENGINE_HEALTH: Record<string, { health: EngineHealth; note: string }> = {
-  'gemini-omni-flash-preview': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
-  'veo-3.1-generate-preview': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
-  'veo-3.1-fast-generate-preview': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
-  'veo-3.0-generate-001': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic veo_video_error_* id). Use Veo 3.1.' },
-  'veo-3.0-fast-generate-001': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic veo_video_error_* id). Use Veo 3.1 Fast.' },
-  'veo-2.0-generate-001': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic veo_video_error_* id). Use Veo 3.1.' },
-  'sora-2': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic sora_error_* id). Veo 3.1 is the working stand-in.' },
-  'sora-2-pro': { health: 'broken', note: 'Refused platform-side on 9 Oct 2026 (synthetic sora_error_* id). Veo 3.1 is the working stand-in.' },
+  'gemini-omni-1.1-flash': { health: 'working', note: 'The platform default for /api/veo/generate/video. The 9 Oct 2026 sweep reached it through its older ids and got finished clips back; the integration catalog names it the id to use in new code.' },
+  'gemini-omni-flash-preview': { health: 'working', note: 'Accepted, but served by gemini-omni-1.1-flash — it is the same model under an older name.' },
+  'veo-3.1-generate-preview': { health: 'working', note: 'Accepted, but retired: the platform serves it on gemini-omni-1.1-flash, so it is not a separate engine and it does not render 4K.' },
+  'veo-3.1-fast-generate-preview': { health: 'working', note: 'Accepted, but retired: the platform serves it on gemini-omni-1.1-flash, so it is not a separate engine and it does not render 4K.' },
   'openrouter/bytedance/seedance-2.0-fast': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
-  'openrouter/bytedance/seedance-2.5-fast': { health: 'rejected', note: 'Not in the proxy model enum — answers 400. Use Seedance 2.0 Fast.' },
   'openrouter/google/veo-3.1': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
   'openrouter/google/veo-3.1-fast': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
   'openrouter/google/veo-3.1-lite': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
-  'minimax-hailuo-02': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip. Duration must be 6 or 10 seconds.' },
-  'dop-turbo': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip from a source image.' },
-  'dop-standard': { health: 'working', note: 'Verified 9 Oct 2026 — accepted and rendered from a source image.' },
-  'dop-lite': { health: 'working', note: 'Verified 9 Oct 2026 — accepted and rendered from a source image.' },
-  'kling-v2-master': { health: 'unconfigured', note: 'A submit answers 503 — KLING_API_KEY is missing on this platform.' },
-  'kling-v1-6': { health: 'unconfigured', note: 'A submit answers 503 — KLING_API_KEY is missing on this platform.' },
-  'kling-v1-5': { health: 'unconfigured', note: 'A submit answers 503 — KLING_API_KEY is missing on this platform.' },
-  'kling-v1': { health: 'unconfigured', note: 'A submit answers 503 — KLING_API_KEY is missing on this platform.' },
+  'minimax-hailuo-02': { health: 'working', note: 'Re-verified live 13 Oct 2026 — returned a finished clip. Duration must be 6 or 10 seconds.' },
+  'dop-turbo': { health: 'working', note: 'Re-verified live 13 Oct 2026 — returned a finished clip from a source image (public URL; inline data: images are refused upstream today).' },
+  'dop-standard': { health: 'working', note: 'Re-verified live 13 Oct 2026 — rendered from a source image (public URL; inline data: images are refused upstream today).' },
+  'dop-lite': { health: 'working', note: 'Re-verified live 13 Oct 2026 — rendered from a source image (public URL; inline data: images are refused upstream today).' },
+  // Kling: the key went LIVE 14 Oct 2026 (credit pack). Only kling-v2-master
+  // has a live post-key observation; the other Kling ids (legacy v1* and the
+  // new 2.5/2.6/3.0 roster) carry no health row until the Video Provider Lab
+  // proves them in the browser, where the workspace credential exists.
+  'kling-v2-master': { health: 'rejected', note: 'Discontinued upstream — a live 14 Oct 2026 submit answered 502 wrapping Kling API error (404, code 1203) "The model has been discontinued". The static /models catalogue still lists it; do not trust that.' },
 };
 
 export function engineHealth(id: string | null | undefined): { health: EngineHealth; note: string } | null {
@@ -1120,6 +1233,53 @@ export function engineHealthWarning(id: string | null | undefined): string | nul
   return entry && entry.health !== 'working' ? entry.note : null;
 }
 
+/**
+ * Whether a model selector should offer this id as a normal choice.
+ *
+ * An id the sweep never covered counts as available — ENGINE_HEALTH is a
+ * snapshot of what was probed, not an allow-list, so a new engine must not be
+ * greyed out just because nobody has probed it yet. Only an id the sweep
+ * actually caught failing comes back false.
+ */
+export function isEngineAvailable(id: string | null | undefined): boolean {
+  const entry = engineHealth(id);
+  return !entry || entry.health === 'working';
+}
+
+/** The badge a selector shows on an unavailable model, or null when it is fine. */
+export function engineAvailabilityBadge(
+  id: string | null | undefined,
+): { label: string; title: string } | null {
+  const entry = engineHealth(id);
+  if (!entry || entry.health === 'working') return null;
+  const label = entry.health === 'unconfigured' ? 'Not connected' : 'Unavailable';
+  return { label, title: entry.note };
+}
+
+/**
+ * The engines to reach for first, best quality last-verified-working first.
+ * Anything the sweep caught failing is excluded outright.
+ */
+export const PREFERRED_WORKING_ENGINES: string[] = [
+  'openrouter/google/veo-3.1',
+  OMNI_MODEL_ID,
+  'openrouter/google/veo-3.1-fast',
+  'openrouter/bytedance/seedance-2.0-fast',
+  'openrouter/google/veo-3.1-lite',
+].filter((id) => isEngineAvailable(id) && !isAliasEngine(id));
+
+/**
+ * Up to `limit` working engines to offer after a failure, named the way a
+ * customer would recognise them ("Veo 3.1 Fast"), never as raw proxy ids.
+ * The one that just failed is excluded.
+ */
+export function suggestWorkingEngines(failedId?: string | null, limit = 2): Array<{ id: string; name: string }> {
+  const failed = String(failedId || '');
+  return PREFERRED_WORKING_ENGINES.filter((id) => id !== failed)
+    .slice(0, limit)
+    .map((id) => ({ id, name: groupAModel(id)?.name || id }));
+}
+
 /** Tier badge colors for the flat quality tiers (LightBeam palette). */
 export function qualityTierColor(tier: EngineQualityTier): { bg: string; fg: string } {
   switch (tier) {
@@ -1128,6 +1288,355 @@ export function qualityTierColor(tier: EngineQualityTier): { bg: string; fg: str
     case 'fast': return { bg: 'rgba(45,212,191,0.14)', fg: '#2DD4BF' };
     default: return { bg: 'rgba(148,163,184,0.14)', fg: '#94A3B8' };
   }
+}
+
+// ---------------------------------------------------------------------------
+// SCENE DURATION LIMITS AND SCENE PLANNING (added 13 Oct 2026).
+//
+// THE PROBLEM THIS SOLVES. Every generation model here has a hard per-clip
+// ceiling — 8s on Omni Flash and the Veo 3.1 family, 10s on Seedance and the
+// Runway video models — but a script's natural scene is whatever length the
+// script says. Asking for a 14-second scene does not produce a 14-second clip:
+// it produces a provider rejection, or worse, a clip that silently drops the
+// end of the dialogue. And an agent left to choose freely picks a scene count
+// from nowhere in particular, so the same brief yields 4 scenes one time and
+// 30 the next.
+//
+// So duration is treated as a CONSTRAINT SOLVED BEFORE SUBMIT, in one place,
+// against the chosen model's real capability:
+//
+//   sceneDurationLimits()  what this model actually accepts
+//   planScenes()           a bounded, whole-second plan that sums to the total
+//   validateSceneDurations() the pre-submit check, with readable violations
+//   splitSegmentForModel() divides an over-long beat into coherent parts
+//
+// These are GUARDRAILS, not a creative policy. Nothing here decides what a
+// scene is about, how it is shot or how many beats a story wants — a planning
+// agent still does that, and then runs its plan through these functions so its
+// creative choice is expressed in durations the provider will actually honour.
+// ---------------------------------------------------------------------------
+
+export interface SceneDurationLimits {
+  minS: number;
+  maxS: number;
+  defaultS: number;
+  /** Where the numbers came from, for a UI that shows the customer the rule. */
+  source: string;
+}
+
+/** The conservative floor used when a model id is unknown to this catalog. */
+const FALLBACK_SCENE_LIMITS: SceneDurationLimits = {
+  minS: 2,
+  maxS: 8,
+  defaultS: 6,
+  source: 'Unrecognised model — the safe 8-second ceiling every engine here supports.',
+};
+
+/**
+ * What ONE scene may be on this model. Reads the same catalog entries the
+ * selectors read, so a UI limit and a submit limit can never drift apart.
+ */
+export function sceneDurationLimits(modelId: string | null | undefined): SceneDurationLimits {
+  const groupA = groupAModel(modelId);
+  if (groupA) {
+    return {
+      minS: 2,
+      maxS: groupA.maxDurationS,
+      defaultS: groupA.defaultDurationS,
+      source: `${groupA.name} generates clips up to ${groupA.maxDurationS}s.`,
+    };
+  }
+  const runwayVideo = runwayVideoModel(modelId as any);
+  if (runwayVideo) {
+    return {
+      minS: runwayVideo.minDurationS,
+      maxS: runwayVideo.maxDurationS,
+      defaultS: runwayVideo.defaultDurationS,
+      source: `${runwayVideo.name} accepts any whole second from ${runwayVideo.minDurationS}s to ${runwayVideo.maxDurationS}s.`,
+    };
+  }
+  const runway = runwayModel(modelId);
+  if (runway && runway.maxDurationS) {
+    return {
+      minS: runway.minDurationS ?? 2,
+      maxS: runway.maxDurationS,
+      defaultS: runway.defaultDurationS ?? Math.min(5, runway.maxDurationS),
+      source: `${runway.label} accepts ${runway.minDurationS ?? 2}–${runway.maxDurationS}s per clip.`,
+    };
+  }
+  return FALLBACK_SCENE_LIMITS;
+}
+
+/**
+ * Build limits for a model this catalog does not list, from whatever ceiling
+ * the calling surface's own registry knows.
+ *
+ * Script-to-Video, SceneForge and Ads Studio each carry a model registry of
+ * their own (Kling ids, native-integration ids, provider ids the Group A list
+ * has never heard of). Without this, those surfaces would either get the
+ * conservative 8-second fallback — under-reporting a model that really does
+ * 10 — or go back to inventing their own duration rules, which is the drift
+ * this contract exists to end. So the limits SHAPE stays the single thing
+ * every surface validates against, while the number may come from the
+ * registry that actually knows it.
+ */
+export function sceneDurationLimitsFrom(input: {
+  modelId?: string | null;
+  modelName?: string | null;
+  maxS: number;
+  minS?: number;
+  defaultS?: number;
+}): SceneDurationLimits {
+  // A model this catalog DOES know always wins: those numbers are probe-verified.
+  const known = groupAModel(input.modelId)
+    || runwayVideoModel(input.modelId as any)
+    || runwayModel(input.modelId);
+  if (known) return sceneDurationLimits(input.modelId);
+
+  const maxS = Math.max(1, Math.round(Number(input.maxS) || FALLBACK_SCENE_LIMITS.maxS));
+  const minS = Math.max(1, Math.min(maxS, Math.round(Number(input.minS) || FALLBACK_SCENE_LIMITS.minS)));
+  const defaultS = Math.max(minS, Math.min(maxS, Math.round(Number(input.defaultS) || Math.min(maxS, 6))));
+  const name = String(input.modelName || input.modelId || 'This model').trim();
+  return { minS, maxS, defaultS, source: `${name} generates clips up to ${maxS}s.` };
+}
+
+/**
+ * The sentence a form shows under a duration control, from limits already in
+ * hand. Separated from `sceneDurationHint` so a surface using
+ * `sceneDurationLimitsFrom` shows the customer the SAME wording rather than
+ * writing its own.
+ */
+export function formatSceneDurationHint(limits: SceneDurationLimits): string {
+  return `${limits.minS}–${limits.maxS}s per scene (default ${limits.defaultS}s). ${limits.source}`;
+}
+
+/** The sentence a form shows under a duration control. */
+export function sceneDurationHint(modelId: string | null | undefined): string {
+  return formatSceneDurationHint(sceneDurationLimits(modelId));
+}
+
+export interface ScenePlanInput {
+  modelId?: string | null;
+  /** The finished video's length. Scene length is derived from it, not equal to it. */
+  totalDurationS: number;
+  /** An agent's or a customer's intended scene count. Honoured when it fits. */
+  requestedSceneCount?: number | null;
+  /** Hard ceiling on scenes, so "AI mode" cannot return an unbounded plan. */
+  maxScenes?: number;
+  minScenes?: number;
+}
+
+export interface PlannedScene {
+  index: number;
+  durationS: number;
+}
+
+export interface ScenePlan {
+  scenes: PlannedScene[];
+  /** The total the plan actually covers — may be less than requested; see notes. */
+  totalDurationS: number;
+  limits: SceneDurationLimits;
+  /** Every adjustment made, in words worth showing. Never a silent change. */
+  notes: string[];
+}
+
+export const DEFAULT_MAX_SCENES = 12;
+
+/**
+ * Turn "I want N seconds of video on model M" into a plan of whole-second
+ * scenes that each fit the model and together sum EXACTLY to the covered total.
+ *
+ * The scene count is derived, never hardcoded: the minimum number of scenes
+ * that can carry the total is the floor, the caller's request is honoured when
+ * it fits between that floor and the ceiling, and the ceiling is what stops an
+ * agent returning sixty scenes for a thirty-second ad. Any clamp is reported
+ * in `notes` rather than applied quietly.
+ */
+export function planScenes(input: ScenePlanInput): ScenePlan {
+  const limits = sceneDurationLimits(input.modelId);
+  const notes: string[] = [];
+  const maxScenes = Math.max(1, Math.floor(input.maxScenes ?? DEFAULT_MAX_SCENES));
+  const minScenes = Math.max(1, Math.min(maxScenes, Math.floor(input.minScenes ?? 1)));
+
+  let total = Math.round(Number(input.totalDurationS));
+  if (!Number.isFinite(total) || total <= 0) {
+    total = limits.defaultS;
+    notes.push(`No total length was given, so one ${limits.defaultS}s scene is planned.`);
+  }
+
+  // The fewest scenes that can carry the total without any scene exceeding the
+  // model's ceiling, and the most that can carry it without falling under the
+  // model's floor.
+  const fewestPossible = Math.ceil(total / limits.maxS);
+  const mostUseful = Math.max(1, Math.floor(total / limits.minS));
+
+  let count = fewestPossible;
+  const requested = Math.floor(Number(input.requestedSceneCount));
+  if (Number.isFinite(requested) && requested > 0) {
+    count = requested;
+    if (count < fewestPossible) {
+      notes.push(
+        `${requested} scene${requested === 1 ? '' : 's'} cannot carry ${total}s on this model `
+        + `(${limits.maxS}s per scene), so ${fewestPossible} scenes are used instead.`,
+      );
+      count = fewestPossible;
+    }
+    if (count > mostUseful) {
+      notes.push(
+        `${requested} scenes would leave each one under the ${limits.minS}s minimum, `
+        + `so ${mostUseful} scenes are used instead.`,
+      );
+      count = mostUseful;
+    }
+  }
+
+  count = Math.max(minScenes, Math.min(maxScenes, count));
+
+  // A total too long for the scene ceiling is REDUCED and said out loud. The
+  // alternative is submitting a duration the provider refuses.
+  const coverable = count * limits.maxS;
+  if (total > coverable) {
+    notes.push(
+      `${total}s needs more than the ${maxScenes}-scene limit allows on this model, `
+      + `so the video is planned at ${coverable}s. Raise the scene limit or pick a `
+      + `longer-clip model to go further.`,
+    );
+    total = coverable;
+  }
+  const floorable = count * limits.minS;
+  if (total < floorable) {
+    notes.push(`${total}s is shorter than ${count} scenes can be, so ${floorable}s is planned.`);
+    total = floorable;
+  }
+
+  // Whole seconds that sum exactly: the base length for every scene, with the
+  // remainder handed out one second at a time to the earliest scenes.
+  const base = Math.floor(total / count);
+  let remainder = total - base * count;
+  const scenes: PlannedScene[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const extra = remainder > 0 ? 1 : 0;
+    remainder -= extra;
+    scenes.push({
+      index,
+      durationS: Math.max(limits.minS, Math.min(limits.maxS, base + extra)),
+    });
+  }
+
+  return { scenes, totalDurationS: scenes.reduce((sum, s) => sum + s.durationS, 0), limits, notes };
+}
+
+/**
+ * The PRE-SUBMIT check. Returns a readable violation for each problem and an
+ * empty array when the plan is safe to send. Call this before paying for a
+ * generation, not after the provider has refused it.
+ */
+export function validateSceneDurations(
+  modelId: string | null | undefined,
+  durations: number[],
+  opts: {
+    expectedTotalS?: number | null;
+    maxScenes?: number;
+    /** Limits from `sceneDurationLimitsFrom`, for a model this catalog does
+     * not list. Omit it and the catalog's own limits are used. */
+    limits?: SceneDurationLimits;
+  } = {},
+): string[] {
+  const limits = opts.limits || sceneDurationLimits(modelId);
+  const maxScenes = Math.max(1, Math.floor(opts.maxScenes ?? DEFAULT_MAX_SCENES));
+  const problems: string[] = [];
+
+  if (!durations.length) return ['The plan has no scenes.'];
+  if (durations.length > maxScenes) {
+    problems.push(`${durations.length} scenes exceeds the ${maxScenes}-scene limit for this workflow.`);
+  }
+
+  durations.forEach((raw, index) => {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) {
+      problems.push(`Scene ${index + 1} has no duration.`);
+      return;
+    }
+    if (!Number.isInteger(value)) {
+      problems.push(`Scene ${index + 1} is ${value}s — durations must be whole seconds.`);
+    }
+    if (value > limits.maxS) {
+      problems.push(
+        `Scene ${index + 1} is ${value}s, over this model's ${limits.maxS}s ceiling. `
+        + `Split it into ${Math.ceil(value / limits.maxS)} scenes instead.`,
+      );
+    }
+    if (value < limits.minS) {
+      problems.push(`Scene ${index + 1} is ${value}s, under this model's ${limits.minS}s minimum.`);
+    }
+  });
+
+  const expected = Number(opts.expectedTotalS);
+  if (Number.isFinite(expected) && expected > 0) {
+    const sum = durations.reduce((total, value) => total + (Number(value) || 0), 0);
+    if (sum !== Math.round(expected)) {
+      problems.push(`The scene durations add up to ${sum}s but the video is set to ${Math.round(expected)}s.`);
+    }
+  }
+
+  return problems;
+}
+
+export interface SegmentPart {
+  text: string;
+  durationS: number;
+}
+
+/**
+ * Divide one over-long beat into parts the model can actually generate.
+ *
+ * The text is split at SENTENCE boundaries and, failing that, at clause
+ * boundaries, so each part is still a coherent thing to film. Nothing is
+ * truncated: every word in the input appears in exactly one part — losing the
+ * back half of a line of dialogue to a duration cap is the failure this
+ * function exists to prevent. Returns a single part when the beat already fits.
+ */
+export function splitSegmentForModel(
+  modelId: string | null | undefined,
+  text: string,
+  durationS: number,
+): SegmentPart[] {
+  const limits = sceneDurationLimits(modelId);
+  const total = Math.max(limits.minS, Math.round(Number(durationS) || limits.defaultS));
+  const body = String(text || '').trim();
+
+  if (total <= limits.maxS) return [{ text: body, durationS: total }];
+
+  const plan = planScenes({
+    modelId,
+    totalDurationS: total,
+    maxScenes: Math.ceil(total / limits.minS),
+  });
+  const parts = plan.scenes.length;
+
+  // Sentences first; clauses only if the beat is one long sentence.
+  let pieces = body.match(/[^.!?\u2026]+[.!?\u2026]+|[^.!?\u2026]+$/g) || [];
+  if (pieces.length < parts) {
+    pieces = body.split(/(?<=[,;:—])\s+/).filter(Boolean);
+  }
+  if (!pieces.length) pieces = [body];
+
+  // Hand the pieces out in proportion to each part's share of the duration, so
+  // a longer part carries more of the line.
+  const out: SegmentPart[] = [];
+  let cursor = 0;
+  plan.scenes.forEach((scene, index) => {
+    const remainingParts = parts - index;
+    const remainingPieces = pieces.length - cursor;
+    const take = index === parts - 1
+      ? remainingPieces
+      : Math.max(1, Math.round(remainingPieces / remainingParts));
+    const slice = pieces.slice(cursor, cursor + take).join(' ').trim();
+    cursor += take;
+    out.push({ text: slice || body, durationS: scene.durationS });
+  });
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -1144,17 +1653,20 @@ export function qualityTierColor(tier: EngineQualityTier): { bg: string; fg: str
 //    veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and EVERY
 //    openrouter/* id in the enum (seedance-2.0-fast, veo-3.1, veo-3.1-fast,
 //    veo-3.1-lite). The managed POST /api/generate/video works too.
-//  · BROKEN platform-side (the proxy answers 200 with a synthetic *_error_*
-//    id instead of a real operation): sora-2, sora-2-pro, veo-3.0-generate-001,
-//    veo-3.0-fast-generate-001, veo-2.0-generate-001. No request shape fixes
-//    this from here; the fallbackChain on each route is what covers it.
-//  · NOT IN THE PROXY ENUM (hard 400): openrouter/bytedance/seedance-2.5-fast.
+//  · REMOVED FROM THE CATALOG (13 Oct 2026): sora-2, sora-2-pro,
+//    veo-3.0-generate-001, veo-3.0-fast-generate-001 and veo-2.0-generate-001
+//    (the proxy answered 200 with a synthetic *_error_* id instead of a real
+//    operation) plus openrouter/bytedance/seedance-2.5-fast (hard 400 — not in
+//    the proxy enum). They no longer exist in GROUP_A_MODELS, so no route or
+//    fallback chain names them.
 //  · RUNWAY: live. The free quote answers 200 with a real price, so routes stay
 //    ON by default; pass runwayEnabled:false only after a submit answered 503
 //    this session. The paid submit needs a browser X-Workspace-DB-Token.
-//  · KLING: NOT configured — a submit answers 503 KLING_API_KEY missing, even
-//    though GET /api/generate/kling/models still answers 200 with a static
-//    list. Never gate Kling on that catalogue call.
+//  · KLING: LIVE as of 14 Oct 2026 (credit pack active). kling-v2-master is
+//    discontinued upstream (502 wrapping Kling 404 code 1203). Kling's own
+//    docs now list kling-2.5-turbo / 2.6 / 3.0 / 3.0-omni; none are verified
+//    through the platform proxy yet, and GET /api/generate/kling/models is
+//    still a static list — never gate Kling on that catalogue call.
 //  · HIGGSFIELD: verified WORKING (Hailuo 02 text-to-video and all three DoP
 //    image-to-video models returned clips). It is excluded from VIDEO_ENGINES
 //    because that list is Group-A-only — reach it through
@@ -1181,7 +1693,10 @@ export interface EngineAvailability {
    * undefined counts as TRUE. Pass false only after a submit answered 503
    * this session. */
   runwayEnabled?: boolean;
-  /** True only after GET /api/generate/kling/models answered 200 AND a submit worked. */
+  /** True only after a Kling submit worked this session. The key is LIVE as of
+   * 14 Oct 2026 (credit pack), but kling-v2-master is discontinued upstream and
+   * no other Kling id is proven through the proxy yet, so undefined still
+   * counts as FALSE. The /models catalogue is static — never gate on it. */
   klingEnabled?: boolean;
   /** OpenRouter submits were re-verified working on 9 Oct 2026 (Seedance 2.0
    * Fast and all three OpenRouter Veo ids each returned a real operation and a
@@ -1203,10 +1718,15 @@ export interface ShotRoute {
   reason: string;
 }
 
-// TODO: upgrade to 1.1 when platform key is confirmed
-const OMNI = 'gemini-omni-flash-preview';
-const VEO_31 = 'veo-3.1-generate-preview';
-const VEO_31_FAST = 'veo-3.1-fast-generate-preview';
+// The four engines that are genuinely DISTINCT on this platform. The
+// `veo-3.1-*-generate-preview` ids are not among them: they are retired
+// aliases the proxy serves on Omni 1.1, so routing a "cinematic Veo" shot to
+// one of them delivered an Omni clip while telling the customer it was Veo.
+// Real Veo 3.1 is reachable — through OpenRouter, which is a separate enum
+// entry and not retired.
+const OMNI = OMNI_MODEL_ID;
+const VEO_31 = 'openrouter/google/veo-3.1';
+const VEO_31_FAST = 'openrouter/google/veo-3.1-fast';
 const SEEDANCE = 'openrouter/bytedance/seedance-2.0-fast';
 
 export function routeShotIntent(intent: ShotIntent, avail: EngineAvailability = {}): ShotRoute {
@@ -1214,12 +1734,12 @@ export function routeShotIntent(intent: ShotIntent, avail: EngineAvailability = 
     case 'ui_demo':
       return {
         kind: 'code', engineId: null, fallbackChain: [],
-        reason: 'Product UI is recreated deterministically — real screenshot (or coded interface skeleton) inside an animated device/browser mockup with cursor, clicks and highlights (Remotion/GSAP). Generative video is never asked to draw an interface.',
+        reason: 'Product UI is recreated deterministically — real screenshot (or coded interface skeleton) inside an animated device/browser mockup with cursor, clicks and highlights, rendered through Remotion. Generative video is never asked to draw an interface.',
       };
     case 'cinematic_hero':
       return {
-        kind: 'engine', engineId: VEO_31, fallbackChain: [VEO_31_FAST, 'sora-2', OMNI],
-        reason: 'Veo 3.1: hero cinematic quality, 4K, up to 3 reference ingredients or a locked last frame.',
+        kind: 'engine', engineId: VEO_31, fallbackChain: [VEO_31_FAST, OMNI, SEEDANCE],
+        reason: 'Real Veo 3.1 via OpenRouter for a text-led cinematic hero shot. This path accepts one seed image, no reference images, and does not promise 4K.',
       };
     case 'fast_broll':
       return avail.openRouterHealthy !== false
@@ -1232,8 +1752,8 @@ export function routeShotIntent(intent: ShotIntent, avail: EngineAvailability = 
       };
     case 'product_consistency':
       return {
-        kind: 'engine', engineId: VEO_31, fallbackChain: [VEO_31_FAST, OMNI],
-        reason: 'Veo 3.1 asset-reference ingredients keep the real product on-model in generated footage.',
+        kind: 'engine', engineId: OMNI, fallbackChain: [VEO_31, VEO_31_FAST],
+        reason: 'Omni 1.1 is the only engine here that accepts reference images (up to ten, combinable with a seed frame), so it is the product-consistency route.',
       };
     case 'motion_background':
       return {
@@ -1245,18 +1765,14 @@ export function routeShotIntent(intent: ShotIntent, avail: EngineAvailability = 
         ? { kind: 'engine', engineId: 'gen4_turbo', fallbackChain: [VEO_31_FAST, OMNI], reason: 'Runway Gen 4 Turbo at $0.05/s is the cheapest image-to-video once enabled.' }
         : { kind: 'engine', engineId: VEO_31_FAST, fallbackChain: [OMNI], reason: 'Runway answered 503 this session — Veo 3.1 Fast animates a single seed image (imageData) as the fallback; gen4_turbo resumes when Runway recovers.' };
     case 'surreal_stylized':
-      // Sora stays the primary because it is the right engine for this intent
-      // and its current failure is platform-side, fast (the proxy answers in
-      // well under a second with a synthetic sora_error_* id) and already
-      // absorbed by the fallback chain. Veo 3.1 is what actually renders today.
       return {
-        kind: 'engine', engineId: 'sora-2', fallbackChain: [VEO_31, VEO_31_FAST],
-        reason: 'Sora 2 is strongest for surreal, stylized and complex multi-subject scenes. As of the 9 Oct 2026 sweep Sora submits are refused platform-side, so expect the chain to land on Veo 3.1.',
+        kind: 'engine', engineId: VEO_31, fallbackChain: [VEO_31_FAST, OMNI],
+        reason: 'Veo 3.1 carries surreal, stylized and complex multi-subject scenes — strong prompt adherence for dream logic, crowds and impossible physics.',
       };
     case 'video_to_video':
       return avail.runwayEnabled !== false
         ? { kind: 'recipe', engineId: 'product_swap', fallbackChain: [], reason: 'Runway product_swap performs a real video transformation (reference video + product swap).' }
-        : { kind: 'unavailable', engineId: null, fallbackChain: [], reason: 'Runway answered 503 this session, and no other enabled provider performs true video-to-video (Kling key missing, Higgsfield founder-excluded). Do NOT fake it with text-to-video — retry Runway shortly or offer Video Enhancer\u2019s editorial treatments (real transforms of the real footage) instead.' };
+        : { kind: 'unavailable', engineId: null, fallbackChain: [], reason: 'Runway answered 503 this session, and no other enabled provider performs true video-to-video (Kling has no video-to-video route on the platform proxy, Higgsfield founder-excluded). Do NOT fake it with text-to-video — retry Runway shortly or offer Video Enhancer\u2019s editorial treatments (real transforms of the real footage) instead.' };
     case 'finished_product_ad':
       return avail.runwayEnabled !== false
         ? { kind: 'recipe', engineId: 'product_ad', fallbackChain: [], reason: 'Runway product_ad assembles a complete polished advertisement from product photos in one call.' }

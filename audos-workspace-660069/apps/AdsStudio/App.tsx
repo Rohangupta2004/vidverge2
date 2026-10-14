@@ -2,8 +2,8 @@
  * ADS STUDIO — agentic short-form ad engine.
  *
  * A linear 8-step workflow (Product → Research → Angles → Script → Scene Plan
- * → Generate → Review → Variations) where Claude Opus 5 makes the creative
- * decisions, Veo films the avatar clips, GSAP/SVG renders the overlay layer,
+ * → Generate → Review → Variations) where the creative planner chooses shot
+ * intent and shared routing resolves each engine; GSAP/SVG renders overlays
  * and FFmpeg.wasm assembles the final MP4 in the browser. No Remotion.
  *
  * Standalone: shares no module with Product Video, SceneForge, Video Enhancer
@@ -29,16 +29,26 @@ import {
 } from './opus';
 import { generateClipAgentic, assembleWithOverlays, ResolvedClip } from './pipeline';
 import RecipesPanel from './RecipesPanel';
+import RunwayStudio from '../../components/RunwayStudio';
 import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
 import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
 import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
 import { engineDisplayName, usePersistentEngine } from '../../components/EngineSelector';
 import VideoIntegrationPicker from '../../components/VideoIntegrationPicker';
-import { loadVideoSelection, saveVideoSelection, type VideoIntegrationId } from '../../lib/videoIntegrations';
+import {
+  integrationForEngineId, loadVideoSelection, saveVideoSelection,
+  type VideoIntegrationId,
+} from '../../lib/videoIntegrations';
 import { omniFallbackMessage } from '../../lib/omniFallback';
+import {
+  formatSceneDurationHint, sceneDurationLimitsFrom, validateSceneDurations,
+} from '../../lib/videoEngines';
 import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
 import AppShell from '../../components/ui/AppShell';
 import VergeMark from '../../components/ui/VergeMark';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
+import { withBrandContext } from '../../components/BrandContextLayer';
 
 // ---------------------------------------------------------------------------
 // Small UI atoms — card, inputStyle, labelStyle, Btn, Tag and Spin live in
@@ -127,7 +137,7 @@ const ADS_RESPONSIVE_CSS = `
 .ads-studio-app input:not([type='checkbox']):not([type='radio']), .ads-studio-app textarea, .ads-studio-app select { box-shadow: 0 0 0 1px ${T.lineStrong}; transition: box-shadow .18s ease, border-color .18s ease, background-color .18s ease; }
 .ads-studio-app input:not([type='checkbox']):not([type='radio']):focus, .ads-studio-app textarea:focus, .ads-studio-app select:focus { outline: none; border-color: ${T.accent} !important; box-shadow: 0 0 0 1px ${T.accent}, 0 0 0 4px color-mix(in srgb, ${T.accent} 18%, transparent); }
 .ads-card { transition: transform .22s cubic-bezier(.22,.9,.3,1), box-shadow .22s ease, border-color .22s ease; }
-.ads-card:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(120,80,0,.12); }
+.ads-card:hover { transform: translateY(-2px); box-shadow: 0 4px 24px rgba(0,0,0,.4); }
 @supports (interpolate-size: allow-keywords) { .ads-studio-app { interpolate-size: allow-keywords; } .ads-studio-app details::details-content { block-size: 0; opacity: 0; overflow: clip; transition: block-size .32s cubic-bezier(.22,.9,.3,1), opacity .22s ease; } .ads-studio-app details[open]::details-content { block-size: auto; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .ads-studio-app *, .ads-studio-app *::before, .ads-studio-app *::after { animation: none !important; transition-duration: 0.01ms !important; } }
 @media (max-width: 767px) {
@@ -163,6 +173,7 @@ const ADS_RESPONSIVE_CSS = `
 }
 `;
 
+type Step4Branch = 'ugc' | 'multi-shot' | 'recipes' | 'workflow';
 type ClipPhaseStatus = 'pending' | 'running' | 'done' | 'failed';
 type ClipPhase = { id: 'render' | 'frames' | 'inspect' | 'retake' | 'continuity'; label: string; status: ClipPhaseStatus; startedAt?: number; elapsedMs?: number };
 
@@ -188,7 +199,9 @@ function formatClipElapsed(ms: number): string {
 // The app
 // ---------------------------------------------------------------------------
 
-export default function AdsStudioApp() {
+const BrandedAdsStudioApp = withBrandContext(AdsStudioApp, 'Ads Studio');
+export default BrandedAdsStudioApp;
+function AdsStudioApp() {
   const [s, setS] = useState<AdsSession>(() => loadSession());
   const [stageNote, setStageNote] = useState('');
   const [ffLogs, setFfLogs] = useState<string[]>([]);
@@ -204,6 +217,7 @@ export default function AdsStudioApp() {
   // stands; nothing in the session is touched until the customer presses
   // "Use in Ad" on a saved clip.
   const [runwayOpen, setRunwayOpen] = useState(false);
+  const [step4Branch, setStep4Branch] = useState<Step4Branch>('workflow');
   // Engine every clip in this run renders on. Omni Flash stays the default
   // (it is the only model that keeps the same presenter across cuts via the
   // avatar reference); the Runway roster is the cinematic alternative. The
@@ -212,6 +226,18 @@ export default function AdsStudioApp() {
   const initialVideo = loadVideoSelection();
   const [clipEngine, setClipEngine] = usePersistentEngine('ads-studio:clip-engine', initialVideo.model);
   const [clipIntegration, setClipIntegration] = useState<VideoIntegrationId>(() => initialVideo.integration);
+  const clipDurationLimits = sceneDurationLimitsFrom({
+    modelId: clipEngine,
+    modelName: engineDisplayName(clipEngine),
+    minS: 2,
+    maxS: clipIntegration === 'image-and-video-generation' || clipIntegration === 'google-veo3' ? 8 : 10,
+    defaultS: 6,
+  });
+  const clipDurationHint = formatSceneDurationHint(clipDurationLimits);
+
+  function durationProblem(durations: number[]): string {
+    return validateSceneDurations(clipEngine, durations, { limits: clipDurationLimits })[0] || '';
+  }
 
   function onClipVideoSelection(integration: VideoIntegrationId, model: string) {
     setClipIntegration(integration);
@@ -410,7 +436,7 @@ export default function AdsStudioApp() {
     say(`Your director is writing the script for “${angle.angle_name}”…`);
     try {
       const script = await writeScript(live.current.research!, angle, live.current.offerCta);
-      patch({ script, scenePlan: [], clips: [], finalVideoUrl: null, assemblyStatus: 'idle', matrix: null, variations: [], isProcessing: false });
+      patch({ script, scenePlan: [], planNotes: [], clips: [], finalVideoUrl: null, assemblyStatus: 'idle', matrix: null, variations: [], isProcessing: false });
       say('Script ready — edit any line, then continue.');
     } catch (e: any) { patch({ isProcessing: false }); fail('Script writing failed', e); }
     finally { busy.current = false; }
@@ -472,7 +498,7 @@ export default function AdsStudioApp() {
     say('Your director is building the scene plan…');
     try {
       const assets = [...cur.screenshots, ...cur.productImages, ...(cur.logo ? [cur.logo] : [])];
-      const { voiceDescription, accent, plans } = await buildScenePlan({
+      const { voiceDescription, accent, plans, notes } = await buildScenePlan({
         research: cur.research!, angle, script: cur.script, assets, hasAvatar: !!cur.avatar,
       });
 
@@ -487,8 +513,8 @@ export default function AdsStudioApp() {
           generated.push({ ...need, url });
         } catch (e: any) { say(`Asset skipped (${String(e?.message || e).slice(0, 80)}).`); }
       }
-      patch({ scenePlan: plans, voiceDescription: `${voiceDescription} · ${accent}`, generatedAssets: generated, isProcessing: false });
-      say('Scene plan ready — review the storyboard.');
+      patch({ scenePlan: plans, voiceDescription: `${voiceDescription} · ${accent}`, planNotes: notes, generatedAssets: generated, isProcessing: false });
+      say(notes.length ? `Scene plan ready — review the storyboard and ${notes.length} guardrail note${notes.length === 1 ? '' : 's'}.` : 'Scene plan ready — review the storyboard.');
     } catch (e: any) { patch({ isProcessing: false }); fail('Scene planning failed', e); }
     finally { busy.current = false; }
   }
@@ -577,10 +603,47 @@ export default function AdsStudioApp() {
     setS((prev) => ({ ...prev, clips: prev.clips.map((c) => c.clipNumber === clipNumber ? { ...c, ...p } : c) }));
   }
 
+  /** The agent chooses intent; shared routing resolves a concrete engine.
+   * The picker is an explicit fallback/override only for code/recipe routes
+   * that this sequential presenter pipeline cannot submit as a normal clip. */
+  function engineForPlan(plan: ScenePlan): { model: string; integration: VideoIntegrationId } {
+    const model = plan.workflow_kind === 'engine' && plan.engine_id ? plan.engine_id : clipEngine;
+    return {
+      model,
+      integration: plan.workflow_kind === 'engine' && plan.engine_id
+        ? integrationForEngineId(model)
+        : clipIntegration,
+    };
+  }
+
+  function plannedDurationProblem(cur: AdsSession): string {
+    for (const clip of cur.script) {
+      const plan = cur.scenePlan.find((entry) => entry.clip_number === clip.clip_number);
+      if (!plan) return `Clip ${clip.clip_number} has no production plan.`;
+      if ((plan.duration_notes || []).length) return String(plan.duration_notes![0]);
+      const routed = engineForPlan(plan);
+      const limits = sceneDurationLimitsFrom({
+        modelId: routed.model,
+        modelName: engineDisplayName(routed.model),
+        minS: 2,
+        maxS: routed.integration === 'image-and-video-generation' || routed.integration === 'google-veo3' ? 8 : 10,
+        defaultS: 6,
+      });
+      const problem = validateSceneDurations(routed.model, [clip.duration_seconds], {
+        expectedTotalS: clip.duration_seconds,
+        limits,
+      })[0];
+      if (problem) return problem;
+    }
+    return '';
+  }
+
   async function runGeneration() {
     if (busy.current) return;
     const cur = live.current;
     if (!cur.scenePlan.length) return;
+    const durationIssue = plannedDurationProblem(cur);
+    if (durationIssue) { say(`Duration check: ${durationIssue}`); return; }
     busy.current = true;
     patch({ isProcessing: true, currentStep: 6 });
     // Seed the grid — clips already accepted are kept so a resume never re-bills.
@@ -591,45 +654,65 @@ export default function AdsStudioApp() {
     });
     patch({ clips });
 
-    // One presenter for the whole run, resolved before the first submit. A
-    // resume with nothing left to render never casts (and never pays for a
-    // portrait it will not use).
-    const cast = clips.some((c) => !c.videoUrl)
-      ? await ensureCast(cur)
-      : { url: cur.avatar?.url || cur.castUrl, description: cur.castDescription };
+    try {
+      // One presenter for the whole run, resolved before the first submit. A
+      // resume with nothing left to render never casts (and never pays for a
+      // portrait it will not use).
+      const cast = clips.some((c) => !c.videoUrl)
+        ? await ensureCast(cur)
+        : { url: cur.avatar?.url || cur.castUrl, description: cur.castDescription };
 
-    let continuity: string | null = null;
-    let prevFrame: string | null = null;
-    for (const sc of cur.script) {
-      const plan = cur.scenePlan.find((p) => p.clip_number === sc.clip_number);
-      if (!plan) continue;
-      const existing = clips.find((c) => c.clipNumber === sc.clip_number)!;
-      if (existing.videoUrl && (existing.status === 'accepted' || existing.status === 'regenerated')) {
-        prevFrame = existing.lastFrameUrl;
-        continuity = existing.lastFrameUrl ? await continuityNoteFromFrame(existing.lastFrameUrl) : null;
-        continue;
+      let continuity: string | null = null;
+      let prevFrame: string | null = null;
+      for (const sc of cur.script) {
+        const plan = cur.scenePlan.find((p) => p.clip_number === sc.clip_number);
+        if (!plan) continue;
+        const existing = clips.find((c) => c.clipNumber === sc.clip_number)!;
+        if (existing.videoUrl && (existing.status === 'accepted' || existing.status === 'regenerated')) {
+          prevFrame = existing.lastFrameUrl;
+          try {
+            continuity = existing.lastFrameUrl ? await continuityNoteFromFrame(existing.lastFrameUrl) : null;
+          } catch {
+            continuity = null;
+          }
+          continue;
+        }
+        setClipState(sc.clip_number, { status: 'generating', note: '' });
+        startClipPhases(sc.clip_number);
+        say(`Generating clip ${sc.clip_number} of ${cur.script.length}…`);
+        try {
+          const routed = engineForPlan(plan);
+          const res = await generateClipAgentic({
+            plan: { ...plan, spoken_line: sc.spoken_line }, script: sc, aspect: cur.aspect,
+            characterRefUrl: cast.url, characterDescription: cast.description, model: routed.model, integration: routed.integration,
+            continuityNote: continuity, previousFrameUrl: prevFrame, onNote: (message) => noteClipPhase(sc.clip_number, message),
+          });
+          finishClipPhases(sc.clip_number, Boolean(res.videoUrl));
+          if (res.fallbackFrom) setToast(omniFallbackMessage(res.fallbackFrom));
+          clips = clips.map((c) => c.clipNumber === sc.clip_number ? {
+            ...c, videoUrl: res.videoUrl, status: res.status, issues: res.issues,
+            attempts: res.attempts, lastFrameUrl: res.lastFrameUrl, promptUsed: res.promptUsed, modelUsed: res.modelUsed, note: res.note,
+          } : c);
+          setClipState(sc.clip_number, clips.find((c) => c.clipNumber === sc.clip_number)!);
+          if (res.videoUrl) { prevFrame = res.lastFrameUrl; continuity = res.continuityNote || null; }
+        } catch (error) {
+          const note = error instanceof Error ? error.message : String(error);
+          finishClipPhases(sc.clip_number, false);
+          clips = clips.map((c) => c.clipNumber === sc.clip_number
+            ? { ...c, status: 'failed', note, issues: [], attempts: Math.max(1, c.attempts || 0) }
+            : c);
+          setClipState(sc.clip_number, clips.find((c) => c.clipNumber === sc.clip_number)!);
+        }
       }
-      setClipState(sc.clip_number, { status: 'generating' });
-      startClipPhases(sc.clip_number);
-      say(`Generating clip ${sc.clip_number} of ${cur.script.length}…`);
-      const res = await generateClipAgentic({
-        plan: { ...plan, spoken_line: sc.spoken_line }, script: sc, aspect: cur.aspect,
-        characterRefUrl: cast.url, characterDescription: cast.description, model: clipEngine, integration: clipIntegration,
-        continuityNote: continuity, previousFrameUrl: prevFrame, onNote: (message) => noteClipPhase(sc.clip_number, message),
-      });
-      finishClipPhases(sc.clip_number, Boolean(res.videoUrl));
-      if (res.fallbackFrom) setToast(omniFallbackMessage(res.fallbackFrom));
-      clips = clips.map((c) => c.clipNumber === sc.clip_number ? {
-        ...c, videoUrl: res.videoUrl, status: res.status, issues: res.issues,
-        attempts: res.attempts, lastFrameUrl: res.lastFrameUrl, promptUsed: res.promptUsed, modelUsed: res.modelUsed, note: res.note,
-      } : c);
-      setClipState(sc.clip_number, clips.find((c) => c.clipNumber === sc.clip_number)!);
-      if (res.videoUrl) { prevFrame = res.lastFrameUrl; continuity = res.continuityNote || null; }
+      const failed = clips.filter((c) => !c.videoUrl).length;
+      patch({ clips });
+      say(failed ? `${failed} clip(s) failed — regenerate them from their cards, then review.` : 'All clips generated — head to Review.');
+    } catch (error) {
+      fail('Clip generation could not start', error);
+    } finally {
+      busy.current = false;
+      patch({ isProcessing: false });
     }
-    const failed = clips.filter((c) => !c.videoUrl).length;
-    patch({ isProcessing: false, clips });
-    say(failed ? `${failed} clip(s) failed — regenerate them from their cards, then review.` : 'All clips generated — head to Review.');
-    busy.current = false;
   }
 
   async function regenerateOneClip(clipNumber: number, promptOverride?: string) {
@@ -638,6 +721,8 @@ export default function AdsStudioApp() {
     const sc = cur.script.find((c) => c.clip_number === clipNumber);
     const plan = cur.scenePlan.find((p) => p.clip_number === clipNumber);
     if (!sc || !plan) return;
+    const durationIssue = plannedDurationProblem({ ...cur, script: [sc], scenePlan: [plan] });
+    if (durationIssue) { say(`Duration check: ${durationIssue}`); return; }
     busy.current = true;
     patch({ isProcessing: true });
     setClipState(clipNumber, { status: 'generating', issues: [], note: '' });
@@ -646,10 +731,11 @@ export default function AdsStudioApp() {
       const prev = cur.clips.filter((c) => c.clipNumber < clipNumber && c.lastFrameUrl).sort((a, b) => b.clipNumber - a.clipNumber)[0];
       const continuity = prev?.lastFrameUrl ? await continuityNoteFromFrame(prev.lastFrameUrl) : null;
       const cast = await ensureCast(cur);
+      const routed = engineForPlan(plan);
       const res = await generateClipAgentic({
         plan: { ...plan, spoken_line: sc.spoken_line }, script: sc, aspect: cur.aspect,
         characterRefUrl: cast.url, characterDescription: cast.description,
-        model: clipEngine, integration: clipIntegration, continuityNote: continuity,
+        model: routed.model, integration: routed.integration, continuityNote: continuity,
         previousFrameUrl: prev?.lastFrameUrl || null, promptOverride: promptOverride || null, onNote: (message) => noteClipPhase(clipNumber, message),
       });
       finishClipPhases(clipNumber, Boolean(res.videoUrl));
@@ -729,6 +815,8 @@ export default function AdsStudioApp() {
     const m = cur.matrix;
     if (!m || !cur.script.length) return;
     const id = `v_${hookIdx}${bodyIdx}${ctaIdx}`;
+    const durationIssue = plannedDurationProblem(cur);
+    if (durationIssue) { say(`Duration check: ${durationIssue}`); return; }
     busy.current = true;
     patch({ isProcessing: true });
     setS((prev) => ({
@@ -768,9 +856,10 @@ export default function AdsStudioApp() {
         const plan = cur.scenePlan.find((p) => p.clip_number === sc.clip_number)!;
         const newScript: ScriptClip = { ...sc, spoken_line: lines[key], word_count: wordCount(lines[key]) };
         const newPlan: ScenePlan = { ...plan, spoken_line: lines[key] };
+        const routed = engineForPlan(plan);
         const res = await generateClipAgentic({
           plan: newPlan, script: newScript, aspect: cur.aspect,
-          characterRefUrl: cast.url, characterDescription: cast.description, model: clipEngine, integration: clipIntegration,
+          characterRefUrl: cast.url, characterDescription: cast.description, model: routed.model, integration: routed.integration,
           continuityNote: continuity, previousFrameUrl: prevFrame, onNote: say,
         });
         if (!res.videoUrl) throw new Error(`Clip ${sc.clip_number} failed: ${res.note || res.issues.join('; ') || 'render error'}`);
@@ -823,11 +912,11 @@ export default function AdsStudioApp() {
       maxWidth="full"
       padding={0}
     >
-    <div className="ads-studio-app" style={{ display: 'flex', height: '100%', minHeight: 0, background: 'transparent', color: T.ink, fontFamily: T.sans }}>
+    <div className="ads-studio-app" style={{ display: 'flex', height: '100%', minHeight: 0, background: 'radial-gradient(ellipse 72% 44% at 58% -10%, color-mix(in srgb, var(--space-brand-primary-500) 10%, transparent), transparent 62%)', color: T.ink, fontFamily: T.sans }}> 
       <style>{ADS_RESPONSIVE_CSS}</style>
 
       {/* ---- progress rail ---- */}
-      <aside className="ads-rail" style={{ width: 216, flexShrink: 0, borderRight: `1px solid ${T.line}`, padding: '20px 14px', display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
+      <aside className="ads-rail" style={{ width: 216, flexShrink: 0, borderRight: `1px solid ${T.line}`, padding: '20px 14px', display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', background: 'color-mix(in srgb, var(--space-surface-card) 92%, transparent)', boxShadow: '14px 0 38px rgba(0,0,0,0.2)' }}>
         <div className="ads-rail-brand" style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14, paddingLeft: 6 }}>
           <VergeMark size={30} />
           <div>
@@ -1095,11 +1184,71 @@ export default function AdsStudioApp() {
           </div>
         )}
 
-        {/* ================= STEP 4 — SCRIPT ================= */}
+        {/* ================= STEP 4 — PRODUCTION PATH ================= */}
         {s.currentStep === 4 && (
-          <div style={{ maxWidth: 980 }}>
+          <div style={{ maxWidth: 1080 }}>
+            <h2 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 800 }}>Choose how to make this ad</h2>
+            <p style={{ margin: '0 0 16px', color: T.muted, fontSize: 13.5 }}>
+              Four clear paths from the same product research and angle. Runway branches use Audos' native authenticated API, wallet billing, and durable media tasks.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(210px, 100%), 1fr))', gap: 10, marginBottom: 18 }}>
+              {([
+                ['ugc', 'UGC Ads', 'Creator-led product ads via product_ugc.'],
+                ['multi-shot', 'Multi-Shot Ads', 'A 3–5 shot narrative cut via multi_shot_video.'],
+                ['recipes', 'Recipes', 'Product Ad, Swap, Localization, Stock and Campaign imagery.'],
+                ['workflow', 'Director Workflow', 'Keep the existing script → scenes → clips → review workflow.'],
+              ] as Array<[Step4Branch, string, string]>).map(([id, label, description]) => {
+                const active = step4Branch === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setStep4Branch(id)}
+                    style={{
+                      ...card, textAlign: 'left', cursor: 'pointer',
+                      borderColor: active ? T.accent : T.line,
+                      background: active ? 'color-mix(in srgb, var(--space-brand-primary-500) 12%, var(--space-surface-card))' : T.card,
+                    }}
+                    data-testid={`step4-branch-${id}`}
+                  >
+                    <span style={{ display: 'block', color: active ? T.highlight : T.ink, fontSize: 14, fontWeight: 800 }}>{label}</span>
+                    <span style={{ display: 'block', marginTop: 5, color: T.muted, fontSize: 12, lineHeight: 1.5 }}>{description}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {step4Branch !== 'workflow' ? (
+              <RunwayStudio
+                key={step4Branch}
+                modes={step4Branch === 'ugc'
+                  ? ['product_ugc']
+                  : step4Branch === 'multi-shot'
+                    ? ['multi_shot_video']
+                    : ['product_ad', 'product_swap', 'ad_localization', 'marketing_stock_image', 'product_campaign_image']}
+                initialMode={step4Branch === 'ugc' ? 'product_ugc' : step4Branch === 'multi-shot' ? 'multi_shot_video' : 'product_ad'}
+                title={step4Branch === 'ugc' ? 'UGC Ads' : step4Branch === 'multi-shot' ? 'Multi-Shot Ads' : 'Runway Recipes'}
+                subtitle="Your brief is submitted through Audos' native Runway API. Audos owns the provider key, wallet charge, task status, and durable media."
+                autoPersona={step4Branch === 'ugc' || step4Branch === 'recipes'}
+                prefill={{
+                  productName: s.research?.product_name || '',
+                  productDescription: s.research?.one_liner || s.productDescription,
+                  productImage: s.productImages[0]?.url || s.screenshots[0]?.url || '',
+                  sourceVideo: s.productVideos[0]?.url || '',
+                  concept: s.angles.find((angle) => angle.id === s.activeAngleId)?.creative_direction || '',
+                  prompt: s.angles.find((angle) => angle.id === s.activeAngleId)?.hook || '',
+                  shots: s.script.map((clip) => clip.visual_concept).filter(Boolean),
+                }}
+                theme={{
+                  panel: T.panel, card: T.card, line: T.line, lineStrong: T.lineStrong,
+                  ink: T.ink, soft: T.soft, muted: T.muted, accent: T.accent,
+                  onAccent: '#ffffff', good: T.good, bad: T.bad, font: T.sans,
+                }}
+              />
+            ) : (
+            <>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 6 }}>
-              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>Script</h2>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>Director workflow script</h3>
               {s.selectedAngleIds.length > 1 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {s.selectedAngleIds.map((id) => {
@@ -1121,10 +1270,11 @@ export default function AdsStudioApp() {
                       <Tag tone="info">Clip {c.clip_number} · {c.clip_role}</Tag>
                       <Tag tone={over ? 'bad' : 'ok'}>{c.word_count}/{limit} words</Tag>
                       <span style={{ fontSize: 12, color: T.muted }}>emotion: {c.emotion || '—'}</span>
-                      <span style={{ marginLeft: 'auto', display: 'flex', gap: 5 }}>
+                      <span style={{ marginLeft: 'auto', display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
                         {([4, 6, 8, 10] as ClipDuration[]).map((d) => (
                           <Btn key={d} small kind={c.duration_seconds === d ? 'primary' : 'ghost'} onClick={() => setScriptDuration(i, d)}>{d}s</Btn>
                         ))}
+                        <span style={{ flexBasis: '100%', color: T.muted, fontSize: 10.5, textAlign: 'right' }}>{clipDurationHint}</span>
                       </span>
                     </div>
                     <textarea
@@ -1146,6 +1296,8 @@ export default function AdsStudioApp() {
                 {scriptViolations > 0 && <span style={{ color: T.bad, fontSize: 13 }}>{scriptViolations} clip(s) over the word limit</span>}
                 <span style={{ marginLeft: 'auto', color: T.muted, fontSize: 13 }}>Total ≈ {totalSeconds}s</span>
               </div>
+            )}
+            </>
             )}
           </div>
         )}
@@ -1181,6 +1333,9 @@ export default function AdsStudioApp() {
                   <div key={p.clip_number} style={card}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                       <Tag tone="info">Clip {p.clip_number} · {sc?.clip_role}</Tag>
+                      {p.shot_intent && <Tag>{p.shot_intent.replace(/_/g, ' ')}</Tag>}
+                      {p.engine_id && <Tag tone="ok">{engineDisplayName(p.engine_id)}</Tag>}
+                      {p.workflow_kind && p.workflow_kind !== 'engine' && <Tag tone="warn">{p.workflow_kind} workflow</Tag>}
                       {p.use_screenshot_mockup && <Tag tone="warn">{p.screenshot_mockup_type} mockup</Tag>}
                       {p.overlay_type !== 'none' && !p.use_screenshot_mockup && <Tag>{p.overlay_type}</Tag>}
                       <span style={{ marginLeft: 'auto' }}>
@@ -1188,6 +1343,8 @@ export default function AdsStudioApp() {
                       </span>
                     </div>
                     <div style={{ fontSize: 13, color: T.ink, fontStyle: 'italic', marginBottom: 10 }}>“{p.spoken_line}”</div>
+                    {p.engine_reason ? <div style={{ fontSize: 11.5, color: T.muted, lineHeight: 1.5, marginBottom: 8 }}>{p.engine_reason}</div> : null}
+                    {(p.duration_notes || []).map((note, index) => <div key={index} style={{ fontSize: 11.5, color: T.warn, lineHeight: 1.5, marginBottom: 4 }}>Duration: {note}</div>)}
                     <details style={{ marginTop: 10 }}>
                       <summary style={{ fontSize: 12, fontWeight: 700, color: T.muted, cursor: 'pointer', listStylePosition: 'inside' }}>Advanced — camera, performance, continuity and production prompt</summary>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: 8, marginTop: 10 }}>
@@ -1218,15 +1375,13 @@ export default function AdsStudioApp() {
             {s.scenePlan.length > 0 && (
               <div style={{ marginTop: 16 }}>
                 <VideoIntegrationPicker
-                  label="Video provider"
+                  label="Manual fallback / override"
                   integration={clipIntegration}
                   model={clipEngine}
                   sceneOnly
                   disabled={s.isProcessing}
                   onChange={onClipVideoSelection}
-                  note={clipEngine === 'gemini-omni-flash-preview'
-                    ? 'Omni Flash carries your avatar reference into every cut — the safest pick when the same presenter has to appear throughout.'
-                    : 'Every clip in this run uses the provider above. If the platform refuses a model, the clip falls back to Omni Flash and the card shows which engine actually ran.'}
+                  note="Auto mode uses each card’s agent-selected intent and routed engine. This picker is used only for a code/recipe route that needs a sequential clip fallback, or when you explicitly regenerate with an override."
                   style={{ marginBottom: 14, maxWidth: 560 }}
                 />
                 <Btn kind="primary" disabled={s.isProcessing} onClick={runGeneration}><Play size={15} /> Generate all clips <ChevronRight size={15} /></Btn>
@@ -1250,13 +1405,13 @@ export default function AdsStudioApp() {
             </div>
 
             <VideoIntegrationPicker
-              label="Video provider"
+              label="Manual fallback / override"
               integration={clipIntegration}
               model={clipEngine}
               sceneOnly
               disabled={s.isProcessing}
               onChange={onClipVideoSelection}
-              note="All six native Audos video integrations are available. Provider errors surface on the clip card; Omni Flash may stand in when a Group A or Runway model is rejected."
+              note="Each clip follows its storyboard’s routed engine. This selection is the fallback for non-engine workflows; provider errors surface on the clip card."
               style={{ marginBottom: 16, maxWidth: 560 }}
             />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 12 }}>
@@ -1283,15 +1438,24 @@ export default function AdsStudioApp() {
                     <div style={{ background: '#000', borderRadius: 10, overflow: 'hidden', aspectRatio: s.aspect === '9:16' ? '9/16' : s.aspect === '1:1' ? '1/1' : '16/9', maxHeight: 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {clip?.videoUrl ? (
                         <video src={clip.videoUrl} controls preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                      ) : (status === 'generating' ? <div style={{ display: 'grid', placeItems: 'center', gap: 8, color: T.muted, fontSize: 12 }}><Spin size={110} caption="Filming this clip" /></div> : <div style={{ display: 'grid', placeItems: 'center', gap: 7, padding: 18, color: T.muted, fontSize: 12, textAlign: 'center' }}><Film size={22} color={T.accent} /><span>Ready for its first take</span></div>)}
+                      ) : (status === 'generating' ? <VideoGeneratingState label={`Filming clip ${sc.clip_number}`} detail={stageNote || engineDisplayName(clipEngine)} compact style={{ width: '100%', margin: 10 }} /> : <div style={{ display: 'grid', placeItems: 'center', gap: 7, padding: 18, color: T.muted, fontSize: 12, textAlign: 'center' }}><Film size={22} color={T.accent} /><span>Ready for its first take</span></div>)}
                     </div>
                     {clip && clip.issues.length > 0 ? (
                       <div style={{ marginTop: 8, fontSize: 12, color: T.warn }}>{clip.issues.slice(0, 3).map((iss, x) => <div key={x}>• {iss}</div>)}</div>
                     ) : null}
-                    {clip?.note ? <div style={{ marginTop: 6, fontSize: 12, color: T.muted }}>{clip.note}</div> : null}
+                    {status === 'failed' && clip?.note ? (
+                      <VideoErrorCard
+                        error={clip.note}
+                        engineId={clip.modelUsed || clipEngine}
+                        subject={`clip ${sc.clip_number}`}
+                        onRetry={() => void regenerateOneClip(sc.clip_number)}
+                        compact
+                        style={{ marginTop: 8 }}
+                      />
+                    ) : clip?.note ? <div style={{ marginTop: 6, fontSize: 12, color: T.muted }}>{clip.note}</div> : null}
                     {clip?.modelUsed && clip.videoUrl ? <div style={{ marginTop: 4, fontSize: 10.5, color: T.muted }}>Engine: {engineDisplayName(clip.modelUsed)} · takes: {clip.attempts}</div> : null}
                     <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
-                      <Btn small disabled={s.isProcessing} onClick={() => regenerateOneClip(sc.clip_number)}><RefreshCw size={12} /> Regenerate</Btn>
+                      {status !== 'failed' ? <Btn small disabled={s.isProcessing} onClick={() => regenerateOneClip(sc.clip_number)}><RefreshCw size={12} /> Regenerate</Btn> : null}
                       <Btn small disabled={s.isProcessing} onClick={() => setEditingPrompt(editingPrompt === sc.clip_number ? null : sc.clip_number)}><Pencil size={12} /> Edit prompt</Btn>
                     </div>
                     {editingPrompt === sc.clip_number && (
@@ -1322,12 +1486,21 @@ export default function AdsStudioApp() {
               </div>
             </div>
 
+            {s.assemblyStatus === 'assembling' ? (
+              <VideoGeneratingState
+                label="Assembling your final ad"
+                detail={stageNote || 'Compositing clips, captions and overlays'}
+                style={{ marginBottom: 12 }}
+              />
+            ) : null}
+
             {s.assemblyStatus === 'error' && (
-              <div className="ads-rise" style={{ ...card, borderColor: T.bad, background: 'rgba(153,27,27,.07)', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-                <span style={{ display: 'grid', placeItems: 'center', width: 34, height: 34, borderRadius: 10, background: 'rgba(153,27,27,.1)', flexShrink: 0 }}><AlertTriangle size={16} color={T.bad} /></span><div style={{ minWidth: 'min(100%, 220px)', flex: 1 }}><div style={{ color: T.ink, fontWeight: 700 }}>Assembly failed</div>
-                <div style={{ color: T.soft, fontSize: 13, margin: '6px 0 10px' }}>{customerError(s.assemblyError)}</div>
-                <Btn kind="primary" onClick={runAssembly}><RefreshCw size={14} /> Retry assembly</Btn>
-              </div></div>
+              <VideoErrorCard
+                error={s.assemblyError}
+                subject="the final ad assembly"
+                onRetry={() => void runAssembly()}
+                style={{ marginBottom: 12 }}
+              />
             )}
 
             {s.finalVideoUrl && (
@@ -1374,7 +1547,7 @@ export default function AdsStudioApp() {
                         Overlay: {plan?.use_screenshot_mockup ? `${plan.screenshot_mockup_type} mockup with real screenshot` : plan && plan.overlay_type !== 'none' ? `${plan.overlay_type}${plan.overlay_text ? ` — “${plan.overlay_text}”` : ''}` : 'caption only'}
                       </div>
                       <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                        <Btn small disabled={s.isProcessing} onClick={() => regenerateOneClip(sc.clip_number)}><RefreshCw size={12} /> Regenerate</Btn>
+                        {clip?.status !== 'failed' ? <Btn small disabled={s.isProcessing} onClick={() => regenerateOneClip(sc.clip_number)}><RefreshCw size={12} /> Regenerate</Btn> : null}
                         <Btn small disabled={s.isProcessing} onClick={() => setEditingPrompt(editingPrompt === sc.clip_number ? null : sc.clip_number)}><Pencil size={12} /> Production prompt</Btn>
                       </div>
                       {editingPrompt === sc.clip_number && (
@@ -1453,12 +1626,18 @@ export default function AdsStudioApp() {
                             <a href={v.videoUrl} download style={{ textDecoration: 'none' }}><Btn small kind="primary"><Download size={12} /> Download</Btn></a>
                           </div>
                         ) : v?.status === 'error' ? (
-                          <div>
-                            <div style={{ fontSize: 11.5, color: T.bad, marginBottom: 6 }}>{customerError(v.error).slice(0, 120)}</div>
-                            <Btn small disabled={s.isProcessing} onClick={() => buildVariation(hi, bi, ci)}><RefreshCw size={12} /> Retry</Btn>
-                          </div>
+                          <VideoErrorCard
+                            error={v.error}
+                            subject={`variation H${hi + 1}B${bi + 1}C${ci + 1}`}
+                            onRetry={() => void buildVariation(hi, bi, ci)}
+                            compact
+                          />
                         ) : v ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.muted }}><Spin size={44} label="Building the variation" /> building…</div>
+                          <VideoGeneratingState
+                            label="Building the variation"
+                            detail={`H${hi + 1} · B${bi + 1} · C${ci + 1}`}
+                            compact
+                          />
                         ) : (
                           <Btn small disabled={s.isProcessing} onClick={() => buildVariation(hi, bi, ci)}><Play size={12} /> Build this variation</Btn>
                         )}
@@ -1485,7 +1664,7 @@ export default function AdsStudioApp() {
             position: 'fixed', right: 20, bottom: 20, zIndex: 60, maxWidth: 380,
             display: 'flex', alignItems: 'flex-start', gap: 9,
             background: T.card, borderRadius: 12, padding: '12px 14px',
-            border: `1px solid ${T.highlight}`, boxShadow: '0 18px 40px rgba(120,80,0,0.14)',
+            border: `1px solid ${T.highlight}`, boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
           }}
           data-testid="ads-engine-toast"
         >

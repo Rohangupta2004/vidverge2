@@ -13,10 +13,9 @@
  *
  * PROVIDERS
  * - 'google'  → POST /api/veo/generate/video + GET /api/veo/status/:id.
- *   Default model: Gemini Omni Flash (gemini-omni-flash-preview) — proven
- *   end-to-end in this workspace. Supports a single seed frame (imageData —
- *   how a continuation scene receives the previous scene's final frame) plus
- *   up to 3 referenceImages. Does NOT support lastFrameImage.
+ *   Default model: Gemini Omni 1.1 Flash (gemini-omni-1.1-flash). It supports
+ *   a seed frame plus up to TEN reference images, and last-frame interpolation.
+ *   It is the character/product consistency engine and output caps at 720p.
  * - 'openrouter' → the SAME /api/veo proxy with an openrouter/* model id
  *   (Seedance 2.0 Fast, Seedance 2.5 Fast). Seed image only, no
  *   referenceImages. These kick off asynchronously: the proxy answers 200
@@ -124,19 +123,15 @@ export interface VideoModelConfig {
 }
 
 export const VIDEO_MODEL: VideoModelConfig = {
-  id: 'omni-flash',
-  label: 'Omni Flash (Google)',
+  id: 'omni-1.1-flash',
+  label: 'Gemini Omni 1.1 Flash',
   provider: 'google',
-  model: 'omni-flash',
-  // The proxy's model enum accepts `gemini-omni-flash-preview` and no
-  // versioned spelling; `gemini-omni-flash-1.1` answers 400 invalid_enum_value.
-  // TODO: upgrade to 1.1 when platform key is confirmed
-  apiModel: 'gemini-omni-flash-preview',
-  // Omni renders up to 8 seconds; the proxy accepts any integer in between.
-  supportedDurations: [4, 5, 6, 7, 8],
-  minDuration: 4,
+  model: 'omni-1.1-flash',
+  apiModel: 'gemini-omni-1.1-flash',
+  supportedDurations: [2, 3, 4, 5, 6, 7, 8],
+  minDuration: 2,
   safeMaxDuration: 8,
-  maxReferenceImages: 3,
+  maxReferenceImages: 10,
   promptMaxChars: 10000,
   negativeMaxChars: 500,
   pollIntervalMs: 5000,
@@ -222,6 +217,8 @@ export const SEEDANCE_2_0: VideoModelConfig = {
   timeoutMs: 10 * 60 * 1000,
 };
 
+/** Kept only to recognise old saved films. This id is a hard 400 and is not
+ * included in VIDEO_MODELS, so no picker or creative agent can select it. */
 export const SEEDANCE_2_5: VideoModelConfig = {
   id: 'seedance-2.5',
   label: 'Seedance 2.5 Fast',
@@ -264,11 +261,33 @@ export const KLING_V2_MASTER: VideoModelConfig = {
   availabilityNote: 'Provider key pending on the platform — submits fail until it lands.',
 };
 
-/** Every model the pipeline can run on, in picker order: Omni Flash and
- * Seedance 2.0 Fast lead because they are the two engines proven end to end
- * in this workspace, then the full Runway roster. (Gen 4.5 is still
- * DEFAULT_FILM_MODEL — picker order and the default are separate choices.) */
-export const VIDEO_MODELS: VideoModelConfig[] = [VIDEO_MODEL, SEEDANCE_2_0, ...RUNWAY_VIDEO_CONFIGS, SEEDANCE_2_5, KLING_V2_MASTER];
+const openRouterVeo = (id: string, label: string, duration = 8): VideoModelConfig => ({
+  id,
+  label,
+  provider: 'openrouter',
+  model: id,
+  apiModel: id,
+  supportedDurations: Array.from({ length: Math.max(1, duration - 1) }, (_, i) => i + 2),
+  minDuration: 2,
+  safeMaxDuration: duration,
+  maxReferenceImages: 0,
+  promptMaxChars: 10000,
+  negativeMaxChars: 500,
+  pollIntervalMs: 5000,
+  timeoutMs: 10 * 60 * 1000,
+});
+
+/** Real Veo 3.1 exists only on these OpenRouter ids. Each accepts one seed
+ * image and no referenceImages. None is allowed to claim 4K. */
+export const VEO_31 = openRouterVeo('openrouter/google/veo-3.1', 'Veo 3.1');
+export const VEO_31_FAST = openRouterVeo('openrouter/google/veo-3.1-fast', 'Veo 3.1 Fast');
+export const VEO_31_LITE = openRouterVeo('openrouter/google/veo-3.1-lite', 'Veo 3.1 Lite', 6);
+
+/** Selectable models. Retired preview aliases and Seedance 2.5 are excluded. */
+export const VIDEO_MODELS: VideoModelConfig[] = [
+  VIDEO_MODEL, VEO_31, VEO_31_FAST, VEO_31_LITE, SEEDANCE_2_0,
+  ...RUNWAY_VIDEO_CONFIGS, KLING_V2_MASTER,
+];
 
 /** The engine a NEW film starts on. Films created before the picker existed
  * stored no id at all and were rendered on Omni Flash, so resolveVideoModel

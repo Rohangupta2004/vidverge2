@@ -20,6 +20,8 @@ import {
   BrollSlot, CARD_META, EditCard, LB, WordToken, fmtTimecode, retentionColor,
 } from './studioModel';
 import { fillerCounts, sentenceRanges } from './studioTranscript';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 
 const panel: CSSProperties = {
   background: LB.bgCard,
@@ -439,16 +441,29 @@ export function BrollPanel(props: {
                     onChange={(e) => props.onPrompt(slot.id, e.target.value)}
                     rows={3}
                     placeholder="What should the cutaway show?"
-                    style={{ width: '100%', background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 8, padding: 8, color: LB.textPrimary, fontSize: 12, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                    style={{ width: '100%', background: '#18150A', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 8, color: LB.textPrimary, fontSize: 12, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
                   />
-                  {slot.error ? <div style={{ color: '#991B1B', fontSize: 11, lineHeight: 1.5 }}>{slot.error}</div> : null}
+                  {slot.status === 'generating' ? (
+                    <VideoGeneratingState
+                      label={props.generatingLabel || 'Generating this cutaway'}
+                      compact
+                    />
+                  ) : null}
+                  {slot.error ? (
+                    <VideoErrorCard
+                      error={slot.error}
+                      subject={`the cutaway at ${fmtTimecode(slot.start)}`}
+                      onRetry={() => props.onGenerate(slot.id)}
+                      compact
+                    />
+                  ) : null}
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       className="vs-btn"
                       disabled={slot.status === 'generating' || slot.prompt.trim().length < 10}
                       onClick={() => props.onGenerate(slot.id)}
-                      style={{ ...ghostButton(true), background: LB.accentGradient, color: '#241503', border: 'none', fontWeight: 800 }}
+                      style={{ ...ghostButton(true), background: LB.accentGradient, color: '#ffffff', border: 'none', fontWeight: 800 }}
                     >
                       {slot.status === 'generating' ? <Loader2 size={12} className="vs-spin" /> : <Sparkles size={12} />}
                       {slot.status === 'generating' ? (props.generatingLabel || 'Generating…') : 'Generate'}

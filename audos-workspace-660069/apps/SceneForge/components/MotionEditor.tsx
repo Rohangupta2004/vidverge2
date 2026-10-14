@@ -149,32 +149,32 @@ export default function MotionEditor(props: {
   };
 
   return (
-    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#FFFDF4] text-[#1A1000]">
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#0D0B05] text-[#F5E9C8]">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(245,181,62,.09),transparent_34%),radial-gradient(circle_at_85%_15%,rgba(220,172,90,.07),transparent_28%)]" />
       <main className="relative mx-auto max-w-6xl px-5 py-7 sm:px-8 sm:py-10">
         <header className="mb-7 flex flex-wrap items-center gap-4">
-          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-xl border border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[#FFFFFF] text-[#3D2800] transition hover:border-[color-mix(in_srgb,#B4780A_30%,transparent)] hover:text-[#1A1000]" aria-label="Back to Avatar Studio"><ArrowLeft size={19} /></button>
-          <div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[#C8920A]"><Clapperboard size={17} /><span className="text-xs font-black uppercase tracking-[.2em]">SceneForge post-production</span></div><h1 className="mt-1 truncate text-xl font-semibold text-[#1A1000] sm:text-2xl">{sourceLabel}</h1></div>
-          <span className="rounded-full border border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[#FFFFFF] px-3 py-1.5 text-xs text-[#7A6030]">{source.aspectRatio} · generated video</span>
+          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-xl border border-[color-mix(in_srgb,#F0B429_14%,transparent)] bg-[#FFFFFF] text-[#3D2800] transition hover:border-[color-mix(in_srgb,#F0B429_30%,transparent)] hover:text-[#F5E9C8]" aria-label="Back to Avatar Studio"><ArrowLeft size={19} /></button>
+          <div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[#D4920A]"><Clapperboard size={17} /><span className="text-xs font-black uppercase tracking-[.2em]">SceneForge post-production</span></div><h1 className="mt-1 truncate text-xl font-semibold text-[#F5E9C8] sm:text-2xl">{sourceLabel}</h1></div>
+          <span className="rounded-full border border-[color-mix(in_srgb,#F0B429_14%,transparent)] bg-[#FFFFFF] px-3 py-1.5 text-xs text-[#7A6030]">{source.aspectRatio} · generated video</span>
         </header>
 
         {view === 'setup' && (
           <div className="grid gap-5 lg:grid-cols-[1.35fr_.75fr]">
-            <section className="rounded-3xl border border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[#FFFFFF] p-5 shadow-2xl shadow-[rgba(120,80,0,0.12)]">
-              <div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-[color-mix(in_srgb,#C8920A_12%,transparent)] text-[#C8920A]"><Film size={20} /></div><div><h2 className="font-semibold text-[#1A1000]">Your generated master</h2><p className="text-sm text-[#7A6030]">Used automatically as Layer 1 · never regenerated</p></div></div>
-              <div className={`overflow-hidden rounded-2xl border border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-black ${source.aspectRatio === '9:16' ? 'mx-auto max-w-[320px]' : ''}`}><video key={baseUrl} src={baseUrl} poster={source.posterUrl} controls playsInline className={source.aspectRatio === '9:16' ? 'aspect-[9/16] w-full object-contain' : 'aspect-video w-full object-contain'} onError={() => void refreshSource()} /></div>
+            <section className="rounded-3xl border border-[color-mix(in_srgb,#F0B429_14%,transparent)] bg-[#FFFFFF] p-5 shadow-2xl shadow-[rgba(120,80,0,0.12)]">
+              <div className="mb-4 flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-[color-mix(in_srgb,#D4920A_12%,transparent)] text-[#D4920A]"><Film size={20} /></div><div><h2 className="font-semibold text-[#F5E9C8]">Your generated master</h2><p className="text-sm text-[#7A6030]">Used automatically as Layer 1 · never regenerated</p></div></div>
+              <div className={`overflow-hidden rounded-2xl border border-[color-mix(in_srgb,#F0B429_14%,transparent)] bg-black ${source.aspectRatio === '9:16' ? 'mx-auto max-w-[320px]' : ''}`}><video key={baseUrl} src={baseUrl} poster={source.posterUrl} controls playsInline className={source.aspectRatio === '9:16' ? 'aspect-[9/16] w-full object-contain' : 'aspect-video w-full object-contain'} onError={() => void refreshSource()} /></div>
               {refreshing && <p className="mt-3 flex items-center justify-center gap-2 text-sm text-[#7A6030]"><RefreshCw className="animate-spin" size={15} />Refreshing the generated video link…</p>}
             </section>
             <div className="space-y-5">
               <StyleSelector value={style} onChange={setStyle} />
-              <div className="rounded-2xl border border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[color-mix(in_srgb,#B4780A_6%,transparent)] p-4 text-sm leading-6 text-[#3D2800]"><Sparkles className="mb-2 text-[#C8920A]" size={18} />Deepgram times the spoken words, GPT-5.6-sol directs the edit, Seedance creates only the motion moments that need it, and Remotion preserves the original presenter audio underneath.</div>
+              <div className="rounded-2xl border border-[color-mix(in_srgb,#F0B429_14%,transparent)] bg-[color-mix(in_srgb,#F0B429_6%,transparent)] p-4 text-sm leading-6 text-[#3D2800]"><Sparkles className="mb-2 text-[#D4920A]" size={18} />Deepgram times the spoken words, GPT-5.6-sol directs the edit, Seedance creates only the motion moments that need it, and Remotion preserves the original presenter audio underneath.</div>
               {error && <div className="rounded-2xl border border-[color-mix(in_srgb,#991B1B_24%,transparent)] bg-[color-mix(in_srgb,#991B1B_8%,transparent)] p-4 text-sm text-[#991B1B]">{error}</div>}
-              <button type="button" onClick={analyze} disabled={!baseUrl || refreshing} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#C8920A] px-5 py-4 font-bold text-white transition hover:bg-[#B4720A] disabled:opacity-40"><WandSparkles size={18} /> Analyze generated video</button>
+              <button type="button" onClick={analyze} disabled={!baseUrl || refreshing} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#D4920A] px-5 py-4 font-bold text-white transition hover:bg-[#B4720A] disabled:opacity-40"><WandSparkles size={18} /> Analyze generated video</button>
             </div>
           </div>
         )}
 
-        {view === 'analyzing' && <div className="grid gap-5 lg:grid-cols-[1.15fr_.85fr]"><div className="rounded-3xl border border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[#FFFFFF] p-6"><div className="animate-pulse"><div className="h-5 w-36 rounded bg-[color-mix(in_srgb,#B4780A_14%,transparent)]" /><div className="mt-5 aspect-video rounded-2xl bg-[color-mix(in_srgb,#B4780A_8%,transparent)]" /><div className="mt-5 h-3 w-full rounded bg-[color-mix(in_srgb,#B4780A_10%,transparent)]" /><div className="mt-2 h-3 w-4/5 rounded bg-[color-mix(in_srgb,#B4780A_10%,transparent)]" /></div></div><ProgressTracker steps={steps} error={error} onRetry={retryMode === 'analyze' ? analyze : undefined} /></div>}
+        {view === 'analyzing' && <div className="grid gap-5 lg:grid-cols-[1.15fr_.85fr]"><div className="rounded-3xl border border-[color-mix(in_srgb,#F0B429_14%,transparent)] bg-[#FFFFFF] p-6"><div className="animate-pulse"><div className="h-5 w-36 rounded bg-[color-mix(in_srgb,#F0B429_14%,transparent)]" /><div className="mt-5 aspect-video rounded-2xl bg-[color-mix(in_srgb,#F0B429_8%,transparent)]" /><div className="mt-5 h-3 w-full rounded bg-[color-mix(in_srgb,#F0B429_10%,transparent)]" /><div className="mt-2 h-3 w-4/5 rounded bg-[color-mix(in_srgb,#F0B429_10%,transparent)]" /></div></div><ProgressTracker steps={steps} error={error} onRetry={retryMode === 'analyze' ? analyze : undefined} /></div>}
         {view === 'review' && plan && transcript && <EditPlanPanel plan={plan} duration={transcript.duration} onChange={setPlan} onGenerate={generate} />}
         {view === 'generating' && <div className="mx-auto max-w-2xl"><ProgressTracker steps={steps} error={error} onRetry={retryMode === 'generate' ? generate : undefined} /></div>}
         {view === 'result' && resultUrl && <ResultScreen videoUrl={resultUrl} onNew={onClose} />}

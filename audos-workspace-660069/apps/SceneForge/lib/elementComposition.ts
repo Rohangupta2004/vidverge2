@@ -23,7 +23,7 @@
 
 import type { Scene } from './supabase';
 import { accentForSpec, contrastAccent, motionFingerprint, type MotionSpec } from './motionSpec';
-import { sceneMotionSpec } from './motionCapture';
+import { sceneMotionSpec } from './motionScene';
 
 export type ElementKind = 'image' | 'text' | 'stat' | 'card' | 'pill' | 'arrow' | 'line' | 'underline' | 'highlight' | 'chart' | 'progress';
 export type ElementAnchor = 'center' | 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right' | 'top' | 'bottom' | 'left' | 'right';
@@ -48,6 +48,8 @@ export interface CompositionElement {
   /** Width as a fraction of frame width; height optional (fraction of frame height). */
   w: number; h?: number;
   z: number;
+  /** 0 = foreground (moves most), 1 = background (barely moves). */
+  depth_z?: number;
   /** Visibility window, seconds from scene start. */
   start: number; end: number;
   anchor: ElementAnchor;
@@ -236,14 +238,36 @@ export function resolveElementStates(elements: CompositionElement[], t: number):
 }
 
 /** Subtle global camera — always SECONDARY to element motion, never a zoom substitute. */
-export function cameraStateAt(camera: CompositionCamera | undefined, t: number, duration: number): { scale: number; x: number; y: number } {
-  if (!camera || camera.move === 'none') return { scale: 1, x: 0, y: 0 };
+export function cameraStateAt(
+  camera: CompositionCamera | undefined,
+  t: number,
+  duration: number,
+  depthZ = 0.5,
+): { scale: number; x: number; y: number; depth_z: number } {
+  const depth = clamp(depthZ, 0, 1);
+  if (!camera || camera.move === 'none') return { scale: 1, x: 0, y: 0, depth_z: depth };
   const k = clamp(camera.intensity ?? 1, 0.25, 1.5);
   const p = elementEase(duration > 0 ? t / duration : 1, 'ease-in-out');
-  if (camera.move === 'push_in') return { scale: 1 + 0.045 * k * p, x: 0, y: 0 };
-  if (camera.move === 'pull_back') return { scale: 1 + 0.045 * k * (1 - p), x: 0, y: 0 };
-  if (camera.move === 'drift_left') return { scale: 1 + 0.03 * k, x: -1.2 * k * (p - 0.5) * 2, y: 0 };
-  return { scale: 1 + 0.03 * k, x: 1.2 * k * (p - 0.5) * 2, y: 0 };
+  // Foreground travels at full camera speed; the deepest plane deliberately
+  // retains 20% so it never looks pinned while the foreground moves.
+  const speed = 0.2 + 0.8 * (1 - depth);
+  if (camera.move === 'push_in') {
+    const scale = 1 + 0.08 * speed * k * p;
+    return { scale, x: 0, y: 0, depth_z: depth };
+  }
+  if (camera.move === 'pull_back') {
+    const scale = 1 + 0.08 * speed * k * (1 - p);
+    return { scale, x: 0, y: 0, depth_z: depth };
+  }
+  if (camera.move === 'drift_left') {
+    const x = -0.04 * speed * k * (p - 0.5) * 2;
+    return { scale: 1 + 0.02 * speed * k, x, y: 0, depth_z: depth };
+  }
+  if (camera.move === 'drift_right') {
+    const x = 0.04 * speed * k * (p - 0.5) * 2;
+    return { scale: 1 + 0.02 * speed * k, x, y: 0, depth_z: depth };
+  }
+  return { scale: 1 + 0.03 * k, x: 1.2 * k * (p - 0.5) * 2, y: 0, depth_z: depth };
 }
 
 /** transform-origin CSS for an anchor — scaling a pen around its tip, a card around its edge. */
@@ -290,6 +314,7 @@ function normalizeElement(raw: any, index: number): CompositionElement | null {
   const h = num(raw.h); if (h !== undefined) el.h = clamp(h, 0.01, 1.6);
   const rot = num(raw.rotation); if (rot) el.rotation = clamp(rot, -180, 180);
   const sc = num(raw.scale); if (sc !== undefined) el.scale = clamp(sc, 0.05, 4);
+  const dz = num(raw.depth_z ?? raw.depthZ); if (dz !== undefined) el.depth_z = clamp(dz, 0, 1);
   const op = num(raw.opacity); if (op !== undefined) el.opacity = clamp(op, 0, 1);
   if (EASINGS.includes(raw.easing)) el.easing = raw.easing;
   if (raw.parent) el.parent = str(raw.parent, 40);

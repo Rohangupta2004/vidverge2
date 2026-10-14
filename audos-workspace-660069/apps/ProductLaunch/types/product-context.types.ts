@@ -47,6 +47,29 @@ export interface SocialProofItem {
   film_usable: boolean;
 }
 
+export interface SemanticUiElement {
+  id: string;
+  type: 'navbar' | 'sidebar' | 'heading' | 'text' | 'button' | 'card' | 'metric' | 'chart' | 'table' | 'input' | 'badge' | 'image';
+  label: string;
+  value?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A screenshot is retained as evidence, but only this React-ready blueprint reaches the film. */
+export interface SemanticUiReference {
+  id: string;
+  source_handle: string;
+  screen_name: string;
+  background: string;
+  surface: string;
+  text: string;
+  accent: string;
+  elements: SemanticUiElement[];
+}
+
 export interface ProductContext {
   url: string;
   extracted_at: string;       // ISO timestamp
@@ -68,6 +91,7 @@ export interface ProductContext {
 
   brand: BrandExtraction;
   assets: ExtractedAsset[];       // ordered by film usability, descending
+  ui_references: SemanticUiReference[]; // screenshot-derived React blueprints
 
   best_hook_asset?: string;         // handle of single strongest visual for hook
   ui_richness: 'high' | 'medium' | 'low';
@@ -87,7 +111,9 @@ export const DESIGN_MATURITIES: DesignMaturity[] = ['polished', 'functional', 'r
 
 /** Every handle the film is allowed to reference. */
 export function assetHandles(ctx: ProductContext): string[] {
-  const handles = ctx.assets.map((asset) => asset.handle);
+  // Screenshots are evidence for semantic reconstruction only. They are never
+  // renderable assets; ProductImage and Logo preserve real non-UI imagery.
+  const handles = ctx.assets.filter((asset) => asset.type !== 'screenshot').map((asset) => asset.handle);
   if (ctx.brand.logo_handle && handles.indexOf(ctx.brand.logo_handle) < 0) {
     handles.push(ctx.brand.logo_handle);
   }

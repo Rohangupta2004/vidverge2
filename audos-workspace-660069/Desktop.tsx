@@ -1,6 +1,6 @@
 import { useState, Suspense, LazyExoticComponent, ComponentType, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
-import { Bot, Folder, X, Activity, Clapperboard, Moon, Heart, Calendar, Users, FileText, BarChart, Settings as SettingsIcon, MessageCircle, Plane, TrendingUp, LineChart, Dumbbell, Brain, Target, Zap, Star, Clock, CheckCircle, List, BookOpen, Coffee, Music, Camera, MapPin, Wallet, ShoppingCart, Gift, Lightbulb, Sparkles, Rocket, Home, Building, Globe, Mail, Phone, Video, Mic, Image, Play, Pause, Volume2, Wifi, Cloud, Sun, Umbrella, Thermometer, Wind, Droplets, Leaf, Flower2, Film, Mountain, Waves, Compass, Map, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond, Gem, Key, Lock, Unlock, Shield, Eye, Search, Filter, SortAsc, Download, Upload, Share2, Link, ExternalLink, Copy, Clipboard, Trash2, Edit, Pencil, PenTool, Scissors, Bookmark, Flag, Bell, AlertCircle, Info, HelpCircle, XCircle, CheckCircle2, Circle, Square, Triangle, Hexagon, Octagon, Hash, AtSign, DollarSign, Percent, Calculator, Code, Terminal, Database, Server, Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker, Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote, PiggyBank, TrendingDown, AreaChart, PieChart, FlaskConical, Ghost, Radar, Crosshair, Wand2, Type } from 'lucide-react';
-import type { SpaceConfig, DesktopBranding, DesktopThemeTokens } from './types';
+import { Bot, Folder, X, Activity, Clapperboard, Moon, Heart, Calendar, Users, FileText, BarChart, Settings as SettingsIcon, MessageCircle, Plane, TrendingUp, LineChart, Dumbbell, Brain, Target, Zap, Star, Clock, CheckCircle, List, BookOpen, Coffee, Music, Camera, MapPin, Wallet, ShoppingCart, Gift, Lightbulb, Sparkles, Rocket, Home, Building, Globe, Mail, Phone, Video, Mic, Image, Play, Pause, Volume2, Wifi, Cloud, Sun, Umbrella, Thermometer, Wind, Droplets, Leaf, Flower2, Film, Mountain, Waves, Compass, Map as MapIcon, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond, Gem, Key, Lock, Unlock, Shield, Eye, Search, Filter, SortAsc, Download, Upload, Share2, Link, ExternalLink, Copy, Clipboard, Trash2, Edit, Pencil, PenTool, Scissors, Bookmark, Flag, Bell, AlertCircle, Info, HelpCircle, XCircle, CheckCircle2, Circle, Square, Triangle, Hexagon, Octagon, Hash, AtSign, DollarSign, Percent, Calculator, Code, Terminal, Database, Server, Cpu, Monitor, Smartphone, Tablet, Laptop, Watch, Headphones, Speaker, Radio, Tv, Printer, Scan, QrCode, Barcode, CreditCard, Receipt, Banknote, PiggyBank, TrendingDown, AreaChart, PieChart, FlaskConical, Ghost, Radar, Crosshair, Wand2, Type, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import type { AppConfig, SpaceConfig, DesktopBranding, DesktopThemeTokens } from './types';
 import { useSpaceRuntime } from './SpaceRuntimeContext';
 import FileBrowser from './components/FileBrowser';
 import EmailGate from './components/EmailGate';
@@ -24,6 +24,7 @@ import AgentChatView from './components/AgentChatView';
 import VergeLoader from './components/VergeLoader';
 import BrandLogo from './components/BrandLogo';
 import { useAgentChatRuntime } from './components/useAgentChatRuntime';
+import GlobalStyles from './components/ui/GlobalStyles';
 
 const DESKTOP_VERSION = 2;
 
@@ -121,7 +122,7 @@ class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundary
 
 function buildFontFamily(fontName?: string): string {
   if (!fontName) {
-    return '"Sora", system-ui, -apple-system, sans-serif';
+    return '"Inter", system-ui, -apple-system, sans-serif';
   }
 
   return `"${fontName}", system-ui, -apple-system, sans-serif`;
@@ -170,7 +171,7 @@ const baseIconMap: Record<string, ComponentType<any>> = {
   ShoppingCart, Gift, Lightbulb, Sparkles, Rocket, Home, Building, Globe,
   Mail, Phone, Video, Mic, Image, Play, Pause, Volume2, Wifi, Cloud, Sun,
   Umbrella, Thermometer, Wind, Droplets, Leaf, Mountain, Waves, Compass,
-  Map, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond,
+  Map: MapIcon, Navigation, Car, Bike, Ship, Award, Trophy, Medal, Crown, Diamond,
   Gem, Key, Lock, Unlock, Shield, Eye, Search, Filter, SortAsc, Download,
   Upload, Share2, Link, ExternalLink, Copy, Clipboard, Trash2, Edit, Pencil,
   PenTool, Scissors, Bookmark, Flag, Bell, AlertCircle, Info, HelpCircle,
@@ -245,6 +246,112 @@ iconMap['chat'] = MessageCircle;
 iconMap['settings'] = SettingsIcon;
 iconMap['config'] = SettingsIcon;
 iconMap['gear'] = SettingsIcon;
+
+// =============================================================================
+// SIDEBAR
+// =============================================================================
+
+const SIDEBAR_WIDTH = 248;
+const SIDEBAR_WIDTH_COLLAPSED = 76;
+const SIDEBAR_COLLAPSE_KEY = 'vv-sidebar-collapsed';
+const SIDEBAR_BORDER = 'var(--space-border-default, rgba(255,255,255,0.07))';
+
+/**
+ * How the studios are grouped in the sidebar. Ids are matched against
+ * config.apps, so a renamed app keeps its place and an unregistered app drops
+ * out. Anything registered but not listed here is swept into a trailing
+ * "More" section rather than vanishing from the nav.
+ */
+const SIDEBAR_GROUPS: Array<{ label: string; emoji: string; appIds: string[] }> = [
+  {
+    label: 'Video',
+    emoji: '\u{1F3AC}',
+    appIds: [
+      'vidverge-agent',
+      'vidverge-engine',
+      'sceneforge',
+      'script-to-video',
+      'faceless',
+      'faceless-content',
+      'video-enhancer',
+    ],
+  },
+  {
+    label: 'Lab & Tools',
+    emoji: '\u{1F52C}',
+    appIds: ['video-provider-lab', 'cineagent', 'phantom'],
+  },
+  {
+    label: 'Creative',
+    emoji: '\u{1F3A8}',
+    appIds: ['ads-studio', 'motion-type', 'voice-studio', 'product-launch', 'brand-context'],
+  },
+];
+
+interface SidebarSection {
+  label: string;
+  emoji: string;
+  items: AppConfig[];
+}
+
+function buildSidebarSections(apps: AppConfig[]): SidebarSection[] {
+  const byId = new Map(apps.map((app) => [app.id, app]));
+  const claimed = new Set<string>();
+
+  const sections: SidebarSection[] = [];
+  SIDEBAR_GROUPS.forEach((group) => {
+    const items: AppConfig[] = [];
+    group.appIds.forEach((id) => {
+      const app = byId.get(id);
+      if (!app || claimed.has(id)) return;
+      claimed.add(id);
+      items.push(app);
+    });
+    if (items.length) sections.push({ label: group.label, emoji: group.emoji, items });
+  });
+
+  const unlisted = apps.filter((app) => !claimed.has(app.id));
+  if (unlisted.length) {
+    sections.push({ label: 'More', emoji: '\u2728', items: unlisted });
+  }
+
+  return sections;
+}
+
+interface SidebarNavItemProps {
+  icon: ComponentType<any>;
+  label: string;
+  active: boolean;
+  collapsed: boolean;
+  onClick: () => void;
+}
+
+function SidebarNavItem({ icon: Icon, label, active, collapsed, onClick }: SidebarNavItemProps) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-current={active ? 'page' : undefined}
+      className={[
+        'relative flex w-full items-center rounded-[10px] transition-all duration-200 ease-out',
+        collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5',
+        active
+          ? 'bg-[var(--space-brand-primary)] text-[var(--space-text-on-primary)] shadow-[0_8px_28px_rgba(214,171,74,0.22)]'
+          : 'text-[var(--space-text-muted)] hover:bg-[rgba(255,255,255,0.055)] hover:text-[var(--space-text-primary)]',
+      ].join(' ')}
+    >
+      <Icon className="w-[18px] h-[18px] shrink-0" />
+      {!collapsed && (
+        <span
+          className="min-w-0 truncate text-[13px] font-semibold"
+          style={{ letterSpacing: '-0.01em' }}
+        >
+          {label}
+        </span>
+      )}
+    </button>
+  );
+}
 
 interface SpaceDesktopProps {
   mode: 'entrepreneur' | 'customer';
@@ -343,6 +450,23 @@ export default function SpaceDesktop({
   }, [isMobile]);
   const [activeWindowId, setActiveWindowId] = useState<WindowId | null>(null);
   const [fileAccessLogs] = useState<FileAccessLog[]>([]);
+  // Sidebar collapse is a per-visitor preference, so it is read straight out
+  // of localStorage on first render rather than flashing expanded first.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSE_KEY, sidebarCollapsed ? '1' : '0');
+    } catch {
+      // A blocked storage quota must never take the shell down.
+    }
+  }, [sidebarCollapsed]);
   // Plans overlay. Mounted here rather than inside an app so it can take the
   // whole screen from any shell state, and so every surface can raise it.
   // The whole request is kept rather than just the trigger: a credit wall
@@ -595,15 +719,18 @@ export default function SpaceDesktop({
   const CurrentApp = isAppWindow && activeWindowId ? apps[activeWindowId] : null;
 
   const runtimeTheme = resolveGenesisRuntimeTheme(config);
+  const workspaceName = runtimeTheme.branding.name || 'VidVerge';
+  const sidebarSections = buildSidebarSections(config.apps);
+  const sidebarWidth = sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH;
   const themeVariables = (runtimeTheme.themeTokens.cssVariables || {}) as Record<string, string>;
   const rootStyle = {
     ...themeVariables,
     ['--space-font-family' as any]:
       runtimeTheme.themeTokens.typography?.fontFamily ||
-      `"${runtimeTheme.themeTokens.typography?.headingFont || 'Sora'}", system-ui, -apple-system, sans-serif`,
+      `"${runtimeTheme.themeTokens.typography?.headingFont || 'Inter'}", system-ui, -apple-system, sans-serif`,
     fontFamily:
       runtimeTheme.themeTokens.typography?.fontFamily ||
-      `"${runtimeTheme.themeTokens.typography?.headingFont || 'Sora'}", system-ui, -apple-system, sans-serif`,
+      `"${runtimeTheme.themeTokens.typography?.headingFont || 'Inter'}", system-ui, -apple-system, sans-serif`,
     background:
       runtimeTheme.themeTokens.shell?.pageBackground ||
       `linear-gradient(135deg, var(--space-surface-gradient-from), var(--space-surface-gradient-via), var(--space-surface-gradient-to))`,
@@ -675,10 +802,13 @@ export default function SpaceDesktop({
 
     return (
       <div
-        className="fixed inset-0 overflow-hidden bg-[var(--space-surface-card,#fff)]"
+        className="fixed inset-0 overflow-hidden vv-dark bg-[var(--space-surface-card,#15120A)]"
         style={rootStyle}
         data-testid="tenant-delegation-canvas"
       >
+        {/* This branch returns before the main tree, so the global dark rules
+            have to be mounted here too or `vv-dark` resolves to nothing. */}
+        <GlobalStyles />
         <AppErrorBoundary key={currentAppConfig.id} appName={currentAppConfig.name}>
           <Suspense fallback={<div className="flex h-full w-full items-center justify-center"><VergeLoader size={120} caption="Opening your studio" /></div>}>
             <CurrentApp appConfig={currentAppConfig} dataFile={currentAppConfig.dataFile || ''} />
@@ -690,19 +820,24 @@ export default function SpaceDesktop({
 
   return (
     <>
-      {/* Google Fonts - Load brand font or fallback to Sora */}
+      {/* Google Fonts. Inter is the brand face and is always loaded; the
+          conditional link covers a space configured onto some other font. */}
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      {runtimeTheme.themeTokens.typography?.headingFont && runtimeTheme.themeTokens.typography.headingFont !== 'Sora' && (
+      {runtimeTheme.themeTokens.typography?.headingFont && runtimeTheme.themeTokens.typography.headingFont !== 'Inter' && (
         <link 
           href={`https://fonts.googleapis.com/css2?family=${encodeURIComponent(runtimeTheme.themeTokens.typography.headingFont)}:wght@300;400;500;600;700;800&display=swap`} 
           rel="stylesheet" 
         />
       )}
-      <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+      {/* Dark ground, dark scrollbars and the light-utility neutraliser that
+          finishes the dark conversion inside apps written before it. */}
+      <GlobalStyles />
 
       <div 
-        className="min-h-screen"
+        className="min-h-screen vv-dark"
         style={rootStyle}
       >
         {/* Credits + Plans - always reachable from the shell chrome (mobile uses the dock) */}
@@ -712,80 +847,141 @@ export default function SpaceDesktop({
             onClick={() => setPricingRequest({ trigger: 'nav' })}
             className="flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold text-[var(--space-text-primary)] transition-all hover:scale-105"
             style={{
-              // Quiet chrome on the brand ground: a subscriber gets the gold
+              // Quiet chrome on the dark ground: a subscriber gets the gold
               // edge, everyone else a neutral one. The gradient CTA stays the
               // single loud accent anywhere on screen.
-              background: 'linear-gradient(90deg, #FFFFFF 0%, #FFF6DD 100%)',
-              border: isSubscriber ? '1px solid rgba(200,146,10,0.45)' : '1px solid rgba(180,120,0,0.18)',
-              boxShadow: '0 6px 18px rgba(120,80,0,0.12)',
+              background: 'linear-gradient(90deg, var(--space-surface-panel) 0%, var(--space-surface-panel-strong) 100%)',
+              border: isSubscriber ? '1px solid color-mix(in srgb, var(--space-brand-primary-500) 55%, transparent)' : '1px solid var(--space-border-default)',
+              boxShadow: '0 12px 36px rgba(0,0,0,0.38)',
             }}
             title={planButtonTitle}
             data-testid="button-open-plans"
             data-plan-tier={userTier || 'unknown'}
           >
-            <Crown className="w-4 h-4" style={{ color: '#C8920A' }} />
+            <Crown className="w-4 h-4" style={{ color: 'var(--space-brand-highlight-500)' }} />
             {planLabel}
           </button>
         </div>
 
-        {/* Left Dock - Desktop Only - Animates away in launcher mode */}
-      {/* Always visible — the app nav lives here in every shell state, launcher included */}
-      <div className={`hidden md:flex fixed left-4 top-1/2 -translate-y-1/2 ${tw.dock.glass} p-4 z-50 max-h-[92vh] overflow-y-auto`}>
-        <div className="flex flex-col gap-3">
-          {/* Memory Icon - Hidden in customer mode (use Cmd+M to access for debugging) */}
+      {/* Left Sidebar — the product's primary navigation, present in every
+          desktop shell state including the launcher. Collapses to icons. */}
+      <aside
+        className="hidden md:flex fixed left-0 top-0 bottom-0 z-50 flex-col border-r transition-[width] duration-300 ease-in-out"
+        style={{
+          width: sidebarWidth,
+          background: 'linear-gradient(180deg, color-mix(in srgb, var(--space-surface-card) 96%, transparent), var(--space-surface-bg))',
+          borderColor: SIDEBAR_BORDER,
+          boxShadow: '14px 0 44px rgba(0,0,0,0.28)',
+        }}
+        aria-label={`${workspaceName} studios`}
+      >
+        {/* Workspace mark + name, and the way back to the launcher */}
+        <button
+          onClick={() => setActiveWindowId(null)}
+          title={`${workspaceName} home`}
+          className={`flex h-[68px] shrink-0 items-center border-b transition-colors hover:bg-[rgba(255,255,255,0.03)] ${
+            sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-4'
+          }`}
+          style={{ borderColor: SIDEBAR_BORDER }}
+        >
+          <BrandLogo size={sidebarCollapsed ? 44 : 54} glow={false} />
+          {!sidebarCollapsed && (
+            <span className="flex min-w-0 flex-col items-start">
+              <span
+                className="truncate text-sm font-bold text-[var(--space-text-primary)]"
+                style={{ letterSpacing: '-0.01em' }}
+              >
+                {workspaceName}
+              </span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--space-text-muted)]">
+                Video studios
+              </span>
+            </span>
+          )}
+        </button>
+
+        {/* Grouped studio nav */}
+        <nav className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-2">
+          {/* Memory - Hidden in customer mode (use Cmd+M to access for debugging) */}
           {mode === 'entrepreneur' && (
-            <button
-              onClick={() => setActiveWindowId('files')}
-              className={`p-3 rounded-xl transition-all ${
-                activeWindowId === 'files' ? tw.dock.active : tw.dock.inactive
-              }`}
-              title="Memory"
-            >
-              <Folder className="w-6 h-6" />
-            </button>
+            <div className="px-2.5 pb-1">
+              <SidebarNavItem
+                icon={Folder}
+                label="Memory"
+                active={activeWindowId === 'files'}
+                collapsed={sidebarCollapsed}
+                onClick={() => setActiveWindowId('files')}
+              />
+            </div>
           )}
 
-          {/* App Icons — labeled, not icon-only, so the nav reads at a glance */}
-          {config.apps.map(app => {
-            const isActive = activeWindowId === app.id;
-            const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
-            return (
-              <button
-                key={app.id}
-                onClick={() => openApp(app.id)}
-                className={`flex flex-col items-center gap-1 px-1.5 py-2 rounded-xl transition-all ${
-                  isActive ? tw.dock.active : tw.dock.inactive
-                }`}
-                title={app.name}
-              >
-                <IconComponent className="w-6 h-6" />
-                <span className="text-[8px] font-semibold leading-tight text-center max-w-[56px] line-clamp-2">{app.name}</span>
-              </button>
-            );
-          })}
+          {sidebarSections.map(section => (
+            <div key={section.label} className="pb-1">
+              {sidebarCollapsed ? (
+                <div
+                  className="mx-auto my-2 h-px w-8"
+                  style={{ background: SIDEBAR_BORDER }}
+                  aria-hidden="true"
+                />
+              ) : (
+                <div className="px-[22px] pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--space-text-muted)]">
+                  <span className="mr-1.5" aria-hidden="true">{section.emoji}</span>
+                  {section.label}
+                </div>
+              )}
+              <div className="flex flex-col gap-0.5 px-2.5">
+                {section.items.map(app => (
+                  <SidebarNavItem
+                    key={app.id}
+                    icon={app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity}
+                    label={app.name}
+                    active={activeWindowId === app.id}
+                    collapsed={sidebarCollapsed}
+                    onClick={() => openApp(app.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </nav>
 
-          {/* Divider */}
-          <div className="h-px bg-[var(--space-border-default)] my-1"></div>
-
-          {/* Settings Icon */}
-          <button
+        {/* Settings, then the collapse toggle pinned to the bottom */}
+        <div className="shrink-0 border-t px-2.5 py-2" style={{ borderColor: SIDEBAR_BORDER }}>
+          <SidebarNavItem
+            icon={SettingsIcon}
+            label="Settings"
+            active={activeWindowId === 'settings'}
+            collapsed={sidebarCollapsed}
             onClick={() => setActiveWindowId('settings')}
-            className={`flex flex-col items-center gap-1 px-1.5 py-2 rounded-xl transition-all ${
-              activeWindowId === 'settings' ? tw.dock.active : tw.dock.inactive
+          />
+          <button
+            onClick={() => setSidebarCollapsed(prev => !prev)}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!sidebarCollapsed}
+            className={`mt-1 flex w-full items-center rounded-[10px] py-2.5 text-[12px] font-semibold text-[var(--space-text-muted)] transition-all duration-200 hover:bg-[rgba(255,255,255,0.055)] hover:text-[var(--space-text-primary)] ${
+              sidebarCollapsed ? 'justify-center px-0' : 'gap-3 px-3'
             }`}
-            title="Settings"
           >
-            <SettingsIcon className="w-6 h-6" />
-            <span className="text-[8px] font-semibold leading-tight">Settings</span>
+            {sidebarCollapsed ? (
+              <ChevronsRight className="h-[18px] w-[18px] shrink-0" />
+            ) : (
+              <>
+                <ChevronsLeft className="h-[18px] w-[18px] shrink-0" />
+                <span>Collapse</span>
+              </>
+            )}
           </button>
         </div>
-      </div>
+      </aside>
 
       {/* Desktop: Main Content Area */}
       <div className="hidden md:block h-screen min-h-0 overflow-hidden">
-        {/* Launcher = the VidVerge agent front and center, full height beside the dock */}
+        {/* Launcher = the VidVerge agent front and center, full height beside the sidebar */}
         {isLauncherMode && (
-          <div className="relative h-screen flex flex-col overflow-hidden pl-32 pr-8 animate-in fade-in duration-500">
+          <div
+            className="relative h-screen flex flex-col overflow-hidden pr-8 animate-in fade-in duration-500 transition-[padding] duration-300 ease-in-out"
+            style={{ paddingLeft: sidebarWidth + 32 }}
+          >
             <LauncherFX />
             {/* Headline above the hero chat */}
             <div className="relative text-center pt-7 pb-4 vv-fade-up">
@@ -800,13 +996,13 @@ export default function SpaceDesktop({
                 <span className="vv-title-shimmer">What would you like to make today?</span>
               </h1>
               <p className="mt-1.5 text-sm text-[var(--space-text-secondary)]">
-                Tell the {runtimeTheme.branding.name || 'VidVerge'} agent your idea — or pick a studio from the dock on the left.
+                Tell the {workspaceName} agent your idea — or pick a studio from the sidebar on the left.
               </p>
             </div>
 
             {/* Hero agent chat — the dominant element of the main screen */}
             <div className="relative flex-1 min-h-0 w-full max-w-5xl mx-auto pb-6 vv-fade-up">
-              <div className="h-full rounded-3xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] overflow-hidden shadow-[0_24px_60px_-28px_rgba(120,80,0,0.35)]">
+              <div className="h-full rounded-3xl border border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-card)_94%,transparent)] backdrop-blur-xl overflow-hidden shadow-[0_24px_70px_rgba(0,0,0,0.42)]">
                 <HeroAgentChat spaceId={spaceId} />
               </div>
             </div>
@@ -816,13 +1012,16 @@ export default function SpaceDesktop({
         {/* Normal window layout */}
         {!isLauncherMode && (
         <>
-        <div className="flex h-full w-full items-stretch gap-px overflow-hidden pl-32">
+        <div
+          className="flex h-full w-full items-stretch gap-px overflow-hidden transition-[padding] duration-300 ease-in-out"
+          style={{ paddingLeft: sidebarWidth }}
+        >
           {/* App Window - LEFT side, slides in when selected */}
           {activeWindowId && (
             <div className="min-w-0 h-full flex-1 transition-all duration-500 ease-in-out">
               <div className="w-full h-full flex flex-col bg-[var(--space-surface-card)] overflow-hidden">
                 {/* App Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--space-border-default)]">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-panel)_72%,transparent)] backdrop-blur-xl">
                   <div className="flex items-center gap-2">
                     {activeWindowId === 'files' && (
                       <>
@@ -859,8 +1058,14 @@ export default function SpaceDesktop({
                 {/* App Content — `relative` is load-bearing: apps that fill
                     their frame with `position:absolute; inset:0` need a
                     positioned ancestor here, or they anchor to the viewport
-                    and render underneath the left dock. */}
-                <div className="relative flex-1 overflow-y-auto min-h-0">
+                    and render underneath the left sidebar.
+
+                    `vv-dark` is the colour-only scope from
+                    components/ui/GlobalStyles.tsx. Applying it here means an
+                    app inherits the dark ground, dark scrollbars and the
+                    light-utility neutraliser whether or not it opted into the
+                    design system itself. */}
+                <div className="relative flex-1 overflow-y-auto min-h-0 vv-dark">
                   {activeWindowId === 'files' && (
                     <FileBrowser fileAccessLogs={fileAccessLogs} />
                   )}
@@ -900,18 +1105,27 @@ export default function SpaceDesktop({
                 </h1>
               </div>
 
-              {/* App nav — every studio, icon + name, horizontally scrollable */}
+              {/* App nav — every studio, icon + name, horizontally scrollable.
+                  Ordered by the same grouping as the desktop sidebar so the
+                  two navs never disagree about where a studio sits. */}
               <div className="relative px-3 pt-2 pb-1">
                 <div className="flex gap-2 overflow-x-auto py-1" style={{ scrollbarWidth: 'none' }}>
-                  {config.apps.map(app => {
+                  {sidebarSections.flatMap(section => section.items).map(app => {
+                    const isActive = activeWindowId === app.id;
                     const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
                     return (
                       <button
                         key={app.id}
                         onClick={() => openApp(app.id)}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] text-xs font-semibold text-[var(--space-text-primary)] whitespace-nowrap shrink-0"
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-full border text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
+                          isActive
+                            ? 'border-[var(--space-brand-primary)] bg-[var(--space-brand-primary)] text-white'
+                            : 'border-[var(--space-border-default)] bg-[var(--space-surface-panel)] text-[var(--space-text-primary)]'
+                        }`}
                       >
-                        <IconComponent className="w-4 h-4 text-[var(--space-text-brand)]" />
+                        <IconComponent
+                          className={`w-4 h-4 ${isActive ? 'text-white' : 'text-[var(--space-text-brand)]'}`}
+                        />
                         {app.name}
                       </button>
                     );
@@ -962,7 +1176,7 @@ export default function SpaceDesktop({
                   Close
                 </button>
               </div>
-              <div className="relative flex-1 overflow-y-auto min-h-0">
+              <div className="relative flex-1 overflow-y-auto min-h-0 vv-dark">
                 {activeWindowId === 'files' && (
                   <FileBrowser fileAccessLogs={fileAccessLogs} />
                 )}
@@ -1001,7 +1215,7 @@ export default function SpaceDesktop({
             )}
 
             {/* App Icons */}
-            {config.apps.map(app => {
+            {sidebarSections.flatMap(section => section.items).map(app => {
               const isActive = activeWindowId === app.id;
               const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
               return (

@@ -425,10 +425,15 @@ export default function Settings({ spaceId }: SettingsProps) {
     ['trial', 'trialing', 'trial_expired', 'canceled', 'past_due', 'registered'].includes(subscriptionStatus.status);
 
   return (
-    <div className={settingsStyles.container}>
-      <div className={settingsStyles.innerContainer}>
+    <div className={`${settingsStyles.container} bg-[radial-gradient(ellipse_70%_38%_at_50%_-8%,color-mix(in_srgb,var(--space-brand-primary-500)_10%,transparent),transparent_66%),var(--space-surface-bg)]`}>
+      <div className={`${settingsStyles.innerContainer} mx-auto max-w-3xl`}>
+        <div className="mb-7">
+          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--space-text-brand)]">VidVerge account</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--space-text-primary)]">Your studio, plan and credits</h2>
+          <p className="mt-2 text-sm text-[var(--space-text-secondary)]">Manage the identity and production balance shared by every VidVerge engine.</p>
+        </div>
         {/* Account Section */}
-        <div className={settingsStyles.section}>
+        <div className={`${settingsStyles.section} rounded-2xl border border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-card)_94%,transparent)] p-6 shadow-[0_18px_48px_rgba(0,0,0,0.26)]`}>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-[var(--space-text-primary)]">
               Your Account
@@ -492,7 +497,7 @@ export default function Settings({ spaceId }: SettingsProps) {
 
         {/* Subscription Section */}
         {email && (
-          <div className="mt-8 pt-6 border-t border-[var(--space-border-default)]" style={{ minHeight: 185 }}>
+          <div className="mt-6 rounded-2xl border border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-card)_94%,transparent)] p-6 shadow-[0_18px_48px_rgba(0,0,0,0.26)]" style={{ minHeight: 185 }}>
             <div className="flex items-center justify-between gap-2 mb-4">
               <div className="flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-[var(--space-text-muted)]" />
@@ -502,7 +507,7 @@ export default function Settings({ spaceId }: SettingsProps) {
               </div>
               <button
                 onClick={() => openPricing('nav')}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#93c5fd] bg-[#f59e0b]/10 hover:bg-[#f59e0b]/20 border border-[#f59e0b]/40 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--space-brand-highlight)] bg-[color-mix(in_srgb,var(--space-brand-primary)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--space-brand-primary)_20%,transparent)] border border-[color-mix(in_srgb,var(--space-brand-primary)_40%,transparent)] rounded-lg transition-colors"
                 data-testid="button-settings-plans"
               >
                 <Crown className="w-3.5 h-3.5" />
@@ -526,7 +531,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                 </span>
                 <button
                   onClick={() => openPricing('nav')}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all hover:brightness-110 text-[#180f02] bg-[var(--space-brand-primary)]"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all hover:brightness-110 text-[var(--space-text-on-primary)] bg-[var(--space-brand-primary)]"
                   data-testid="button-settings-topup"
                 >
                   Top up
@@ -538,9 +543,9 @@ export default function Settings({ spaceId }: SettingsProps) {
               <div
                 className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3"
                 style={{
-                  borderColor: subscriber ? 'rgba(37,99,235,0.4)' : 'var(--space-border-default)',
+                  borderColor: subscriber ? 'color-mix(in srgb, var(--space-brand-primary-500) 40%, transparent)' : 'var(--space-border-default)',
                   background: subscriber
-                    ? 'linear-gradient(90deg, rgba(37,99,235,0.16) 0%, rgba(29,78,216,0.08) 100%)'
+                    ? 'linear-gradient(90deg, color-mix(in srgb, var(--space-brand-primary-500) 16%, transparent) 0%, color-mix(in srgb, var(--space-brand-highlight-500) 8%, transparent) 100%)'
                     : 'var(--space-surface-muted)',
                 }}
                 data-testid="settings-tier-row"
@@ -556,9 +561,9 @@ export default function Settings({ spaceId }: SettingsProps) {
                 <span
                   className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold"
                   style={{
-                    color: subscriber ? '#fff' : 'var(--space-text-secondary)',
+                    color: subscriber ? 'var(--space-text-on-primary)' : 'var(--space-text-secondary)',
                     background: subscriber
-                      ? 'linear-gradient(90deg, #f59e0b 0%, #d97706 100%)'
+                      ? 'linear-gradient(135deg, var(--space-brand-primary, #D6AB4A) 0%, var(--space-brand-highlight, #F3D58B) 100%)'
                       : 'var(--space-surface-panel-strong)',
                   }}
                   data-testid="badge-settings-tier"
@@ -584,7 +589,7 @@ export default function Settings({ spaceId }: SettingsProps) {
               // An account that DOES hold a live Stripe subscription keeps the
               // normal panel, so it never loses its manage-billing link.
               <div
-                className="p-4 rounded-xl border border-[#f59e0b]/30 bg-gradient-to-r from-[#f59e0b]/15 to-[#d97706]/5"
+                className="p-4 rounded-xl border border-[color-mix(in_srgb,var(--space-brand-primary)_30%,transparent)] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--space-brand-primary)_15%,transparent),color-mix(in_srgb,var(--space-brand-highlight)_5%,transparent))]"
                 data-testid="settings-granted-access"
               >
                 <div className="flex items-center gap-2">
@@ -608,7 +613,7 @@ export default function Settings({ spaceId }: SettingsProps) {
 
                 {/* Trial Progress */}
                 {(subscriptionStatus?.status === 'trial' || subscriptionStatus?.status === 'trialing') && (
-                  <div className="p-4 bg-gradient-to-r from-[#f59e0b]/15 to-[#d97706]/10 rounded-xl border border-[#f59e0b]/30">
+                  <div className="p-4 bg-[linear-gradient(90deg,color-mix(in_srgb,var(--space-brand-primary)_15%,transparent),color-mix(in_srgb,var(--space-brand-highlight)_10%,transparent))] rounded-xl border border-[color-mix(in_srgb,var(--space-brand-primary)_30%,transparent)]">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-sm font-medium text-[var(--space-text-primary)]">
                         Free Trial
@@ -619,7 +624,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                     </div>
                     <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-gradient-to-r from-[#f59e0b] to-[#d97706] rounded-full transition-all"
+                        className="h-full bg-gradient-to-r from-[var(--space-brand-primary)] to-[var(--space-brand-highlight)] rounded-full transition-all"
                         style={{ 
                           width: `${((subscriptionStatus.trialDays - subscriptionStatus.trialDaysRemaining) / subscriptionStatus.trialDays) * 100}%` 
                         }}
@@ -742,7 +747,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                     <button
                       onClick={handleSubscribe}
                       disabled={subscribing}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#fbbf24] to-[#d97706] hover:brightness-110 text-[#180f02] font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[var(--space-brand-primary)] to-[var(--space-brand-highlight)] hover:brightness-110 text-[var(--space-text-on-primary)] font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       data-testid="button-subscribe"
                     >
                       {subscribing ? (

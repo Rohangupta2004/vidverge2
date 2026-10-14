@@ -30,11 +30,11 @@ import { FIELD_ICON_CLASS } from '../styles/fieldStyles';
 // search box uses the shared Tailwind field class (styles/fieldStyles) rather
 // than the `.sfstudio`-scoped stylesheet, for the same reason: this component is
 // mounted on surfaces that do not carry that scope.
-const CHIP_ON = 'h-11 rounded-xl bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-3.5 text-xs font-semibold text-white';
+const CHIP_ON = 'h-11 rounded-xl bg-[linear-gradient(135deg,#F0B429,#D4920A)] px-3.5 text-xs font-semibold text-white';
 const CHIP_OFF = 'h-11 rounded-xl border border-[var(--space-border-default)] px-3.5 text-xs font-medium text-[var(--space-text-secondary)] hover:border-[var(--space-border-strong)]';
 const ICON_BUTTON = 'flex h-11 shrink-0 items-center gap-1 rounded-xl border border-[var(--space-border-strong)] px-2.5 text-[var(--space-text-secondary)] hover:text-[var(--space-text-primary)] disabled:opacity-50';
-const SEGMENT_ON = 'rounded-lg bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-3 py-1.5 text-xs font-semibold text-white';
-const SEGMENT_OFF = 'rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_10%,transparent)]';
+const SEGMENT_ON = 'rounded-lg bg-[linear-gradient(135deg,#F0B429,#D4920A)] px-3 py-1.5 text-xs font-semibold text-white';
+const SEGMENT_OFF = 'rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B87808_10%,transparent)]';
 
 /** Which language view the list is showing. 'all' is the default: nothing hidden. */
 export type VoiceFilterLanguage = 'all' | 'en' | 'hi' | 'other';
@@ -208,7 +208,7 @@ export default function ElevenVoicePicker({
       </div>
     </div>
 
-    {activeLanguage === 'hi' ? <p className="rounded-xl border border-[color-mix(in_srgb,#C8920A_34%,transparent)] bg-[color-mix(in_srgb,#C8920A_8%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[var(--space-text-secondary)]">
+    {activeLanguage === 'hi' ? <p className="rounded-xl border border-[color-mix(in_srgb,#D4920A_34%,transparent)] bg-[color-mix(in_srgb,#D4920A_8%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[var(--space-text-secondary)]">
       <strong className="text-[var(--space-text-primary)]">{HINDI_LEAD_VOICE} and the other voices ElevenLabs labels as Hindi speakers are listed first.</strong>{' '}
       Every voice below them narrates Hindi too: Hindi is spoken on ElevenLabs&rsquo; multilingual model ({getElevenLabsModel('hi')}), which SceneForge
       selects automatically whenever the film is not in English — so no voice is excluded here for having an English accent.
@@ -254,26 +254,26 @@ export default function ElevenVoicePicker({
                     ? `Replay the generated sample of ${shortVoiceName(voice.name)} (already paid for)`
                     : `Generate a short sample of ${shortVoiceName(voice.name)} \u2014 billed as one short voiceover (\u201c${PREVIEW_SAMPLE_LINE.slice(0, 32)}\u2026\u201d)`;
                 return <li key={voice.id} className={selected
-                  ? 'flex items-center gap-2 rounded-xl border-2 border-[#C8920A] bg-[color-mix(in_srgb,#C8920A_12%,transparent)] p-2.5'
+                  ? 'flex items-center gap-2 rounded-xl border-2 border-[#D4920A] bg-[color-mix(in_srgb,#D4920A_12%,transparent)] p-2.5'
                   : voice.indian
-                    ? 'flex items-center gap-2 rounded-xl border border-[color-mix(in_srgb,#C8920A_48%,transparent)] bg-[color-mix(in_srgb,#C8920A_7%,transparent)] p-2.5 hover:border-[#C8920A]'
-                    : 'flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] p-2.5 hover:border-[#C8920A]'}>
+                    ? 'flex items-center gap-2 rounded-xl border border-[color-mix(in_srgb,#D4920A_48%,transparent)] bg-[color-mix(in_srgb,#D4920A_7%,transparent)] p-2.5 hover:border-[#D4920A]'
+                    : 'flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] p-2.5 hover:border-[#D4920A]'}>
                   <button type="button" onClick={() => onChange(voice.id)} aria-pressed={selected} disabled={disabled} className="min-w-0 flex-1 text-left disabled:opacity-60">
                     <span className="flex flex-wrap items-center gap-1.5">
                       <span className="truncate text-sm font-semibold text-[var(--space-text-primary)]">{shortVoiceName(voice.name)}</span>
                       {label ? <span className={voice.category === 'cloned'
                         ? 'shrink-0 rounded-full bg-[color-mix(in_srgb,#166534_18%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#166534]'
-                        : 'shrink-0 rounded-full bg-[color-mix(in_srgb,#B4780A_12%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--space-text-muted)]'}>{label}</span> : null}
-                      {voice.indian ? <span title={voice.indianReason} className="shrink-0 rounded-full bg-[color-mix(in_srgb,#C8920A_26%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#C8920A]">{'\u{1F1EE}\u{1F1F3}'} India</span> : null}
+                        : 'shrink-0 rounded-full bg-[color-mix(in_srgb,#B87808_12%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--space-text-muted)]'}>{label}</span> : null}
+                      {voice.indian ? <span title={voice.indianReason} className="shrink-0 rounded-full bg-[color-mix(in_srgb,#D4920A_26%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#D4920A]">{'\u{1F1EE}\u{1F1F3}'} India</span> : null}
                     </span>
                     <span className="mt-0.5 block truncate text-[11px] text-[var(--space-text-muted)]">{voice.descriptor || (voice.category === 'cloned' ? 'Cloned from your own samples' : 'ElevenLabs voice')}</span>
                   </button>
                   <button type="button" onClick={() => void preview(voice)} disabled={sampling || Boolean(samplingId && !playing)} aria-label={previewTitle} title={previewTitle} className={ICON_BUTTON}>
                     {sampling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                    {!free && !ready ? <span className="text-[9px] font-bold uppercase tracking-wide text-[#C8920A]">Billed</span> : null}
+                    {!free && !ready ? <span className="text-[9px] font-bold uppercase tracking-wide text-[#D4920A]">Billed</span> : null}
                   </button>
                   {renderActions ? renderActions(voice) : null}
-                  {selected ? <Check className="h-4 w-4 shrink-0 text-[#C8920A]" /> : null}
+                  {selected ? <Check className="h-4 w-4 shrink-0 text-[#D4920A]" /> : null}
                 </li>;
               })}
             </ul>

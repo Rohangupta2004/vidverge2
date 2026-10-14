@@ -1,7 +1,7 @@
 /**
- * ADS STUDIO — Claude Opus 5, the single creative brain of the ad engine.
- * Every AI decision goes through claude-opus-5 on the platform Anthropic proxy
- * (POST /proxy/anthropic/v1/messages, X-Workspace-DB-Token auth):
+ * ADS STUDIO — the creative reasoning brain of the ad engine.
+ * Every browser-side decision goes through the shared interactive OpenAI
+ * planner (gpt-6.1-sol, medium reasoning, 6,000 completion tokens):
  *
  *   RESEARCH  — product-site content → structured direct-response research
  *   ANGLES    — 8–12 genuinely different reasons-to-buy
@@ -11,18 +11,21 @@
  *   CONTINUITY— vision on each clip's last frame → note for the next prompt
  *   VARIATIONS— alternative hooks / bodies / CTAs for the matrix
  *
- * Contract notes (platform docs): Opus 5 cannot disable thinking — pair
- * thinking:{type:'adaptive'} with output_config:{effort}. max_tokens ≤ 8192.
- * Never send temperature/top_p/top_k. `system` is a top-level string.
+ * The exported askOpus* names remain compatibility aliases for the rest of
+ * Ads Studio. Provider policy, workspace-token auth and truncation handling
+ * live in lib/creativePlanner.ts.
  */
 
 import {
   AdAngle, ANGLE_TYPES, ClipDuration, GeneratedAssetNeed, MockupDevice,
   OverlayType, ProductResearch, ScenePlan, ScriptClip, UploadedAsset,
-  VariationMatrix, WORD_LIMITS, callHook, newId, wordCount, wsToken,
+  VariationMatrix, WORD_LIMITS, callHook, newId, wordCount,
 } from './api';
-
-const MODEL = 'claude-opus-5';
+import { askCreativePlanner } from '../../lib/creativePlanner';
+import {
+  DEFAULT_MAX_SCENES, planScenes, routeShotIntent,
+  validateSceneDurations, type ShotIntent,
+} from '../../lib/videoEngines';
 
 interface OpusCall {
   system: string;
@@ -33,34 +36,8 @@ interface OpusCall {
   effort?: 'low' | 'medium' | 'high';
 }
 
-export async function askOpus({ system, user, images = [], maxTokens = 4096, effort = 'medium' }: OpusCall): Promise<string> {
-  const token = wsToken();
-  if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
-  const content: any[] = images
-    .filter((u) => typeof u === 'string' && u.startsWith('https://'))
-    .map((url) => ({ type: 'image', source: { type: 'url', url } }));
-  content.push({ type: 'text', text: user });
-  const res = await fetch('/proxy/anthropic/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: Math.min(8192, maxTokens),
-      thinking: { type: 'adaptive' },
-      output_config: { effort },
-      system,
-      messages: [{ role: 'user', content }],
-    }),
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok || data?.error) {
-    const code = data?.code ? ` [${data.code}]` : '';
-    throw new Error(`${data?.error?.message || data?.error || `The strategist did not answer (HTTP ${res.status})`}${code}`);
-  }
-  return (Array.isArray(data?.content) ? data.content : [])
-    .filter((b: any) => b?.type === 'text')
-    .map((b: any) => String(b.text || ''))
-    .join('');
+export async function askOpus({ system, user, images = [] }: OpusCall): Promise<string> {
+  return (await askCreativePlanner({ system, user, images })).text;
 }
 
 /** Parse the first balanced JSON value out of a model reply — robust to
@@ -350,16 +327,32 @@ export async function writeScript(research: ProductResearch, angle: AdAngle, off
 const CAMERA_MOVES = ['static', 'slow zoom in', 'slow zoom out', 'push-in', 'tracking left', 'tracking right', 'orbit', 'pull-back', 'handheld', 'bokeh', 'slow motion', 'dolly'];
 const OVERLAY_TYPES: OverlayType[] = ['none', 'screenshot_mockup', 'text_callout', 'review_card', 'stat_counter', 'cta_button', 'arrow_highlight'];
 const DEVICES: MockupDevice[] = ['phone', 'laptop', 'browser', 'tablet', 'monitor'];
+const SHOT_INTENTS: ShotIntent[] = [
+  'cinematic_hero', 'fast_broll', 'ui_demo', 'character_consistency',
+  'product_consistency', 'motion_background', 'stills_to_motion',
+  'surreal_stylized', 'video_to_video', 'finished_product_ad',
+  'ugc_testimonial', 'multi_shot',
+];
 
-const SCENE_PLAN_SYSTEM = `You are the director of photography + creative director for a short-form UGC-style video ad. One presenter (the uploaded avatar reference) speaks every clip to camera. For EACH script clip you produce a full production plan.
+const SCENE_PLAN_SYSTEM = `You are the director of photography + creative director for a short-form UGC-style video ad. Read the WHOLE approved script first. Reason about the approach, the visual progression across clips, what must remain continuous, and the best production workflow for EACH shot. One presenter (the uploaded avatar reference) speaks every clip to camera.
+
+MODEL FACTS (use these to choose intent honestly; code resolves the engine):
+- Gemini Omni 1.1 Flash is the platform default and the character/product consistency engine. It is the ONLY engine here that accepts reference images: up to ten, combinable with a seed frame, plus last-frame interpolation. Output caps at 720p.
+- Retired ids gemini-omni-flash-preview, veo-3.1-generate-preview and veo-3.1-fast-generate-preview are aliases served on Omni 1.1, not distinct engines.
+- Real Veo 3.1 lives only at openrouter/google/veo-3.1, -fast and -lite. Those accept one seed image and no reference images.
+- openrouter/bytedance/seedance-2.0-fast works. Seedance 2.5 Fast is unavailable (hard 400).
+- No engine in this workspace is confirmed to deliver 4K. Never promise 4K.
+
+SHOT INTENT: choose exactly one per clip from [${SHOT_INTENTS.map((intent) => `"${intent}"`).join(', ')}]. Choose the creative INTENT, not a model id. The app passes that intent to the shared routeShotIntent() contract, which alone resolves engine/workflow and fallbacks.
 
 VOICE RULE: produce ONE "voice_description" (plus one "accent") at the top level and it is reused VERBATIM for every clip — never vary the voice between clips.
 
 Each clip plan object:
-{ "clip_number": num, "camera_movement": one of [${CAMERA_MOVES.map((c) => `"${c}"`).join(', ')}], "framing": str (e.g. "medium close-up"), "subject_position": str, "micro_action": str (small physical action synced to the line), "gesture": str, "expression": str, "environment": str, "lighting": str, "visual_style": str, "product_interaction": str ("none" or a concrete interaction), "continuity_notes": str (what must match the previous clip — outfit, background, lighting), "do_not_show": str (hard exclusions), "overlay_type": one of [${OVERLAY_TYPES.map((o) => `"${o}"`).join(', ')}], "overlay_text": str (the COMPLETE overlay text when relevant — the full key phrase, full stat, full review quote or CTA, written out in full with exact product/feature names and numbers from the research; never truncated, never elided with "…" or "etc"; empty when none), "overlay_assets": [str] (file names from the AVAILABLE ASSETS list to composite; empty when none), "use_screenshot_mockup": bool, "screenshot_mockup_type": one of [${DEVICES.map((d) => `"${d}"`).join(', ')}], "generated_assets_needed": [{ "description": str, "purpose": str }] (ONLY visuals genuinely missing from the uploads — icons, illustrations, background elements; usually empty) }
+{ "clip_number": num, "shot_intent": one of [${SHOT_INTENTS.map((intent) => `"${intent}"`).join(', ')}], "camera_movement": one of [${CAMERA_MOVES.map((c) => `"${c}"`).join(', ')}], "framing": str (e.g. "medium close-up"), "subject_position": str, "micro_action": str (small physical action synced to the line), "gesture": str, "expression": str, "environment": str, "lighting": str, "visual_style": str, "product_interaction": str ("none" or a concrete interaction), "continuity_notes": str (what must match the previous clip — outfit, background, lighting), "do_not_show": str (hard exclusions), "overlay_type": one of [${OVERLAY_TYPES.map((o) => `"${o}"`).join(', ')}], "overlay_text": str (the COMPLETE overlay text when relevant — the full key phrase, full stat, full review quote or CTA, written out in full with exact product/feature names and numbers from the research; never truncated, never elided with "…" or "etc"; empty when none), "overlay_assets": [str] (file names from the AVAILABLE ASSETS list to composite; empty when none), "use_screenshot_mockup": bool, "screenshot_mockup_type": one of [${DEVICES.map((d) => `"${d}"`).join(', ')}], "generated_assets_needed": [{ "description": str, "purpose": str }] (ONLY visuals genuinely missing from the uploads — icons, illustrations, background elements; usually empty) }
 
 HARD RULES:
-- The SAME person, outfit, environment family and lighting across all clips (state it in continuity_notes).
+- The SAME person, outfit, environment family and lighting across all clips (state it in continuity_notes). Decide deliberately whether each transition continues the prior frame or cuts away; do not mechanically chain every shot.
+- Choose shot_intent from the shot's actual job. Use ui_demo for readable interfaces, character_consistency when identity is the dominant constraint, product_consistency for a physical hero product, fast_broll for inexpensive cutaways, and cinematic_hero/surreal_stylized only when the shot genuinely needs them.
 - VISUAL HOOK RULE: clip 1 must open on a specific action/expression/visual that creates a pattern interrupt in the FIRST SECOND — never a static talking head.
 - Screenshot/UI moments: NEVER plan for the video model to recreate UI — set use_screenshot_mockup true and the real screenshot is composited in an animated device mockup afterwards. In those clips the presenter gestures toward empty space or holds a device casually.
 - do_not_show must always include on-screen text and captions (the overlay layer owns all text).
@@ -370,9 +363,36 @@ Return ONE JSON object: { "voice_description": str (e.g. "warm, confident Americ
 
 function cleanPlan(raw: any, script: ScriptClip, voice: string, accent: string): ScenePlan {
   const overlayType: OverlayType = OVERLAY_TYPES.includes(raw?.overlay_type) ? raw.overlay_type : 'none';
-  const useMock = raw?.use_screenshot_mockup === true || overlayType === 'screenshot_mockup';
+  const shotIntent: ShotIntent = SHOT_INTENTS.includes(raw?.shot_intent) ? raw.shot_intent : 'character_consistency';
+  const route = routeShotIntent(shotIntent);
+  const durationNotes: string[] = [];
+  if (route.kind === 'engine' && route.engineId) {
+    const guard = planScenes({
+      modelId: route.engineId,
+      totalDurationS: script.duration_seconds,
+      requestedSceneCount: 1,
+      minScenes: 1,
+      maxScenes: DEFAULT_MAX_SCENES,
+    });
+    durationNotes.push(
+      ...guard.notes,
+      ...validateSceneDurations(route.engineId, [script.duration_seconds], {
+        expectedTotalS: script.duration_seconds,
+        maxScenes: DEFAULT_MAX_SCENES,
+      }),
+    );
+    if (guard.scenes.length !== 1) {
+      durationNotes.push(`${script.duration_seconds}s needs ${guard.scenes.length} shots on ${route.engineId}; split this clip before generation.`);
+    }
+  }
+  const useMock = raw?.use_screenshot_mockup === true || overlayType === 'screenshot_mockup' || route.kind === 'code';
   return {
     clip_number: script.clip_number,
+    shot_intent: shotIntent,
+    workflow_kind: route.kind,
+    engine_id: route.engineId,
+    engine_reason: route.reason,
+    duration_notes: Array.from(new Set(durationNotes)),
     camera_movement: CAMERA_MOVES.includes(raw?.camera_movement) ? raw.camera_movement : 'slow zoom in',
     framing: String(raw?.framing || 'medium close-up').slice(0, 120),
     subject_position: String(raw?.subject_position || 'centered').slice(0, 160),
@@ -411,7 +431,7 @@ export function assembleVeoPrompt(plan: ScenePlan, durationS: number, continuity
     `[Accent]: ${plan.accent}`,
     `[Environment]: ${plan.environment}`,
     `[Lighting]: ${plan.lighting}`,
-    `[Style]: ${plan.visual_style}, ${Math.min(8, Math.max(4, durationS))}s duration`,
+    `[Style]: ${plan.visual_style}, ${Math.max(1, Math.round(durationS))}s duration`,
     `[Continuity]: ${[plan.continuity_notes, continuityNote].filter(Boolean).join(' ') || 'opening clip'}`,
     `[Avoid]: ${plan.do_not_show}`,
   ];
@@ -425,7 +445,7 @@ export async function buildScenePlan(params: {
   script: ScriptClip[];
   assets: UploadedAsset[];
   hasAvatar: boolean;
-}): Promise<{ voiceDescription: string; accent: string; plans: ScenePlan[] }> {
+}): Promise<{ voiceDescription: string; accent: string; plans: ScenePlan[]; notes: string[] }> {
   const assetLines = params.assets.map((a) => `- ${a.name} — ${a.url}`).join('\n');
   const raw = await askOpusJson<any>({
     system: SCENE_PLAN_SYSTEM,
@@ -447,7 +467,21 @@ export async function buildScenePlan(params: {
     plan.veo_prompt = assembleVeoPrompt(plan, sc.duration_seconds, null);
     return plan;
   });
-  return { voiceDescription: voice, accent, plans };
+  const countGuard = planScenes({
+    modelId: 'openrouter/bytedance/seedance-2.0-fast',
+    totalDurationS: params.script.reduce((sum, clip) => sum + clip.duration_seconds, 0),
+    requestedSceneCount: plans.length,
+    minScenes: 1,
+    maxScenes: DEFAULT_MAX_SCENES,
+  });
+  const notes = Array.from(new Set([
+    ...countGuard.notes,
+    ...plans.flatMap((plan) => plan.duration_notes || []),
+  ]));
+  if (plans.length > DEFAULT_MAX_SCENES) {
+    throw new Error(`${plans.length} planned clips exceeds the ${DEFAULT_MAX_SCENES}-clip creative-agent limit. Simplify the approach and plan again.`);
+  }
+  return { voiceDescription: voice, accent, plans, notes };
 }
 
 /** Regenerate the production plan for ONE clip (per-card "Regenerate"). */

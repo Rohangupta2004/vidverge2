@@ -19,7 +19,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import {
-  AlertTriangle, CheckCircle2, ChevronRight, Circle, Clapperboard, Clock, Download, FileText,
+  AlertTriangle, CheckCircle2, ChevronRight, Circle, Clapperboard, Download, FileText,
   Film, Layers, MessageSquareText, Mic, Music, Palette, Pencil, Play, Plus, RefreshCw, Search,
   Settings, Sparkles, Trash2, Upload, User, Volume2, VolumeX, Wand2, X, XCircle,
 } from 'lucide-react';
@@ -38,7 +38,11 @@ import { KIND_LABELS, visualKindOf } from '../lib/effects';
 import { sortAvatars, sortVoices, withIndiaSeedVoices } from '../lib/heygenCatalog';
 import VideoIntegrationPicker from '../../../components/VideoIntegrationPicker';
 import VergeLoader from '../../../components/VergeLoader';
+import VideoErrorCard from '../../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../../components/video/VideoGeneratingState';
 import { defaultModelForIntegration, integrationForEngineId, type VideoIntegrationId } from '../../../lib/videoIntegrations';
+import { sceneElementComposition } from '../lib/elementComposition';
+import { ElementCompositionPlayer } from './ElementCompositionView';
 
 /** Live state of a Generate All run, so the bar can say "Generating scene 2 of 4". */
 export interface SceneProgress {
@@ -61,6 +65,7 @@ export interface StudioWorkbenchProps {
   providersLoading: boolean;
   onRefreshProviders: () => void;
   estimate: GenerationEstimate;
+  durationHint: string;
   progress: SceneProgress;
   busy: boolean;
   note: string;
@@ -85,7 +90,7 @@ export interface StudioWorkbenchProps {
   onFilmAsVideo: (scene: Scene) => void;
   onSkipScene: (scene: Scene) => void;
   onUnskipScene: (scene: Scene) => void;
-  onEditSceneScript: (scene: Scene, description: string) => void;
+  onEditSceneScript: (scene: Scene, description: string, durationS: number) => void;
   onUploadSceneMedia: (scene: Scene, file: File) => void;
   generatingSceneId: string | null;
   onSaveScript: (script: string) => void;
@@ -275,7 +280,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [menu, setMenu] = useState<{ scene: Scene; x: number; y: number } | null>(null);
-  const [editing, setEditing] = useState<{ scene: Scene; text: string } | null>(null);
+  const [editing, setEditing] = useState<{ scene: Scene; text: string; durationS: number } | null>(null);
   const sceneUploadRef = useRef<HTMLInputElement | null>(null);
   const uploadTarget = useRef<Scene | null>(null);
 
@@ -302,6 +307,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
     ? String(selected.render_url)
     : finalVideoUrl;
   const previewStill = selected?.render_url && !isVideoUrl(selected.render_url) ? String(selected.render_url) : '';
+  const selectedComposition = selected ? sceneElementComposition(selected) : null;
 
   const readyCount = ordered.filter((scene) => statusOf(scene, generatingSceneId) === 'done').length;
   const errorCount = ordered.filter((scene) => statusOf(scene, generatingSceneId) === 'error').length;
@@ -309,9 +315,9 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
   return <div className="sf-studio flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--sf-bg)] text-[var(--sf-text)]">
     <style>{`
       .sf-studio {
-        --sf-bg: color-mix(in srgb, var(--space-surface-bg) 86%, #FFF3D6);
-        --sf-panel: color-mix(in srgb, var(--space-surface-card) 88%, #FFFFFF);
-        --sf-sunken: color-mix(in srgb, var(--space-surface-panel) 72%, #FFFAEB);
+        --sf-bg: color-mix(in srgb, var(--space-surface-bg) 92%, #0D0B05);
+        --sf-panel: color-mix(in srgb, var(--space-surface-card) 92%, #15120A);
+        --sf-sunken: color-mix(in srgb, var(--space-surface-panel) 88%, #18150A);
         --sf-chip: color-mix(in srgb, var(--space-text-primary) 7%, transparent);
         --sf-line: color-mix(in srgb, var(--space-border-default) 80%, transparent);
         --sf-line-strong: var(--space-border-strong);
@@ -321,7 +327,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
         --sf-accent-text: var(--space-text-brand);
         --sf-ok: var(--space-semantic-success);
         --sf-bad: var(--space-semantic-danger);
-        --sf-warn: var(--space-semantic-warning, #f59e0b);
+        --sf-warn: var(--space-semantic-warning, #fbbf24);
         --sf-info: var(--space-text-brand);
       }
       @keyframes sf-shimmer-slide { 0% { background-position: -160% 0; } 100% { background-position: 260% 0; } }
@@ -372,26 +378,19 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
 
     {/* ---------------- STATUS STRIP ---------------- */}
     {progress.active || exportBusy || error || note ? <div className="shrink-0 border-b border-[var(--sf-line)] bg-[var(--sf-sunken)] px-4 py-2">
-      {error ? <div role="alert" className="flex items-start gap-2 text-xs leading-relaxed text-[var(--sf-text)]">
-        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--sf-bad)]" />
-        <span className="min-w-0 flex-1">{error}</span>
-        <button aria-label="Dismiss" onClick={onDismissError} className="shrink-0 rounded p-0.5 hover:bg-[var(--sf-chip)]"><X className="h-3.5 w-3.5" /></button>
-      </div> : null}
-      {progress.active ? <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--sf-dim)]">
-        <VergeLoader size={30} label="Working" />
-        <strong className="font-semibold text-[var(--sf-text)]">
-          {progress.currentIndex
-            ? `Generating scene ${progress.currentIndex} of ${progress.total}`
-            : `Generating ${progress.done} of ${progress.total} scenes`}
-        </strong>
-        {progress.etaSec > 0 ? <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />about {humanDuration(progress.etaSec)} left</span> : null}
-        <span className="min-w-0 flex-1 truncate">{progress.message || note}</span>
-      </div> : null}
-      {!progress.active && exportBusy ? <div className="mt-1 flex items-center gap-2 text-xs text-[var(--sf-dim)]">
-        <VergeLoader size={30} label="Working" />
-        <span className="min-w-0 flex-1 truncate">{exportMessage || 'Rendering the final MP4…'}</span>
-        <span className="h-1.5 w-28 overflow-hidden rounded-full bg-[var(--sf-line)]"><span className="block h-full rounded-full bg-[var(--sf-accent)] transition-all" style={{ width: `${Math.max(3, Math.min(100, exportProgress))}%` }} /></span>
-      </div> : null}
+      {error ? <VideoErrorCard error={error} engineId={config.provider} subject="this SceneForge run" onRetry={finalVideoUrl ? onExport : onGenerateAll} onDismiss={onDismissError} compact /> : null}
+      {progress.active ? <VideoGeneratingState
+        label={progress.currentIndex ? `Generating scene ${progress.currentIndex} of ${progress.total}` : `Generating ${progress.done} of ${progress.total} scenes`}
+        detail={`${progress.message || note}${progress.etaSec > 0 ? ` · about ${humanDuration(progress.etaSec)} left` : ''}`}
+        progress={progress.total ? (progress.done / progress.total) * 100 : undefined}
+        compact
+      /> : null}
+      {!progress.active && exportBusy ? <VideoGeneratingState
+        label="Rendering the final MP4"
+        detail={exportMessage || 'Compositing scenes, graphics and audio'}
+        progress={exportProgress}
+        compact
+      /> : null}
       {!progress.active && !exportBusy && !error && note ? <div className="text-xs text-[var(--sf-dim)]">{note}</div> : null}
     </div> : null}
 
@@ -400,7 +399,9 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
       <main className="flex min-w-0 flex-1 flex-col">
         {/* PREVIEW — the dominant region */}
         <section className="relative flex min-h-0 flex-1 items-center justify-center bg-[#05060c] p-3">
-          {previewUrl
+          {selectedComposition
+            ? <div className="w-full max-w-4xl"><ElementCompositionPlayer composition={selectedComposition} /></div>
+            : previewUrl
             ? <video key={previewUrl} src={previewUrl} controls playsInline className="h-full max-h-full w-auto max-w-full rounded-xl bg-black shadow-[0_24px_80px_rgba(0,0,0,0.55)]" />
             : previewStill
               ? <img src={previewStill} alt="" className="h-full max-h-full w-auto max-w-full rounded-xl object-contain" />
@@ -432,6 +433,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
             <button onClick={props.onAddScene} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-[var(--sf-dim)] hover:bg-[var(--sf-chip)] hover:text-[var(--sf-text)]"><Plus className="h-3 w-3" />Add scene</button>
             <span className="ml-auto hidden lg:block">{describeEstimate(estimate)}</span>
           </div>
+          <p className="mb-2 text-[10px] leading-relaxed text-[var(--sf-dim)]">Per-scene duration: {props.durationHint}</p>
           <div className="sf-rail flex gap-2 overflow-x-auto pb-1">
             {ordered.map((scene) => <SceneCard
               key={scene.id}
@@ -458,10 +460,10 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
       role="menu"
       style={{ left: menu.x, top: menu.y }}
       onClick={(event) => event.stopPropagation()}
-      className="fixed z-50 w-[200px] overflow-hidden rounded-xl border border-[var(--sf-line)] bg-[var(--sf-panel)] py-1 shadow-[0_18px_50px_rgba(120,80,0,0.18)]"
+      className="fixed z-50 w-[200px] overflow-hidden rounded-xl border border-[var(--sf-line)] bg-[var(--sf-panel)] py-1 shadow-[0_4px_24px_rgba(0,0,0,0.4)]"
     >
       <button role="menuitem" onClick={() => { onRegenerateScene(menu.scene); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--sf-chip)]"><RefreshCw className="h-3.5 w-3.5" />Regenerate this scene</button>
-      <button role="menuitem" onClick={() => { setEditing({ scene: menu.scene, text: String(menu.scene.description || '') }); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--sf-chip)]"><Pencil className="h-3.5 w-3.5" />Edit script</button>
+      <button role="menuitem" onClick={() => { setEditing({ scene: menu.scene, text: String(menu.scene.description || ''), durationS: Math.round(sceneWindowSec(menu.scene)) }); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--sf-chip)]"><Pencil className="h-3.5 w-3.5" />Edit script & duration</button>
       <button role="menuitem" onClick={() => { uploadTarget.current = menu.scene; sceneUploadRef.current?.click(); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--sf-chip)]"><Upload className="h-3.5 w-3.5" />Replace with upload</button>
       {visualKindOf(menu.scene.visual_kind) === 'ai_video'
         ? <button role="menuitem" onClick={() => { props.onConvertScene(menu.scene); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--sf-chip)]"><Layers className="h-3.5 w-3.5" />Switch to text / graphics</button>
@@ -486,7 +488,7 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
     />
 
     {/* ---------------- SCENE SCRIPT EDITOR ---------------- */}
-    {editing ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(26,16,0,0.35)] p-4" onClick={() => setEditing(null)}>
+    {editing ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.58)] p-4" onClick={() => setEditing(null)}>
       <div onClick={(event) => event.stopPropagation()} className="w-full max-w-lg rounded-2xl border border-[var(--sf-line)] bg-[var(--sf-panel)] p-5">
         <h3 className="text-sm font-bold">Scene {editing.scene.scene_index} script</h3>
         <p className="mt-1 text-xs text-[var(--sf-dim)]">This text is what the provider films. Saving marks the scene for regeneration.</p>
@@ -494,19 +496,29 @@ export default function StudioWorkbench(props: StudioWorkbenchProps) {
           autoFocus
           rows={5}
           value={editing.text}
-          onChange={(event) => setEditing({ scene: editing.scene, text: event.target.value })}
+          onChange={(event) => setEditing({ ...editing, text: event.target.value })}
           placeholder="What the viewer sees in this shot — subject, setting, action, camera"
           aria-invalid={editing.text.trim() ? undefined : true}
           className={`mt-3 ${editing.text.trim() ? inputClass : invalidInputClass}`}
         />
-        {/* Save is disabled on an empty script, so the reason sits on the field
+        <Field label="Scene duration" hint={props.durationHint} error={editing.durationS > 0 ? undefined : 'Enter a positive whole-second duration.'}>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={editing.durationS}
+            onChange={(event) => setEditing({ ...editing, durationS: Number(event.target.value) })}
+            className={editing.durationS > 0 ? inputClass : invalidInputClass}
+          />
+        </Field>
+        {/* Save is disabled on an empty script or duration, so the reason sits on the field
             instead of leaving a dead button with no explanation beside it. */}
         {editing.text.trim() ? null : <span role="alert" className="mt-1.5 block text-[11px] leading-relaxed text-[var(--sf-bad)]">
           A scene needs a script before it can be filmed — describe what happens in this shot.
         </span>}
         <div className="mt-3 flex justify-end gap-2">
           <button onClick={() => setEditing(null)} className={buttonClass}>Cancel</button>
-          <button onClick={() => { onEditSceneScript(editing.scene, editing.text.trim()); setEditing(null); }} disabled={!editing.text.trim()} className={primaryClass}>Save scene script</button>
+          <button onClick={() => { onEditSceneScript(editing.scene, editing.text.trim(), editing.durationS); setEditing(null); }} disabled={!editing.text.trim() || !(editing.durationS > 0)} className={primaryClass}>Save scene</button>
         </div>
       </div>
     </div> : null}
@@ -558,7 +570,7 @@ function ProviderSelect({ providers, loading, value, onChange, onRefresh }: {
       <span className="max-w-[140px] truncate">{current?.label || 'Choose provider'}</span>
       <ChevronRight className="h-3 w-3 rotate-90" />
     </button>
-    {open ? <div className="absolute right-0 top-full z-50 mt-1.5 w-[320px] overflow-hidden rounded-xl border border-[var(--sf-line)] bg-[var(--sf-panel)] py-1 shadow-[0_18px_50px_rgba(120,80,0,0.18)]">
+    {open ? <div className="absolute right-0 top-full z-50 mt-1.5 w-[320px] overflow-hidden rounded-xl border border-[var(--sf-line)] bg-[var(--sf-panel)] py-1 shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
       <div className="flex items-center justify-between px-3 py-1.5">
         <span className="text-[10px] font-bold uppercase tracking-[.16em] text-[var(--sf-dim)]">Scene clips</span>
         <button onClick={onRefresh} className="inline-flex items-center gap-1 text-[10px] text-[var(--sf-dim)] hover:text-[var(--sf-text)]"><RefreshCw className="h-3 w-3" />Recheck</button>

@@ -201,26 +201,26 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
   const pad = compact ? 16 : 24;
 
   return (
-    <div style={{ fontFamily: FONT, color: '#1A1000' }}>
+    <div style={{ fontFamily: FONT, color: 'var(--space-text-primary, #F5E9C8)' }}>
       <style>{`
         .ms-btn { transition: transform .16s ease, filter .16s ease; }
         .ms-btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
         .ms-card { transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
-        .ms-card:hover { transform: translateY(-3px); border-color: rgba(200,146,10,0.45); }
+        .ms-card:hover { transform: translateY(-3px); border-color: rgba(212,146,10,0.45); }
       `}</style>
 
       {/* Generator */}
       <div
         style={{
           borderRadius: 18,
-          border: '1px solid rgba(180,120,0,0.14)',
-          background: 'linear-gradient(180deg, rgba(200,146,10,0.10) 0%, rgba(180,120,0,0.04) 100%)',
+          border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+          background: 'linear-gradient(180deg, rgba(212,146,10,0.14) 0%, rgba(212,146,10,0.05) 100%)',
           padding: pad,
           marginBottom: 22,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-          <Wand2 size={16} color="#B4720A" />
+          <Wand2 size={16} color="var(--space-brand-highlight, #F0B429)" />
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Generate an app mockup</h3>
         </div>
 
@@ -252,7 +252,7 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
               style={{ display: 'none' }}
               onChange={(event) => void handleUpload(event.target.files && event.target.files[0])}
             />
-            <div style={{ display: 'inline-flex', borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(180,120,0,0.14)' }}>
+            <div style={{ display: 'inline-flex', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))' }}>
               {(['phone', 'desktop'] as const).map((p) => {
                 const on = platform === p;
                 const Icon = p === 'phone' ? Smartphone : Monitor;
@@ -270,8 +270,8 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                       fontWeight: 600,
                       cursor: 'pointer',
                       border: 'none',
-                      color: on ? '#FFFFFF' : '#7A6030',
-                      background: on ? '#C8920A' : 'transparent',
+                      color: on ? '#FFFFFF' : '#9E8B55',
+                      background: on ? '#D4920A' : 'transparent',
                       textTransform: 'capitalize',
                     }}
                   >
@@ -294,11 +294,11 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                 borderRadius: 12,
                 fontSize: 13.5,
                 fontWeight: 600,
-                color: '#B4720A',
-                border: '1px solid rgba(200,146,10,0.34)',
+                color: 'var(--space-brand-highlight, #F0B429)',
+                border: '1px solid rgba(212,146,10,0.34)',
                 cursor: uploading || generating ? 'not-allowed' : 'pointer',
                 opacity: uploading || generating ? 0.7 : 1,
-                background: 'rgba(200,146,10,0.10)',
+                background: 'rgba(212,146,10,0.10)',
               }}
               data-testid="button-upload-mockup"
             >
@@ -323,8 +323,8 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                 border: 'none',
                 cursor: generating || uploading ? 'not-allowed' : 'pointer',
                 opacity: generating || uploading ? 0.7 : 1,
-                background: 'linear-gradient(90deg, #C8920A 0%, #B4720A 100%)',
-                boxShadow: '0 6px 20px rgba(200,146,10,0.35)',
+                background: 'linear-gradient(135deg, var(--space-brand-primary, #D4920A) 0%, var(--space-brand-highlight, #F0B429) 100%)',
+                boxShadow: '0 0 24px rgba(212,146,10,0.28)',
               }}
             >
               {generating ? <VergeLoader size={30} label="Generating your mockup" /> : <Wand2 size={15} />}
@@ -333,18 +333,18 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
           </div>
 
           {error && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#991B1B', fontSize: 12.5 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--space-semantic-danger, #f87171)', fontSize: 12.5 }}>
               <AlertTriangle size={13} /> {error}
             </div>
           )}
           {generating && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '8px 0' }}>
               <VergeLoader size={120} caption={`Rendering your ${platform} screen`} />
-              <p style={{ margin: 0, fontSize: 12, color: '#7A6030' }}>This takes ~15–30 seconds.</p>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--space-text-muted, #9E8B55)' }}>This takes ~15–30 seconds.</p>
             </div>
           )}
           {!generating && justAdded !== null && selectedId !== justAdded && (
-            <p style={{ margin: 0, fontSize: 12, color: '#B4720A' }}>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--space-brand-highlight, #F0B429)' }}>
               Saved to your mockups. Tap “Use this” on it when you want it in a video — nothing is
               added to a render until you do.
             </p>
@@ -367,12 +367,12 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
             textAlign: 'center',
             padding: '36px 20px',
             borderRadius: 16,
-            border: '1px solid rgba(180,120,0,0.14)',
-            background: '#FFFFFF',
-            color: '#7A6030',
+            border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+            background: 'var(--space-surface-card, #15120A)',
+            color: 'var(--space-text-muted, #9E8B55)',
           }}
         >
-          <Smartphone size={26} color="rgba(180,120,0,0.55)" />
+          <Smartphone size={26} color="var(--space-text-muted, #9E8B55)" />
           <p style={{ margin: 0, fontSize: 14, maxWidth: 380 }}>
             No mockups yet. Upload your product screen or describe one above to generate a realistic app UI —
             the character will be shown holding or using it.
@@ -397,10 +397,10 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                 className="ms-card"
                 style={{
                   borderRadius: 16,
-                  border: isSel ? '1px solid #C8920A' : '1px solid rgba(180,120,0,0.14)',
-                  background: '#FFFFFF',
+                  border: isSel ? '1px solid var(--space-brand-primary, #D4920A)' : '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+                  background: 'var(--space-surface-card, #15120A)',
                   overflow: 'hidden',
-                  boxShadow: isSel ? '0 0 0 1px #C8920A, 0 14px 40px rgba(200,146,10,0.28)' : 'none',
+                  boxShadow: isSel ? '0 0 0 1px var(--space-brand-primary, #D4920A), 0 0 24px rgba(212,146,10,0.28)' : 'none',
                   display: 'flex',
                   flexDirection: 'column',
                 }}
@@ -409,7 +409,7 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                   {m.image_url ? (
                     <img src={m.image_url} alt={m.screen || m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, #C8920A, #E0A33A)' }}>
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, var(--space-brand-primary, #D4920A), var(--space-brand-highlight, #F0B429))' }}>
                       {isDesktop ? <Monitor size={24} color="rgba(255,255,255,0.6)" /> : <Smartphone size={24} color="rgba(255,255,255,0.6)" />}
                     </div>
                   )}
@@ -427,7 +427,7 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                         fontSize: 10.5,
                         fontWeight: 700,
                         color: '#FFFFFF',
-                        background: 'rgba(200,146,10,0.95)',
+                        background: 'rgba(212,146,10,0.95)',
                       }}
                     >
                       <CheckCircle2 size={11} /> In use
@@ -439,7 +439,7 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                     {m.name}
                   </h4>
                   {m.screen && (
-                    <p style={{ margin: 0, fontSize: 11.5, color: '#7A6030', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <p style={{ margin: 0, fontSize: 11.5, color: 'var(--space-text-muted, #9E8B55)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {m.screen}
                     </p>
                   )}
@@ -455,9 +455,9 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                         fontSize: 12,
                         fontWeight: 600,
                         cursor: 'pointer',
-                        border: isSel ? '1px solid rgba(180,120,0,0.36)' : '1px solid rgba(200,146,10,0.45)',
-                        color: isSel ? '#3D2800' : '#B4720A',
-                        background: isSel ? 'rgba(180,120,0,0.06)' : 'rgba(200,146,10,0.12)',
+                        border: isSel ? '1px solid rgba(184,120,8,0.36)' : '1px solid rgba(212,146,10,0.45)',
+                        color: isSel ? '#3D2800' : '#F0B429',
+                        background: isSel ? 'rgba(184,120,8,0.06)' : 'rgba(212,146,10,0.12)',
                       }}
                     >
                       {isSel ? 'Selected' : 'Use this'}
@@ -466,7 +466,7 @@ export function MockupManager({ compact = false }: { compact?: boolean }) {
                       type="button"
                       onClick={() => void handleDelete(m.id)}
                       title="Delete"
-                      style={{ padding: 7, borderRadius: 9, cursor: 'pointer', border: '1px solid rgba(180,120,0,0.14)', background: 'transparent', color: '#7A6030' }}
+                      style={{ padding: 7, borderRadius: 9, cursor: 'pointer', border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))', background: 'transparent', color: 'var(--space-text-muted, #9E8B55)' }}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -485,9 +485,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid rgba(180,120,0,0.14)',
-  background: 'rgba(180,120,0,0.06)',
-  color: '#1A1000',
+  border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+  background: 'var(--space-surface-input, #18150A)',
+  color: 'var(--space-text-primary, #F5E9C8)',
   fontSize: 13.5,
   outline: 'none',
   fontFamily: FONT,

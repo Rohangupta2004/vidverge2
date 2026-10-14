@@ -25,10 +25,10 @@ import {
 export const AUTO_PROCEED_MS = 8000;
 
 const PRIORITY_COLOR: Record<Priority, string> = {
-  critical: '#991B1B',
-  high: '#B45309',
-  low: '#1D4ED8',
-  none: '#166534',
+  critical: 'var(--space-semantic-danger, #f87171)',
+  high: 'var(--space-semantic-warning, #fbbf24)',
+  low: 'var(--space-brand-highlight, #F0B429)',
+  none: 'var(--space-semantic-success, #4ade80)',
 };
 
 function ScoreMeter(props: { score: number; delta: number | null }) {
@@ -47,7 +47,7 @@ function ScoreMeter(props: { score: number; delta: number | null }) {
             style={{
               fontSize: 12.5,
               fontWeight: 700,
-              color: delta >= 0 ? '#166534' : '#991B1B',
+              color: delta >= 0 ? 'var(--space-semantic-success, #4ade80)' : 'var(--space-semantic-danger, #f87171)',
               fontVariantNumeric: 'tabular-nums',
             }}
           >
@@ -55,12 +55,12 @@ function ScoreMeter(props: { score: number; delta: number | null }) {
           </span>
         )}
       </div>
-      <div style={{ height: 6, borderRadius: 3, background: 'rgba(180,120,0,0.14)', overflow: 'hidden' }}>
+      <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
         <div
           style={{
             width: String(pct) + '%',
             height: '100%',
-            background: props.score >= 0.8 ? '#166534' : props.score >= 0.6 ? ACCENT : '#991B1B',
+            background: props.score >= 0.8 ? 'var(--space-semantic-success, #4ade80)' : props.score >= 0.6 ? ACCENT : 'var(--space-semantic-danger, #f87171)',
             transition: 'width 320ms ease',
           }}
         />

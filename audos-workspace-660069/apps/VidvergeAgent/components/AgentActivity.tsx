@@ -5,7 +5,7 @@ const ACTIVITY_CSS = `
   display: block;
   width: 2.5px;
   border-radius: 2px;
-  background: var(--vv-gold, #C8920A);
+  background: var(--vv-gold, #D4920A);
   transform-origin: center bottom;
   animation: vva-eq 2.6s ease-in-out infinite;
 }
@@ -13,7 +13,7 @@ const ACTIVITY_CSS = `
 .vva-eq span:nth-child(3) { animation-delay: 0.44s; }
 .vva-eq span:nth-child(4) { animation-delay: 0.12s; }
 .vva-activity[data-state='working'] .vva-eq span { animation-duration: 0.9s; }
-.vva-activity[data-state='error'] .vva-eq span { background: var(--vv-error, #991B1B); }
+.vva-activity[data-state='error'] .vva-eq span { background: var(--vv-error, #f87171); }
 .vva-line { animation: vva-line-in 420ms ease-out both; }
 @keyframes vva-eq {
   0%, 100% { transform: scaleY(0.3); opacity: 0.45; }
@@ -65,11 +65,11 @@ export default function AgentActivity({ state, lines }: AgentActivityProps) {
           <li
             key={`${line}-${index}`}
             className="vva-line flex items-start gap-2 text-[12px] leading-snug"
-            style={{ color: index === 0 ? '#1A1000' : 'var(--vv-text-dim)' }}
+            style={{ color: index === 0 ? '#F5E9C8' : 'var(--vv-text-dim)' }}
           >
             <span
               className="mt-[6px] h-1 w-1 shrink-0 rounded-full"
-              style={{ background: index === 0 ? 'var(--vv-gold, #C8920A)' : 'rgba(180,120,0,0.28)' }}
+              style={{ background: index === 0 ? 'var(--vv-gold, #D4920A)' : 'rgba(255,255,255,0.18)' }}
             />
             <span>{line}</span>
           </li>

@@ -52,7 +52,7 @@ const toolColors: Record<string, string> = {
   'write': 'text-green-600',
   'edit': 'text-amber-600',
   'glob': 'text-blue-500',
-  'grep': 'text-indigo-600',
+  'grep': 'text-amber-600',
   'ls': 'text-blue-400',
 
   // Search - sky/blue (brand-aligned)

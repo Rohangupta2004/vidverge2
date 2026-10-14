@@ -31,7 +31,7 @@ export const FIELD_HEIGHT_PX = 44;
 
 // The caret is inlined as a data URL so a select looks like the rest of the
 // family instead of falling back to the browser's own chrome.
-const CARET = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237A6030' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.5 8 10.5l4-4'/%3E%3C/svg%3E";
+const CARET = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%239E8B55' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.5 8 10.5l4-4'/%3E%3C/svg%3E";
 
 /**
  * The scoped field stylesheet. Injected by every `.sfstudio` surface (the Avatar
@@ -62,8 +62,8 @@ export const SF_FIELD_CSS = [
   // The focus ring is deliberately loud: a colour-only focus state is not a
   // focus state.
   '.sfstudio .st-field:focus, .sfstudio .st-select:focus, .sfstudio .st-textarea:focus {',
-  '  border-color: #C8920A;',
-  '  box-shadow: 0 0 0 3px rgba(200, 146, 10, .42), 0 0 0 6px rgba(200, 146, 10, .14);',
+  '  border-color: var(--space-brand-primary-500, #D4920A);',
+  '  box-shadow: 0 0 0 3px rgba(212, 146, 10, .42), 0 0 0 6px rgba(212, 146, 10, .14);',
   '}',
   '.sfstudio .st-field:disabled, .sfstudio .st-select:disabled, .sfstudio .st-textarea:disabled { opacity: .55; cursor: not-allowed; }',
   // File inputs sit in the same frame as everything else rather than as a bare
@@ -106,8 +106,8 @@ export const SFME_FIELD_CSS = [
   '.sfme .sf-input::placeholder, .sfme .sf-textarea::placeholder { color: var(--space-text-muted); opacity: 1; }',
   '.sfme .sf-input:hover:not(:disabled) { border-color: var(--space-border-strong); }',
   '.sfme .sf-input:focus, .sfme .sf-select:focus, .sfme .sf-textarea:focus {',
-  '  border-color: #C8920A;',
-  '  box-shadow: 0 0 0 3px rgba(200, 146, 10, .42), 0 0 0 6px rgba(200, 146, 10, .14);',
+  '  border-color: var(--space-brand-primary-500, #D4920A);',
+  '  box-shadow: 0 0 0 3px rgba(212, 146, 10, .42), 0 0 0 6px rgba(212, 146, 10, .14);',
   '}',
   '.sfme .sf-input:disabled { opacity: .55; cursor: not-allowed; }',
   '.sfme .sf-input--error { border-color: var(--space-semantic-danger-500, #f43f5e); }',
@@ -123,7 +123,7 @@ export const SFME_FIELD_CSS = [
 // able to tell it apart from the same picker in the studio.
 
 const FIELD_BASE = 'w-full rounded-xl border bg-[var(--space-surface-panel)] text-sm leading-normal text-[var(--space-text-primary)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-[var(--space-text-muted)] disabled:cursor-not-allowed disabled:opacity-55';
-const FIELD_RESTING = 'border-[var(--space-border-default)] hover:border-[var(--space-border-strong)] focus:border-[#C8920A] focus:shadow-[0_0_0_3px_color-mix(in_srgb,#C8920A_42%,transparent)]';
+const FIELD_RESTING = 'border-[var(--space-border-default)] hover:border-[var(--space-border-strong)] focus:border-[var(--space-brand-primary-500)] focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--space-brand-primary-500)_42%,transparent)]';
 const FIELD_INVALID = 'border-[var(--space-semantic-danger-500)] focus:border-[var(--space-semantic-danger-500)] focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--space-semantic-danger-500)_38%,transparent)]';
 
 /** A single-line text input. */

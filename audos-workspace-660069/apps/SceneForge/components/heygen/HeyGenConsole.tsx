@@ -85,7 +85,7 @@ export default function HeyGenConsole({ onBackToQuickRender }: { onBackToQuickRe
   const unavailable = Object.entries(allCapabilities()).filter(([, state]) => state === 'unavailable');
 
   return <div className="sfstudio relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]"
-    style={{ backgroundImage: 'radial-gradient(1100px 520px at 12% -8%, rgba(200,146,10,.20), transparent 62%), radial-gradient(900px 480px at 92% 4%, rgba(200,146,10,.17), transparent 58%), linear-gradient(165deg,#FFFDF4,#FFFFFF 52%,#FFF3D6)' }}>
+    style={{ backgroundImage: 'radial-gradient(1100px 520px at 12% -8%, rgba(200,146,10,.20), transparent 62%), radial-gradient(900px 480px at 92% 4%, rgba(200,146,10,.17), transparent 58%), linear-gradient(165deg,#0D0B05,#15120A 52%,#1C1808)' }}>
     <style>{`
       @keyframes st-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
       @keyframes st-shimmer { 0%, 100% { opacity: .40; } 50% { opacity: .85; } }
@@ -99,8 +99,8 @@ export default function HeyGenConsole({ onBackToQuickRender }: { onBackToQuickRe
       @media (prefers-reduced-motion: reduce) { .sfstudio *, .sfstudio *::before, .sfstudio *::after { animation: none !important; transition-duration: .01ms !important; } }
     `}</style>
 
-    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[color-mix(in_srgb,#FFFFFF_82%,transparent)] px-4 py-3 backdrop-blur sm:px-6">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_4px_16px_rgba(200,146,10,.35)]" style={{ backgroundImage: 'linear-gradient(135deg,#E8B737,#C8920A)' }}>
+    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[color-mix(in_srgb,#15120A_82%,transparent)] px-4 py-3 backdrop-blur sm:px-6">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_4px_16px_rgba(200,146,10,.35)]" style={{ backgroundImage: 'linear-gradient(135deg,#F0B429,#D4920A)' }}>
         <Clapperboard className="h-4 w-4 text-white" />
       </span>
       <div className="min-w-0">
@@ -128,7 +128,7 @@ export default function HeyGenConsole({ onBackToQuickRender }: { onBackToQuickRe
       </div>
     </header>
 
-    {locks.length ? <div className="shrink-0 border-b border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[color-mix(in_srgb,#C8920A_8%,transparent)] px-4 py-2 sm:px-6">
+    {locks.length ? <div className="shrink-0 border-b border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[color-mix(in_srgb,#D4920A_8%,transparent)] px-4 py-2 sm:px-6">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--space-text-secondary)]">
         <span className="font-semibold uppercase tracking-wide text-[var(--space-text-muted)]">Locked for this session</span>
         {locks.map((entry) => <span key={entry}>{entry}</span>)}

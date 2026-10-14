@@ -35,7 +35,7 @@ function ScoreBar(props: { score: number }) {
           flex: 1,
           height: 4,
           borderRadius: 2,
-          background: 'rgba(180,120,0,0.14)',
+          background: 'rgba(255,255,255,0.07)',
           overflow: 'hidden',
           minWidth: 60,
         }}
@@ -68,7 +68,7 @@ function ConceptCard(props: {
         borderRadius: 16,
         border: '1px solid ' + (props.selected ? ACCENT : BORDER),
         background: props.selected
-          ? 'color-mix(in srgb, var(--space-brand-primary-500, #F59E0B) 9%, transparent)'
+          ? 'color-mix(in srgb, var(--space-brand-primary-500, #D4920A) 9%, transparent)'
           : CARD_BG,
         color: TEXT,
         cursor: 'pointer',
@@ -84,8 +84,8 @@ function ConceptCard(props: {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: props.selected ? ACCENT : 'rgba(180,120,0,0.14)',
-            color: props.selected ? 'var(--space-text-on-primary, #180F02)' : MUTED,
+            background: props.selected ? ACCENT : 'rgba(255,255,255,0.07)',
+            color: props.selected ? 'var(--space-text-on-primary, #FFFFFF)' : MUTED,
             fontSize: 11,
             fontWeight: 800,
           }}

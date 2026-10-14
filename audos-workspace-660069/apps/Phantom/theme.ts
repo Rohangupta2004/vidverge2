@@ -21,24 +21,24 @@
  * that survives the capture.
  */
 
-export const INK = '#FFFDF4';
-export const INK_DEEP = '#FFFAEB';
-export const PANEL = '#FFF3D6';
-export const CARD = '#FFFFFF';
-export const CARD_HI = '#FFFAEB';
-export const LINE = 'rgba(180,120,0,0.14)';
-export const LINE_HI = 'rgba(180,120,0,0.36)';
-export const TEXT = '#1A1000';
-export const TEXT_DIM = '#3D2800';
-export const TEXT_MUTED = '#7A6030';
-export const DANGER = '#991B1B';
-export const SUCCESS = '#166534';
-export const WARN = '#B45309';
+export const INK = '#0D0B05';
+export const INK_DEEP = '#110E07';
+export const PANEL = '#1C1808';
+export const CARD = '#15120A';
+export const CARD_HI = '#1C1808';
+export const LINE = 'rgba(255,255,255,0.07)';
+export const LINE_HI = 'rgba(255,255,255,0.18)';
+export const TEXT = '#F5E9C8';
+export const TEXT_DIM = '#C8AA6E';
+export const TEXT_MUTED = '#9E8B55';
+export const DANGER = '#f87171';
+export const SUCCESS = '#4ade80';
+export const WARN = '#fbbf24';
 
 export const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
 /** The workspace's own brand primary, so a fresh Vergeye matches the shell. */
-export const DEFAULT_ACCENT = '#C8920A';
+export const DEFAULT_ACCENT = '#D4920A';
 
 export function normalizeHex(value: unknown): string {
   const raw = String(value == null ? '' : value).trim().toLowerCase();
@@ -101,7 +101,10 @@ export function tileColor(name: unknown): string {
   const text = String(name == null ? '' : name);
   let hash = 0;
   for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) % 360;
-  const palette = ['#1D4ED8', '#C8920A', '#9D2667', '#166534', '#B4720A', '#991B1B', '#8A5A00', '#B45309'];
+  // Deliberately varied rather than on-brand: these tiles stand in for OTHER
+  // companies, so they have to be told apart at a glance. Each one is picked
+  // to stay legible against the dark card it sits on.
+  const palette = ['#3b82f6', '#D4920A', '#d946a8', '#22c55e', '#F0B429', '#ef4444', '#06b6d4', '#f59e0b'];
   return palette[hash % palette.length];
 }
 
@@ -126,10 +129,11 @@ export const SPIN_CSS = `
 .vergeye-app button, .vergeye-app a { transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, opacity 0.16s ease; }
 .vergeye-app button:active:not(:disabled) { transform: scale(0.975); }
 .vergeye-app input:focus, .vergeye-app textarea:focus { outline: none; }
-.vergeye-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
-.vergeye-scroll::-webkit-scrollbar-thumb { background: rgba(200,146,10,0.4); border-radius: 999px; }
-.vergeye-scroll::-webkit-scrollbar-thumb:hover { background: rgba(200,146,10,0.7); }
-.vergeye-scroll::-webkit-scrollbar-track { background: #FFF3D6; }
+.vergeye-scroll { scrollbar-color: #2A2410 transparent; scrollbar-width: thin; }
+.vergeye-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+.vergeye-scroll::-webkit-scrollbar-thumb { background: #2A2410; border-radius: 999px; }
+.vergeye-scroll::-webkit-scrollbar-thumb:hover { background: #6E5F38; }
+.vergeye-scroll::-webkit-scrollbar-track { background: transparent; }
 @media (prefers-reduced-motion: reduce) {
   .vergeye-app *, .vergeye-app *::before, .vergeye-app *::after { animation: none !important; transition-duration: 0.01ms !important; }
 }

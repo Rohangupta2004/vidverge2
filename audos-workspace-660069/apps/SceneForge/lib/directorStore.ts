@@ -3,6 +3,9 @@
 // here so it can be reopened on another signed-in device and surfaced by the
 // Vidverge Agent.
 import type { DirectorSession } from './directorSession';
+import type { Scene } from './supabase';
+import type { SceneDirection } from './visualTimeline';
+import { forgeApi } from './forge';
 
 export const DIRECTOR_TABLE = 'sf_director_films';
 
@@ -134,6 +137,14 @@ export async function getDirectorFilm(id: string | number, ownerKey: string): Pr
   const response = await client().from(DIRECTOR_TABLE, { shared: true }).eq('id', id).eq('owner_key', ownerKey).limit(1).get();
   const row = rowData(response);
   return row ? rowToSession(row) : null;
+}
+
+/** Persist only the editable direction JSON through the privileged hook. */
+export async function saveSceneDirectorTimeline(scene: Pick<Scene, 'id' | 'project_id'>, timeline: SceneDirection): Promise<Scene | null> {
+  const result = await forgeApi.saveScene(scene.project_id, scene.id, {
+    director_timeline: timeline as unknown as Record<string, unknown>,
+  });
+  return result.scene || null;
 }
 
 export async function listDirectorFilms(ownerKey: string, limit = 12): Promise<DirectorFilmSummary[]> {

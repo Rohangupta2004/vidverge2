@@ -26,7 +26,7 @@ function anchorTranslate(anchor?: string): string {
   return `translate(${tx},${ty})`;
 }
 
-export default function ElementCompositionView({ elements, tSec, durationSec, camera, background, backdropUrl }: {
+export default function ElementCompositionView({ elements, tSec, durationSec, camera, background, backdropUrl, enableDepth = false }: {
   elements: CompositionElement[];
   /** Seconds inside the SCENE window. */
   tSec: number;
@@ -34,14 +34,20 @@ export default function ElementCompositionView({ elements, tSec, durationSec, ca
   camera?: CompositionCamera | null;
   background?: string;
   backdropUrl?: string;
+  /** CSS 3D is enabled for the Remotion-style video-backed compositor preview. */
+  enableDepth?: boolean;
 }) {
   const states = resolveElementStates(elements, tSec);
-  const cam = cameraStateAt(camera || undefined, tSec, durationSec);
   const ordered = [...elements].sort((a, b) => (a.z || 0) - (b.z || 0));
-  return <div style={{ position: 'absolute', inset: 0, background: background || 'transparent', overflow: 'hidden' }}>
+  return <div className="compositor" style={{ position: 'absolute', inset: 0, background: background || 'transparent', overflow: 'hidden', ...(enableDepth ? { perspective: '1200px', transformStyle: 'preserve-3d' as const } : {}) }}> 
     {backdropUrl ? <div style={{ position: 'absolute', inset: '-2%', opacity: 0.3 }}><img src={backdropUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div> : null}
-    <div style={{ position: 'absolute', inset: 0, transform: `scale(${cam.scale}) translate(${cam.x}%,${cam.y}%)` }}>
+    <div style={{ position: 'absolute', inset: 0, ...(enableDepth ? { transformStyle: 'preserve-3d' as const } : {}) }}> 
       {ordered.map((el) => {
+        const depth = el.depth_z ?? 0.5;
+        const cam = cameraStateAt(camera || undefined, tSec, durationSec, depth);
+        const zOffset = enableDepth ? depth * -300 : 0;
+        const parallaxX = enableDepth ? cam.x * 1920 : 0;
+        const parallaxY = enableDepth ? cam.y * 1080 : 0;
         const st = states.get(el.id);
         if (!st || !st.visible || st.opacity <= 0.004) return null;
         // LightBeam default: an element with no accent of its own reads as
@@ -69,7 +75,7 @@ export default function ElementCompositionView({ elements, tSec, durationSec, ca
           height: el.h !== undefined ? `${el.h * 100}%` : undefined,
           zIndex: 10 + (el.z || 0),
           opacity: st.opacity,
-          transform: `${anchorTranslate(el.anchor)} rotate(${st.rotation}deg) scale(${st.scale})`,
+          transform: `translateX(${parallaxX}px) translateY(${parallaxY}px) translateZ(${zOffset}px) ${anchorTranslate(el.anchor)} rotate(${st.rotation}deg) scale(${st.scale * cam.scale})`,
           transformOrigin: anchorOrigin(el.anchor || 'center'),
           clipPath: st.clipPath || undefined,
           filter: st.blur ? `blur(${st.blur}px)` : undefined,
@@ -163,7 +169,7 @@ export function ElementCompositionPlayer({ composition }: { composition: Element
   }, [playing, composition.duration]);
   return <div>
     <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', borderRadius: 14, overflow: 'hidden', background: '#05070f', containerType: 'inline-size', fontSize: 'clamp(6px, 1.6cqw, 22px)' } as Record<string, any>}>
-      <ElementCompositionView elements={composition.elements} tSec={tSec} durationSec={composition.duration} camera={composition.camera} background={composition.background} backdropUrl={composition.backdrop_url} />
+      <ElementCompositionView elements={composition.elements} tSec={tSec} durationSec={composition.duration} camera={composition.camera} background={composition.background} backdropUrl={composition.backdrop_url} enableDepth />
     </div>
     <div className="mt-2 flex items-center gap-3">
       <button aria-label={playing ? 'Pause' : 'Play'} onClick={() => setPlaying((p) => !p)} className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--space-brand-primary-600)] text-white">{playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}</button>

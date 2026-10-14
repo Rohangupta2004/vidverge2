@@ -99,6 +99,7 @@ import ProControls, {
 import ProTimeline from './proTimeline';
 import ProAgent, { emptyJobs, routeInstruction, type AgentActionId, type AgentJobs } from './proAgent';
 import ProExport, { encodeGif, encodeWebm, type ExportResult, type ExportSpec } from './proExport';
+import { withBrandContext } from '../../components/BrandContextLayer';
 import { detectTempo } from './proAudio';
 
 /** Which legacy effects tab belongs under each pro tab. */
@@ -141,11 +142,11 @@ const STUDIO_CSS = `
 .vs-btn, .ve-btn { transition: filter .15s ease, background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease; }
 .vs-btn:hover:not(:disabled), .ve-btn:hover:not(:disabled) { filter: brightness(1.15); }
 .vs-btn:disabled, .ve-btn:disabled { opacity: .5; cursor: default; }
-.vs-input:focus, .ve-input:focus { outline: none; border-color: rgba(200,146,10,0.55) !important; box-shadow: 0 0 0 3px rgba(200,146,10,0.18); }
+.vs-input:focus, .ve-input:focus { outline: none; border-color: rgba(212,146,10,0.55) !important; box-shadow: 0 0 0 3px rgba(212,146,10,0.18); }
 @keyframes vs-progress { 0% { background-position: 0 0; } 100% { background-position: 28px 0; } }
 .vs-progress { background-image: linear-gradient(45deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%, transparent); background-size: 28px 28px; animation: vs-progress .9s linear infinite; }
 .vs-rail::-webkit-scrollbar { width: 8px; }
-.vs-rail::-webkit-scrollbar-thumb { background: rgba(180,120,0,0.22); border-radius: 8px; }
+.vs-rail::-webkit-scrollbar-thumb { background: #2A2410; border-radius: 8px; }
 ${LB_SHIMMER_CSS}
 ${GUIDE_CSS}
 /* Resizable timeline: the bottom grid row follows --ve-tl-h (auto when unset or collapsed). */
@@ -153,30 +154,30 @@ ${GUIDE_CSS}
 .vp-root .vp-stagecol { grid-column: 1; grid-row: 1; min-height: 0; }
 .vp-root .vp-tl { grid-column: 1; grid-row: 2; }
 .vp-root .vp-side { display: none; }
-.vp-root .vp-side.open { display: flex; position: fixed; z-index: 82; top: 68px; right: 16px; bottom: 16px; width: min(460px, calc(100vw - 32px)); min-height: 0; border: 1px solid rgba(200,146,10,.24); border-radius: 18px; background: rgba(255,255,255,.96); backdrop-filter: blur(22px); box-shadow: 0 28px 90px rgba(120,80,0,.18),0 0 46px rgba(200,146,10,.08); overflow: hidden; }
-.vp-root .vp-drawerhead { flex:0 0 auto; display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(180,120,0,.14); background:linear-gradient(135deg,rgba(200,146,10,.12),rgba(255,255,255,.96)); }
+.vp-root .vp-side.open { display: flex; position: fixed; z-index: 82; top: 68px; right: 16px; bottom: 16px; width: min(460px, calc(100vw - 32px)); min-height: 0; border: 1px solid rgba(255,255,255,.07); border-radius: 18px; background: rgba(21,18,10,.97); backdrop-filter: blur(22px); box-shadow: 0 4px 24px rgba(0,0,0,.4),0 0 46px rgba(212,146,10,.08); overflow: hidden; }
+.vp-root .vp-drawerhead { flex:0 0 auto; display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.07); background:linear-gradient(135deg,rgba(212,146,10,.12),rgba(28,24,8,.96)); }
 .vp-root .vp-drawerhead > span { display:grid; gap:2px; min-width:0; }
-.vp-root .vp-drawerhead b { color:#1A1000; font-size:13px; letter-spacing:.01em; }
-.vp-root .vp-drawerhead small { color:#7A6030; font-size:10.5px; }
+.vp-root .vp-drawerhead b { color:#F5E9C8; font-size:13px; letter-spacing:.01em; }
+.vp-root .vp-drawerhead small { color:#9E8B55; font-size:10.5px; }
 .vp-root .vp-drawerhead button { margin-left:auto; }
-.vp-root .vp-toolstack { display:flex; flex-direction:column; gap:0; border:1px solid rgba(180,120,0,.14); border-radius:12px; background:rgba(180,120,0,.04); overflow:visible; }
-.vp-root .vp-toolstack-head { display:flex; align-items:center; padding:10px 12px; border-bottom:1px solid rgba(180,120,0,.14); background:rgba(200,146,10,.07); }
+.vp-root .vp-toolstack { display:flex; flex-direction:column; gap:0; border:1px solid rgba(255,255,255,.07); border-radius:12px; background:rgba(255,255,255,.03); overflow:visible; }
+.vp-root .vp-toolstack-head { display:flex; align-items:center; padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.07); background:rgba(212,146,10,.08); }
 .vp-root .vp-toolstack-head span { display:grid; gap:2px; }
-.vp-root .vp-toolstack-head b { color:#B4720A; font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
-.vp-root .vp-toolstack-head small { color:#7A6030; font-size:10px; }
+.vp-root .vp-toolstack-head b { color:#F0B429; font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+.vp-root .vp-toolstack-head small { color:#9E8B55; font-size:10px; }
 .vp-root .vp-toolstack-body { padding:10px; display:flex; flex-direction:column; gap:10px; }
-.vp-root .vp-aiimage { display:flex; flex-direction:column; padding:12px; border-radius:12px; border:1px solid rgba(200,146,10,.3); background:linear-gradient(145deg,rgba(200,146,10,.12),rgba(255,255,255,.9)); box-shadow:inset 0 1px 0 rgba(180,120,0,.06); }
+.vp-root .vp-aiimage { display:flex; flex-direction:column; padding:12px; border-radius:12px; border:1px solid rgba(212,146,10,.3); background:linear-gradient(145deg,rgba(212,146,10,.12),rgba(28,24,8,.94)); box-shadow:inset 0 1px 0 rgba(255,255,255,.05); }
 .vp-root .vp-aiimage-head { display:flex; align-items:center; gap:10px; margin-bottom:11px; }
 .vp-root .vp-aiimage-head span { display:grid; gap:2px; }
-.vp-root .vp-aiimage-head b { color:#B4720A; font-size:12px; }
-.vp-root .vp-aiimage-head small { color:#7A6030; font-size:10px; }
+.vp-root .vp-aiimage-head b { color:#F0B429; font-size:12px; }
+.vp-root .vp-aiimage-head small { color:#9E8B55; font-size:10px; }
 .vp-root .vp-aiimage-head button { margin-left:auto; }
 .vp-root .vp-aiimage .vp-btn { margin-top:11px; }
-.vp-root .vp-drawerback { position: fixed; inset: 0; z-index: 81; border: 0; background: rgba(26,16,0,.35); backdrop-filter: blur(3px); cursor: default; }
+.vp-root .vp-drawerback { position: fixed; inset: 0; z-index: 81; border: 0; background: rgba(0,0,0,.58); backdrop-filter: blur(3px); cursor: default; }
 .vp-root .vp-body > .vp-stagecol, .vp-root .vp-body > .vp-side { min-height: 0; }
 .vp-root .vp-tl { min-height: 0; }
 .vp-root .vp-tl-grip { flex: 0 0 auto; height: 6px; cursor: ns-resize; touch-action: none; background: transparent; transition: background .15s ease; }
-.vp-root .vp-tl-grip:hover, .vp-root .vp-tl-grip[data-dragging="true"] { background: rgba(200,146,10,0.55); }
+.vp-root .vp-tl-grip:hover, .vp-root .vp-tl-grip[data-dragging="true"] { background: rgba(212,146,10,0.55); }
 @media (max-width: 900px) { .vp-root .vp-body { grid-template-rows: minmax(320px,1fr) auto; } .vp-root .vp-tl-grip { display: none; } .vp-root .vp-side.open { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: min(74vh, 680px); border-radius: 20px 20px 14px 14px; } }
 /* Icons in rails and track labels: never squeeze the icon or clip it off the left edge. */
 .vp-root .vp-trkhead { flex-basis: auto; width: auto; min-width: 76px; }
@@ -453,6 +454,7 @@ function VideoStudio() {
   const [exportStage, setExportStage] = useState('');
   const [exportEta, setExportEta] = useState(0);
   const [exportError, setExportError] = useState('');
+  const [exportWarning, setExportWarning] = useState('');
   const [exportResults, setExportResults] = useState<{ aspect: AspectId; url: string; geometry: string }[]>([]);
   const resultsRef = useRef<{ aspect: AspectId; url: string; geometry: string }[]>([]);
   useEffect(() => { resultsRef.current = exportResults; }, [exportResults]);
@@ -2144,6 +2146,7 @@ function VideoStudio() {
 
     setExporting(true);
     setExportError('');
+    setExportWarning('');
     setExportResults([]);
     setExportProgress(0.02);
 
@@ -2175,11 +2178,11 @@ function VideoStudio() {
         }
         if (out?.status === 'complete' && out.renderUrl) {
           done.push({ aspect, url: String(out.renderUrl), geometry: String(out.geometry || '') });
-          if (out.note) setExportError((cur) => [cur, String(out.note)].filter(Boolean).join(' · '));
+          if (out.note) setExportWarning((cur) => [cur, String(out.note)].filter(Boolean).join(' · '));
         }
         else failures.push(`${aspect}: ${String(out?.error || 'the render failed')}`);
       } catch (e) {
-        failures.push(`${aspect}: ${msg(e)}`);
+        failures.push(`${aspect}: ${e instanceof Error ? e.message : String(e)}`);
       } finally {
         clearInterval(tick);
       }
@@ -2193,11 +2196,11 @@ function VideoStudio() {
     setExporting(false);
     if (failures.length) {
       console.error('[VideoStudio] export failed:', failures.join(' · '));
-      setExportError('Export failed. Your project is saved — click Export Video to try again.');
+      setExportError(failures.join(' · '));
       pushToast({ message: 'Export failed. Your project is saved — try again.', tone: 'bad', ttlMs: 6000 });
     }
     if (localOverlays.length) {
-      setExportError((cur) => [cur, `${localOverlays.length} overlay image${localOverlays.length === 1 ? '' : 's'} could not be included — re-add them and export again.`].filter(Boolean).join(' · '));
+      setExportWarning((cur) => [cur, `${localOverlays.length} overlay image${localOverlays.length === 1 ? '' : 's'} could not be included — re-add them and export again.`].filter(Boolean).join(' · '));
     }
     if (!d.captionSettings.burnIn && d.captions.length) downloadSrt();
     void saveProject();
@@ -3043,8 +3046,8 @@ function VideoStudio() {
                       onClick={() => commit((cur) => ({ ...cur, aspect: a.id }))}
                       style={{
                         cursor: 'pointer',
-                        borderColor: doc.aspect === a.id ? 'rgba(245,162,10,0.75)' : undefined,
-                        color: doc.aspect === a.id ? '#FDE68A' : undefined,
+                        borderColor: doc.aspect === a.id ? 'rgba(212,146,10,0.75)' : undefined,
+                        color: doc.aspect === a.id ? '#FFD168' : undefined,
                       }}
                     >
                       {a.label}
@@ -3052,7 +3055,7 @@ function VideoStudio() {
                   ))}
                   <span className="vp-divider" style={{ height: 18 }} />
                   {(['fit', 'fill'] as const).map((mode) => (
-                    <button key={mode} type="button" className="vp-chip" onClick={() => setPreviewFit(mode)} style={{ cursor: 'pointer', color: previewFit === mode ? '#FDE68A' : undefined, borderColor: previewFit === mode ? 'rgba(245,162,10,0.75)' : undefined }}>
+                    <button key={mode} type="button" className="vp-chip" onClick={() => setPreviewFit(mode)} style={{ cursor: 'pointer', color: previewFit === mode ? '#FFD168' : undefined, borderColor: previewFit === mode ? 'rgba(212,146,10,0.75)' : undefined }}>
                       {mode === 'fit' ? 'Fit' : 'Fill'}
                     </button>
                   ))}
@@ -3069,7 +3072,7 @@ function VideoStudio() {
                         commit((cur) => ({ ...cur, resolution: resolution.id }));
                         setExportSpec((spec) => ({ ...spec, resolution: resolution.id }));
                       }}
-                      style={{ cursor: resolution.available ? 'pointer' : 'not-allowed', opacity: resolution.available ? 1 : 0.38, color: doc.resolution === resolution.id ? '#FDE68A' : undefined, borderColor: doc.resolution === resolution.id ? 'rgba(245,162,10,0.75)' : undefined }}
+                      style={{ cursor: resolution.available ? 'pointer' : 'not-allowed', opacity: resolution.available ? 1 : 0.38, color: doc.resolution === resolution.id ? '#FFD168' : undefined, borderColor: doc.resolution === resolution.id ? 'rgba(212,146,10,0.75)' : undefined }}
                     >
                       {resolution.label}
                     </button>
@@ -3082,7 +3085,7 @@ function VideoStudio() {
                     type="button"
                     className="vp-chip"
                     title="Show filters and captions while the preview plays"
-                    style={{ cursor: 'pointer', color: playWithEffects ? '#FDE68A' : undefined }}
+                    style={{ cursor: 'pointer', color: playWithEffects ? '#FFD168' : undefined }}
                     onClick={() => setPlayWithEffects((on) => !on)}
                   >
                     FX {playWithEffects ? 'on' : 'off'}
@@ -3330,7 +3333,7 @@ function VideoStudio() {
                     </button>
                   </div>
                 ) : null}
-                <div style={{ background: '#FFFFFF', borderRadius: 12, padding: 12, border: '1px solid rgba(180,120,0,0.14)' }}>
+                <div style={{ background: '#15120A', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.07)' }}>
                 <button
                   type="button"
                   className="vs-btn"
@@ -3351,10 +3354,10 @@ function VideoStudio() {
                       bare
                       modes={['product_swap', 'text_to_video', 'image_to_video']}
                       theme={{
-                        panel: 'rgba(180,120,0,0.06)', card: '#FFFFFF',
-                        line: 'rgba(180,120,0,0.14)', lineStrong: 'rgba(180,120,0,0.28)',
+                        panel: '#1C1808', card: '#15120A',
+                        line: 'rgba(255,255,255,0.07)', lineStrong: 'rgba(255,255,255,0.18)',
                         ink: LB.textPrimary, soft: LB.textSecondary, muted: LB.textMuted,
-                        accent: LB.accent, onAccent: '#241503', good: '#166534', bad: '#991B1B',
+                        accent: LB.accent, onAccent: '#ffffff', good: '#4ade80', bad: '#f87171',
                         font: "'Inter', system-ui, sans-serif",
                       }}
                       prefill={{ sourceVideo: runwaySource }}
@@ -3566,7 +3569,7 @@ function VideoStudio() {
           stage={exportStage}
           etaS={exportEta}
           error={exportError}
-          warning={renderWarning}
+          warning={[renderWarning, exportWarning].filter(Boolean).join(' · ')}
           results={proResults}
           onClose={() => setExportOpen(false)}
           onExport={() => { void runProExport(); }}
@@ -3576,8 +3579,8 @@ function VideoStudio() {
       ) : null}
 
       {confirmClearAll ? (
-        <div role="dialog" aria-modal="true" aria-label="Clear all clips" onClick={() => setConfirmClearAll(false)} style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(26,16,0,0.35)', padding: 20 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(390px, 92vw)', background: '#FFFFFF', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 14, padding: 18, boxShadow: '0 20px 60px rgba(120,80,0,0.16)' }}>
+        <div role="dialog" aria-modal="true" aria-label="Clear all clips" onClick={() => setConfirmClearAll(false)} style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.58)', padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(390px, 92vw)', background: '#15120A', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }}>
             <div style={{ color: VE.text, fontSize: 17, fontWeight: 800 }}>Remove every clip?</div>
             <div style={{ color: VE.textMuted, fontSize: 13, lineHeight: 1.55, marginTop: 7 }}>This takes out all your clips, cutaways and B-roll slots. You can still press Cmd+Z afterwards to bring them back.</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
@@ -3592,11 +3595,11 @@ function VideoStudio() {
       {libraryFor ? (
         <div
           onClick={() => setLibraryFor(null)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(26,16,0,0.35)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.58)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ width: 'min(820px, 94vw)', maxHeight: '82vh', overflowY: 'auto', background: '#FFFFFF', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 14, padding: 18 }}
+            style={{ width: 'min(820px, 94vw)', maxHeight: '82vh', overflowY: 'auto', background: '#15120A', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: 18 }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}>
               <span style={{ color: LB.textPrimary, fontSize: 14, fontWeight: 700 }}>Pick a clip from your library</span>
@@ -3615,7 +3618,7 @@ function VideoStudio() {
                     type="button"
                     className="vs-btn"
                     onClick={() => void useLibraryClip(v.url)}
-                    style={{ textAlign: 'left', background: 'rgba(180,120,0,0.06)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 10, padding: 8, cursor: 'pointer' }}
+                    style={{ textAlign: 'left', background: '#1C1808', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: 8, cursor: 'pointer' }}
                   >
                     <video src={v.url} muted preload="metadata" style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 7, background: '#000' }} />
                     <div style={{ color: LB.textSecondary, fontSize: 11, marginTop: 6, lineHeight: 1.45, maxHeight: 44, overflow: 'hidden' }}>
@@ -3674,7 +3677,9 @@ class VeBoundary extends Component<{ children?: ReactNode }, { error: Error | nu
   }
 }
 
-export default function App() {
+const BrandedVideoEnhancer = withBrandContext(App, 'Video Enhancer');
+export default BrandedVideoEnhancer;
+function App() {
   return (
     // The editor fills the whole frame and runs its own scroll panes, so the
     // shell only supplies the ground and the beam layer behind it.

@@ -1,34 +1,45 @@
 /**
- * VERGE LOADER — Vidverge's branded loading motion.
+ * VERGE LOADER — Vidverge's branded loading motion: a light beam firing.
  *
- * The mark is the logo itself: a shallow "V" drawn from swooping light
- * filaments. While something is loading, a bright spark sweeps in from the
- * outer tips, dives through the vertex and runs out the far side, so the wait
- * is carried by the brand shape instead of a generic spinner.
+ * WHAT THIS REPLACED, AND WHY
+ * This component used to draw the logo's shallow "V" and run a spark around it.
+ * As a brand mark that worked; as a LOADER it read as a decorative logo
+ * animation, and at small sizes the V collapsed into an indistinct gold smudge.
+ * It has been replaced with the thing the product actually does: light fired in
+ * a straight line. Dense, narrow, luminous beams leave an emitter, cross the
+ * frame at different depths and speeds, and bloom where they land.
  *
- * WHY THIS IS CODED MOTION RATHER THAN A RIVE ARTBOARD
- * Rive renders `.riv` files, which are binaries exported from the Rive editor;
- * no `.riv` ships with this workspace and one cannot be authored from source.
- * Pointing the Rive runtime at a file that does not exist renders a blank
- * canvas, so the motion is hand-coded here as SVG + CSS keyframes, which is
- * dependency-free and animates on the compositor. To move to Rive later, keep
- * this component's props and swap the <svg> for the runtime's <RiveComponent>
- * (the rive-animation integration pins the runtime and the required wasm URL).
+ * It is deliberately NOT a glowing orb or a particle field — both are the house
+ * style of every generic AI dashboard, and neither says anything about video.
+ *
+ * HOW IT STAYS CHEAP
+ * Only `transform` and `opacity` are animated, so every frame is composited on
+ * the GPU and nothing re-rasterises. The soft edges come from STATIC linear and
+ * radial gradients rather than from SVG blur filters: a Gaussian blur applied
+ * to a moving element forces a re-raster every frame, which is exactly the kind
+ * of loader that makes an app feel slower than it is. There are five beams, not
+ * fifty, and the whole thing is one <svg> with no JavaScript animation loop, no
+ * timers and no layout reads.
+ *
+ * `prefers-reduced-motion` is honoured: the beams stop and the frame settles
+ * into a static lit rail, so the component still reads as "busy" without moving.
+ *
+ * The props are unchanged from the previous implementation on purpose — every
+ * existing call site keeps working, including the `amber` and `ink` tone names.
  */
 import { useId } from 'react';
 import type { CSSProperties } from 'react';
 
-/** The house tone: gold filaments with a deep-gold spark, per components/theme.ts. */
-const BRAND_TONE = { edge: '#C8920A', mid: '#B4720A', spark: '#B4720A' } as const;
+/** The house tone: gold filaments with a hot gold core, per components/theme.ts. */
+const BRAND_TONE = { edge: '#D4920A', mid: '#B87808', spark: '#F5C451' } as const;
 
 /**
  * Drawn on top of a brand-filled surface — a gold-gradient button — where a
- * gold mark would disappear into its own background.
+ * gold beam would disappear into its own background.
  */
 const ON_BRAND_TONE = { edge: 'rgba(255,255,255,0.45)', mid: '#FFFFFF', spark: '#FFFFFF' } as const;
 
-// `amber` and `ink` are the names the existing call sites pass; they now point
-// at the two tones above rather than the retired gold palette.
+// `amber` and `ink` are the names the existing call sites pass.
 const TONES = {
   brand: BRAND_TONE,
   onBrand: ON_BRAND_TONE,
@@ -38,24 +49,42 @@ const TONES = {
 
 export type VergeLoaderTone = keyof typeof TONES;
 
-// Three filaments at different depths, each sparking slightly out of phase so
-// the light cascades through the V rather than pulsing all at once.
-const FILAMENTS: Array<{ d: string; w: number; delay: string }> = [
-  { d: 'M 2 27 C 52 29, 72 47, 100 85 C 128 47, 148 29, 198 27', w: 1.5, delay: '0s' },
-  { d: 'M 2 36 C 54 38, 74 56, 100 94 C 126 56, 146 38, 198 36', w: 2.3, delay: '-0.6s' },
-  { d: 'M 2 45 C 56 47, 76 64, 100 102 C 124 64, 144 47, 198 45', w: 1.5, delay: '-1.2s' },
+/**
+ * Five beams across the 120-unit-tall artboard.
+ *
+ * `y` places each one at a different depth; `h` is its thickness and `o` its
+ * opacity, and the two move together so a thin faint beam reads as further away
+ * than a thick bright one. `dur` and `delay` are staggered by prime-ish
+ * fractions so the volley never falls into a visible repeating lockstep — the
+ * pattern takes several seconds to come back around.
+ */
+const BEAMS: Array<{ y: number; h: number; o: number; dur: string; delay: string }> = [
+  { y: 44, h: 1, o: 0.35, dur: '1.70s', delay: '-0.95s' },
+  { y: 53, h: 1.5, o: 0.6, dur: '1.45s', delay: '-0.35s' },
+  { y: 60, h: 2.5, o: 1, dur: '1.25s', delay: '0s' },
+  { y: 67, h: 1.5, o: 0.6, dur: '1.55s', delay: '-0.7s' },
+  { y: 76, h: 1, o: 0.35, dur: '1.85s', delay: '-1.3s' },
 ];
 
-// `pathLength=100` normalises every filament to 100 units, so one dash cycle
-// is exactly one trip along the path regardless of the curve's real length.
+// The beam travels from just off the left edge to just past the right one, so
+// it enters and exits cleanly instead of appearing mid-frame. Opacity ramps at
+// both ends to hide the hand-off.
 const LOADER_CSS = `
-@keyframes vvlSpark { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
-@keyframes vvlBloom { 0%, 100% { opacity: .1; } 50% { opacity: .3; } }
-.vvl-spark { animation: vvlSpark 1.9s linear infinite; }
-.vvl-bloom { animation: vvlBloom 1.9s ease-in-out infinite; }
+@keyframes vvlFire {
+  0%   { transform: translateX(-78px); opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { transform: translateX(206px); opacity: 0; }
+}
+@keyframes vvlImpact { 0%, 100% { opacity: .12; } 55% { opacity: .55; } }
+@keyframes vvlCharge { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.vvl-beam { animation: vvlFire linear infinite; will-change: transform, opacity; }
+.vvl-impact { animation: vvlImpact 1.25s ease-in-out infinite; }
+.vvl-emitter { animation: vvlCharge 1.25s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .vvl-spark { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; opacity: .45; }
-  .vvl-bloom { animation: none; opacity: .18; }
+  .vvl-beam { animation: none; transform: translateX(0); opacity: .5; }
+  .vvl-impact { animation: none; opacity: .3; }
+  .vvl-emitter { animation: none; opacity: .8; }
 }
 `;
 
@@ -79,9 +108,11 @@ export default function VergeLoader({
 }: VergeLoaderProps) {
   // Unique per instance so several loaders on one page never share gradients.
   const uid = useId().replace(/:/g, '');
-  const gradId = `vvlGrad-${uid}`;
-  const glowId = `vvlGlow-${uid}`;
+  const beamId = `vvlBeam-${uid}`;
+  const railId = `vvlRail-${uid}`;
   const bloomId = `vvlBloom-${uid}`;
+  const emitId = `vvlEmit-${uid}`;
+  const clipId = `vvlClip-${uid}`;
   const colors = TONES[tone];
 
   return (
@@ -105,74 +136,81 @@ export default function VergeLoader({
         viewBox="0 0 200 120"
         aria-hidden
         focusable="false"
-        style={{ display: 'block', overflow: 'visible' }}
+        style={{ display: 'block' }}
       >
         <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+          {/*
+            The beam itself: a long transparent tail that tightens into a hot
+            core at the leading edge. This asymmetry is what makes it read as
+            something FIRED rather than a bar sliding across — the light is
+            densest where it is going, not in the middle.
+          */}
+          <linearGradient id={beamId} x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor={colors.edge} stopOpacity="0" />
-            <stop offset="20%" stopColor={colors.edge} stopOpacity="0.55" />
-            <stop offset="50%" stopColor={colors.mid} stopOpacity="1" />
-            <stop offset="80%" stopColor={colors.edge} stopOpacity="0.55" />
+            <stop offset="55%" stopColor={colors.edge} stopOpacity="0.28" />
+            <stop offset="86%" stopColor={colors.mid} stopOpacity="0.85" />
+            <stop offset="97%" stopColor={colors.spark} stopOpacity="1" />
+            <stop offset="100%" stopColor={colors.spark} stopOpacity="0" />
+          </linearGradient>
+
+          {/* The unlit path the beams travel, so the frame has structure at rest. */}
+          <linearGradient id={railId} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor={colors.edge} stopOpacity="0" />
+            <stop offset="50%" stopColor={colors.edge} stopOpacity="0.22" />
             <stop offset="100%" stopColor={colors.edge} stopOpacity="0" />
           </linearGradient>
-          <filter id={glowId} x="-25%" y="-70%" width="150%" height="240%">
-            <feGaussianBlur stdDeviation="3" />
-          </filter>
-          <filter id={bloomId} x="-70%" y="-160%" width="240%" height="420%">
-            <feGaussianBlur stdDeviation="7" />
-          </filter>
+
+          {/* Where the light lands. A static radial — only its opacity animates. */}
+          <radialGradient id={bloomId} cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor={colors.spark} stopOpacity="0.9" />
+            <stop offset="45%" stopColor={colors.mid} stopOpacity="0.35" />
+            <stop offset="100%" stopColor={colors.mid} stopOpacity="0" />
+          </radialGradient>
+
+          {/* The emitter, pulsing as it charges the next volley. */}
+          <linearGradient id={emitId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={colors.mid} stopOpacity="0" />
+            <stop offset="50%" stopColor={colors.spark} stopOpacity="1" />
+            <stop offset="100%" stopColor={colors.mid} stopOpacity="0" />
+          </linearGradient>
+
+          {/*
+            Beams are clipped to the artboard so they cannot bleed over
+            neighbouring UI while they enter and leave — which also means this
+            svg does not need overflow:visible, and the browser can cull it.
+          */}
+          <clipPath id={clipId}>
+            <rect x="0" y="0" width="200" height="120" />
+          </clipPath>
         </defs>
 
-        {/* Gold haze at the vertex, where the filaments converge. */}
-        <ellipse
-          className="vvl-bloom"
-          cx="100"
-          cy="94"
-          rx="30"
-          ry="12"
-          fill={colors.mid}
-          filter={`url(#${bloomId})`}
-        />
+        {/* Resting rail. */}
+        <rect x="0" y="59.25" width="200" height="1.5" fill={`url(#${railId})`} />
 
-        {FILAMENTS.map((filament) => (
-          <g key={filament.d}>
-            {/* Dim rail so the V reads even between sparks. */}
-            <path
-              d={filament.d}
-              fill="none"
-              stroke={`url(#${gradId})`}
-              strokeWidth={filament.w}
-              strokeLinecap="round"
-              opacity={0.35}
-            />
-            {/* Blurred halo trailing the spark. */}
-            <path
-              className="vvl-spark"
-              d={filament.d}
-              pathLength={100}
-              strokeDasharray="13 87"
-              fill="none"
-              stroke={`url(#${gradId})`}
-              strokeWidth={filament.w * 3}
-              strokeLinecap="round"
-              filter={`url(#${glowId})`}
-              opacity={0.55}
-              style={{ animationDelay: filament.delay }}
-            />
-            {/* Hot core of the spark. */}
-            <path
-              className="vvl-spark"
-              d={filament.d}
-              pathLength={100}
-              strokeDasharray="9 91"
-              fill="none"
-              stroke={colors.spark}
-              strokeWidth={filament.w}
-              strokeLinecap="round"
-              style={{ animationDelay: filament.delay }}
-            />
-          </g>
-        ))}
+        <g clipPath={`url(#${clipId})`}>
+          {BEAMS.map((beam) => (
+            <g
+              key={beam.y}
+              className="vvl-beam"
+              style={{ animationDuration: beam.dur, animationDelay: beam.delay }}
+            >
+              <rect
+                x="0"
+                y={beam.y - beam.h / 2}
+                width="72"
+                height={beam.h}
+                fill={`url(#${beamId})`}
+                opacity={beam.o}
+              />
+            </g>
+          ))}
+        </g>
+
+        {/* Impact bloom at the far side. */}
+        <ellipse className="vvl-impact" cx="196" cy="60" rx="26" ry="20" fill={`url(#${bloomId})`} />
+
+        {/* Emitter at the near side. */}
+        <rect className="vvl-emitter" x="1" y="40" width="2" height="40" fill={`url(#${emitId})`} />
       </svg>
 
       {caption ? (
@@ -181,7 +219,7 @@ export default function VergeLoader({
             fontSize: 13,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
-            color: tone === 'ink' || tone === 'onBrand' ? '#FFFFFF' : '#7A6030',
+            color: tone === 'ink' || tone === 'onBrand' ? '#FFFFFF' : '#9E8B55',
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, 'SF Mono', monospace",
           }}
         >

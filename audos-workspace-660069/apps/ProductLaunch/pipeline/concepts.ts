@@ -29,6 +29,9 @@ import { assetHandles, type ProductContext } from '../types/product-context.type
 export const MIN_DURATION_FRAMES = 450;
 export const MAX_DURATION_FRAMES = 900;
 
+const PIXEL_UI_COMPONENTS = ['BrowserFrame', 'Dashboard', 'Morph', 'FloatingUI', 'Grid', 'FullBleed', 'Screenshot'];
+const PRODUCTION_COMPONENTS = SDK_COMPONENTS.filter((name) => PIXEL_UI_COMPONENTS.indexOf(name) < 0);
+
 function str(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -168,23 +171,37 @@ export function describeProductContext(ctx: ProductContext): string {
   lines.push('visual_style: ' + ctx.brand.visual_style);
   lines.push('design_maturity: ' + ctx.brand.design_maturity);
 
-  lines.push('', 'ASSETS — the only handles that exist');
-  if (ctx.assets.length) {
-    for (const asset of ctx.assets) {
+  lines.push('', 'RENDERABLE ASSETS — logos and non-UI imagery only');
+  const renderable = ctx.assets.filter((asset) => asset.type !== 'screenshot');
+  if (renderable.length) {
+    for (const asset of renderable) {
       lines.push('- ' + asset.handle + ' [' + asset.type + ', quality ' + asset.visual_quality + ']'
         + (asset.source_url ? '' : ' (NO FILE — will draw as missing)')
         + '\n    shows: ' + asset.description
         + '\n    film use: ' + asset.film_usability
-        + (asset.suitable_for_roles.length
-          ? '\n    suits roles: ' + asset.suitable_for_roles.join(', ')
-          : ''));
+        + (asset.suitable_for_roles.length ? '\n    suits roles: ' + asset.suitable_for_roles.join(', ') : ''));
     }
   } else {
-    lines.push('- NONE. This film has no imagery at all and must be carried by typography and motion.');
+    lines.push('- NONE. Use typography and reconstructed UI.');
+  }
+  lines.push('', 'SEMANTIC UI REFERENCES — screenshot pixels are forbidden in output');
+  if (ctx.ui_references.length) {
+    for (const reference of ctx.ui_references) {
+      lines.push('- ' + reference.id + ': ' + reference.screen_name + ' ('
+        + reference.elements.map((element) => element.id).join(', ') + ')');
+    }
+  } else {
+    lines.push('- none reconstructed');
   }
 
   lines.push('', 'FILM READINESS');
-  lines.push('best_hook_asset: ' + (ctx.best_hook_asset || 'none'));
+  const hookAsset = ctx.assets.find((asset) => asset.handle === ctx.best_hook_asset);
+  const hookUi = hookAsset?.type === 'screenshot'
+    ? ctx.ui_references.find((reference) => reference.source_handle === hookAsset.handle)
+    : undefined;
+  lines.push(hookUi
+    ? 'best_hook_ui_reference: ' + hookUi.id
+    : 'best_hook_asset: ' + (ctx.best_hook_asset || 'none'));
   lines.push('ui_richness: ' + ctx.ui_richness + ' — ' + ctx.ui_richness_rationale);
   lines.push('extraction_confidence: ' + String(ctx.extraction_confidence));
   lines.push('extraction_gaps: ' + (ctx.extraction_gaps.join(' | ') || 'none flagged'));
@@ -196,7 +213,7 @@ function normalizeScene(raw: unknown, index: number, validHandles: string[]): Sc
   const source = asRecord(raw);
   const treatment = str(pick(source, 'visual_treatment', 'visual', 'treatment', 'visual_description', 'description'));
   const components = strList(pick(source, 'components', 'sdk_components', 'component_names'), 8)
-    .filter(isSDKComponent);
+    .filter((name) => isSDKComponent(name) && PIXEL_UI_COMPONENTS.indexOf(name) < 0);
   const beat = str(pick(source, 'narration_beat', 'beat', 'narrative_beat', 'message'));
   const rawRole = str(pick(source, 'role', 'scene_role')).toLowerCase();
 
@@ -300,8 +317,8 @@ export function normalizeFilmSpec(raw: unknown, ctx: ProductContext, index: numb
     narration_voice: str(source.narration_voice) || undefined,
     music_style: oneOf(
       pick(source, 'music_style', 'music'),
-      ['tension', 'momentum', 'minimal', 'cinematic', 'none'] as const,
-      'none',
+      ['tension', 'momentum', 'minimal', 'cinematic'] as const,
+      'momentum',
     ),
 
     concept_score: (() => {
@@ -353,7 +370,8 @@ function buildConceptRequest(
 
   parts.push(
     'VALID ASSET HANDLES: ' + (assetHandles(ctx).join(', ') || 'none'),
-    'VALID SDK COMPONENT NAMES: ' + SDK_COMPONENTS.join(', '),
+    'VALID PRODUCTION COMPONENT NAMES: ' + PRODUCTION_COMPONENTS.join(', '),
+    'SEMANTIC UI REFERENCE IDS: ' + (ctx.ui_references.map((reference) => reference.id).join(', ') || 'none'),
     FILM_SPEC_JSON_SHAPE,
     count === 1
       ? 'Answer with a JSON array containing EXACTLY ONE FilmSpec object — your single '

@@ -21,7 +21,7 @@ export interface GridOverlayProps {
 
 const GridOverlay: React.FC<GridOverlayProps> = function GridOverlay({
   spacing = 20,
-  color = 'rgba(180,120,0,0.14)',
+  color = 'rgba(184,120,8,0.14)',
   opacity = 1,
   className,
   style,

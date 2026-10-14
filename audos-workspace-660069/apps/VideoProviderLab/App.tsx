@@ -15,17 +15,21 @@
  * path where the platform adds the provider credential server-side and bills
  * the workspace wallet. `X-Workspace-DB-Token` is the only credential sent.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import {
-  AlertCircle, Download, FileText, Film, Music, Paperclip, Send, X,
+  AlertCircle, ChevronDown, ChevronUp, Download, FileText, Film, Music, Paperclip, Send, X,
 } from 'lucide-react';
 
 import {
+  CAMERA_PRESETS,
   DEFAULT_LAB_MODEL_KEY,
   LAB_GROUPS,
   LAB_MODELS,
   defaultRunInput,
+  describeRunBlock,
   effectiveRunInput,
+  isKlingTool,
   labModel,
   retargetRunInput,
 } from './labModels';
@@ -37,33 +41,34 @@ import {
   errorText,
   readImageFile,
   runLabModel,
-  workspaceId,
   workspaceToken,
 } from './labClient';
 import type { RunContext, RunResult } from './labClient';
 import { useSpaceRuntime } from '../../SpaceRuntimeContext';
 import AppShell from '../../components/ui/AppShell';
+import { COLORS, alpha } from '../../components/theme';
+import { withBrandContext } from '../../components/BrandContextLayer';
 
 // ---------------------------------------------------------------------------
 // Look
 // ---------------------------------------------------------------------------
 
 const C = {
-  bg: '#FFFDF4',
-  card: '#FFFFFF',
-  raised: '#FFFAEB',
-  line: 'rgba(180,120,0,0.14)',
-  lineStrong: 'rgba(180,120,0,0.36)',
-  accent: '#C8920A',
-  accentSurface: 'rgba(200,146,10,0.10)',
-  ink: '#1A1000',
-  soft: '#3D2800',
-  muted: '#7A6030',
-  good: '#166534',
-  bad: '#991B1B',
-  warn: '#B45309',
-  headerBg: '#1A1000',
-  headerText: '#FFF8E8',
+  bg: COLORS.bg,
+  card: COLORS.surface,
+  raised: COLORS.surfaceAlt,
+  line: COLORS.border,
+  lineStrong: COLORS.borderHover,
+  accent: COLORS.primary,
+  accentSurface: alpha(COLORS.primary, 0.14),
+  ink: COLORS.text,
+  soft: COLORS.textMuted,
+  muted: COLORS.textFaint,
+  good: COLORS.success,
+  bad: COLORS.error,
+  warn: COLORS.warning,
+  headerBg: COLORS.surface,
+  headerText: COLORS.text,
 };
 const FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
@@ -168,11 +173,11 @@ function useLabStyles() {
       '.vpl-btn:disabled { opacity: 0.4; cursor: not-allowed; }',
       '.vpl-turn { animation: vpl-rise 180ms ease both; }',
       '.vpl-scroll::-webkit-scrollbar { height: 6px; width: 6px; }',
-      '.vpl-scroll::-webkit-scrollbar-thumb { background: rgba(180,120,0,0.35); border-radius: 99px; }',
-      '.vpl-scroll::-webkit-scrollbar-thumb:hover { background: rgba(180,120,0,0.65); }',
-      '.vpl-scroll::-webkit-scrollbar-track { background: #FFF9E8; }',
+      '.vpl-scroll::-webkit-scrollbar-thumb { background: #2A2410; border-radius: 99px; }',
+      '.vpl-scroll::-webkit-scrollbar-thumb:hover { background: #6E5F38; }',
+      '.vpl-scroll::-webkit-scrollbar-track { background: transparent; }',
       '.vpl-input:focus { outline: none; }',
-      '.vpl-select:focus { outline: none; border-color: rgba(200,146,10,0.7); box-shadow: 0 0 0 3px rgba(200,146,10,0.22); }',
+      '.vpl-select:focus { outline: none; border-color: rgba(212,146,10,0.7); box-shadow: 0 0 0 3px rgba(212,146,10,0.22); }',
     ].join('\n');
     document.head.appendChild(style);
   }, []);
@@ -279,7 +284,108 @@ function ImageThumb({ attachment, onRemove }: { attachment: Attachment; onRemove
   );
 }
 
-export default function App() {
+// ---------------------------------------------------------------------------
+// Kling controls — field pieces
+// ---------------------------------------------------------------------------
+
+const FIELD_STYLE: CSSProperties = {
+  background: COLORS.input,
+  color: C.ink,
+  border: `1px solid ${C.lineStrong}`,
+  borderRadius: 8,
+  padding: '7px 9px',
+  fontSize: 12.5,
+  fontFamily: FONT,
+  minWidth: 0,
+  boxSizing: 'border-box',
+};
+
+function Field({ label, children, grow, width }: {
+  label: string;
+  children: ReactNode;
+  grow?: boolean;
+  width?: number;
+}) {
+  return (
+    <label
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        flex: grow ? '1 1 220px' : '0 0 auto',
+        width: grow ? undefined : width,
+        minWidth: 0,
+      }}
+    >
+      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: C.muted }}>
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+/** A number box that lets the user clear and retype: it keeps its own text and
+ *  only reports values that parse, clamped to the range. */
+function NumberInput({ value, onCommit, min, max, step, placeholder, integer, allowEmpty }: {
+  value: number | null;
+  onCommit: (next: number | null) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  placeholder?: string;
+  integer?: boolean;
+  allowEmpty?: boolean;
+}) {
+  const shown = (current: number | null) => (current === null || current === undefined ? '' : String(current));
+  const [text, setText] = useState(shown(value));
+
+  useEffect(() => {
+    setText((current) => {
+      const parsed = current.trim() === '' ? null : Number(current);
+      return parsed === value ? current : shown(value);
+    });
+  }, [value]);
+
+  return (
+    <input
+      className="vpl-select"
+      type="number"
+      value={text}
+      min={min}
+      max={max}
+      step={step}
+      placeholder={placeholder}
+      onChange={(event) => {
+        const raw = event.target.value;
+        setText(raw);
+        if (raw.trim() === '') {
+          if (allowEmpty) onCommit(null);
+          return;
+        }
+        let next = Number(raw);
+        if (!Number.isFinite(next)) return;
+        if (integer) next = Math.trunc(next);
+        if (min !== undefined) next = Math.max(min, next);
+        if (max !== undefined) next = Math.min(max, next);
+        onCommit(next);
+      }}
+      onBlur={() => setText(shown(value))}
+      style={{ ...FIELD_STYLE, width: '100%' }}
+    />
+  );
+}
+
+function describeToolTurn(model: LabModel, input: LabRunInput): string {
+  const id = input.sourceTaskId.trim();
+  if (model.params.extend) return `Extend clip ${id}`;
+  const spoken = input.lipSyncText.trim() || input.lipSyncAudioUrl.trim();
+  return `Lip sync clip ${id}: ${spoken}`;
+}
+
+const BrandedVideoProviderLab = withBrandContext(App, 'Video Provider Lab');
+export default BrandedVideoProviderLab;
+function App() {
   const { spaceId } = useSpaceRuntime();
 
   // Keyed on the space so a tenant switch starts the thread fresh.
@@ -301,6 +407,7 @@ function VideoProviderLab() {
   const [pending, setPending] = useState<Attachment[]>([]);
   const [attachNotice, setAttachNotice] = useState('');
   const [tick, setTick] = useState(0);
+  const [controlsOpen, setControlsOpen] = useState(true);
 
   const mounted = useRef(true);
   const cancels = useRef<Record<string, Array<() => void>>>({});
@@ -375,6 +482,15 @@ function VideoProviderLab() {
     setActiveKey(key);
     setInput((prev) => retargetRunInput(prev, model));
   }, []);
+
+  const patchInput = useCallback((next: Partial<LabRunInput>) => {
+    setInput((prev) => ({ ...prev, ...next }));
+  }, []);
+
+  // Extend and Lip Sync act on a finished clip, so they run without a prompt
+  // or attachment and are gated on their own required fields instead.
+  const tool = isKlingTool(active);
+  const toolBlock = tool ? describeRunBlock(active, { ...input, prompt, images: [] }) : null;
 
   // -------------------------------------------------------------------------
   // Attachments
@@ -514,7 +630,7 @@ function VideoProviderLab() {
   const send = useCallback(() => {
     if (busy) return;
     const text = prompt.trim();
-    if (!text && !pending.length) return;
+    if (tool ? toolBlock : (!text && !pending.length)) return;
 
     const model = active;
     const images = pending
@@ -530,23 +646,21 @@ function VideoProviderLab() {
       videoInput: model.params.videoUpload && sourceVideo ? sourceVideo.dataUrl : '',
     });
 
-    pushMessage({ kind: 'user', id: messageId('you'), text, attachments: pending });
+    const shownText = text || (tool ? describeToolTurn(model, input) : '');
+    pushMessage({ kind: 'user', id: messageId('you'), text: shownText, attachments: pending });
     setPrompt('');
     setPending([]);
     setAttachNotice('');
     launch(model, (ctx) => runLabModel(model, runInput, ctx));
-  }, [active, busy, input, launch, pending, prompt, pushMessage]);
+  }, [active, busy, input, launch, pending, prompt, pushMessage, tool, toolBlock]);
 
   // -------------------------------------------------------------------------
   // Surface
   // -------------------------------------------------------------------------
 
   const hasToken = Boolean(workspaceToken());
-  const spaceWorkspaceId = workspaceId();
-  const credentialWarning = !hasToken
-    ? 'no workspace credential — reload the space'
-    : !spaceWorkspaceId ? 'no workspaceId — the HeyGen entries cannot build their proxy path' : '';
-  const canSend = !busy && Boolean(prompt.trim() || pending.length);
+  const credentialWarning = hasToken ? '' : 'no workspace credential — reload the space';
+  const canSend = !busy && (tool ? !toolBlock : Boolean(prompt.trim() || pending.length));
 
   return (
     <AppShell
@@ -605,9 +719,9 @@ function VideoProviderLab() {
             title={`${active.provider} · ${active.costHint}`}
             style={{
               marginLeft: 'auto',
-              background: '#2A1E00',
+              background: COLORS.input,
               color: C.headerText,
-              border: '1px solid rgba(200,146,10,0.4)',
+              border: `1px solid ${alpha(COLORS.primary, 0.4)}`,
               borderRadius: 10,
               padding: '8px 10px',
               fontSize: 12.5,
@@ -619,18 +733,28 @@ function VideoProviderLab() {
           >
             {LAB_GROUPS.map((group) => (
               <optgroup key={group.id} label={group.label}>
-                {LAB_MODELS.filter((model) => model.group === group.id).map((model) => (
-                  <option
-                    key={model.key}
-                    value={model.key}
-                    disabled={!model.available}
-                    style={{
-                      color: model.available ? C.headerText : 'rgba(255,248,232,0.5)',
-                      background: '#2A1E00',
-                    }}
-                  >
-                    {model.available ? model.name : `${model.name} — unavailable`}
-                  </option>
+                {LAB_MODELS.filter((model) => model.group === group.id).map((model, index, list) => (
+                  <Fragment key={model.key}>
+                    {isKlingTool(model) && !(index > 0 && isKlingTool(list[index - 1])) ? (
+                      <option
+                        value="__kling-tools__"
+                        disabled
+                        style={{ color: COLORS.textFaint, background: COLORS.input }}
+                      >
+                        {'— Tools —'}
+                      </option>
+                    ) : null}
+                    <option
+                      value={model.key}
+                      disabled={!model.available}
+                      style={{
+                        color: model.available ? C.headerText : COLORS.textFaint,
+                        background: COLORS.input,
+                      }}
+                    >
+                      {model.available ? model.name : `${model.name} — unavailable`}
+                    </option>
+                  </Fragment>
                 ))}
               </optgroup>
             ))}
@@ -656,7 +780,9 @@ function VideoProviderLab() {
             <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 420 }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: C.soft }}>Describe a shot to generate it</div>
               <p style={{ margin: '8px 0 0', fontSize: 12.5, color: C.muted, lineHeight: 1.7 }}>
-                {`${active.name} is selected. Attach reference images or a source clip with the paperclip — every run goes through the Audos proxy and bills the workspace wallet.`}
+                {tool
+                  ? `${active.name} is selected. Fill in the Kling controls below, then press send — every run goes through the Audos proxy and bills the workspace wallet.`
+                  : `${active.name} is selected. Attach reference images or a source clip with the paperclip — every run goes through the Audos proxy and bills the workspace wallet.`}
               </p>
             </div>
           ) : null}
@@ -740,7 +866,7 @@ function VideoProviderLab() {
                           textTransform: 'uppercase',
                           color: C.accent,
                           background: C.accentSurface,
-                          border: '1px solid rgba(200,146,10,0.35)',
+                          border: `1px solid ${alpha(COLORS.primary, 0.35)}`,
                           borderRadius: 999,
                           padding: '4px 10px',
                         }}
@@ -822,8 +948,8 @@ function VideoProviderLab() {
                   {message.phase === 'error' ? (
                     <div
                       style={{
-                        background: 'rgba(153,27,27,0.06)',
-                        border: '1px solid rgba(153,27,27,0.25)',
+                        background: alpha(COLORS.error, 0.08),
+                        border: `1px solid ${alpha(COLORS.error, 0.3)}`,
                         borderRadius: 9,
                         padding: '9px 11px',
                         display: 'flex',
@@ -834,7 +960,7 @@ function VideoProviderLab() {
                       <div
                         style={{
                           fontSize: 11.5,
-                          color: '#991B1B',
+                          color: COLORS.error,
                           lineHeight: 1.6,
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-word',
@@ -857,6 +983,224 @@ function VideoProviderLab() {
             );
           })}
         </div>
+
+        {/* Row 2b — Kling controls */}
+        {active.group === 'kling' ? (
+          <div
+            className="vpl-scroll"
+            style={{
+              flexShrink: 0,
+              background: C.card,
+              borderTop: `1px solid ${C.line}`,
+              padding: '8px 16px',
+              maxHeight: '42vh',
+              overflowY: 'auto',
+            }}
+          >
+            <button
+              type="button"
+              className="vpl-btn"
+              onClick={() => setControlsOpen((value) => !value)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                color: C.soft,
+                fontSize: 11.5,
+                fontWeight: 700,
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+                fontFamily: FONT,
+                cursor: 'pointer',
+              }}
+            >
+              {controlsOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+              Kling controls
+            </button>
+
+            {controlsOpen ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8, alignItems: 'flex-end' }}>
+                {active.params.durations.length ? (
+                  <Field label="Duration" width={86}>
+                    <select
+                      className="vpl-select"
+                      value={input.duration}
+                      onChange={(event) => patchInput({ duration: Number(event.target.value) })}
+                      style={FIELD_STYLE}
+                    >
+                      {active.params.durations.map((seconds) => (
+                        <option key={seconds} value={seconds}>{`${seconds}s`}</option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : null}
+
+                {active.params.aspectRatios.length ? (
+                  <Field label="Aspect" width={92}>
+                    <select
+                      className="vpl-select"
+                      value={input.aspectRatio}
+                      onChange={(event) => patchInput({ aspectRatio: event.target.value })}
+                      style={FIELD_STYLE}
+                    >
+                      {active.params.aspectRatios.map((ratio) => (
+                        <option key={ratio} value={ratio}>{ratio}</option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : null}
+
+                {active.params.modes.length ? (
+                  <Field label="Mode" width={110}>
+                    <select
+                      className="vpl-select"
+                      value={input.mode}
+                      onChange={(event) => patchInput({ mode: event.target.value })}
+                      style={FIELD_STYLE}
+                    >
+                      {active.params.modes.map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : null}
+
+                {active.params.camera ? (
+                  <Field label="Camera preset" width={130}>
+                    <select
+                      className="vpl-select"
+                      value={input.cameraPreset}
+                      onChange={(event) => patchInput({ cameraPreset: event.target.value })}
+                      style={FIELD_STYLE}
+                    >
+                      {CAMERA_PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : null}
+
+                {active.params.seed ? (
+                  <Field label="Seed" width={120}>
+                    <NumberInput
+                      value={input.seed}
+                      onCommit={(next) => patchInput({ seed: next })}
+                      min={0}
+                      step={1}
+                      integer
+                      allowEmpty
+                      placeholder="random"
+                    />
+                  </Field>
+                ) : null}
+
+                {active.params.negativePrompt ? (
+                  <Field label="Negative prompt" grow>
+                    <input
+                      className="vpl-select"
+                      type="text"
+                      value={input.negativePrompt}
+                      onChange={(event) => patchInput({ negativePrompt: event.target.value })}
+                      placeholder="What to keep out of the clip…"
+                      spellCheck={false}
+                      style={FIELD_STYLE}
+                    />
+                  </Field>
+                ) : null}
+
+                {tool ? (
+                  <Field label="Finished clip task ID" grow>
+                    <input
+                      className="vpl-select"
+                      type="text"
+                      value={input.sourceTaskId}
+                      onChange={(event) => patchInput({ sourceTaskId: event.target.value })}
+                      placeholder="Paste kling task ID…"
+                      spellCheck={false}
+                      style={{ ...FIELD_STYLE, fontFamily: MONO }}
+                    />
+                  </Field>
+                ) : null}
+
+                {active.params.lipSync ? (
+                  <>
+                    <div style={{ flex: '1 1 100%' }}>
+                      <Field label="Lip Sync text (text-to-speech)" grow>
+                        <textarea
+                          className="vpl-select vpl-scroll"
+                          value={input.lipSyncText}
+                          onChange={(event) => patchInput({ lipSyncText: event.target.value })}
+                          rows={2}
+                          placeholder="What the character should say…"
+                          spellCheck={false}
+                          style={{ ...FIELD_STYLE, resize: 'vertical', lineHeight: 1.5 }}
+                        />
+                      </Field>
+                    </div>
+                    <Field label="OR audio URL" grow>
+                      <input
+                        className="vpl-select"
+                        type="text"
+                        value={input.lipSyncAudioUrl}
+                        onChange={(event) => patchInput({ lipSyncAudioUrl: event.target.value })}
+                        placeholder="https://…"
+                        spellCheck={false}
+                        style={FIELD_STYLE}
+                      />
+                    </Field>
+                    <Field label="Voice ID" width={130}>
+                      <input
+                        className="vpl-select"
+                        type="text"
+                        value={input.voiceId}
+                        onChange={(event) => patchInput({ voiceId: event.target.value })}
+                        placeholder="optional"
+                        spellCheck={false}
+                        style={FIELD_STYLE}
+                      />
+                    </Field>
+                    <Field label="Language" width={100}>
+                      <input
+                        className="vpl-select"
+                        type="text"
+                        value={input.language}
+                        onChange={(event) => patchInput({ language: event.target.value })}
+                        placeholder="e.g. en"
+                        spellCheck={false}
+                        style={FIELD_STYLE}
+                      />
+                    </Field>
+                    {active.params.voiceSpeed ? (
+                      <Field label="Voice speed" width={90}>
+                        <NumberInput
+                          value={input.voiceSpeed}
+                          onCommit={(next) => patchInput({ voiceSpeed: next ?? 1 })}
+                          min={0.5}
+                          max={2}
+                          step={0.1}
+                        />
+                      </Field>
+                    ) : null}
+                  </>
+                ) : null}
+
+                <div style={{ flex: '1 1 100%', fontSize: 11.5, color: C.muted, lineHeight: 1.55 }}>
+                  {active.params.multiImage
+                    ? 'Attach 2–4 reference images with the paperclip — the same character will be kept across the clip.'
+                    : active.params.extend
+                      ? 'Every finished Kling clip prints its task ID under the video. The prompt bar is optional here and steers how the clip continues.'
+                      : active.params.lipSync
+                        ? 'Type dialogue for text-to-speech, or give an audio URL instead. The prompt bar is not used for Lip Sync.'
+                        : 'Camera preset, CFG scale and seed are sent only when the model accepts them — a refusal shows up verbatim on the run card.'}
+                  {toolBlock ? <span style={{ color: C.warn }}>{` ${toolBlock}`}</span> : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Row 3 — input */}
         <div
@@ -961,7 +1305,13 @@ function VideoProviderLab() {
                 }
               }}
               rows={1}
-              placeholder="Describe what to generate…"
+              placeholder={
+                active.params.extend
+                  ? 'Optional — steer how the clip continues, then press send…'
+                  : active.params.lipSync
+                    ? 'Dialogue goes in the Kling controls above — press send to sync…'
+                    : 'Describe what to generate…'
+              }
               spellCheck={false}
               style={{
                 flex: 1,

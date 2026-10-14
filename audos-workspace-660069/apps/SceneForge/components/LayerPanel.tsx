@@ -176,7 +176,7 @@ export default function LayerPanel(props: {
         <input type="color" aria-label="Accent colour" value={cine.accent} onChange={(event) => props.onPatchCinematic({ accent: event.target.value })}
           className="h-9 w-12 shrink-0 cursor-pointer rounded-lg border border-[var(--space-border-default)] bg-transparent" />
         <div className="flex flex-wrap gap-1.5">
-          {['#F97316', '#FBBF24', '#22D3EE', '#A78BFA', '#34D399', '#F43F5E'].map((swatch) => <button key={swatch} type="button" aria-label={`Use ${swatch}`} onClick={() => props.onPatchCinematic({ accent: swatch })}
+          {['#F97316', '#FBBF24', '#22D3EE', '#F0B429', '#34D399', '#F43F5E'].map((swatch) => <button key={swatch} type="button" aria-label={`Use ${swatch}`} onClick={() => props.onPatchCinematic({ accent: swatch })}
             className={cine.accent.toLowerCase() === swatch.toLowerCase() ? 'h-7 w-7 rounded-lg border-2 border-[#1A1000]' : 'h-7 w-7 rounded-lg border border-[var(--space-border-strong)]'} style={{ background: swatch }} />)}
         </div>
         <span className="text-[10px] uppercase tracking-wide text-[var(--space-text-muted)]">{cine.accent}</span>

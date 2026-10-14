@@ -3,13 +3,12 @@
 //
 //   OPUS MOTION DIRECTOR (agents/motionDirector)
 //        ↓ Visual Timeline JSON (persisted on scene.director_timeline)
-//   GSAP DIRECTED CAPTURE (lib/motionCapture → lib/motionPrimitives)
-//        ↓ real clip, uploaded
-//   VISUAL QA (lib/visualQa — Opus vision over extracted key frames)
-//        ↓ pass → READY (qa_report: pass)
-//        ↓ fail → the director REVISES the timeline against the concrete
-//                 issues and the scene re-renders — at most 2 retries —
-//                 then it is flagged for human review with the reasons.
+//   STRUCTURED ELEMENT COMPOSITION (lib/elementComposition)
+//        ↓ spec fingerprint persisted with independent layers
+//   REMOTION ASSEMBLY (remotion/AssemblyComp)
+//        ↓ frame-accurate server render; no browser recording
+//   STRUCTURAL QA
+//        ↓ invalid layouts are flagged before the paid final render.
 //
 // Every step degrades instead of blocking: a failed director call uses the
 // deterministic fallback direction, unavailable QA records 'skipped', and a
@@ -20,12 +19,13 @@
 // by HeyGen as one HyperFrames overlay clip timed to the narration window
 // (lib/productGraphics), because compositing those as separate Remotion layers is
 // what produced the misalignment and z-order problems. Everything else — charts,
-// timelines, diagrams, maps, kinetic typography — keeps the GSAP capture. An
-// account without HyperFrames keeps the GSAP capture for both.
+// timelines, diagrams, maps, kinetic typography — stays as structured Remotion
+// layers. An account without HyperFrames uses the same deterministic layers.
 
-import { directScene, fallbackDirection, reviseSceneDirection } from '../agents/motionDirector';
-import { generateSceneMotionClip, sceneDirection, sceneMotionDuration, sceneMotionSpec, type MotionClipResult } from './motionCapture';
-import { runSceneVisualQa, skippedQaReport, type SceneQaReport } from './visualQa';
+import { directElementComposition, directScene, fallbackDirection } from '../agents/motionDirector';
+import { sceneDirection, sceneMotionDuration, sceneMotionSpec } from './motionScene';
+import { skippedQaReport, type SceneQaReport } from './visualQa';
+import { elementFingerprint, hasFreshElementComposition, validateElementComposition } from './elementComposition';
 import { describeError } from './heygenApi';
 import { hyperFramesRuledOut, isProductGraphicBeat, renderProductGraphic, type ProductGraphicResult } from './productGraphics';
 import { alternativeKindsFor, dominantKindOf, planVariety, recastDominant, type VarietyEntry } from './visualBudget';
@@ -33,8 +33,6 @@ import { updateScene, type Project, type Scene } from './supabase';
 import { sceneNeedsGeneration } from './sceneState';
 import { effectiveComposition, visualKindOf } from './effects';
 import type { SceneDirection } from './visualTimeline';
-
-const MAX_QA_RETRIES = 2;
 
 export interface SceneNeighbors { prevKind?: string | null; nextKind?: string | null }
 
@@ -52,7 +50,7 @@ export interface MotionProduceResult {
   fingerprint: string;
   qa: SceneQaReport;
   scene: Scene;
-  /** Set when HeyGen HyperFrames rendered the beat instead of the GSAP capture. */
+  /** Set when HeyGen HyperFrames rendered the beat instead of the Remotion composition. */
   productGraphic?: ProductGraphicResult | null;
 }
 
@@ -98,7 +96,7 @@ async function persistQa(scene: Scene, report: SceneQaReport) {
  * Render a product-graphic beat through HeyGen HyperFrames, or return null.
  *
  * Null means "not a product beat, or HeyGen could not do it" — both of which end
- * in the GSAP capture below. HyperFrames being absent from a plan is not a
+ * in the Remotion composition below. HyperFrames being absent from a plan is not a
  * failure the customer has to solve, and one refused render is not either: the
  * beat is drawn the old way and the reason is reported rather than swallowed.
  */
@@ -108,30 +106,33 @@ async function tryProductGraphic(project: Project, scene: Scene, options: Motion
     return await renderProductGraphic(project, scene, { force: options.force, onNote: options.onNote });
   } catch (e) {
     options.onNote?.(`Scene ${scene.scene_index}: HeyGen HyperFrames could not render this product graphic (${describeError(e)}), so it was drawn with the built-in graphic renderer instead.`);
-    console.warn('[SceneForge] A product-graphic beat fell back to the Remotion/GSAP renderer.', e);
+    console.warn('[SceneForge] A product-graphic beat fell back to the deterministic Remotion renderer.', e);
     return null;
   }
 }
 
 /**
- * Produce one motion scene end to end: direct → capture → QA → auto-fix.
- * Resolves with the best clip produced; a scene that still fails QA after the
- * retries resolves FLAGGED (clip kept, reasons stored) rather than throwing —
- * a capture that cannot record at all still throws, exactly like before.
+ * Depth-compositor path: generate/reuse footage, direct structured element
+ * layers, then leave both assets for the single Remotion assembly sequence.
+ * Kept here beside produceMotionScene so every motion kind enters through one
+ * production boundary; the implementation is split to avoid bloating this
+ * module's deterministic composition boundary.
  */
+export async function produceLayeredVideoScene(project: Project, scene: Scene, options: MotionProduceOptions = {}) {
+  const { produceVideoBackedGraphicScene } = await import('./videoBackedGraphic');
+  return produceVideoBackedGraphicScene(project, scene, options);
+}
+
 export async function produceMotionScene(project: Project, scene: Scene, options: MotionProduceOptions = {}): Promise<MotionProduceResult> {
   const aspect: '16:9' | '9:16' = project.aspect_ratio === '9:16' ? '9:16' : '16:9';
   let working = await ensureSceneDirection(project, scene, options.neighbors || {});
 
-  // The product-graphic route comes first: when HeyGen renders this beat there is
-  // no GSAP capture to make, and no directed-layer count to inspect either — the
-  // frame came from a fixed bundle, so the complexity check is skipped and the
-  // inspector only looks for a broken or empty frame.
+  // Product graphics may still arrive as a finished HyperFrames clip. Every
+  // other motion scene stays structured and is rendered frame-by-frame inside
+  // the final Remotion assembly, so no tab has to remain open recording it.
   const product = await tryProductGraphic(project, working, options);
   if (product) {
-    const report = options.qa === false
-      ? skippedQaReport('QA disabled for this run')
-      : await runSceneVisualQa(working, product.videoUrl, aspect, 1, { skipComplexity: true });
+    const report = skippedQaReport('Rendered by the fixed HyperFrames bundle.');
     await persistQa(working, report);
     return {
       videoUrl: product.videoUrl,
@@ -142,46 +143,64 @@ export async function produceMotionScene(project: Project, scene: Scene, options
     };
   }
 
-  let made: MotionClipResult = await generateSceneMotionClip(project, working, { force: options.force, onProgress: options.onProgress });
-
-  // A reused clip that already passed QA needs no re-inspection.
-  const priorQa = (working as Scene & { qa_report?: SceneQaReport | null }).qa_report;
-  if (made.reused && priorQa && priorQa.status === 'pass') {
-    return { videoUrl: made.videoUrl, fingerprint: made.fingerprint, qa: priorQa, scene: working };
+  const fingerprint = elementFingerprint(sceneMotionSpec(working));
+  if (!options.force && hasFreshElementComposition(working)) {
+    const priorQa = (working as Scene & { qa_report?: SceneQaReport | null }).qa_report;
+    return {
+      videoUrl: String(working.render_url || ''),
+      fingerprint,
+      qa: priorQa || skippedQaReport('The current Remotion composition was reused.'),
+      scene: working,
+      productGraphic: null,
+    };
   }
 
-  if (options.qa === false) {
-    const report = skippedQaReport('QA disabled for this run');
-    await persistQa(working, report);
-    return { videoUrl: made.videoUrl, fingerprint: made.fingerprint, qa: report, scene: working };
-  }
-
-  let report = await runSceneVisualQa(working, made.blob || made.videoUrl, aspect, 1);
-  for (let retry = 1; retry <= MAX_QA_RETRIES && report.status === 'flagged'; retry += 1) {
-    // Auto-fix: the director revises its own timeline against the inspector's
-    // concrete issues, then the scene re-renders from the revised direction.
-    options.onNote?.(`Scene ${scene.scene_index}: visual QA found ${report.issues.length} issue${report.issues.length === 1 ? '' : 's'} — revising the direction and re-rendering (fix ${retry} of ${MAX_QA_RETRIES})`);
-    let revised: SceneDirection | null = null;
-    try {
-      revised = await reviseSceneDirection({
-        spec: sceneMotionSpec(working),
-        direction: sceneDirection(working) || fallbackDirection(sceneMotionSpec(working), sceneMotionDuration(working), aspect),
-        issues: report.issues,
-        aspect,
-        durationSec: sceneMotionDuration(working),
-      });
-    } catch (reviseError) {
-      console.warn('[SceneForge] QA revision call failed — keeping the current render.', reviseError);
-      break;
-    }
-    await updateScene(working.id, { director_timeline: revised as unknown as Record<string, unknown> }, working.project_id).catch(() => undefined);
-    working = { ...working, director_timeline: revised as unknown as Record<string, unknown> };
-    made = await generateSceneMotionClip(project, working, { force: true, onProgress: options.onProgress });
-    report = await runSceneVisualQa(working, made.blob || made.videoUrl, aspect, retry + 1);
-  }
-
-  await persistQa(working, report);
-  return { videoUrl: made.videoUrl, fingerprint: made.fingerprint, qa: report, scene: working, productGraphic: null };
+  const direction = sceneDirection(working)
+    || fallbackDirection(sceneMotionSpec(working), sceneMotionDuration(working), aspect);
+  options.onNote?.(`Scene ${scene.scene_index}: building the deterministic Remotion composition…`);
+  const composition = await directElementComposition({
+    spec: sceneMotionSpec(working),
+    direction,
+    durationSec: sceneMotionDuration(working),
+    aspect,
+    backgroundPrompt: '',
+  });
+  const placement = effectiveComposition(visualKindOf(working.visual_kind), working.overlay_config, sceneMotionSpec(working).kind);
+  composition.background = placement?.mode === 'fullscreen' ? '#0A0F1E' : 'transparent';
+  const verdict = validateElementComposition(composition);
+  const issues = [
+    ...verdict.errors.map((detail) => ({ code: 'composition_invalid', severity: 'fail' as const, detail })),
+    ...verdict.warnings.map((detail) => ({ code: 'composition_warning', severity: 'warn' as const, detail })),
+  ];
+  const report: SceneQaReport = options.qa === false
+    ? skippedQaReport('QA disabled for this run')
+    : {
+      status: verdict.errors.length ? 'flagged' : 'pass',
+      pass: verdict.errors.length === 0,
+      attempts: 1,
+      frames: 0,
+      issues,
+      summary: verdict.errors.length
+        ? 'The deterministic composition has structural errors and needs review.'
+        : verdict.warnings.length
+          ? `The deterministic composition is renderable with ${verdict.warnings.length} polish note${verdict.warnings.length === 1 ? '' : 's'}.`
+          : 'The deterministic composition passed structural QA.',
+      checkedAt: new Date().toISOString(),
+    };
+  await updateScene(working.id, {
+    composition_spec: composition as unknown as Record<string, unknown>,
+    video_prompt: fingerprint,
+    status: verdict.errors.length ? 'error' : 'ready',
+    qa_report: report as unknown as Record<string, unknown>,
+  }, working.project_id);
+  working = {
+    ...working,
+    composition_spec: composition as unknown as Record<string, unknown>,
+    video_prompt: fingerprint,
+    status: verdict.errors.length ? 'error' : 'ready',
+    qa_report: report as unknown as Record<string, unknown>,
+  };
+  return { videoUrl: String(working.render_url || ''), fingerprint, qa: report, scene: working, productGraphic: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +220,7 @@ export async function produceMotionScene(project: Project, scene: Scene, options
 
 function isMotionScene(scene: Scene): boolean {
   const kind = visualKindOf(scene.visual_kind);
-  return kind !== 'ai_video' && kind !== 'image';
+  return kind !== 'ai_video' && kind !== 'image' && kind !== 'video_backed_graphic';
 }
 
 function neighborsOf(rows: Scene[], index: number): SceneNeighbors {
@@ -223,8 +242,8 @@ function neighborsOf(rows: Scene[], index: number): SceneNeighbors {
  * never re-directed for the sake of a rhythm pass.
  *
  * AND NOTHING FINISHED IS INVALIDATED. Re-casting a dominant visual changes the
- * direction, which changes the capture fingerprint — so only scenes that are
- * going to be rendered anyway are ever re-cast. A finished clip is left alone.
+ * direction, which changes the composition fingerprint — so only scenes that
+ * are going to be rendered anyway are ever re-cast. Finished work is left alone.
  *
  * Returns the scenes with their directions attached, in the order given. Never
  * throws: a film that cannot be directed up front is produced scene by scene

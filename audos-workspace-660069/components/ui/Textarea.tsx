@@ -66,7 +66,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             borderRadius: RADIUS.md,
             outline: 'none',
             resize: 'vertical',
-            boxShadow: focus ? '0 0 0 3px rgba(245,158,11,0.18)' : 'none',
+            boxShadow: focus ? '0 0 0 3px rgba(212,146,10,0.18)' : 'none',
             transition: 'border-color 150ms ease, box-shadow 180ms ease',
             ...style,
           }}

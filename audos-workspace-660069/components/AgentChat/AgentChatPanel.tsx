@@ -73,7 +73,7 @@ export function AgentChatPanel() {
 
         <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 14px 6px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {!messages.length ? (
-            <div style={{ borderRadius: 14, border: '1px solid rgba(148, 163, 184, 0.16)', background: 'rgba(217, 119, 6, 0.08)', padding: '14px 14px', color: '#cbd5e1', fontSize: 12.5, lineHeight: 1.6 }}>
+            <div style={{ borderRadius: 14, border: '1px solid rgba(148, 163, 184, 0.16)', background: 'rgba(184, 120, 8, 0.08)', padding: '14px 14px', color: '#cbd5e1', fontSize: 12.5, lineHeight: 1.6 }}>
               Hi — I'm the Vidverge Agent. Tell me what you want to make and I'll fill in the fields and kick off the work in <strong style={{ color: '#f1f5f9' }}>{appContext.appName}</strong> for you.
             </div>
           ) : null}
@@ -88,7 +88,7 @@ export function AgentChatPanel() {
                     {m.content}
                   </div>
                 ) : (
-                  <div style={{ maxWidth: '92%', borderRadius: 14, padding: 1, background: 'linear-gradient(135deg, rgba(217, 119, 6, 0.6), rgba(236, 72, 153, 0.55), rgba(245, 158, 11, 0.5))' }}>
+                  <div style={{ maxWidth: '92%', borderRadius: 14, padding: 1, background: 'linear-gradient(135deg, rgba(184, 120, 8, 0.6), rgba(236, 72, 153, 0.55), rgba(212, 146, 10, 0.5))' }}>
                     <div style={{ borderRadius: 13, background: '#12141d', color: '#e2e8f0', padding: '9px 12px', fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                       {m.content}
                     </div>
@@ -117,7 +117,7 @@ export function AgentChatPanel() {
               type="submit"
               disabled={isThinking || !draft.trim()}
               className="vv-agent-send"
-              style={{ borderRadius: 11, border: 'none', padding: '0 16px', fontSize: 13, fontWeight: 700, color: '#ffffff', cursor: isThinking || !draft.trim() ? 'default' : 'pointer', opacity: isThinking || !draft.trim() ? 0.55 : 1, background: 'linear-gradient(135deg, #D97706, #EC4899, #F59E0B)' }}
+              style={{ borderRadius: 11, border: 'none', padding: '0 16px', fontSize: 13, fontWeight: 700, color: '#ffffff', cursor: isThinking || !draft.trim() ? 'default' : 'pointer', opacity: isThinking || !draft.trim() ? 0.55 : 1, background: 'linear-gradient(135deg, #B87808, #EC4899, #D4920A)' }}
             >
               Send
             </button>

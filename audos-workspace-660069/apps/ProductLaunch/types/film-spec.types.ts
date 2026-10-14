@@ -61,7 +61,7 @@ export interface FilmSpec {
 
   narration_enabled: boolean;
   narration_voice?: string;
-  music_style?: 'tension' | 'momentum' | 'minimal' | 'cinematic' | 'none';
+  music_style: 'tension' | 'momentum' | 'minimal' | 'cinematic';
 
   // Multi-concept selection fields
   concept_score: number;            // 0–1

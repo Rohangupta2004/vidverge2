@@ -158,14 +158,14 @@ function formatDuration(ms: number): string {
 
 function StepBadge({ n, done }: { n: number; done: boolean }) {
   return <span className={done
-    ? 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#E8B737,#C8920A)] text-xs font-bold text-white'
+    ? 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#D4920A,#F0B429)] text-xs font-bold text-white'
     : 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--space-border-strong)] bg-[var(--space-surface-panel)] text-xs font-bold text-[var(--space-text-muted)]'}>
     {done ? <Check className="h-4 w-4" /> : n}
   </span>;
 }
 
 function Step(props: { n: number; done: boolean; title: string; hint?: string; action?: any; children: any }) {
-  return <section className="st-rise rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 shadow-[0_1px_0_color-mix(in_srgb,#B4780A_8%,transparent)_inset]">
+  return <section className="st-rise rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 shadow-[0_1px_0_color-mix(in_srgb,#B87808_8%,transparent)_inset]">
     <div className="flex flex-wrap items-center gap-3">
       <StepBadge n={props.n} done={props.done} />
       <div className="min-w-0 flex-1">
@@ -185,8 +185,8 @@ function Segmented<T extends string>(props: { value: T; options: { value: T; lab
       const active = option.value === props.value;
       return <button key={option.value} type="button" onClick={() => props.onChange(option.value)}
         className={active
-          ? 'flex items-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-3 py-1.5 text-xs font-semibold text-white shadow-[0_2px_10px_color-mix(in_srgb,#C8920A_45%,transparent)]'
-          : 'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]'}>
+          ? 'flex items-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#D4920A,#F0B429)] px-3 py-1.5 text-xs font-semibold text-white shadow-[0_2px_10px_color-mix(in_srgb,#D4920A_45%,transparent)]'
+          : 'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B87808_8%,transparent)]'}>
         {Icon ? <Icon className="h-3.5 w-3.5" /> : null}{option.label}
       </button>;
     })}
@@ -199,7 +199,7 @@ function Notice(props: { tone: 'error' | 'info' | 'key'; title?: string; childre
     ? 'st-rise flex flex-wrap items-start gap-3 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_38%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,transparent)] p-4 text-sm'
     : 'st-rise flex flex-wrap items-start gap-3 rounded-xl border border-dashed border-[var(--space-border-strong)] bg-[var(--space-surface-panel)] p-4 text-sm'}>
     {error ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--space-semantic-danger)]" />
-      : props.tone === 'key' ? <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-[#C8920A]" />
+      : props.tone === 'key' ? <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-[#D4920A]" />
         : <Search className="mt-0.5 h-4 w-4 shrink-0 text-[var(--space-text-muted)]" />}
     <div className="min-w-[min(100%,220px)] flex-1 leading-relaxed text-[var(--space-text-secondary)]">
       {props.title ? <strong className="block text-[var(--space-text-primary)]">{props.title}</strong> : null}
@@ -887,7 +887,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
 
   const portrait = aspectRatio === '9:16';
 
-  return <div className="sfstudio relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]" style={{ backgroundImage: 'radial-gradient(1100px 520px at 12% -8%, rgba(200,146,10,.20), transparent 62%), radial-gradient(900px 480px at 92% 4%, rgba(200,146,10,.17), transparent 58%), linear-gradient(165deg,#FFFDF4,#FFFFFF 52%,#FFF3D6)' }}>
+  return <div className="sfstudio relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]" style={{ backgroundImage: 'radial-gradient(1100px 520px at 12% -8%, rgba(212,146,10,.20), transparent 62%), radial-gradient(900px 480px at 92% 4%, rgba(212,146,10,.17), transparent 58%), linear-gradient(165deg,#0D0B05,#15120A 52%,#1C1808)' }}>
     <style>{`
       @keyframes st-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
       @keyframes st-shimmer { 0%, 100% { opacity: .40; } 50% { opacity: .85; } }
@@ -898,21 +898,21 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
       ${SF_FIELD_CSS}
       .sfstudio .st-scroll::-webkit-scrollbar { width: 8px; }
       .sfstudio .st-scroll::-webkit-scrollbar-thumb { background: var(--space-border-strong); border-radius: 999px; }
-      .sfstudio input[type='range'] { accent-color: #C8920A; }
+      .sfstudio input[type='range'] { accent-color: #D4920A; }
       @media (prefers-reduced-motion: reduce) { .sfstudio *, .sfstudio *::before, .sfstudio *::after { animation: none !important; transition-duration: .01ms !important; } }
     `}</style>
 
-    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,#B4780A_14%,transparent)] bg-[color-mix(in_srgb,#FFFFFF_82%,transparent)] px-4 py-3 backdrop-blur sm:px-6">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#E8B737,#C8920A)] shadow-[0_4px_16px_rgba(200,146,10,.45)]"><Clapperboard className="h-4 w-4 text-white" /></span>
+    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,#B87808_14%,transparent)] bg-[color-mix(in_srgb,#FFFFFF_82%,transparent)] px-4 py-3 backdrop-blur sm:px-6">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#D4920A,#F0B429)] shadow-[0_4px_16px_rgba(212,146,10,.45)]"><Clapperboard className="h-4 w-4 text-white" /></span>
       <div className="min-w-0">
         <h1 className="truncate text-base font-bold tracking-tight">SceneForge Avatar Studio</h1>
         <p className="hidden text-xs text-[var(--space-text-muted)] sm:block">Live HeyGen avatars and voices — pick, write, generate, download.</p>
       </div>
       <div className="ml-auto flex items-center gap-2">
         <button type="button" onClick={() => setHistoryOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-xs font-medium text-[var(--space-text-secondary)] hover:border-[var(--space-border-strong)]">
-          <History className="h-4 w-4" /><span className="hidden sm:inline">Recent</span>{history.length ? <span className="rounded-full bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-1.5 text-[10px] font-bold text-white">{history.length}</span> : null}
+          <History className="h-4 w-4" /><span className="hidden sm:inline">Recent</span>{history.length ? <span className="rounded-full bg-[linear-gradient(135deg,#D4920A,#F0B429)] px-1.5 text-[10px] font-bold text-white">{history.length}</span> : null}
         </button>
-        {onOpenSuite ? <button type="button" onClick={onOpenSuite} title="Lock one character and brand across a whole multi-scene film" className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-white shadow-[0_2px_10px_color-mix(in_srgb,#C8920A_45%,transparent)]" style={{ backgroundImage: 'linear-gradient(135deg,#E8B737,#C8920A)' }}>
+        {onOpenSuite ? <button type="button" onClick={onOpenSuite} title="Lock one character and brand across a whole multi-scene film" className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-white shadow-[0_2px_10px_color-mix(in_srgb,#D4920A_45%,transparent)]" style={{ backgroundImage: 'linear-gradient(135deg,#D4920A,#F0B429)' }}>
           <Sparkles className="h-4 w-4" /><span className="hidden sm:inline">HeyGen Suite</span>
         </button> : null}
         {onOpenDirector ? <button type="button" onClick={onOpenDirector} title="Explain anything: the narrator speaks, an AI visual director decides what the screen shows, Remotion draws it" className="flex items-center gap-2 rounded-xl border border-[color-mix(in_srgb,#B4720A_55%,transparent)] bg-[color-mix(in_srgb,#B4720A_12%,transparent)] px-3 py-2 text-xs font-semibold text-[var(--space-text-primary)] hover:border-[#B4720A]">
@@ -942,7 +942,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
               </div>
 
               {avatarsLoading && !visibleAvatars.length ? <AvatarSkeletons />
-                : avatarsError && !avatarLibrary.length ? <Notice tone="error" title="The avatar catalog did not load" action={<button type="button" onClick={() => window.location.reload()} className="flex items-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3.5 w-3.5" />Retry</button>}>{avatarsError}</Notice>
+                : avatarsError && !avatarLibrary.length ? <Notice tone="error" title="The avatar catalog did not load" action={<button type="button" onClick={() => window.location.reload()} className="flex items-center gap-1.5 rounded-lg bg-[linear-gradient(135deg,#D4920A,#F0B429)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3.5 w-3.5" />Retry</button>}>{avatarsError}</Notice>
                   : !visibleAvatars.length ? <Notice tone="info" title={tab === 'indian' ? 'No Indian avatars matched yet' : 'No avatars match this search'} action={tab === 'indian' ? <button type="button" onClick={() => setTab('all')} className="rounded-lg border border-[var(--space-border-strong)] px-3 py-2 text-xs font-semibold text-[var(--space-text-primary)]">Show all avatars</button> : null}>
                     {tab === 'indian'
                       ? 'HeyGen does not tag avatars by country, so this tab matches on each look\u2019s own name, language and accent. Open All avatars and use the flag button on a card to add it here.'
@@ -958,10 +958,10 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
                           // the All tab where it is surrounded by everything
                           // else on the account.
                           return <div key={view.id} className={selected
-                            ? 'group relative rounded-xl border-2 border-[#C8920A] bg-[color-mix(in_srgb,#C8920A_12%,transparent)] p-2 shadow-[0_8px_26px_rgba(200,146,10,.28)]'
+                            ? 'group relative rounded-xl border-2 border-[#D4920A] bg-[color-mix(in_srgb,#D4920A_12%,transparent)] p-2 shadow-[0_8px_26px_rgba(212,146,10,.28)]'
                             : view.indian || pinned
-                              ? 'group relative rounded-xl border border-[color-mix(in_srgb,#C8920A_52%,transparent)] bg-[color-mix(in_srgb,#C8920A_7%,transparent)] p-2 hover:border-[#C8920A]'
-                              : 'group relative rounded-xl border border-[var(--space-border-default)] p-2 hover:border-[#C8920A] hover:bg-[color-mix(in_srgb,#C8920A_8%,transparent)]'}>
+                              ? 'group relative rounded-xl border border-[color-mix(in_srgb,#D4920A_52%,transparent)] bg-[color-mix(in_srgb,#D4920A_7%,transparent)] p-2 hover:border-[#D4920A]'
+                              : 'group relative rounded-xl border border-[var(--space-border-default)] p-2 hover:border-[#D4920A] hover:bg-[color-mix(in_srgb,#D4920A_8%,transparent)]'}>
                             <button type="button" onClick={() => chooseAvatar(view.id)} aria-pressed={selected} className="block w-full text-left">
                               {view.image
                                 ? <img src={view.image} alt={view.name} loading={index < 8 ? 'eager' : 'lazy'} decoding="async" className="aspect-[3/4] w-full rounded-lg bg-[var(--space-surface-muted)] object-cover" />
@@ -969,21 +969,21 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
                               <span className="mt-2 flex items-center gap-1">
                                 <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[var(--space-text-primary)]">{view.name}</span>
                                 {view.indian || pinned ? <span title={pinned ? 'You pinned this look to the Indian avatars tab.' : 'Matched as Indian on this look\u2019s own name, language or accent.'}
-                                  className="shrink-0 rounded-full bg-[color-mix(in_srgb,#C8920A_26%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#C8920A]">IN</span> : null}
+                                  className="shrink-0 rounded-full bg-[color-mix(in_srgb,#D4920A_26%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#D4920A]">IN</span> : null}
                               </span>
                               <span className="mt-0.5 block truncate text-[10px] uppercase tracking-wide text-[var(--space-text-muted)]">{[view.gender, view.styleLabel].filter(Boolean).join(' · ') || 'HeyGen look'}</span>
                             </button>
-                            {selected ? <span className="pointer-events-none absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[linear-gradient(135deg,#E8B737,#C8920A)] shadow"><Check className="h-3.5 w-3.5 text-white" /></span> : null}
+                            {selected ? <span className="pointer-events-none absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[linear-gradient(135deg,#D4920A,#F0B429)] shadow"><Check className="h-3.5 w-3.5 text-white" /></span> : null}
                             <button type="button" onClick={() => pin(view.id)} title={pinned ? 'Remove from the Indian avatars tab' : 'Add to the Indian avatars tab'} aria-label={pinned ? 'Remove from the Indian avatars tab' : 'Add to the Indian avatars tab'}
                               className={pinned
-                                ? 'absolute left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,#C8920A_85%,transparent)] text-[#1A1000]'
+                                ? 'absolute left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,#D4920A_85%,transparent)] text-[#1A1000]'
                                 : 'absolute left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,#0b1022_72%,transparent)] text-[var(--space-text-muted)] opacity-0 hover:text-white focus:opacity-100 group-hover:opacity-100'}>
                               <Flag className="h-3 w-3" />
                             </button>
                           </div>;
                         })}
                       </div>
-                      {visibleAvatars.length > avatarLimit ? <button type="button" onClick={() => setAvatarLimit((old) => old + 48)} className="mt-3 w-full rounded-xl border border-dashed border-[var(--space-border-strong)] py-3 text-sm font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]">Show more ({visibleAvatars.length - avatarLimit} remaining)</button> : null}
+                      {visibleAvatars.length > avatarLimit ? <button type="button" onClick={() => setAvatarLimit((old) => old + 48)} className="mt-3 w-full rounded-xl border border-dashed border-[var(--space-border-strong)] py-3 text-sm font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B87808_8%,transparent)]">Show more ({visibleAvatars.length - avatarLimit} remaining)</button> : null}
                     </>}
 
               <details className="mt-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] p-3">
@@ -992,7 +992,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
                   Paste an avatar_id from your own HeyGen account. Personal and instant avatars do not always appear in the grid above, and this is how to reach one. Leave it empty to use the presenter you picked.
                 </p>
                 <input value={customAvatarId} onChange={(event) => typeCustomAvatar(event.target.value)} placeholder="Paste a HeyGen avatar_id" spellCheck={false} autoComplete="off" aria-label="HeyGen avatar ID" className="st-field mt-2" />
-                {typedAvatarId ? <p className="mt-2 text-[11px] leading-relaxed text-[#C8920A]">
+                {typedAvatarId ? <p className="mt-2 text-[11px] leading-relaxed text-[#D4920A]">
                   This id is not in the catalog above, so there is no preview to show for it. HeyGen checks the id when you generate and says so if it does not exist on your account.
                 </p> : null}
               </details>
@@ -1025,7 +1025,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
               </Notice> : null}
             </div>
             {usingUpload ? <div className="space-y-3">
-              <div className="rounded-xl border border-dashed border-[color-mix(in_srgb,#C8920A_42%,transparent)] bg-[color-mix(in_srgb,#C8920A_7%,var(--space-surface-panel))] p-4">
+              <div className="rounded-xl border border-dashed border-[color-mix(in_srgb,#D4920A_42%,transparent)] bg-[color-mix(in_srgb,#D4920A_7%,var(--space-surface-panel))] p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h3 className="text-sm font-semibold text-[var(--space-text-primary)]">Upload your narration</h3>
@@ -1059,20 +1059,20 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
             </div> : voiceEngine === 'elevenlabs' ? <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <button type="button" aria-expanded={cloneOpen} onClick={() => { setCloneOpen((open) => !open); setCloneError(''); }} disabled={cloneRecording}
-                  className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#C8920A_42%,transparent)] bg-[color-mix(in_srgb,#C8920A_10%,transparent)] px-3 py-2 text-xs font-semibold text-[#C8920A] hover:bg-[color-mix(in_srgb,#C8920A_18%,transparent)] disabled:opacity-50">
+                  className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#D4920A_42%,transparent)] bg-[color-mix(in_srgb,#D4920A_10%,transparent)] px-3 py-2 text-xs font-semibold text-[#D4920A] hover:bg-[color-mix(in_srgb,#D4920A_18%,transparent)] disabled:opacity-50">
                   <Mic className="h-3.5 w-3.5" />Clone your own voice
                 </button>
               </div>
 
-              {cloneOpen ? <div className="st-rise rounded-xl border border-[color-mix(in_srgb,#C8920A_38%,transparent)] bg-[color-mix(in_srgb,#C8920A_8%,var(--space-surface-panel))] p-4">
+              {cloneOpen ? <div className="st-rise rounded-xl border border-[color-mix(in_srgb,#D4920A_38%,transparent)] bg-[color-mix(in_srgb,#D4920A_8%,var(--space-surface-panel))] p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-[var(--space-text-primary)]">Clone your own voice</h3>
                     <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-[var(--space-text-muted)]">Use 1\u20135 clean speech samples, ideally 1\u20133 minutes total. MP3, WAV, WebM, OGG, M4A, AAC and FLAC are supported; each file can be up to 10 MB and all files together up to 25 MB.</p>
                   </div>
-                  <span className="rounded-full bg-[color-mix(in_srgb,#C8920A_18%,transparent)] px-2.5 py-1 text-[10px] font-bold text-[#C8920A]">$1.00 per voice</span>
+                  <span className="rounded-full bg-[color-mix(in_srgb,#D4920A_18%,transparent)] px-2.5 py-1 text-[10px] font-bold text-[#D4920A]">$1.00 per voice</span>
                 </div>
-                <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,#C8920A_28%,transparent)] bg-[color-mix(in_srgb,#C8920A_8%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[var(--space-text-secondary)]">
+                <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,#D4920A_28%,transparent)] bg-[color-mix(in_srgb,#D4920A_8%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[var(--space-text-secondary)]">
                   Voice cloning costs $1.00 from this workspace\u2019s wallet. If creation fails, the charge is refunded automatically.
                 </p>
                 <label className="mt-3 block">
@@ -1104,7 +1104,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <span className="text-[10px] text-[var(--space-text-muted)]">{cloneSamples.length} / {MAX_CLONE_SAMPLES} samples · {(cloneTotalBytes / 1024 / 1024).toFixed(1)} / 25 MB</span>
                   <button type="button" onClick={() => void createClone()} disabled={cloneBusy || cloneRecording}
-                    className="flex items-center gap-2 rounded-lg bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-4 py-2 text-xs font-bold text-white shadow-[0_4px_14px_rgba(200,146,10,.3)] disabled:opacity-50">
+                    className="flex items-center gap-2 rounded-lg bg-[linear-gradient(135deg,#D4920A,#F0B429)] px-4 py-2 text-xs font-bold text-white shadow-[0_4px_14px_rgba(212,146,10,.3)] disabled:opacity-50">
                     {cloneBusy ? <VergeLoader size={28} label="Cloning your voice" /> : <Sparkles className="h-3.5 w-3.5" />}{cloneBusy ? 'Cloning voice\u2026' : 'Clone voice · $1.00'}
                   </button>
                 </div>
@@ -1159,12 +1159,12 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
               : voicesError && !voiceLibrary.length
                 ? <Notice tone="error" title="The voice catalog did not load">{voicesError}</Notice>
                 : <div ref={voiceBox} className="relative">
-                  <button type="button" onClick={() => setVoiceOpen((open) => !open)} aria-expanded={voiceOpen} className="flex w-full items-center gap-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-4 py-3 text-left hover:border-[#C8920A]">
+                  <button type="button" onClick={() => setVoiceOpen((open) => !open)} aria-expanded={voiceOpen} className="flex w-full items-center gap-3 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-4 py-3 text-left hover:border-[#D4920A]">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-[var(--space-text-primary)]">{selectedVoice?.name || 'Choose a voice'}</span>
                       <span className="block truncate text-xs text-[var(--space-text-muted)]">{selectedVoice ? [selectedVoice.language, selectedVoice.gender, voiceAccent(selectedVoice.raw)].filter(Boolean).join(' · ') : 'Search by language, accent or name'}</span>
                     </span>
-                    {selectedVoice?.indian ? <span className="shrink-0 rounded-full bg-[color-mix(in_srgb,#C8920A_22%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[#C8920A]">India</span> : null}
+                    {selectedVoice?.indian ? <span className="shrink-0 rounded-full bg-[color-mix(in_srgb,#D4920A_22%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[#D4920A]">India</span> : null}
                     <ChevronDown className={voiceOpen ? 'h-4 w-4 shrink-0 rotate-180 text-[var(--space-text-muted)]' : 'h-4 w-4 shrink-0 text-[var(--space-text-muted)]'} />
                   </button>
                   {voiceOpen ? <div className="st-rise absolute z-30 mt-2 w-full overflow-hidden rounded-xl border border-[var(--space-border-strong)] bg-[var(--space-surface-card)] shadow-2xl">
@@ -1188,14 +1188,14 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
                         // finger, and the click that commits the voice lands on nothing.
                         return <button key={view.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseVoice(view.id)}
                           className={selected
-                            ? 'flex w-full items-center gap-3 rounded-lg bg-[color-mix(in_srgb,#C8920A_16%,transparent)] px-3 py-2 text-left'
-                            : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]'}>
+                            ? 'flex w-full items-center gap-3 rounded-lg bg-[color-mix(in_srgb,#D4920A_16%,transparent)] px-3 py-2 text-left'
+                            : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-[color-mix(in_srgb,#B87808_8%,transparent)]'}>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-medium text-[var(--space-text-primary)]">{view.name}</span>
                             <span className="block truncate text-[11px] text-[var(--space-text-muted)]">{[view.language, view.gender, voiceAccent(view.raw)].filter(Boolean).join(' · ')}{unsupported ? ' · v2 only' : ''}</span>
                           </span>
-                          {view.indian ? <span className="shrink-0 rounded-full bg-[color-mix(in_srgb,#C8920A_22%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[#C8920A]">India</span> : null}
-                          {selected ? <Check className="h-4 w-4 shrink-0 text-[#C8920A]" /> : null}
+                          {view.indian ? <span className="shrink-0 rounded-full bg-[color-mix(in_srgb,#D4920A_22%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[#D4920A]">India</span> : null}
+                          {selected ? <Check className="h-4 w-4 shrink-0 text-[#D4920A]" /> : null}
                         </button>;
                       }) : <p className="px-3 py-6 text-center text-sm text-[var(--space-text-muted)]">No voice matches that search.</p>}
                     </div>
@@ -1208,7 +1208,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
               ? 'Your uploaded narration carries the words, so nothing here is spoken. Anything you write is kept as the label for this render and as the opening brief if you take it into the motion editor.'
               : 'Exactly these words are spoken on camera.'}
             action={<button type="button" onClick={() => void polish()} disabled={!script.trim() || polishing}
-              className="flex items-center gap-1.5 rounded-xl border border-[color-mix(in_srgb,#C8920A_45%,transparent)] bg-[color-mix(in_srgb,#C8920A_14%,transparent)] px-3 py-2 text-xs font-semibold text-[#C8920A] disabled:opacity-40">
+              className="flex items-center gap-1.5 rounded-xl border border-[color-mix(in_srgb,#D4920A_45%,transparent)] bg-[color-mix(in_srgb,#D4920A_14%,transparent)] px-3 py-2 text-xs font-semibold text-[#D4920A] disabled:opacity-40">
               {polishing ? <VergeLoader size={28} label="Improving your script" /> : <Sparkles className="h-3.5 w-3.5" />}Improve script
             </button>}>
             <textarea value={script} onChange={(event) => { setScript(event.target.value.slice(0, MAX_SCRIPT + 200)); setScriptNote(''); }} rows={7}
@@ -1238,7 +1238,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
                   <input type="color" value={backgroundColor} onChange={(event) => setBackgroundColor(event.target.value)} aria-label="Background colour" className="h-10 w-16 cursor-pointer rounded-lg border border-[var(--space-border-default)] bg-transparent" />
                   <div className="flex flex-wrap gap-2">
                     {['#0f172a', '#1e1b4b', '#111827', '#f8fafc', '#065f46', '#7c2d12'].map((swatch) => <button key={swatch} type="button" onClick={() => setBackgroundColor(swatch)} aria-label={`Use ${swatch}`}
-                      className={backgroundColor.toLowerCase() === swatch ? 'h-8 w-8 rounded-lg border-2 border-[#C8920A]' : 'h-8 w-8 rounded-lg border border-[var(--space-border-strong)]'} style={{ background: swatch }} />)}
+                      className={backgroundColor.toLowerCase() === swatch ? 'h-8 w-8 rounded-lg border-2 border-[#D4920A]' : 'h-8 w-8 rounded-lg border border-[var(--space-border-strong)]'} style={{ background: swatch }} />)}
                   </div>
                   <span className="text-xs text-[var(--space-text-muted)]">{backgroundColor}</span>
                 </div> : null}
@@ -1280,7 +1280,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
 
             <p className={usingUpload
               ? 'mt-3 inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,#166534_38%,transparent)] bg-[color-mix(in_srgb,#166534_12%,transparent)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#166534]'
-              : 'mt-3 inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,#C8920A_38%,transparent)] bg-[color-mix(in_srgb,#C8920A_12%,transparent)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#C8920A]'}>
+              : 'mt-3 inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,#D4920A_38%,transparent)] bg-[color-mix(in_srgb,#D4920A_12%,transparent)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#D4920A]'}>
               {usingUpload ? <><FileAudio className="h-3 w-3" />Using your narration</> : <><Volume2 className="h-3 w-3" />Using AI voice</>}
             </p>
 
@@ -1292,7 +1292,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
 
             {busy ? <div className="mt-4">
               <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--space-surface-muted)]">
-                <div className="h-full rounded-full bg-[linear-gradient(90deg,#E8B737,#C8920A)] transition-[width] duration-700 ease-out" style={{ width: `${Math.max(6, progress)}%` }} />
+                <div className="h-full rounded-full bg-[linear-gradient(90deg,#E8B737,#D4920A)] transition-[width] duration-700 ease-out" style={{ width: `${Math.max(6, progress)}%` }} />
               </div>
               <ol className="mt-3 space-y-1">
                 {pipelineSteps.map((step) => <li key={step.key} className="flex items-center gap-2 text-[11px]">
@@ -1304,7 +1304,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
               </ol>
               <p className="mt-2 text-xs text-[var(--space-text-secondary)]">{stageLabel} (60–120s in total) · {elapsed}s elapsed</p>
               <p className="mt-1 text-[11px] text-[var(--space-text-muted)]">You can leave this open — the render is picked back up if the page reloads.</p>
-              {stage === 'render' && elapsed > SLOW_RENDER_SEC ? <p className="mt-2 rounded-lg border border-[color-mix(in_srgb,#C8920A_32%,transparent)] bg-[color-mix(in_srgb,#C8920A_10%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[#C8920A]">
+              {stage === 'render' && elapsed > SLOW_RENDER_SEC ? <p className="mt-2 rounded-lg border border-[color-mix(in_srgb,#D4920A_32%,transparent)] bg-[color-mix(in_srgb,#D4920A_10%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[#D4920A]">
                 This is taking longer than expected. HeyGen still has the render and SceneForge is still watching it, so nothing is lost — you can check back later, and reopening the studio picks the render back up and shows it here when it lands.
               </p> : null}
             </div> : null}
@@ -1312,16 +1312,16 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
             {renderError ? <div className="mt-4"><Notice tone="error" title="HeyGen could not finish this video">{renderError}</Notice></div> : null}
 
             {phase === 'done' && videoUrl ? <div className="mt-4 space-y-2">
-              <button type="button" onClick={() => void save(videoUrl, videoId)} disabled={downloading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-4 py-3 text-sm font-semibold text-white shadow-[0_6px_20px_rgba(200,146,10,.4)] disabled:opacity-60">
+              <button type="button" onClick={() => void save(videoUrl, videoId)} disabled={downloading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#D4920A,#F0B429)] px-4 py-3 text-sm font-semibold text-white shadow-[0_6px_20px_rgba(212,146,10,.4)] disabled:opacity-60">
                 {downloading ? <VergeLoader size={32} label="Downloading" /> : <Download className="h-4 w-4" />}Download MP4
               </button>
               {onOpenEditor ? <button type="button" onClick={() => openEditor({ videoId, videoUrl, thumbnailUrl, aspectRatio, script: renderMeta.current.script || script })}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color-mix(in_srgb,#C8920A_45%,transparent)] bg-[color-mix(in_srgb,#C8920A_14%,transparent)] px-4 py-3 text-sm font-semibold text-[#C8920A] hover:bg-[color-mix(in_srgb,#C8920A_22%,transparent)]">
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color-mix(in_srgb,#D4920A_45%,transparent)] bg-[color-mix(in_srgb,#D4920A_14%,transparent)] px-4 py-3 text-sm font-semibold text-[#D4920A] hover:bg-[color-mix(in_srgb,#D4920A_22%,transparent)]">
                 <Wand2 className="h-4 w-4" />AI post-production
               </button> : null}
-              <button type="button" onClick={() => { setPhase('idle'); setVideoUrl(''); setVideoId(''); setElapsed(0); }} className="w-full rounded-xl border border-[var(--space-border-strong)] px-4 py-2.5 text-sm font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]">Make another video</button>
+              <button type="button" onClick={() => { setPhase('idle'); setVideoUrl(''); setVideoId(''); setElapsed(0); }} className="w-full rounded-xl border border-[var(--space-border-strong)] px-4 py-2.5 text-sm font-medium text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B87808_8%,transparent)]">Make another video</button>
             </div> : <button type="button" onClick={() => void generate()} disabled={!ready || busy}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#E8B737,#C8920A)] px-4 py-3.5 text-sm font-bold text-white shadow-[0_6px_20px_rgba(200,146,10,.4)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none">
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#D4920A,#F0B429)] px-4 py-3.5 text-sm font-bold text-white shadow-[0_6px_20px_rgba(212,146,10,.4)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none">
               {busy ? <VergeLoader size={32} label="Rendering your avatar video" /> : <Play className="h-4 w-4" />}{usingUpload ? 'Lip-sync my narration' : 'Generate video'}
             </button>}
 
@@ -1335,7 +1335,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
           {history.length ? <div className="st-rise rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-bold uppercase tracking-[.16em] text-[var(--space-text-muted)]">Recent videos</h2>
-              <button type="button" onClick={() => setHistory(clearHistory())} aria-label="Clear recent videos" className="rounded-lg p-1.5 text-[var(--space-text-muted)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]"><Trash2 className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => setHistory(clearHistory())} aria-label="Clear recent videos" className="rounded-lg p-1.5 text-[var(--space-text-muted)] hover:bg-[color-mix(in_srgb,#B87808_8%,transparent)]"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
             <ul className="mt-3 space-y-2">
               {history.map((entry) => <li key={entry.videoId} className="flex gap-3 rounded-xl border border-[var(--space-border-default)] p-2">
@@ -1346,7 +1346,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
                   <p className="line-clamp-2 text-xs leading-snug text-[var(--space-text-secondary)]">{entry.script || 'Untitled script'}</p>
                   <p className="mt-1 text-[10px] uppercase tracking-wide text-[var(--space-text-muted)]">{[entry.avatarName, entry.aspectRatio, relativeDate(entry.createdAt)].filter(Boolean).join(' · ')}</p>
                 </div>
-                <button type="button" onClick={() => void save(entry.videoUrl, entry.videoId)} aria-label="Download this video" className="self-center rounded-lg border border-[var(--space-border-strong)] p-2 text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B4780A_8%,transparent)]"><Download className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => void save(entry.videoUrl, entry.videoId)} aria-label="Download this video" className="self-center rounded-lg border border-[var(--space-border-strong)] p-2 text-[var(--space-text-secondary)] hover:bg-[color-mix(in_srgb,#B87808_8%,transparent)]"><Download className="h-3.5 w-3.5" /></button>
               </li>)}
             </ul>
           </div> : null}
@@ -1361,7 +1361,7 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
             <h2 className="text-base font-bold tracking-tight">Recent videos</h2>
             <p className="text-xs text-[var(--space-text-muted)]">The last {history.length || 'few'} renders from this browser.</p>
           </div>
-          <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Close recent videos" className="rounded-lg p-1.5 hover:bg-[color-mix(in_srgb,#B4780A_10%,transparent)]"><X className="h-5 w-5" /></button>
+          <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Close recent videos" className="rounded-lg p-1.5 hover:bg-[color-mix(in_srgb,#B87808_10%,transparent)]"><X className="h-5 w-5" /></button>
         </div>
         <div className="st-scroll flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {history.length ? history.map((entry) => <div key={entry.videoId} className="rounded-xl border border-[var(--space-border-default)] p-3">
@@ -1370,12 +1370,12 @@ export default function AvatarStudio({ onOpenPipeline, onOpenSuite, onOpenDirect
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <span className="text-[10px] uppercase tracking-wide text-[var(--space-text-muted)]">{[entry.avatarName, entry.voiceName, entry.aspectRatio, relativeDate(entry.createdAt)].filter(Boolean).join(' · ')}</span>
               <span className="flex items-center gap-1.5">
-                {onOpenEditor ? <button type="button" onClick={() => { setHistoryOpen(false); openEditor(entry); }} className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#C8920A_45%,transparent)] px-2.5 py-1.5 text-xs font-medium text-[#C8920A]"><Wand2 className="h-3.5 w-3.5" />Post-produce</button> : null}
+                {onOpenEditor ? <button type="button" onClick={() => { setHistoryOpen(false); openEditor(entry); }} className="flex items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,#D4920A_45%,transparent)] px-2.5 py-1.5 text-xs font-medium text-[#D4920A]"><Wand2 className="h-3.5 w-3.5" />Post-produce</button> : null}
                 <button type="button" onClick={() => void save(entry.videoUrl, entry.videoId)} className="flex items-center gap-1.5 rounded-lg border border-[var(--space-border-strong)] px-2.5 py-1.5 text-xs font-medium text-[var(--space-text-secondary)]"><Download className="h-3.5 w-3.5" />MP4</button>
               </span>
             </div>
           </div>) : <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-[var(--space-border-strong)] px-6 py-12 text-center">
-            <Wand2 className="h-6 w-6 text-[#C8920A]" />
+            <Wand2 className="h-6 w-6 text-[#D4920A]" />
             <p className="text-sm font-semibold">Nothing here yet</p>
             <p className="text-xs text-[var(--space-text-muted)]">Generate your first avatar video and it lands here with a one-tap MP4 download.</p>
           </div>}

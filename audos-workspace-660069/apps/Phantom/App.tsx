@@ -38,6 +38,7 @@ import { DEFAULT_ACCENT, INK, LINE, MONO, SPIN_CSS, TEXT, TEXT_DIM, TEXT_MUTED, 
 import { AccentProvider, Button, Notice, Breadcrumb, Pill, useAccent } from './ui';
 import { openVidvergeStudio, saveVidvergeHandoff } from '../../lib/vidvergeHandoff';
 import AppShell from '../../components/ui/AppShell';
+import { withBrandContext } from '../../components/BrandContextLayer';
 import BrandScreen from './screens/BrandScreen';
 import CompetitorsScreen from './screens/CompetitorsScreen';
 import CompareScreen from './screens/CompareScreen';
@@ -96,7 +97,9 @@ function Header({
   );
 }
 
-export default function VergeyeApp() {
+const BrandedVergeyeApp = withBrandContext(VergeyeApp, 'Vergeye', { useBrand: true });
+export default BrandedVergeyeApp;
+function VergeyeApp() {
   const [analysis, setAnalysis] = useState<Analysis>(emptyAnalysis);
   const [screen, setScreen] = useState<ScreenId>('brand');
   const [showSaved, setShowSaved] = useState(false);

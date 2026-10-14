@@ -40,10 +40,10 @@ const VergeMark: React.FC<VergeMarkProps> = function VergeMark({
         flex: '0 0 auto',
         borderRadius: Math.round(size * 0.3),
         background: plate
-          ? 'linear-gradient(140deg, rgba(200,146,10,0.16) 0%, rgba(224,163,58,0.12) 100%)'
+          ? 'linear-gradient(140deg, rgba(212,146,10,0.16) 0%, rgba(240,180,41,0.12) 100%)'
           : 'transparent',
         border: plate ? '1px solid ' + COLORS.border : 'none',
-        boxShadow: plate ? '0 0 18px rgba(200,146,10,0.22)' : 'none',
+        boxShadow: plate ? '0 0 18px rgba(212,146,10,0.22)' : 'none',
         ...style,
       }}
     >

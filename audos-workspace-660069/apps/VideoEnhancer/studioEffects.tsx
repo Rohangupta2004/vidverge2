@@ -35,19 +35,22 @@ import {
   SPEED_CURVES, ZOOM_INTENSITIES, rampRange, warpRate,
 } from './studioFx';
 import { languageLabel } from './studioCaptionKit';
+import { engineAvailabilityBadge, engineHealthWarning, isEngineAvailable } from '../../lib/videoEngines';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 
 const rowWrap: CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 };
 const hint: CSSProperties = { color: LB.textMuted, fontSize: 11, lineHeight: 1.55, marginTop: 6 };
 const miniBtn: CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(180,120,0,0.06)',
-  border: '1px solid rgba(180,120,0,0.14)', color: LB.textSecondary, borderRadius: 7,
+  display: 'inline-flex', alignItems: 'center', gap: 5, background: '#2A2410',
+  border: '1px solid rgba(255,255,255,0.07)', color: LB.textSecondary, borderRadius: 7,
   padding: '5px 10px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
 };
 const primaryBtn: CSSProperties = {
-  ...miniBtn, background: LB.accentGradient, color: '#241503', border: 'none', fontWeight: 800,
+  ...miniBtn, background: LB.accentGradient, color: '#ffffff', border: 'none', fontWeight: 800,
 };
 const numInput: CSSProperties = {
-  background: 'rgba(255,253,244,0.9)', border: '1px solid rgba(180,120,0,0.14)', borderRadius: 7,
+  background: '#18150A', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7,
   padding: '5px 7px', color: LB.textPrimary, fontSize: 12, width: '100%', boxSizing: 'border-box',
 };
 const groupTitle: CSSProperties = { color: LB.textSecondary, fontSize: 12, fontWeight: 650 };
@@ -136,7 +139,10 @@ function BrollPanel(props: {
               fontSize: 10, fontWeight: 800, cursor: props.omniGenerating ? 'not-allowed' : 'pointer',
             }}
           >
-            {MODEL_CHOICES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            {MODEL_CHOICES.map((m) => {
+              const badge = engineAvailabilityBadge(m.id);
+              return <option key={m.id} value={m.id} disabled={!isEngineAvailable(m.id)} title={engineHealthWarning(m.id) || undefined}>{m.label}{badge ? ` — ${badge.label}` : ''}</option>;
+            })}
           </select>
         </div>
         <textarea
@@ -161,19 +167,23 @@ function BrollPanel(props: {
           {props.omniGenerating ? `Generating${props.omniProgress ? ` · ${Math.round(props.omniProgress)}%` : '…'}` : 'Generate B-roll'}
         </button>
         {props.omniGenerating ? (
-          <div style={{ height: 5, borderRadius: 999, background: 'rgba(180,120,0,0.14)', overflow: 'hidden', marginTop: 8 }}>
-            <div style={{ width: `${Math.max(6, props.omniProgress)}%`, height: '100%', background: '#166534', transition: 'width .35s ease' }} />
-          </div>
+          <VideoGeneratingState
+            label="Generating subject-matched B-roll"
+            progress={props.omniProgress}
+            compact
+            style={{ marginTop: 8 }}
+          />
         ) : null}
-        {props.omniNote ? <div style={{ ...hint, color: '#166534' }}>{props.omniNote}</div> : null}
+        {props.omniNote ? <div style={{ ...hint, color: '#4ade80' }}>{props.omniNote}</div> : null}
         {props.omniError ? (
-          <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginTop: 8, padding: '7px 8px', borderRadius: 8, background: 'rgba(153,27,27,0.09)', border: '1px solid rgba(153,27,27,0.3)', color: '#991B1B', fontSize: 11, lineHeight: 1.5 }}>
-            <AlertCircle size={12} style={{ flexShrink: 0, marginTop: 2 }} />
-            <span style={{ flex: 1 }}>{props.omniError}</span>
-            <button type="button" className="vs-btn" disabled={props.omniGenerating} onClick={props.onGenerateOmni} style={{ ...miniBtn, padding: '3px 7px', color: '#991B1B' }}>
-              <RefreshCw size={10} /> Retry
-            </button>
-          </div>
+          <VideoErrorCard
+            error={props.omniError}
+            subject="this cutaway"
+            engineId={props.brollModel}
+            onRetry={props.onGenerateOmni}
+            compact
+            style={{ marginTop: 8 }}
+          />
         ) : null}
         <div style={hint}>Uses the main footage as a visual reference when available. Each result lands at the playhead as an editable overlay, so you can generate several and keep the best.</div>
       </div>

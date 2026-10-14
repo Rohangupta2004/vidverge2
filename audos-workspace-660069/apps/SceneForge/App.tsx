@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Circle, Clapperboard, Film, FolderOpen, ImagePlus, MessageSquareText, Plus, RefreshCw, Send, Settings, X } from 'lucide-react';
+import { CheckCircle2, Circle, Clapperboard, Film, FolderOpen, ImagePlus, MessageSquareText, Plus, Send, Settings, X } from 'lucide-react';
 import TopicInput from './components/TopicInput';
 import VergeLoader from '../../components/VergeLoader';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 import ScriptReview from './components/ScriptReview';
 import HeyGenModule from './components/HeyGenModule';
 import StylePicker from './components/StylePicker';
-import EditorHandoff from './components/EditorHandoff';
+import DirectorTimelineEditor from './components/DirectorTimelineEditor';
+import QcSheet from './components/QcSheet';
 import SettingsPanel from './components/SettingsPanel';
 import AssetStudio from './components/AssetStudio';
 import { useProject } from './hooks/useProject';
@@ -18,17 +21,18 @@ import { isExpiredHeyGenSignedUrl, isTerminalRenderFailure, useHeyGen } from './
 import { planScenes, routeChangeRequest, writeScript } from './agents/orchestrator';
 import { ensureMotionBackground, ensureSceneImage, generateSceneImage } from './lib/imageTool';
 import { generateSceneVideo, sceneVideoPrompt, setSceneVideoEngine } from './lib/videoTool';
-import { generatePortraitCalloutImage, generatePortraitImageCardPng, generatePortraitMotionOverlayFrames, generateSceneMotionClip, sceneMotionSpec } from './lib/motionCapture';
-// Directed production: Opus Motion Director → GSAP capture → visual QA with
-// auto-fix (see lib/motionPipeline). One call per motion scene.
-import { ensureFilmVariety, produceMotionScene } from './lib/motionPipeline';
+import { generatePortraitCalloutImage, generatePortraitImageCardPng, generatePortraitMotionCardPng } from './lib/motionCapture';
+import { sceneMotionSpec } from './lib/motionScene';
+// Directed production: Opus Motion Director → structured element composition
+// → server-side Remotion assembly (see lib/motionPipeline).
+import { ensureFilmVariety, produceLayeredVideoScene, produceMotionScene } from './lib/motionPipeline';
 import { findReusableAsset } from './lib/assetReuse';
 import { isMotionFingerprint, specFromOverlay } from './lib/motionSpec';
 import { getStyle } from './styles/registry';
 import { buildTimeline, createAssemblySource, timelineDurationInFrames } from './remotion/AssemblyComp';
 import { captionChunks, musicBedProps } from './remotion/compositionRuntime';
 import { runChecks } from './lib/checks';
-import { filmQaChecks, runFilmQa, verifyRenderOutput } from './lib/filmQa';
+import { filmQaChecks, runFilmQa, verifyRenderOutput, type FilmQaReport } from './lib/filmQa';
 import { validateTimeline } from './lib/timelineValidation';
 import { newGenerationId, planOf, treatmentOfScene, type DirectorPlan } from './lib/directorPlan';
 import { saveUpload } from './lib/storage';
@@ -40,7 +44,7 @@ import { sleep, uploadFile, workspaceToken } from './lib/proxy';
 import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
 import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
 import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
-import { videoEngine } from '../../lib/videoEngines';
+import { formatSceneDurationHint, validateSceneDurations, videoEngine } from '../../lib/videoEngines';
 import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
 import AppShell from '../../components/ui/AppShell';
 import { integrationForEngineId, type VideoIntegrationId } from '../../lib/videoIntegrations';
@@ -56,13 +60,14 @@ import { fetchVideoStatus } from './lib/heygenStudio';
 // timeline and a single collapsible panel. The step wizard below it is kept
 // only for first-run (topic -> script -> presenter -> style).
 import StudioWorkbench, { type SceneProgress } from './components/StudioWorkbench';
-import { DEFAULT_SCENE_PROVIDER, describeProviderFailure, estimateGeneration, estimateSecondsPerClip, probeProviders, type ProviderStatus } from './lib/providers';
+import { DEFAULT_SCENE_PROVIDER, describeProviderFailure, estimateGeneration, estimateSecondsPerClip, probeProviders, sceneForgeDurationLimits, type ProviderStatus } from './lib/providers';
 import { DEFAULT_STUDIO_CONFIG, applyAutoGraphics, postProductionProps, saveStudioConfig, studioConfigOf, type StudioConfig } from './lib/studioConfig';
 import { runSceneVision } from './lib/sceneVision';
 import { setSceneBroll, type BrollClip } from './lib/broll';
 import { sortElevenVoices, type ElevenVoice } from './lib/elevenLabs';
 import { pipelineFor } from './lib/voicePipeline';
 import { lipsyncScenes, narrateScenes, sceneSpeechWindows, scenesNeedingLipsync, scenesNeedingVoice, stampTimelineAudio } from './lib/sceneAudio';
+import { withBrandContext } from '../../components/BrandContextLayer';
 
 type View = 'library' | 'project' | 'settings';
 
@@ -84,7 +89,7 @@ const SURFACE_KEY = 'sceneforge_surface_v1';
 
 function friendlyErrorText(value: unknown): string {
   const raw = String(value || 'This step could not be completed.');
-  const named = raw.replace(/(?:openrouter\/[^\s,;]+|gemini-omni-flash-preview|veo-[\w.-]+)/g, (id) => videoEngine(id)?.label || 'the selected video engine');
+  const named = raw.replace(/(?:openrouter\/[^\s,;]+|gemini-omni-[\w.-]+|veo-[\w.-]+)/g, (id) => videoEngine(id)?.label || 'the selected video engine');
   if (/no_credentials|\b401\b/i.test(named)) return 'Your workspace session is not ready yet. Try again in a moment.';
   if (/insufficient|payment|required|\b402\b/i.test(named)) return 'This generation needs more workspace credits before it can start.';
   if (/rate.?limit|\b429\b/i.test(named)) return 'The production service is busy right now. Wait a moment, then try again.';
@@ -171,6 +176,7 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
   const [autoGraphicsBusy, setAutoGraphicsBusy] = useState(false);
   const [autoGraphicsNote, setAutoGraphicsNote] = useState('');
   const [characterNote, setCharacterNote] = useState('');
+  const [qcBusy, setQcBusy] = useState(false);
   // ---- Per-scene speech (the Audio tab) --------------------------------
   // The mode, voice and every clip live in studio_config.audio and ride the
   // same debounced save as the rest of the workbench; this is only the live
@@ -617,6 +623,9 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
       const context = await runSceneVision(scene, { force: true });
       if (context) setScenes((all) => all.map((item) => item.id === scene.id ? ({ ...item, vision_context: context } as Scene) : item));
       else setSceneImageError(`Scene ${scene.scene_index}: Gemini Vision could not read a frame from this clip in this browser, so there is no scene context for it. The film itself is unaffected.`);
+    } catch (error) {
+      console.warn('[SceneForge] scene vision failed:', error);
+      setSceneImageError(`Scene ${scene.scene_index}: the visual analysis could not finish. The film itself is unaffected; try Analyze again.`);
     } finally { setAnalyzingSceneId(null); }
   }
 
@@ -740,9 +749,19 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
   // Editing a scene's script invalidates its clip: the stored prompt is
   // cleared so the next generate actually re-films it instead of reusing the
   // old take.
-  async function editSceneScript(scene: Scene, description: string) {
+  async function editSceneScript(scene: Scene, description: string, durationS: number) {
     if (!description) return;
-    await patchScene(scene.id, { description, video_prompt: '', status: 'pending' });
+    const engineId = studio.provider || DEFAULT_SCENE_PROVIDER;
+    const paidVideoKind = ['ai_video', 'video_backed_graphic'].includes(sceneKind(scene));
+    const durationProblems = paidVideoKind
+      ? validateSceneDurations(engineId, [Math.round(durationS)], { limits: sceneForgeDurationLimits(engineId) })
+      : [];
+    if (durationProblems.length) {
+      setError(durationProblems[0].replace(/^Scene 1\b/, `Scene ${scene.scene_index}`));
+      return;
+    }
+    const start = Number(scene.script_start_sec) || 0;
+    await patchScene(scene.id, { description, script_end_sec: start + Math.round(durationS), video_prompt: '', status: 'pending' });
     await bumpDraftVersion();
   }
 
@@ -890,7 +909,7 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
   }
 
   // Produce every supporting scene, in parallel, by its own kind. AI-video
-  // scenes generate a real clip on the existing Omni pipeline and land
+  // scenes generate a real clip through Seedance 2 (canonical Omni fallback) and land
   // DIRECTLY on the timeline; text/graphics scenes at most draw one cached
   // still — their text, asset and preset effect are composed only inside the
   // ONE final assembly render. No per-scene Remotion render exists on either
@@ -898,6 +917,19 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
   async function generateSupportingScenes() {
     if (!project) return; setBusy(true); setError(''); setSceneImageError('');
     cancelBatch.current = false;
+    const engineId = studio.provider || DEFAULT_SCENE_PROVIDER;
+    const limits = sceneForgeDurationLimits(engineId);
+    const paidScenes = scenes.filter((scene) => ['ai_video', 'video_backed_graphic'].includes(sceneKind(scene)) && sceneNeedsGeneration(scene));
+    const durationProblems = paidScenes.flatMap((scene) => validateSceneDurations(
+      engineId,
+      [Math.round(Number(scene.script_end_sec) - Number(scene.script_start_sec))],
+      { limits },
+    ).map((problem) => problem.replace(/^Scene 1\b/, `Scene ${scene.scene_index}`)));
+    if (durationProblems.length) {
+      setError(`Scene durations must be fixed before generation: ${durationProblems.join(' ')}`);
+      setBusy(false);
+      return;
+    }
     try {
       await patch({ status: 'asset_gen' });
       const style = getStyle(project.style);
@@ -938,13 +970,13 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
       const reusePool = await listAssets(project.id).catch(() => [] as Asset[]);
       const queue = persisted.filter((scene) => sceneNeedsGeneration(scene)).sort((a, b) => a.scene_index - b.scene_index);
       const failures: string[] = [];
+      const fallbackNotices: string[] = [];
       const markScene = (id: string, changes: Partial<Scene>) => setScenes((all) => all.map((item) => item.id === id ? { ...item, ...changes } : item));
       // PER-SCENE PROGRESS. Three lanes pull from one queue, so the readout
       // reports the lowest scene still in flight plus how many have settled,
       // and estimates the remaining wait from the chosen engine's typical
       // clip time — "Generating scene 2 of 4 · about 3m left" rather than a
       // spinner with nothing behind it.
-      const engineId = studio.provider || DEFAULT_SCENE_PROVIDER;
       const totalToMake = queue.length;
       const inFlight = new Set<number>();
       let completed = 0;
@@ -973,6 +1005,11 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
             if (kind === 'ai_video') {
               const made = await generateSceneVideo(project, scene, { model: engineId, characterRefUrl: studio.character_photo_url });
               markScene(scene.id, { render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' });
+              if (made.fallbackNotice) {
+                fallbackNotices.push(made.fallbackNotice);
+                setNote(made.fallbackNotice);
+                pipelineLog('scene-media', 'provider-fallback', { projectId: project.id, sceneIndex: scene.scene_index, from: made.fallbackFrom, to: made.modelUsed, reason: made.fallbackNotice });
+              }
               // SCENE CONTEXT. The new clip's first frame goes straight to
               // Gemini Vision, so the sidebar can describe the shot and the
               // B-roll picker can suggest footage that matches it. A failed
@@ -981,10 +1018,22 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
                 .then((context) => { if (context) markScene(scene.id, { vision_context: context } as Partial<Scene>); })
                 .catch(() => undefined);
               pipelineLog('scene-media', 'scene-video-ready', { projectId: project.id, sceneIndex: scene.scene_index, reused: made.reused });
+            } else if (kind === 'video_backed_graphic') {
+              const orderedVbg = persisted.filter((row) => row.status !== 'skipped').sort((a, b) => a.scene_index - b.scene_index);
+              const positionVbg = orderedVbg.findIndex((row) => row.id === scene.id);
+              const madeVbg = await produceLayeredVideoScene(project, scene, {
+                neighbors: { prevKind: positionVbg > 0 ? sceneKind(orderedVbg[positionVbg - 1]) : 'heygen', nextKind: positionVbg >= 0 && positionVbg < orderedVbg.length - 1 ? sceneKind(orderedVbg[positionVbg + 1]) : 'heygen' },
+                onNote: (message) => {
+                  setNote(message);
+                  if (message.includes('Seedance 2 could not route')) fallbackNotices.push(message);
+                },
+              });
+              markScene(scene.id, { composition_spec: madeVbg.scene.composition_spec, video_prompt: madeVbg.fingerprint, status: 'ready', director_timeline: madeVbg.scene.director_timeline });
+              pipelineLog('scene-media', 'video-backed-ready', { projectId: project.id, sceneIndex: scene.scene_index });
             } else if (kind === 'motion_graphic' || kind === 'text_overlay') {
-              // The GSAP+SVG engine records this scene right here in the
-              // browser — deterministic text, real clip out — then the clip is
-              // uploaded and composited exactly like any other scene video.
+              // The element composer keeps this scene structured until the
+              // final server-side Remotion render — deterministic text and
+              // frame-accurate motion without recording in the browser.
               // An annotated-image layout with no backdrop first adopts a
               // matching existing project asset, so the frame shows a real,
               // relevant picture instead of an empty placeholder.
@@ -1019,17 +1068,16 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
                 }
               }
               // DIRECTED PRODUCTION: the Motion Director writes the scene's
-              // Visual Timeline, the GSAP engine captures it, and the visual
-              // QA loop inspects rendered frames (auto-fix + re-render, max 2
-              // retries; a scene still failing ships flagged, never silently).
+              // Visual Timeline, builds independent element layers, and runs
+              // deterministic structural QA before final Remotion assembly.
               const ordered = persisted.filter((row) => row.status !== 'skipped').sort((a, b) => a.scene_index - b.scene_index);
               const position = ordered.findIndex((row) => row.id === scene.id);
               const made = await produceMotionScene(project, target, {
                 neighbors: { prevKind: position > 0 ? sceneKind(ordered[position - 1]) : 'heygen', nextKind: position >= 0 && position < ordered.length - 1 ? sceneKind(ordered[position + 1]) : 'heygen' },
                 onNote: setNote,
               });
-              markScene(scene.id, { render_url: made.videoUrl, video_prompt: made.fingerprint, status: 'ready', qa_report: made.qa as unknown as Record<string, unknown>, director_timeline: made.scene.director_timeline, ...(target.spec !== scene.spec ? { spec: target.spec } : {}) });
-              pipelineLog('scene-media', 'motion-clip-ready', { projectId: project.id, sceneIndex: scene.scene_index, qa: made.qa.status, qaIssues: made.qa.issues.length });
+              markScene(scene.id, { composition_spec: made.scene.composition_spec, video_prompt: made.fingerprint, status: made.scene.status, qa_report: made.qa as unknown as Record<string, unknown>, director_timeline: made.scene.director_timeline, ...(target.spec !== scene.spec ? { spec: target.spec } : {}) });
+              pipelineLog('scene-media', 'remotion-composition-ready', { projectId: project.id, sceneIndex: scene.scene_index, qa: made.qa.status, qaIssues: made.qa.issues.length });
             } else {
               // Reuse first: an existing project asset that matches this
               // scene's subject is adopted for free before any generation.
@@ -1085,7 +1133,9 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
         await noteStage(project.id, `${failures.length} supporting scene${plural} failed — retry, switch to Text/Graphics, or skip`);
         throw new Error(`${failures.length} supporting scene${plural} failed. ${failures[0]}. Each failed scene can be retried, switched to Text/Graphics, or skipped — the rest of the film is unaffected.`);
       }
-      const readyNote = 'Every supporting scene is settled — ready to assemble';
+      const readyNote = fallbackNotices.length
+        ? `Every supporting scene is settled — ready to assemble. ${fallbackNotices.join(' ')}`
+        : 'Every supporting scene is settled — ready to assemble';
       setNote(readyNote);
       await noteStage(project.id, readyNote);
     } catch (e: any) { pipelineLog('assets', 'error', { projectId: project.id, message: e.message }); setError(e.message); }
@@ -1111,12 +1161,16 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
       if (kind === 'ai_video') {
         const made = await generateSceneVideo(project, scene, { force: true, model: studio.provider || DEFAULT_SCENE_PROVIDER, characterRefUrl: studio.character_photo_url });
         setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: sceneVideoPrompt(scene), status: 'ready' as const } : item));
+        if (made.fallbackNotice) setNote(made.fallbackNotice);
         void runSceneVision({ ...scene, render_url: made.videoUrl } as Scene)
           .then((context) => { if (context) setScenes((all) => all.map((item) => item.id === scene.id ? ({ ...item, vision_context: context } as Scene) : item)); })
           .catch(() => undefined);
+      } else if (kind === 'video_backed_graphic') {
+        const made = await produceLayeredVideoScene(project, scene, { force: true, onNote: setNote });
+        setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, composition_spec: made.scene.composition_spec, video_prompt: made.fingerprint, status: 'ready' as const, director_timeline: made.scene.director_timeline } : item));
       } else if (kind === 'motion_graphic' || kind === 'text_overlay') {
         const made = await produceMotionScene(project, scene, { force: true, onNote: setNote });
-        setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.videoUrl, video_prompt: made.fingerprint, status: 'ready' as const, qa_report: made.qa as unknown as Record<string, unknown>, director_timeline: made.scene.director_timeline } : item));
+        setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, composition_spec: made.scene.composition_spec, video_prompt: made.fingerprint, status: made.scene.status, qa_report: made.qa as unknown as Record<string, unknown>, director_timeline: made.scene.director_timeline } : item));
       } else {
         const made = await generateSceneImage(project, scene, settings.image_model, getStyle(project.style));
         setScenes((all) => all.map((item) => item.id === scene.id ? { ...item, render_url: made.url, status: 'ready' as const } : item));
@@ -1131,7 +1185,7 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
   }
 
   // Error recovery: a failed clip becomes a deterministic text-overlay scene
-  // (captured by the motion engine on the next generate pass) — the film keeps
+  // (composed by Remotion on the next generate pass) — the film keeps
   // its beat with exact text instead of losing the scene.
   async function convertSceneToText(scene: Scene) {
     const overlay = scene.overlay_config && (scene.overlay_config.text || scene.overlay_config.subtext) ? scene.overlay_config : defaultOverlay(scene.description);
@@ -1147,18 +1201,19 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
     await patchScene(scene.id, { status: needs ? 'pending' : 'ready' });
   }
 
-  // The Scene editor's four-way type switch (AI Video / Image / Motion
-  // Graphic / Text Overlay). Existing media is kept where it still fits the
+  // The Scene editor's kind switch (AI Video / Image / Motion Graphic /
+  // Text Overlay / Video + Graphics). Existing media is kept where it still fits the
   // new kind, so flipping back and forth never destroys paid work — only a
   // kind that genuinely needs different media re-queues the scene.
   async function switchSceneKind(scene: Scene, kind: VisualKind) {
     if (visualKindOf(scene.visual_kind) === kind && scene.visual_kind) return;
     const changes: Partial<Scene> = { visual_kind: kind };
     if ((kind === 'text_overlay' || kind === 'motion_graphic' || kind === 'text_graphics') && !scene.overlay_config) changes.overlay_config = defaultOverlay(scene.description);
-    if (kind === 'motion_graphic' && !scene.spec) changes.spec = specFromOverlay(scene.overlay_config, scene.description) as any;
-    // A motion-capture fingerprint parked in video_prompt is not an AI video
-    // prompt — switching to AI Video restages the prompt from the scene text.
-    if (kind === 'ai_video' && (!scene.video_prompt || isMotionFingerprint(scene.video_prompt))) changes.video_prompt = [String(scene.description || '').trim(), String(scene.motion_notes || '').trim()].filter(Boolean).join('. ');
+    if ((kind === 'motion_graphic' || kind === 'video_backed_graphic') && !scene.spec) changes.spec = specFromOverlay(scene.overlay_config, scene.description) as any;
+    if (kind === 'video_backed_graphic' && !scene.composition_spec) changes.composition_spec = { version: 1, type: 'video_backed_graphic', background_prompt: [scene.description, scene.motion_notes].filter(Boolean).join('. ') };
+    // Composition/legacy-capture fingerprints parked in video_prompt are not
+    // AI video prompts — switching to AI Video restages from the scene text.
+    if (kind === 'ai_video' && (!scene.video_prompt || isMotionFingerprint(scene.video_prompt) || /^(vbg|ec):/.test(scene.video_prompt))) changes.video_prompt = [String(scene.description || '').trim(), String(scene.motion_notes || '').trim()].filter(Boolean).join('. ');
     const probe = { ...scene, ...changes, status: 'pending' } as Scene;
     changes.status = sceneNeedsGeneration(probe) ? 'pending' : 'ready';
     await patchScene(scene.id, changes);
@@ -1277,7 +1332,8 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
     mergeProject(next);
     // The six mechanical checks plus the film-level output QA (verified file +
     // black/frozen frame sweep) — eight verdicts in one list.
-    const qa = await runFilmQa(videoUrl, verification);
+    const cutTimesSec = timeline.filter((segment) => segment.type === 'scene' && segment.startSec > 0).map((segment) => segment.startSec);
+    const qa = await runFilmQa(videoUrl, verification, 11, { cutTimesSec });
     const checks = [...await runChecks(next, sceneRows, assets, previousHash), ...filmQaChecks(verification, qa)];
     // STALE-RESULT PROTECTION: if the plan was edited while this render was in
     // flight, this output is an OLDER draft — it is shown, but never promoted
@@ -1396,18 +1452,25 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
         if (studio.audio.mode !== 'off') pipelineLog('joiner', 'scene-audio-unsupported-portrait', { projectId, mode: studio.audio.mode });
         await push({ progress: 14, message: 'Compositing scene overlays and presenter callouts…' });
         // The endpoint accepts only full-frame assets, but its FFmpeg pipeline
-        // preserves PNG alpha. That alpha channel is what powers the
-        // COMPOSITION MODES here: an overlay/central motion graphic ships as a
-        // short sequence of timed 1080x1920 RGBA stills (transparent
-        // everywhere except the graphic tile, sampled from the same GSAP
-        // timeline the preview plays) so it builds up OVER the visible
-        // presenter; an overlay/central image ships as a framed card PNG; only
+        // preserves PNG alpha. That alpha channel powers the COMPOSITION MODES
+        // here: overlay/central motion graphics and images ship as deterministic
+        // transparent 1080x1920 cards built from their stored specs, while only
         // fullscreen cutaways, AI clips and full-bleed stills cover the frame.
         const sceneById = new Map<string, Scene>(scenes.map((scene): [string, Scene] => [scene.id, scene]));
         const overlayGroups = await Promise.all(timeline.filter((segment) => segment.type === 'scene').map(async (segment): Promise<{ asset_url: string; start_time: number; end_time: number; position: 'full' }[]> => {
           const sourceScene = segment.sceneId ? sceneById.get(segment.sceneId) : undefined;
           const startTime = segment.startSec;
           const endTime = segment.startSec + segment.frames / 30;
+          if (segment.videoBacked?.background_clip_url && sourceScene) {
+            // The public Remotion service is fixed at 16:9. Portrait keeps the
+            // generated footage and places one deterministic transparent card
+            // from the same stored spec above it — no tab-timed capture.
+            const graphicUrl = await generatePortraitMotionCardPng(current, sourceScene, { mode: 'central', position: 'center', scale: 0.94 });
+            return [
+              { asset_url: segment.videoBacked.background_clip_url, start_time: startTime, end_time: endTime, position: 'full' as const },
+              { asset_url: graphicUrl, start_time: startTime, end_time: endTime, position: 'full' as const },
+            ];
+          }
           if (segment.overlay?.overAvatar === true) {
             if (!sourceScene) throw new Error('An over-avatar callout lost its source scene. Reopen the project and assemble again.');
             const calloutUrl = await generatePortraitCalloutImage(current, sourceScene);
@@ -1418,9 +1481,9 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
             const kind = visualKindOf(sourceScene.visual_kind);
             if (kind === 'motion_graphic' || kind === 'text_overlay') {
               try {
-                const frames = await generatePortraitMotionOverlayFrames(current, sourceScene, { mode: comp.mode, position: comp.position as any, scale: comp.scale });
-                pipelineLog('joiner', 'composited-motion-overlay', { projectId, sceneIndex: sourceScene.scene_index, mode: comp.mode, frameCount: frames.length });
-                return frames.map((frame) => ({ asset_url: frame.url, start_time: Math.round((startTime + frame.start) * 1000) / 1000, end_time: Math.round(Math.min(endTime, startTime + frame.end) * 1000) / 1000, position: 'full' as const })).filter((entry) => entry.end_time > entry.start_time);
+                const cardUrl = await generatePortraitMotionCardPng(current, sourceScene, { mode: comp.mode, position: comp.position as any, scale: comp.scale });
+                pipelineLog('joiner', 'composited-motion-card', { projectId, sceneIndex: sourceScene.scene_index, mode: comp.mode });
+                return [{ asset_url: cardUrl, start_time: startTime, end_time: endTime, position: 'full' as const }];
               } catch (compositeError: any) {
                 // The captured clip below still ships the scene — as a cutaway —
                 // rather than losing the beat over a failed transparent frame.
@@ -1450,8 +1513,8 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
               const kind = visualKindOf(sourceScene.visual_kind);
               pipelineLog('joiner', 'broken-overlay-clip', { projectId, sceneIndex: sourceScene.scene_index, bytes, kind });
               if (kind === 'motion_graphic') {
-                setNote(`Scene ${sourceScene.scene_index}'s motion clip had no frames — re-capturing it before the composite`);
-                assetUrl = (await generateSceneMotionClip(current, sourceScene, { force: true })).videoUrl;
+                setNote(`Scene ${sourceScene.scene_index}'s legacy motion clip had no frames — rebuilding it as a deterministic portrait card`);
+                assetUrl = await generatePortraitMotionCardPng(current, sourceScene, { mode: 'fullscreen', position: 'center', scale: 0.94 });
               } else if (kind === 'text_overlay' || kind === 'text_graphics') {
                 setNote(`Scene ${sourceScene.scene_index}'s captured clip had no frames — compositing its text as a safe-zone callout instead`);
                 assetUrl = await generatePortraitCalloutImage(current, sourceScene);
@@ -1577,6 +1640,25 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
     } finally { if (stopTicker) stopTicker(); assembling.current = false; assemblyAbort.current = null; setBusy(false); setNote(''); }
   }
 
+  async function rerunFilmQc() {
+    if (!project?.assembled_video_url || qcBusy) return;
+    setQcBusy(true); setError('');
+    try {
+      const [sceneRows, assets] = await Promise.all([listScenes(project.id), listAssets(project.id)]);
+      const timeline = buildTimeline(project, sceneRows, assets);
+      const expectedSec = timelineDurationInFrames(timeline, Number(project.avatar_duration_sec || project.estimated_duration_sec || project.target_length_sec) || 0) / 30;
+      const verification = await verifyRenderOutput(project.assembled_video_url, expectedSec);
+      const qa = await runFilmQa(project.assembled_video_url, verification, 11, { cutTimesSec: timeline.filter((segment) => segment.type === 'scene' && segment.startSec > 0).map((segment) => segment.startSec) });
+      const priorMechanical = (project.checks || []).filter((check) => check.id !== 'output_verified' && check.id !== 'frame_sweep' && check.id !== 'film_qc_sheet');
+      const mechanical = priorMechanical.length >= 6 ? priorMechanical : await runChecks(project, sceneRows, assets);
+      const checks = [...mechanical, ...filmQaChecks(verification, qa)];
+      const status: Project['status'] = checks.every((check) => check.pass) ? 'done' : 'checks';
+      await updateProject(project.id, { final_qa_report: qa as unknown as Record<string, unknown>, checks, status, stage_note: status === 'done' ? 'Film QC passed' : 'Film QC found frames that need review' });
+      setProject((current) => current ? { ...current, final_qa_report: qa as unknown as Record<string, unknown>, checks, status } : current);
+    } catch (e: any) { setError(String(e?.message || e)); }
+    finally { setQcBusy(false); }
+  }
+
   function openEditor() {
     if (!project?.assembled_video_url) return;
     const payload = { url: project.assembled_video_url, title: project.topic, mode: 'edit', manifest: project.editor_manifest, ts: Date.now() };
@@ -1699,6 +1781,8 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
     failedChecks.length ? `Delivery checks need attention — ${failedChecks.map((check) => `${check.label}: ${check.detail}`).join(' · ')}` : '',
   ].filter(Boolean).join(' · ');
   const pendingWindows = scenes.filter((scene) => sceneNeedsGeneration(scene)).map((scene) => Number(scene.script_end_sec) - Number(scene.script_start_sec));
+  const selectedDurationLimits = sceneForgeDurationLimits(studio.provider || DEFAULT_SCENE_PROVIDER);
+  const sceneDurationHintText = formatSceneDurationHint(selectedDurationLimits);
   const workbenchMode = Boolean(project && view === 'project' && WORKBENCH_STATUSES.includes(project.status));
 
   const workbench = project ? <StudioWorkbench
@@ -1710,6 +1794,7 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
     providersLoading={providersLoading}
     onRefreshProviders={refreshProviders}
     estimate={estimateGeneration(pendingWindows, studio.provider || DEFAULT_SCENE_PROVIDER)}
+    durationHint={sceneDurationHintText}
     progress={sceneProgress}
     busy={busy}
     note={workbenchNote}
@@ -1732,7 +1817,7 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
     onFilmAsVideo={(scene) => void switchSceneKind(scene, 'ai_video')}
     onSkipScene={(scene) => void skipScene(scene)}
     onUnskipScene={(scene) => void unskipScene(scene)}
-    onEditSceneScript={(scene, description) => void editSceneScript(scene, description)}
+    onEditSceneScript={(scene, description, durationS) => void editSceneScript(scene, description, durationS)}
     onUploadSceneMedia={(scene, file) => void uploadScene(scene, file)}
     generatingSceneId={generatingSceneId}
     onSaveScript={(script) => void applyScript(script)}
@@ -1777,7 +1862,8 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
     if (project.status === 'avatar_render') return <HeyGenModule avatars={heygen.avatars} voices={heygen.voices} catalogLoading={heygen.catalogLoading} catalogError={heygen.catalogError} aspectRatio={project.aspect_ratio} progress={heygen.progress} busy={busy} videoUrl={project.heygen_video_url} refreshingVideoLink={refreshingVideoLink} onVideoError={() => void refreshAvatarVideoUrl(project).catch((e: any) => setError(String(e?.message || e)))} onGenerate={(options) => void generateAvatar(options)} />;
     if (project.status === 'style_choice') return <StylePicker value={project.style} onChange={(style) => void patch({ style })} onConfirm={() => void confirmStyle()} />;
     if (project.status === 'scene_planning') return <Working text={note || 'Verger is timing supporting scenes against the avatar'} />;
-    if (project.status === 'editing') return <EditorHandoff project={project} scenes={scenes} onOpen={openEditor} />;
+    if (project.status === 'editing') return <DirectorTimelineEditor project={project} scenes={scenes} onSaved={(saved) => setScenes((all) => all.map((scene) => scene.id === saved.id ? saved : scene))} onBack={() => void patch({ status: project.assembled_video_url ? 'checks' : 'scene_review' })} onOpenFinishingEditor={openEditor} />;
+    if ((project.status === 'checks' || project.status === 'done') && project.assembled_video_url) return <QcSheet videoUrl={String(project.assembled_video_url || '')} report={(project.final_qa_report || null) as unknown as FilmQaReport | null} checks={project.checks || []} busy={qcBusy} onRun={() => void rerunFilmQc()} onBack={() => void patch({ status: 'scene_review' })} onEdit={() => void patch({ status: 'editing' })} />;
     // From the scene plan onward there is ONE surface, not a stack of step
     // screens: the workbench owns planning review, generation, the preview
     // and the export.
@@ -1787,7 +1873,7 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
 
   // The space surface token stays the base colour; the gradient rides on top of
   // it as a background IMAGE, so the shell theme still drives the palette.
-  return <div className="sceneforge-app relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]" style={{ backgroundImage: 'linear-gradient(160deg, #FFFDF4, #FFF3D6)' }}>
+  return <div className="sceneforge-app relative flex h-full min-h-[560px] flex-col overflow-hidden bg-[var(--space-surface-bg)] text-[var(--space-text-primary)]" style={{ backgroundImage: 'radial-gradient(ellipse 72% 44% at 50% -8%, color-mix(in srgb, var(--space-brand-primary-500) 10%, transparent), transparent 64%), linear-gradient(160deg, var(--space-surface-bg, #08090B), var(--space-surface-panel, #171A21))' }}> 
     <style>{`
       @keyframes sf-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
       @keyframes sf-pulse { 0%, 100% { opacity: .42; } 50% { opacity: .82; } }
@@ -1815,12 +1901,12 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
       }
       @media (prefers-reduced-motion: reduce) { .sceneforge-app *, .sceneforge-app *::before, .sceneforge-app *::after { animation: none !important; transition-duration: 0.01ms !important; } }
     `}</style>
-    {workbenchMode ? null : <header className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--space-border-default)] bg-[var(--space-surface-card)] px-5"><button onClick={() => { setView('library'); setProject(null); void refreshLibrary(); }} className="flex items-center gap-2.5 rounded-xl px-1.5 py-1 font-bold tracking-tight transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]">SceneForge</button><span className="hidden text-sm text-[var(--space-text-muted)] sm:block">Avatar-first explainers, directed scene by scene</span><div className="ml-auto flex gap-2"><button onClick={onExitToStudio} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Clapperboard className="h-4 w-4" />Avatar Studio</button>{project ? <button onClick={() => setAssetStudioOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><ImagePlus className="h-4 w-4" />Asset Studio</button> : null}<button onClick={() => setVergerOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><MessageSquareText className="h-4 w-4" />Verger</button><button aria-label="Settings" onClick={() => setView('settings')} className="rounded-xl border border-[var(--space-border-default)] p-2 transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Settings className="h-4 w-4" /></button></div></header>}
-    {!workbenchMode && error ? <div role="alert" className="sf-fade-up flex flex-wrap items-center gap-3 border-b border-[color-mix(in_srgb,var(--space-semantic-danger-500)_35%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_14%,transparent)] px-4 py-3 text-sm leading-relaxed sm:px-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_14%,transparent)]"><AlertTriangle className="h-4 w-4 text-[var(--space-semantic-danger)]" /></span><span className="min-w-[min(100%,240px)] flex-1 text-[var(--space-text-secondary)]"><strong className="block text-[var(--space-text-primary)]">This step needs attention</strong>{friendlyErrorText(error)}</span><button onClick={() => window.location.reload()} className="flex items-center gap-1.5 rounded-xl bg-[var(--space-brand-primary-600)] px-3 py-2 text-xs font-semibold text-white"><RefreshCw className="h-3.5 w-3.5" />Retry</button><button aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded-lg p-1.5 text-[var(--space-semantic-danger)] hover:bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_18%,transparent)]"><X className="h-4 w-4" /></button></div> : null}
+    {workbenchMode ? null : <header className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-card)_92%,transparent)] px-5 shadow-[0_12px_34px_rgba(0,0,0,0.18)] backdrop-blur-xl"><button onClick={() => { setView('library'); setProject(null); void refreshLibrary(); }} className="flex items-center gap-2.5 rounded-xl px-1.5 py-1 font-bold tracking-tight transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]">SceneForge</button><span className="hidden text-sm text-[var(--space-text-muted)] sm:block">Avatar-first explainers, directed scene by scene</span><div className="ml-auto flex gap-2"><button onClick={onExitToStudio} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Clapperboard className="h-4 w-4" />Avatar Studio</button>{project ? <button onClick={() => setAssetStudioOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><ImagePlus className="h-4 w-4" />Asset Studio</button> : null}<button onClick={() => setVergerOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3 py-2 text-sm font-medium transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><MessageSquareText className="h-4 w-4" />Verger</button><button aria-label="Settings" onClick={() => setView('settings')} className="rounded-xl border border-[var(--space-border-default)] p-2 transition-all hover:border-[var(--space-border-strong)] hover:bg-[color-mix(in_srgb,var(--space-text-primary)_5%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Settings className="h-4 w-4" /></button></div></header>}
+    {!workbenchMode && error ? <div className="sf-fade-up border-b border-[var(--space-border-default)] px-4 py-3 sm:px-5"><VideoErrorCard error={error} engineId={studio.provider} subject="this SceneForge step" onRetry={() => window.location.reload()} onDismiss={() => setError('')} compact /></div> : null}
     {!workbenchMode && project && vergerSteps.length ? <details className="shrink-0 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2.5"><summary className="cursor-pointer text-xs font-semibold text-[var(--space-text-secondary)]">Production status — <span className="font-normal text-[var(--space-text-muted)]">{project.stage_note || note || (busy ? 'Working on the current stage' : 'Waiting for you')}</span></summary><div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">{vergerSteps.map((step) => <span key={step.label} className="flex items-center gap-2 text-xs">{step.state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--space-semantic-success)]" /> : step.state === 'active' ? <VergeLoader size={30} label={`${step.label} in progress`} /> : <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--space-text-muted)]" />}<span className={step.state === 'todo' ? 'text-[var(--space-text-muted)]' : 'text-[var(--space-text-secondary)]'}>{step.label}</span></span>)}</div></details> : null}
     {refreshingVideoLink ? <div className="flex shrink-0 items-center gap-2 border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-5 py-2 text-xs text-[var(--space-text-muted)]"><VergeLoader size={30} label="Refreshing video link" />Refreshing video link…</div> : null}
     <main className={workbenchMode ? 'min-h-0 flex-1 overflow-hidden' : 'flex-1 overflow-y-auto'}>{content()}</main>
-    {sceneImageError ? <div role="alert" className="sf-fade-up absolute bottom-4 left-4 right-4 z-30 flex max-w-sm flex-wrap items-start gap-3 rounded-xl border border-[color-mix(in_srgb,var(--space-semantic-danger-500)_40%,transparent)] bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_12%,var(--space-surface-card))] p-4 text-sm text-[var(--space-text-primary)] shadow-2xl sm:left-auto sm:right-5"><AlertTriangle className="h-4 w-4 shrink-0 text-[var(--space-semantic-danger)]" /><span className="min-w-0 flex-1">{friendlyErrorText(sceneImageError)}</span><button onClick={() => window.location.reload()} className="flex items-center gap-1 rounded-lg bg-[var(--space-brand-primary-600)] px-2.5 py-1.5 text-xs font-semibold text-white"><RefreshCw className="h-3 w-3" />Retry</button><button aria-label="Dismiss image generation error" onClick={() => setSceneImageError('')} className="rounded-lg p-1"><X className="h-4 w-4" /></button></div> : null}
+    {sceneImageError ? <div className="sf-fade-up absolute bottom-4 left-4 right-4 z-30 max-w-md sm:left-auto sm:right-5"><VideoErrorCard error={sceneImageError} engineId={studio.provider} subject="this scene" onRetry={() => window.location.reload()} onDismiss={() => setSceneImageError('')} compact /></div> : null}
     {vergerOpen ? <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-xl flex-col border-l border-[var(--space-border-default)] bg-[var(--space-surface-card)] shadow-2xl">
       <div className="flex items-center justify-between border-b border-[var(--space-border-default)] px-6 py-4"><div><h2 className="text-lg font-bold tracking-tight">Verger</h2><p className="mt-0.5 text-xs text-[var(--space-text-muted)]">Your project director — it knows this project, its scenes and its timeline</p></div><button aria-label="Close Verger" onClick={() => setVergerOpen(false)} className="rounded-lg p-1.5 transition-colors hover:bg-[color-mix(in_srgb,var(--space-text-primary)_7%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><X className="h-5 w-5" /></button></div>
       {project && vergerSteps.length ? <div className="border-b border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-6 py-3">
@@ -1847,8 +1933,8 @@ function ForgePipeline({ onExitToStudio }: { onExitToStudio: () => void }) {
   </div>;
 }
 
-function Working({ text }: { text: string }) { return <div className="flex h-full min-h-[420px] items-center justify-center px-4"><div className="sf-fade-up w-full max-w-sm rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-6 text-center shadow-xl"><VergeLoader size={120} caption={text} /><p className="mt-4 text-sm text-[var(--space-text-muted)]">Your progress is saved as each stage lands.</p></div></div>; }
-function Library({ projects, loading, onOpen, onNew }: { projects: Project[]; loading: boolean; onOpen: (id: string) => void; onNew: () => void }) { return <div className="mx-auto max-w-6xl px-6 py-10"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Your studio</p><h1 className="mt-2 text-3xl font-bold tracking-tight">SceneForge projects</h1></div><button onClick={onNew} className="flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_6px_18px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Plus className="h-4 w-4" />New project</button></div>{loading ? <div className="mt-7 flex justify-center py-10"><VergeLoader size={120} caption="Loading your projects" /></div> : <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project.id)} className="group rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 text-left transition-all hover:-translate-y-0.5 hover:border-[var(--space-border-strong)] hover:shadow-[0_10px_30px_rgba(120,80,0,0.14)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><FolderOpen className="h-5 w-5 text-[var(--space-text-brand)] transition-transform group-hover:scale-110" /><div className="mt-4 line-clamp-2 font-semibold leading-snug">{project.topic}</div><div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--space-text-muted)]">{project.status.replace(/_/g, ' ')} · {project.aspect_ratio}</div></button>)}{!projects.length ? <div className="col-span-full flex flex-col items-center rounded-2xl border border-dashed border-[var(--space-border-default)] px-8 py-14 text-center"><span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--space-brand-primary-500)_12%,transparent)]"><Film className="h-6 w-6 text-[var(--space-text-brand)]" /></span><p className="mt-4 text-lg font-semibold text-[var(--space-text-primary)]">Direct your first explainer</p><p className="mt-1.5 max-w-sm text-sm leading-relaxed text-[var(--space-text-muted)]">Give SceneForge a topic — it researches the script, renders your avatar, and builds every supporting scene.</p><button onClick={onNew} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-2.5 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)]"><Plus className="h-4 w-4" />Start a project</button></div> : null}</div>}</div>; }
+function Working({ text }: { text: string }) { return <div className="flex h-full min-h-[420px] items-center justify-center px-4"><VideoGeneratingState label={text} detail="Your progress is saved as each stage lands." style={{ width: '100%', maxWidth: 440 }} /></div>; }
+function Library({ projects, loading, onOpen, onNew }: { projects: Project[]; loading: boolean; onOpen: (id: string) => void; onNew: () => void }) { return <div className="mx-auto max-w-6xl px-6 py-10"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-[var(--space-text-brand)]">Your studio</p><h1 className="mt-2 text-3xl font-bold tracking-tight">SceneForge projects</h1></div><button onClick={onNew} className="flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-4 py-3 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)] hover:shadow-[0_6px_18px_color-mix(in_srgb,var(--space-brand-primary-600)_50%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--space-brand-primary-500)]"><Plus className="h-4 w-4" />New project</button></div>{loading ? <div className="mt-7 flex justify-center py-10"><VergeLoader size={120} caption="Loading your projects" /></div> : <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project.id)} className="group rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5 text-left transition-all hover:-translate-y-0.5 hover:border-[var(--space-border-strong)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.4)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--space-brand-primary-500)]"><FolderOpen className="h-5 w-5 text-[var(--space-text-brand)] transition-transform group-hover:scale-110" /><div className="mt-4 line-clamp-2 font-semibold leading-snug">{project.topic}</div><div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--space-text-primary)_6%,transparent)] px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--space-text-muted)]">{project.status.replace(/_/g, ' ')} · {project.aspect_ratio}</div></button>)}{!projects.length ? <div className="col-span-full flex flex-col items-center rounded-2xl border border-dashed border-[var(--space-border-default)] px-8 py-14 text-center"><span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--space-brand-primary-500)_12%,transparent)]"><Film className="h-6 w-6 text-[var(--space-text-brand)]" /></span><p className="mt-4 text-lg font-semibold text-[var(--space-text-primary)]">Direct your first explainer</p><p className="mt-1.5 max-w-sm text-sm leading-relaxed text-[var(--space-text-muted)]">Give SceneForge a topic — it researches the script, renders your avatar, and builds every supporting scene.</p><button onClick={onNew} className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--space-brand-primary-600)] px-5 py-2.5 font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,var(--space-brand-primary-600)_40%,transparent)] transition-all hover:-translate-y-0.5 hover:bg-[var(--space-brand-primary-700)]"><Plus className="h-4 w-4" />Start a project</button></div> : null}</div>}</div>; }
 
 // A Vidverge Agent handoff is PEEKED at (never consumed) before the opening
 // surface is chosen. ForgePipeline consumes normal SceneForge projects;
@@ -1872,7 +1958,9 @@ function initialSurface(): Surface {
   } catch { return 'studio'; }
 }
 
-export default function App() {
+const BrandedSceneForge = withBrandContext(App, 'SceneForge');
+export default BrandedSceneForge;
+function App() {
   const [surface, setSurface] = useState<Surface>(initialSurface);
   const [directorOpenToken, setDirectorOpenToken] = useState(0);
   // The post-production editor is a THIRD face of SceneForge, opened on a

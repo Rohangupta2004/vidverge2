@@ -10,7 +10,7 @@ import { AlertTriangle, Check, Info, Loader2, Lock } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { capabilityState, type Capability } from '../../lib/heygenApi';
 
-export const GRADIENT = 'linear-gradient(135deg,#E8B737,#C8920A)';
+export const GRADIENT = 'linear-gradient(135deg,#D4920A,#F0B429)';
 
 export function Panel(props: { title: string; hint?: string; step?: number; done?: boolean; action?: ReactNode; children: ReactNode }) {
   return <section className="st-rise rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-5">
@@ -97,7 +97,7 @@ export function Button(props: { onClick?: () => void; disabled?: boolean; busy?:
     disabled={props.disabled || props.busy}
     className={ghost
       ? 'inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--space-border-default)] px-3.5 py-2 text-xs font-semibold text-[var(--space-text-secondary)] hover:border-[var(--space-border-strong)] disabled:opacity-50'
-      : 'inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,#C8920A_40%,transparent)] disabled:opacity-50'}
+      : 'inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_12px_color-mix(in_srgb,#D4920A_40%,transparent)] disabled:opacity-50'}
     style={ghost ? undefined : { backgroundImage: GRADIENT }}>
     {props.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
     {props.children}
@@ -106,11 +106,11 @@ export function Button(props: { onClick?: () => void; disabled?: boolean; busy?:
 
 export function Toggle(props: { checked: boolean; onChange: (value: boolean) => void; label: string; hint?: string; disabled?: boolean }) {
   return <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm ${props.checked
-    ? 'border-[color-mix(in_srgb,#C8920A_52%,transparent)] bg-[color-mix(in_srgb,#C8920A_12%,transparent)]'
+    ? 'border-[color-mix(in_srgb,#D4920A_52%,transparent)] bg-[color-mix(in_srgb,#D4920A_12%,transparent)]'
     : 'border-[var(--space-border-default)] bg-[var(--space-surface-panel)]'} ${props.disabled ? 'cursor-not-allowed opacity-55' : ''}`}>
     <input
       type="checkbox"
-      className="mt-0.5 h-4 w-4 shrink-0 accent-[#C8920A]"
+      className="mt-0.5 h-4 w-4 shrink-0 accent-[#D4920A]"
       checked={props.checked}
       disabled={props.disabled}
       onChange={(event) => props.onChange(event.target.checked)}
@@ -163,8 +163,8 @@ export function Progress({ elapsedSec, expectedSec, label, done }: { elapsedSec:
 
 /** The badge that says a presenter or brand is pinned for the whole session. */
 export function LockBadge({ text, onChange }: { text: string; onChange?: () => void }) {
-  return <span className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_srgb,#C8920A_48%,transparent)] bg-[color-mix(in_srgb,#C8920A_14%,transparent)] px-3 py-1.5 text-xs font-semibold text-[var(--space-text-primary)]">
-    <Lock className="h-3.5 w-3.5 text-[#C8920A]" />
+  return <span className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_srgb,#D4920A_48%,transparent)] bg-[color-mix(in_srgb,#D4920A_14%,transparent)] px-3 py-1.5 text-xs font-semibold text-[var(--space-text-primary)]">
+    <Lock className="h-3.5 w-3.5 text-[#D4920A]" />
     {text}
     {onChange ? <button type="button" onClick={onChange} className="ml-1 rounded-full px-2 py-0.5 text-[11px] font-medium text-[var(--space-text-muted)] underline decoration-dotted hover:text-[var(--space-text-primary)]">
       Change
@@ -182,7 +182,7 @@ export function LockBadge({ text, onChange }: { text: string; onChange?: () => v
  */
 export function ChangeLockModal(props: { open: boolean; currentName: string; nextName: string; onCancel: () => void; onConfirm: () => void }) {
   if (!props.open) return null;
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(26,16,0,.35)] p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.58)] p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
     <div className="st-rise w-full max-w-md rounded-2xl border border-[var(--space-border-strong)] bg-[var(--space-surface-card)] p-6 shadow-2xl">
       <div className="flex items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--space-semantic-danger-500)_16%,transparent)]">

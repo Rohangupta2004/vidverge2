@@ -77,6 +77,17 @@ export const SDK_SCHEMA: Record<SDKComponentName, ComponentSchema> = {
     position: { ...point, required: true },
     appearsAtFrame: { kind: 'number' },
   },
+  SemanticUI: {
+    referenceId: { kind: 'string', required: true },
+    screenName: { kind: 'string', required: true },
+    elements: { kind: 'object-list', required: true, note: '{ id, type, label, value?, x, y, width, height }' },
+    background: color,
+    surface: color,
+    textColor: color,
+    accent: color,
+    focusId: { kind: 'string' },
+    beatReactive: { kind: 'boolean' },
+  },
 
   // ── TYPOGRAPHY ──
   MassiveType: {
@@ -201,6 +212,13 @@ export const SDK_SCHEMA: Record<SDKComponentName, ComponentSchema> = {
     src: { kind: 'handle', required: true },
     size: { kind: 'enum', values: ['sm', 'md', 'lg', 'xl'] },
     animateIn: { kind: 'enum', values: ['fade', 'scale', 'none'] },
+  },
+  ProductImage: {
+    src: { kind: 'handle', required: true },
+    fit: { kind: 'enum', values: ['cover', 'contain'] },
+    cornerRadius: { kind: 'number' },
+    shadow: { kind: 'boolean' },
+    uiId: { kind: 'string' },
   },
   MetricCounter: {
     value: { kind: 'number', required: true },

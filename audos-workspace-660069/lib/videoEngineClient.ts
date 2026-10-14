@@ -123,6 +123,33 @@ function wsToken(): string {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
+// NETWORK TIMEOUTS — a hung connection must never outlive the polling deadline
+// ---------------------------------------------------------------------------
+
+/** Generation POSTs get two minutes: a submit that has not answered by then
+ * never will, and the credit gate refunds the charge on the way out. */
+const GENERATION_TIMEOUT_MS = 120_000;
+/** Status reads are small GETs — 30s is already six missed polls' worth. */
+const STATUS_TIMEOUT_MS = 30_000;
+
+/** AbortSignal.timeout where the browser has it; undefined (the old
+ * no-timeout behaviour) on engines that predate it, rather than crashing. */
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  try {
+    const AS: any = typeof AbortSignal === 'undefined' ? null : AbortSignal;
+    return AS && typeof AS.timeout === 'function' ? AS.timeout(ms) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** True when a fetch rejection is our AbortSignal firing, not the network dropping. */
+function isAbortError(e: unknown): boolean {
+  const name = String((e as any)?.name || '');
+  return name === 'TimeoutError' || name === 'AbortError';
+}
+
+// ---------------------------------------------------------------------------
 // APP IDENTITY — what the generation row is keyed to
 // ---------------------------------------------------------------------------
 
@@ -172,6 +199,7 @@ export async function postGeneration(
     method: 'POST',
     headers: withIdentity && named ? { ...base, 'X-App-Id': named } : base,
     body: JSON.stringify(withIdentity && named ? { ...body, appId: named } : body),
+    signal: AbortSignal.timeout(120_000), // 2-min safety net for synchronous generation calls
   });
 
   let res = await send(Boolean(named));
@@ -270,7 +298,7 @@ export async function submitGroupA(params: GroupASubmitParams): Promise<GroupAKi
   if (params.negativePrompt) body.negativePrompt = capPromptText(params.negativePrompt, 10000);
   if (params.resolution) body.resolution = params.resolution;
   if (params.imageData) body.imageData = params.imageData;
-  if (params.referenceImages?.length) body.referenceImages = params.referenceImages.slice(0, 3);
+  if (params.referenceImages?.length) body.referenceImages = params.referenceImages.slice(0, 10);
   if (params.lastFrameImage) body.lastFrameImage = params.lastFrameImage;
 
   let res: Response;
@@ -281,6 +309,9 @@ export async function submitGroupA(params: GroupASubmitParams): Promise<GroupAKi
     data = posted.data;
   } catch (e: any) {
     releaseCredits('The video service could not be reached');
+    if (isAbortError(e)) {
+      throw new EngineError('The video service did not answer within 2 minutes. Nothing was charged — try again.', { code: 'timeout', retryable: true });
+    }
     throw new EngineError(`Could not reach the video service: ${String(e?.message || e)}`, { code: 'network', retryable: true });
   }
   if (!res.ok) {
@@ -293,7 +324,7 @@ export async function submitGroupA(params: GroupASubmitParams): Promise<GroupAKi
   // success:true + operationId (status 'processing') is an accepted async job
   // that the caller polls; `message` there is progress text, never an error.
   const failed = data?.success === false || String(data?.status || '').toLowerCase() === 'failed';
-  if (typeof operationId !== 'string' || !operationId || failed || /^(veo_video_error_|openrouter_error_)/.test(operationId)) {
+  if (typeof operationId !== 'string' || !operationId || failed || /_error_\d+$/.test(operationId)) {
     releaseCredits('The provider did not accept the generation');
     const reason = data?.errorMessage || data?.error || (data?.success === false ? data?.message : '');
     throw new EngineError(String(reason || 'The provider did not accept this generation.'), { code: 'provider_rejected', status: res.status });
@@ -315,9 +346,20 @@ export interface GroupAStatus {
 }
 
 export async function checkGroupA(operationId: string, appId?: AppId): Promise<GroupAStatus> {
-  const res = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, {
-    headers: appId ? generationHeaders(appId) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, {
+      headers: appId ? generationHeaders(appId) : undefined,
+      signal: timeoutSignal(STATUS_TIMEOUT_MS),
+    });
+  } catch (e: any) {
+    // A dropped or hung status read must neither hang the poll past its
+    // deadline nor kill it outright — the miss counter decides when to stop.
+    return {
+      status: 'processing',
+      error: isAbortError(e) ? 'The status check timed out after 30s.' : String(e?.message || e),
+    };
+  }
   const data = await res.json().catch(() => null);
   if (res.status === 404) return { status: 'failed', error: 'The video service has no record of this render (404). Start a new generation.' };
   if (!res.ok) return { status: 'processing', error: String(data?.error || `status HTTP ${res.status}`) };
@@ -418,6 +460,7 @@ export async function runwayQuote(body: Record<string, unknown>): Promise<Runway
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: timeoutSignal(STATUS_TIMEOUT_MS),
     });
   } catch (e: any) {
     return { ok: false, raw: null, error: `Could not reach the quote service: ${String(e?.message || e)}` };
@@ -489,9 +532,12 @@ async function runwaySubmit(path: string, body: Record<string, unknown>, context
 
   let res: Response;
   try {
-    res = await fetch(path, { method: 'POST', headers: runwayHeaders(), body: JSON.stringify(body) });
+    res = await fetch(path, { method: 'POST', headers: runwayHeaders(), body: JSON.stringify(body), signal: timeoutSignal(GENERATION_TIMEOUT_MS) });
   } catch (e: any) {
     releaseCredits('Runway could not be reached');
+    if (isAbortError(e)) {
+      throw new EngineError('Runway did not answer within 2 minutes. Nothing was charged — try again.', { code: 'timeout', retryable: true });
+    }
     throw new EngineError(`Could not reach Runway: ${String(e?.message || e)}`, { code: 'network', retryable: true });
   }
   const data = await res.json().catch(() => null);
@@ -541,6 +587,7 @@ function collectMediaUrls(data: any): string[] {
 export async function checkRunway(taskId: string): Promise<RunwayResult> {
   const res = await fetch(`/api/generate/runway/status/${encodeURIComponent(taskId)}`, {
     headers: { 'X-Workspace-DB-Token': wsToken() },
+    signal: timeoutSignal(STATUS_TIMEOUT_MS),
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw describeHttpError(res.status, data, 'The Runway status check');
@@ -621,8 +668,11 @@ export async function submitKlingVideo(params: {
 
   let res: Response;
   try {
-    res = await fetch(path, { method: 'POST', headers: klingHeaders(), body: JSON.stringify(body) });
+    res = await fetch(path, { method: 'POST', headers: klingHeaders(), body: JSON.stringify(body), signal: timeoutSignal(GENERATION_TIMEOUT_MS) });
   } catch (e: any) {
+    if (isAbortError(e)) {
+      throw new EngineError('Kling did not answer within 2 minutes — try again.', { code: 'timeout', retryable: true });
+    }
     throw new EngineError(`Could not reach Kling: ${String(e?.message || e)}`, { code: 'network', retryable: true });
   }
   const data = await res.json().catch(() => null);
@@ -633,7 +683,7 @@ export async function submitKlingVideo(params: {
 }
 
 export async function checkKling(taskId: string): Promise<{ status: string; videoUrl?: string; error?: string }> {
-  const res = await fetch(`/api/generate/kling/status/${encodeURIComponent(taskId)}`, { headers: klingHeaders() });
+  const res = await fetch(`/api/generate/kling/status/${encodeURIComponent(taskId)}`, { headers: klingHeaders(), signal: timeoutSignal(STATUS_TIMEOUT_MS) });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw describeHttpError(res.status, data, 'The Kling status check');
   const status = String(data?.status || '').toLowerCase();
@@ -642,11 +692,24 @@ export async function checkKling(taskId: string): Promise<{ status: string; vide
   return { status: status || 'processing' };
 }
 
-export async function pollKling(taskId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number } = {}): Promise<string> {
+export async function pollKling(taskId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number; isCancelled?: () => boolean } = {}): Promise<string> {
   const deadline = Date.now() + (opts.timeoutMs || 15 * 60 * 1000);
   let tick = 0;
+  let misses = 0;
   while (Date.now() < deadline) {
-    const st = await checkKling(taskId);
+    if (opts.isCancelled?.()) throw new EngineError('This generation was cancelled.', { code: 'cancelled' });
+    let st: { status: string; videoUrl?: string; error?: string };
+    try {
+      st = await checkKling(taskId);
+      misses = 0;
+    } catch (e) {
+      // A dropped or timed-out status read is not a dead render — tolerate a
+      // few before giving up, like the other pollers in this file.
+      misses += 1;
+      if (misses >= 6) throw e;
+      await sleep(5000);
+      continue;
+    }
     if (st.status === 'completed' && st.videoUrl) return st.videoUrl;
     if (st.status === 'failed') throw new EngineError(st.error || 'Kling render failed.', { code: 'render_failed' });
     tick += 1;
@@ -684,14 +747,53 @@ export async function submitHiggsfieldVideo(params: {
     prompt: capPromptText(params.prompt, 2000),
     model: params.model,
   };
+  // Wallet attribution: the Higgsfield proxy resolves the billable workspace
+  // from x-app-id / workspaceId, not from X-Workspace-DB-Token — without one
+  // the kickoff answers 400 "A billable workspace could not be resolved".
+  const higgsWorkspaceId = typeof window === 'undefined'
+    ? ''
+    : String((window as any).__workspaceDb?.workspaceId || (window as any).__WORKSPACE_ID__ || '');
+  if (higgsWorkspaceId) body.workspaceId = higgsWorkspaceId;
   if (params.aspectRatio) body.aspectRatio = params.aspectRatio;
-  if (params.durationSeconds) body.durationSeconds = Math.max(1, Math.min(15, Math.round(params.durationSeconds)));
-  if (params.imageData) body.imageData = params.imageData;
+  if (params.durationSeconds) {
+    const seconds = Math.max(1, Math.min(15, Math.round(params.durationSeconds)));
+    // MiniMax (Hailuo) models accept ONLY 6 or 10 seconds — anything else
+    // answers 400 "duration: N is not one of [6, 10]" upstream, surfaced as a
+    // 502 with the charge auto-refunded. Snap to the nearest legal value.
+    body.durationSeconds = params.model.indexOf('minimax') === 0
+      ? (seconds <= 7 ? 6 : 10)
+      : seconds;
+  }
+  if (params.imageData) {
+    // Higgsfield's file storage refuses inline uploads today — a data: URL
+    // makes the proxy answer 502 "Higgsfield image upload failed (403)" — but a
+    // public HTTPS URL passes straight through (both verified live 13 Oct
+    // 2026). Stage inline images to workspace storage and send the public URL.
+    let imageRef = params.imageData;
+    if (/^data:/i.test(imageRef)) {
+      const up = await fetch('/api/upload/image', {
+        method: 'POST',
+        headers: higgsfieldHeaders(),
+        body: JSON.stringify({ imageData: imageRef, fileName: 'higgsfield-input.png' }),
+        signal: timeoutSignal(GENERATION_TIMEOUT_MS),
+      });
+      const uploaded = await up.json().catch(() => null);
+      const publicUrl = String(uploaded?.imageUrl || uploaded?.url || '');
+      if (!up.ok || !publicUrl) {
+        throw new EngineError('The source image could not be staged to workspace storage for Higgsfield.', { code: 'image_upload_failed', status: up.status });
+      }
+      imageRef = publicUrl;
+    }
+    body.imageData = imageRef;
+  }
 
   let res: Response;
   try {
-    res = await fetch(path, { method: 'POST', headers: higgsfieldHeaders(), body: JSON.stringify(body) });
+    res = await fetch(path, { method: 'POST', headers: higgsfieldHeaders(), body: JSON.stringify(body), signal: timeoutSignal(GENERATION_TIMEOUT_MS) });
   } catch (e: any) {
+    if (isAbortError(e)) {
+      throw new EngineError('Higgsfield did not answer within 2 minutes — try again.', { code: 'timeout', retryable: true });
+    }
     throw new EngineError(`Could not reach Higgsfield: ${String(e?.message || e)}`, { code: 'network', retryable: true });
   }
   const data = await res.json().catch(() => null);
@@ -704,6 +806,7 @@ export async function submitHiggsfieldVideo(params: {
 export async function checkHiggsfield(requestId: string): Promise<{ status: string; videoUrl?: string; error?: string }> {
   const res = await fetch(`/api/generate/higgsfield/status/${encodeURIComponent(requestId)}`, {
     headers: higgsfieldHeaders(),
+    signal: timeoutSignal(STATUS_TIMEOUT_MS),
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw describeHttpError(res.status, data, 'The Higgsfield status check');
@@ -715,11 +818,23 @@ export async function checkHiggsfield(requestId: string): Promise<{ status: stri
   return { status: status || 'processing' };
 }
 
-export async function pollHiggsfield(requestId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number } = {}): Promise<string> {
+export async function pollHiggsfield(requestId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number; isCancelled?: () => boolean } = {}): Promise<string> {
   const deadline = Date.now() + (opts.timeoutMs || 15 * 60 * 1000);
   let tick = 0;
+  let misses = 0;
   while (Date.now() < deadline) {
-    const st = await checkHiggsfield(requestId);
+    if (opts.isCancelled?.()) throw new EngineError('This generation was cancelled.', { code: 'cancelled' });
+    let st: { status: string; videoUrl?: string; error?: string };
+    try {
+      st = await checkHiggsfield(requestId);
+      misses = 0;
+    } catch (e) {
+      // Same tolerance as pollKling: a few dropped reads are not a dead render.
+      misses += 1;
+      if (misses >= 6) throw e;
+      await sleep(5000);
+      continue;
+    }
     if (st.status === 'completed' && st.videoUrl) return st.videoUrl;
     if (st.status === 'failed') throw new EngineError(st.error || 'Higgsfield render failed.', { code: 'render_failed' });
     tick += 1;

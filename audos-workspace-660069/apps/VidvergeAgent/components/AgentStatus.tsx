@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { AgentState } from '../types';
 
 const DOT_COLOR: Record<AgentState, string> = {
-  idle: 'var(--vv-success, #166534)',
-  working: 'var(--vv-gold, #C8920A)',
-  completed: 'var(--vv-success, #166534)',
-  error: 'var(--vv-error, #991B1B)',
+  idle: 'var(--vv-success, #4ade80)',
+  working: 'var(--vv-gold, #D4920A)',
+  completed: 'var(--vv-success, #4ade80)',
+  error: 'var(--vv-error, #f87171)',
 };
 
 const STATUS_CSS = `
@@ -57,7 +57,7 @@ export default function AgentStatus({ state, label, name = 'VIDVERGE', className
           className="vva-status-dot h-1.5 w-1.5 rounded-full"
           style={{ background: DOT_COLOR[state], boxShadow: `0 0 10px ${DOT_COLOR[state]}` }}
         />
-        <span className="text-[13px] text-[#3D2800]">{shown}</span>
+        <span className="text-[13px] text-[#9E8B55]">{shown}</span>
       </div>
     </div>
   );

@@ -139,7 +139,7 @@ export interface TextOverlayItem {
   end: number;
 }
 
-export const TEXT_COLORS = ['#FFFFFF', '#3D8BFF', '#FFB224', '#FF6B6B', '#34E0B0', '#A78BFA'];
+export const TEXT_COLORS = ['#FFFFFF', '#3D8BFF', '#FFB224', '#FF6B6B', '#34E0B0', '#F0B429'];
 
 export function newTextOverlay(at: number, duration: number): TextOverlayItem {
   return {

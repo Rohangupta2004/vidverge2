@@ -176,7 +176,7 @@ export function paintBackground(
   width: number,
   height: number,
 ): void {
-  const fallback = '#07070f';
+  const fallback = '#0D0B05';
   ctx.save();
   ctx.fillStyle = fallback;
 

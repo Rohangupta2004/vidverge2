@@ -29,7 +29,7 @@ export function useCardTilt<T extends HTMLElement>(ref: RefObject<T | null>) {
   const shadowY = useSpring(shadowYTarget, MICRO_SPRING);
 
   const transform = useMotionTemplate`perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(0)`;
-  const boxShadow = useMotionTemplate`${shadowX}px ${shadowY}px 48px rgba(0, 0, 0, 0.42), ${shadowX}px ${shadowY}px 70px rgba(217, 119, 6, 0.12)`;
+  const boxShadow = useMotionTemplate`${shadowX}px ${shadowY}px 48px rgba(0, 0, 0, 0.42), ${shadowX}px ${shadowY}px 70px rgba(184, 120, 8, 0.12)`;
 
   useEffect(() => {
     const node = ref.current;

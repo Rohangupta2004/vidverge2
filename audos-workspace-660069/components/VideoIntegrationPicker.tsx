@@ -10,6 +10,7 @@ import {
   modelsForIntegration,
   integrationMeta,
 } from '../lib/videoIntegrations';
+import { engineAvailabilityBadge, isEngineAvailable } from '../lib/videoEngines';
 
 export interface VideoIntegrationPickerProps {
   integration: VideoIntegrationId;
@@ -44,7 +45,8 @@ export function VideoIntegrationPicker(props: VideoIntegrationPickerProps) {
   }, [props.integration, props.model, models, props.onChange]);
 
   const meta = integrationMeta(props.integration);
-  const selectClass = props.className || 'mt-1 w-full rounded-lg border border-[color-mix(in_srgb,var(--space-border-default)_80%,transparent)] bg-[var(--space-surface-card,#10182A)] px-3 py-2 text-sm text-[var(--space-text-primary,#F8FAFC)] outline-none focus:border-[var(--space-brand-primary-500,#F59E0B)]';
+  const selectedAvailability = engineAvailabilityBadge(props.model);
+  const selectClass = props.className || 'mt-1 w-full rounded-lg border border-[color-mix(in_srgb,var(--space-border-default)_80%,transparent)] bg-[var(--space-surface-card,#15120A)] px-3 py-2 text-sm text-[var(--space-text-primary,#F5E9C8)] outline-none focus:border-[var(--space-brand-primary-500,#D4920A)]';
 
   return (
     <div style={props.style} className={props.className ? undefined : 'space-y-2'}>
@@ -83,16 +85,26 @@ export function VideoIntegrationPicker(props: VideoIntegrationPickerProps) {
               props.onChange(props.integration, event.target.value);
             }}
           >
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>{m.label}</option>
-            ))}
+            {models.map((m) => {
+              const badge = engineAvailabilityBadge(m.id);
+              return (
+                <option key={m.id} value={m.id} disabled={!isEngineAvailable(m.id)} title={badge?.title || m.hint}>
+                  {m.label}{badge ? ` — ${badge.label}` : ''}
+                </option>
+              );
+            })}
           </select>
         </label>
       </div>
       {meta?.blurb ? (
-        <p className="text-[11px] leading-relaxed text-[var(--space-text-muted,#94A3B8)]">{meta.blurb}</p>
+        <p className="text-[11px] leading-relaxed text-[var(--space-text-muted,#9E8B55)]">{meta.blurb}</p>
       ) : null}
-      {modelError ? <p className="text-[11px] text-[var(--space-semantic-danger,#f97316)]">{modelError}</p> : null}
+      {selectedAvailability ? (
+        <p className="text-[11px] leading-relaxed text-[var(--space-semantic-warning,#fbbf24)]">
+          {selectedAvailability.label}: {selectedAvailability.title}
+        </p>
+      ) : null}
+      {modelError ? <p className="text-[11px] text-[var(--space-semantic-danger,#f87171)]">{modelError}</p> : null}
       {props.note ? <p className="text-[11px] text-[var(--space-text-muted,#94A3B8)]">{props.note}</p> : null}
     </div>
   );

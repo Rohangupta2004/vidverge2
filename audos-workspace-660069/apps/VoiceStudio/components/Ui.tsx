@@ -27,9 +27,9 @@ import { COLORS } from '../../../components/theme';
 export const T = {
   accent: COLORS.primary,
   accentBright: COLORS.primaryGlow,
-  accentDeep: '#b45309',
-  accentSoft: 'rgba(200,146,10,0.14)',
-  accentSofter: 'rgba(200,146,10,0.07)',
+  accentDeep: '#B87808',
+  accentSoft: 'rgba(212,146,10,0.14)',
+  accentSofter: 'rgba(212,146,10,0.07)',
   accentLine: COLORS.borderHover,
   glass: 'rgba(255,255,255,0.78)',
   glassStrong: 'rgba(255,250,235,0.94)',
@@ -45,8 +45,8 @@ export const T = {
   dangerSoft: 'rgba(153,27,27,0.12)',
   warning: '#B45309',
   warningSoft: 'rgba(180,83,9,0.12)',
-  cyan: COLORS.accent,
-  cyanBright: COLORS.accentGlow,
+  highlight: COLORS.accent,
+  highlightBright: COLORS.accentGlow,
   page: 'transparent',
 };
 
@@ -59,12 +59,12 @@ export function StudioStyles() {
     <style>{`
       .vs-range { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 999px; outline: none; }
       .vs-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%;
-        background: #ffffff; border: 3px solid ${T.accent}; cursor: pointer; box-shadow: 0 2px 10px rgba(200,146,10,0.55); }
+        background: #ffffff; border: 3px solid ${T.accent}; cursor: pointer; box-shadow: 0 2px 10px rgba(212,146,10,0.55); }
       .vs-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #ffffff; border: 3px solid ${T.accent};
-        cursor: pointer; box-shadow: 0 2px 10px rgba(200,146,10,0.55); }
+        cursor: pointer; box-shadow: 0 2px 10px rgba(212,146,10,0.55); }
       .vs-range:disabled::-webkit-slider-thumb { border-color: ${T.borderStrong}; box-shadow: none; cursor: not-allowed; }
       @keyframes vs-shimmer { 0% { background-position: -420px 0; } 100% { background-position: 420px 0; } }
-      .vs-skeleton { background-image: linear-gradient(90deg, rgba(180,120,0,0.06) 0%, rgba(180,120,0,0.14) 50%, rgba(180,120,0,0.06) 100%);
+      .vs-skeleton { background-image: linear-gradient(90deg, rgba(184,120,8,0.06) 0%, rgba(184,120,8,0.14) 50%, rgba(184,120,8,0.06) 100%);
         background-size: 420px 100%; animation: vs-shimmer 1.4s linear infinite; }
       @keyframes vs-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       .vs-rise { animation: vs-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
@@ -74,8 +74,8 @@ export function StudioStyles() {
         .vs-skeleton, .vs-rise, .vs-toast { animation: none !important; }
       }
       .vs-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
-      .vs-scroll::-webkit-scrollbar-thumb { background: rgba(200,146,10,0.4); border-radius: 999px; }
-      .vs-scroll::-webkit-scrollbar-thumb:hover { background: rgba(200,146,10,0.7); }
+      .vs-scroll::-webkit-scrollbar-thumb { background: rgba(212,146,10,0.4); border-radius: 999px; }
+      .vs-scroll::-webkit-scrollbar-thumb:hover { background: rgba(212,146,10,0.7); }
       .vs-scroll::-webkit-scrollbar-track { background: #FFFAEB; }
     `}</style>
   );
@@ -212,7 +212,7 @@ export function Badge({ children, tone = 'accent' }: { children: ReactNode; tone
     accent: { color: T.accentBright, background: T.accentSoft, border: T.accentLine },
     success: { color: T.success, background: T.successSoft, border: 'rgba(22,101,52,0.34)' },
     warning: { color: T.warning, background: T.warningSoft, border: 'rgba(180,83,9,0.34)' },
-    muted: { color: T.textMuted, background: 'rgba(180,120,0,0.08)', border: T.border },
+    muted: { color: T.textMuted, background: 'rgba(184,120,8,0.08)', border: T.border },
   }[tone];
   return (
     <span
@@ -420,7 +420,7 @@ export function Slider(props: {
         disabled={props.disabled}
         onChange={(event) => props.onChange(Number(event.target.value))}
         style={{
-          background: `linear-gradient(90deg, ${T.accent} 0%, ${T.accentBright} ${ratio * 100}%, rgba(180,120,0,0.18) ${ratio * 100}%, rgba(180,120,0,0.18) 100%)`,
+          background: `linear-gradient(90deg, ${T.accent} 0%, ${T.accentBright} ${ratio * 100}%, rgba(184,120,8,0.18) ${ratio * 100}%, rgba(184,120,8,0.18) 100%)`,
         }}
       />
       {props.hint ? (
@@ -453,7 +453,7 @@ export function Toggle(props: { label: string; checked: boolean; onChange: (next
       </span>
       <span
         className="relative h-5 w-9 shrink-0 rounded-full transition-colors"
-        style={{ background: props.checked ? T.accent : 'rgba(180,120,0,0.24)' }}
+        style={{ background: props.checked ? T.accent : 'rgba(184,120,8,0.24)' }}
       >
         <span
           className="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all"
@@ -512,7 +512,7 @@ export function PrimaryButton(props: {
       style={{
         background: `linear-gradient(135deg, ${T.accent}, ${T.accentDeep})`,
         color: '#FFFFFF',
-        boxShadow: props.disabled || props.busy ? 'none' : '0 8px 24px rgba(200,146,10,0.32)',
+        boxShadow: props.disabled || props.busy ? 'none' : '0 8px 24px rgba(212,146,10,0.32)',
       }}
     >
       {props.busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : Icon ? <Icon className="h-4 w-4" /> : null}
@@ -642,7 +642,7 @@ export function AudioPlayer({
           onClick={toggle}
           aria-label={playing ? 'Pause' : 'Play'}
           className="grid h-11 w-11 shrink-0 place-items-center rounded-full"
-          style={{ background: T.accent, color: '#FFFFFF', boxShadow: '0 6px 18px rgba(200,146,10,0.4)' }}
+          style={{ background: T.accent, color: '#FFFFFF', boxShadow: '0 6px 18px rgba(212,146,10,0.4)' }}
         >
           {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
         </button>
@@ -662,7 +662,7 @@ export function AudioPlayer({
                 className="flex-1 rounded-sm transition-colors"
                 style={{
                   height: `${Math.round(height * 100)}%`,
-                  background: index / bars.length <= ratio ? T.accentBright : 'rgba(180,120,0,0.20)',
+                  background: index / bars.length <= ratio ? T.accentBright : 'rgba(184,120,8,0.20)',
                 }}
               />
             ))}
@@ -909,7 +909,7 @@ export function ProgressRail({ steps }: { steps: RailStep[] }) {
             <span
               className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold"
               style={{
-                background: step.state === 'pending' ? 'rgba(180,120,0,0.10)' : `${color}22`,
+                background: step.state === 'pending' ? 'rgba(184,120,8,0.10)' : `${color}22`,
                 border: `1px solid ${step.state === 'pending' ? T.border : color}`,
                 color,
               }}
@@ -944,7 +944,7 @@ export function ProgressBar({ ratio, label }: { ratio: number; label?: string })
           <span className="tabular-nums">{pct}%</span>
         </div>
       ) : null}
-      <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'rgba(180,120,0,0.18)' }}>
+      <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'rgba(184,120,8,0.18)' }}>
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${T.accent}, ${T.accentBright})` }}

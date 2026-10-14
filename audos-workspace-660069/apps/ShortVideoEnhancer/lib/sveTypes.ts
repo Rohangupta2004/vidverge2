@@ -361,20 +361,20 @@ export interface EditDoc {
  * never read one way in the editor and another in the export.
  */
 export const FILTER_GRADES: Record<string, { swatch: string; css: string }> = {
-  None: { swatch: 'linear-gradient(135deg,#242432,#111118)', css: 'none' },
+  None: { swatch: 'linear-gradient(135deg,#221E0A,#110E07)', css: 'none' },
   Cinematic: { swatch: 'linear-gradient(135deg,#0F2840,#D29B62)', css: 'contrast(1.12) saturate(1.08) sepia(0.12)' },
-  Moody: { swatch: 'linear-gradient(135deg,#171827,#4B315B)', css: 'contrast(1.18) saturate(0.82) brightness(0.94)' },
+  Moody: { swatch: 'linear-gradient(135deg,#15120A,#4A2D02)', css: 'contrast(1.18) saturate(0.82) brightness(0.94)' },
   Warm: { swatch: 'linear-gradient(135deg,#7C2D12,#F59E0B)', css: 'saturate(1.18) sepia(0.2) brightness(1.04)' },
   Cool: { swatch: 'linear-gradient(135deg,#0C4A6E,#67E8F9)', css: 'saturate(1.1) hue-rotate(-12deg) brightness(1.02)' },
   Vintage: { swatch: 'linear-gradient(135deg,#4D3C2A,#D6B889)', css: 'sepia(0.35) contrast(0.95) saturate(0.9)' },
   'B&W': { swatch: 'linear-gradient(135deg,#080808,#D4D4D8)', css: 'grayscale(1) contrast(1.1)' },
-  Vivid: { swatch: 'linear-gradient(135deg,#DB2777,#7C3AED 48%,#06B6D4)', css: 'saturate(1.45) contrast(1.08)' },
+  Vivid: { swatch: 'linear-gradient(135deg,#DB2777,#B87808 48%,#06B6D4)', css: 'saturate(1.45) contrast(1.08)' },
   Matte: { swatch: 'linear-gradient(135deg,#3F3F46,#A1A1AA)', css: 'contrast(0.92) saturate(0.86) brightness(1.04)' },
   Fade: { swatch: 'linear-gradient(135deg,#6B7280,#E5E7EB)', css: 'contrast(0.86) brightness(1.08) saturate(0.82)' },
-  Neon: { swatch: 'linear-gradient(135deg,#7C3AED,#22D3EE)', css: 'saturate(1.5) contrast(1.14) hue-rotate(-10deg) brightness(1.04)' },
+  Neon: { swatch: 'linear-gradient(135deg,#B87808,#22D3EE)', css: 'saturate(1.5) contrast(1.14) hue-rotate(-10deg) brightness(1.04)' },
   Film: { swatch: 'linear-gradient(135deg,#1C1917,#A8A29E)', css: 'contrast(1.08) saturate(1.06) sepia(0.08)' },
   Retro: { swatch: 'linear-gradient(135deg,#4D3C2A,#E8B35F)', css: 'sepia(0.4) saturate(0.9) contrast(0.96) hue-rotate(-8deg)' },
-  'Lo-Fi': { swatch: 'linear-gradient(135deg,#44403C,#A78BFA)', css: 'sepia(0.28) saturate(0.74) contrast(0.92) brightness(1.03)' },
+  'Lo-Fi': { swatch: 'linear-gradient(135deg,#44403C,#F0B429)', css: 'sepia(0.28) saturate(0.74) contrast(0.92) brightness(1.03)' },
 };
 
 /** Which family each grade belongs to, for the Effects tab's category pills. */

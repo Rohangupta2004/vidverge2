@@ -1,15 +1,20 @@
 /*
- * Vidverge light warm-gold global stylesheet.
+ * Vidverge premium obsidian global stylesheet.
  *
  * The space compiler bundles TSX, not CSS, so this file is the readable
  * reference copy of the rules. The rules that actually ship are injected at
  * runtime by components/ui/GlobalStyles.tsx, which keeps them identical and
  * guarantees they load with the app rather than depending on a CSS pipeline.
+ * The light-utility neutraliser is generated from lists there; the shape it
+ * produces is shown at the bottom of this file.
  *
- * One deliberate difference from a plain global stylesheet: the box-sizing /
- * margin / padding reset is scoped to `.vv-app-shell *` instead of `*`.
- * A bare universal reset would also strip margins from the OS shell (dock,
- * agent chat, settings) that is rendered around every app.
+ * TWO SCOPES, ON PURPOSE:
+ * `.vv-app-shell` carries the box-sizing / margin reset and stays opt-in — a
+ * bare universal reset would also strip margins from the OS shell (dock,
+ * agent chat, settings) rendered around every app.
+ * `.vv-dark` carries colour only, so Desktop.tsx can put it on the shell root
+ * and the app content frame and have every app inherit the dark palette
+ * without a layout reset being applied to it retroactively.
  */
 
 .vv-app-shell,
@@ -26,28 +31,98 @@
   margin: 0;
 }
 
-.vv-app-shell {
-  background: #FFFDF4;
-  color: #1A1000;
-  font-family: 'Inter', system-ui, sans-serif;
+.vv-app-shell,
+.vv-dark {
+  background: #08090B;
+  color: #F6F3EB;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.vv-dark h1,
+.vv-dark h2,
+.vv-dark h3,
+.vv-dark h4 {
+  letter-spacing: -0.01em;
 }
 
-::-webkit-scrollbar-track {
-  background: #fff9e8;
+.vv-dark,
+.vv-dark * {
+  scrollbar-color: #2D3037 transparent;
+  scrollbar-width: thin;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(180, 120, 0, 0.35);
-  border-radius: 3px;
+.vv-dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(180, 120, 0, 0.65);
+.vv-dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vv-dark ::-webkit-scrollbar-thumb {
+  background: #2D3037;
+  border-radius: 4px;
+}
+
+.vv-dark ::-webkit-scrollbar-thumb:hover {
+  background: #41454F;
+}
+
+.vv-dark input,
+.vv-dark textarea,
+.vv-dark select {
+  background-color: #0E1014;
+  color: #F6F3EB;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.vv-dark input::placeholder,
+.vv-dark textarea::placeholder {
+  color: #77736B;
+}
+
+.vv-dark option {
+  background-color: #171A21;
+  color: #F6F3EB;
+}
+
+/*
+ * Light-utility neutraliser (abridged — GlobalStyles.tsx generates the full
+ * class lists). Descendant selectors outrank a bare utility class, so none of
+ * these need `!important`.
+ */
+
+.vv-dark .bg-white,
+.vv-dark .bg-gray-50,
+.vv-dark .bg-slate-50 {
+  background-color: #111318;
+}
+
+.vv-dark .bg-gray-100,
+.vv-dark .bg-slate-100,
+.vv-dark .bg-gray-200,
+.vv-dark .bg-slate-200 {
+  background-color: #171A21;
+}
+
+.vv-dark .text-black,
+.vv-dark .text-gray-900,
+.vv-dark .text-slate-900 {
+  color: #F6F3EB;
+}
+
+.vv-dark .text-gray-700,
+.vv-dark .text-gray-600,
+.vv-dark .text-gray-500,
+.vv-dark .text-slate-600 {
+  color: #77736B;
+}
+
+.vv-dark .border-gray-200,
+.vv-dark .border-gray-300,
+.vv-dark .border-slate-200 {
+  border-color: rgba(255, 255, 255, 0.07);
 }
 
 @keyframes beamPulse {
@@ -105,5 +180,14 @@
   }
   100% {
     transform: translateX(220%);
+  }
+}
+
+@keyframes vvIndeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
   }
 }

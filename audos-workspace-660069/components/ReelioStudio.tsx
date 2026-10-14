@@ -107,7 +107,7 @@ export default function ReelioStudio() {
           flexDirection: 'column',
           borderRadius: 22,
           border: '1px solid rgba(255,255,255,0.12)',
-          background: 'linear-gradient(180deg, #0d0d12 0%, #08080b 100%)',
+          background: 'linear-gradient(180deg, #110E07 0%, #0D0B05 100%)',
           boxShadow: '0 40px 120px rgba(0,0,0,0.7)',
           overflow: 'hidden',
           animation: 'rsRise .28s cubic-bezier(.16,1,.3,1) both',

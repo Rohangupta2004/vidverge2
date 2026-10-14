@@ -39,6 +39,27 @@ export interface TooltipProps {
   appearsAtFrame?: number;
 }
 
+export interface SemanticUIProps {
+  referenceId: string;
+  screenName: string;
+  elements: Array<{
+    id: string;
+    type: 'navbar' | 'sidebar' | 'heading' | 'text' | 'button' | 'card' | 'metric' | 'chart' | 'table' | 'input' | 'badge' | 'image';
+    label: string;
+    value?: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
+  background?: string;
+  surface?: string;
+  textColor?: string;
+  accent?: string;
+  focusId?: string;
+  beatReactive?: boolean;
+}
+
 // ── TYPOGRAPHY ───────────────────────────────────────────
 export interface MassiveTypeProps {
   text: string;
@@ -174,6 +195,14 @@ export interface LogoProps {
   animateIn?: 'fade' | 'scale' | 'none';
 }
 
+export interface ProductImageProps {
+  src: AssetHandle;
+  fit?: 'cover' | 'contain';
+  cornerRadius?: number;
+  shadow?: boolean;
+  uiId?: string;
+}
+
 export interface MetricCounterProps {
   value: number;
   label: string;
@@ -196,7 +225,7 @@ export const RENDER_CONSTRAINTS = {
 // Opus must only reference names from this list.
 export const SDK_COMPONENTS = [
   // UI
-  'BrowserFrame', 'Dashboard', 'Cursor', 'Highlight', 'Tooltip',
+  'BrowserFrame', 'Dashboard', 'Cursor', 'Highlight', 'Tooltip', 'SemanticUI',
   // Typography
   'MassiveType', 'KineticText', 'WordReveal', 'SplitText', 'TypeOn',
   // Motion
@@ -204,7 +233,7 @@ export const SDK_COMPONENTS = [
   // Composition
   'SplitScreen', 'FloatingUI', 'Perspective', 'Grid', 'FullBleed',
   // Media
-  'Screenshot', 'Logo', 'MetricCounter',
+  'Screenshot', 'Logo', 'ProductImage', 'MetricCounter',
 ] as const;
 
 export type SDKComponentName = typeof SDK_COMPONENTS[number];

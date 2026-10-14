@@ -5,7 +5,7 @@ import type { DesktopThemeTokens } from '../types';
 
 // Version marker for auto-upgrade detection
 // Increment this when making breaking changes that stale copies need
-export const EMAIL_GATE_VERSION = 112; // v112: logo light-field behind every section, branded VergeLoader motion on every loading state, competitor table removed, concierge price removed; auth flow untouched
+export const EMAIL_GATE_VERSION = 113; // v113: premium obsidian + champagne-gold brand refresh across landing, OTP and modal surfaces; auth flow untouched
 
 type ParsedResponseBody = { data: unknown; rawText: string };
 
@@ -155,21 +155,21 @@ type GateStep = 'loading' | 'email' | 'code' | 'complete';
 
 // ── Vidverge landing design system ──────────────────────────────────────
 // Presentation only for the SIGNED-OUT view. The dark-cosmic ground with
-// amber-to-cyan studio light, mirroring components/theme.ts so the gate and
+// layered dark-gold studio light, mirroring components/theme.ts so the gate and
 // the shell behind it read as one product. No rainbow gradients, no pastels,
 // no white surfaces anywhere.
-const BG = '#050508';
-const BG_DEEP = '#030305';
-const CARD = '#0D0D14';
-const LINE = '#40301B';
-const BRAND = '#F59E0B';
-const BRAND_HI = '#FCD34D';
+const BG = '#08090B';
+const BG_DEEP = '#050609';
+const CARD = '#111318';
+const LINE = 'rgba(255,255,255,0.09)';
+const BRAND = '#D6AB4A';
+const BRAND_HI = '#F3D58B';
 /** Text sitting on a BRAND-filled surface. */
-const INK = '#FFFFFF';
-const TEXT = '#FFFAF1';
-const MUTED = '#BBA899';
-const DIM = '#80705A';
-const BRAND_GLOW = '0 0 24px rgba(245,158,11,0.25)';
+const INK = '#08090B';
+const TEXT = '#F6F3EB';
+const MUTED = '#B8B2A7';
+const DIM = '#77736B';
+const BRAND_GLOW = '0 0 30px rgba(214,171,74,0.24)';
 const MONO = "ui-monospace, SFMono-Regular, Menlo, 'SF Mono', monospace";
 const FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 const CONTAINER = 1180;
@@ -419,7 +419,7 @@ const GATE_STYLES = `
 .vv-field { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
 .vv-field::after {
   content:''; position:absolute; inset:0;
-  background:radial-gradient(1300px 820px at 50% 42%, transparent 0%, rgba(10,10,15,.26) 62%, rgba(10,10,15,.64) 100%);
+  background:radial-gradient(1300px 820px at 50% 42%, transparent 0%, rgba(8,9,11,.26) 62%, rgba(8,9,11,.64) 100%);
 }
 .vv-layer { position:absolute; inset:0; width:100%; height:100%; mix-blend-mode:screen; will-change:transform; }
 .vv-field-a { animation:vvFieldA 36s ease-in-out infinite; }
@@ -428,7 +428,7 @@ const GATE_STYLES = `
 .vv-bloom {
   position:absolute; left:50%; top:44%; width:min(1020px, 94vw); height:min(620px, 56vw);
   transform:translate(-50%,-50%);
-  background:radial-gradient(closest-side, rgba(252,211,77,.17), rgba(245,158,11,.05) 50%, transparent 74%);
+  background:radial-gradient(closest-side, rgba(255,209,104,.17), rgba(214,171,74,.05) 50%, transparent 74%);
   filter:blur(26px); animation:vvPulse 12s ease-in-out infinite;
 }
 
@@ -440,21 +440,21 @@ const GATE_STYLES = `
 .vv-reveal.vv-in { animation:vvFadeUp .6s cubic-bezier(.16,1,.3,1) forwards; }
 
 .vv-cta { background:${BRAND}; color:${INK}; font-weight:700; border:none; border-radius:12px; cursor:pointer; transition:transform .18s ease, box-shadow .25s ease, filter .18s ease; }
-.vv-cta:hover { transform:translateY(-1px); filter:brightness(1.06); box-shadow:0 12px 34px rgba(245,158,11,.32); }
+.vv-cta:hover { transform:translateY(-1px); filter:brightness(1.06); box-shadow:0 12px 34px rgba(214,171,74,.32); }
 .vv-ghost { background:rgba(255,255,255,.03); border:1px solid ${LINE}; color:${TEXT}; border-radius:12px; cursor:pointer; font-weight:600; transition:transform .18s ease, border-color .18s ease, background .18s ease; }
-.vv-ghost:hover { transform:translateY(-1px); border-color:rgba(245,158,11,.45); background:rgba(245,158,11,.07); }
-.vv-navcta { border:1px solid rgba(245,158,11,.35); background:rgba(245,158,11,.1); color:${BRAND_HI}; border-radius:999px; cursor:pointer; font-weight:600; transition:transform .18s ease, background .18s ease; }
-.vv-navcta:hover { transform:translateY(-1px); background:rgba(245,158,11,.18); }
+.vv-ghost:hover { transform:translateY(-1px); border-color:rgba(214,171,74,.45); background:rgba(214,171,74,.07); }
+.vv-navcta { border:1px solid rgba(214,171,74,.35); background:rgba(214,171,74,.1); color:${BRAND_HI}; border-radius:999px; cursor:pointer; font-weight:600; transition:transform .18s ease, background .18s ease; }
+.vv-navcta:hover { transform:translateY(-1px); background:rgba(214,171,74,.18); }
 .vv-navlink { color:${MUTED}; background:none; border:none; cursor:pointer; font-size:13px; font-weight:500; transition:color .18s ease; text-decoration:none; }
 .vv-navlink:hover { color:${TEXT}; }
 .vv-input::placeholder { color:#4B5563; }
-.vv-input:focus { border-color:${BRAND} !important; box-shadow:0 0 0 3px rgba(245,158,11,.2) !important; outline:none; }
+.vv-input:focus { border-color:${BRAND} !important; box-shadow:0 0 0 3px rgba(214,171,74,.2) !important; outline:none; }
 .vv-link { color:${MUTED}; text-decoration:none; transition:color .18s ease; }
 .vv-link:hover { color:${BRAND_HI}; }
 
 .vv-card { background:${CARD}; border:1px solid ${LINE}; border-radius:12px; }
 .vv-studio { transition:transform .22s ease, border-color .22s ease, box-shadow .22s ease; }
-.vv-studio:hover { transform:translateY(-3px); border-color:rgba(245,158,11,.4); box-shadow:0 18px 48px rgba(0,0,0,.55); }
+.vv-studio:hover { transform:translateY(-3px); border-color:rgba(214,171,74,.4); box-shadow:0 18px 48px rgba(0,0,0,.55); }
 .vv-tile { transition:transform .22s ease, box-shadow .22s ease; }
 .vv-tile:hover { transform:translateY(-3px); box-shadow:${BRAND_GLOW}; }
 
@@ -462,7 +462,7 @@ const GATE_STYLES = `
 .vv-rail > * { scroll-snap-align:start; flex:0 0 auto; }
 .vv-rail::-webkit-scrollbar { height:6px; }
 .vv-rail::-webkit-scrollbar-track { background:rgba(255,255,255,.04); border-radius:999px; }
-.vv-rail::-webkit-scrollbar-thumb { background:rgba(245,158,11,.35); border-radius:999px; }
+.vv-rail::-webkit-scrollbar-thumb { background:rgba(214,171,74,.35); border-radius:999px; }
 
 .vv-hero { display:grid; grid-template-columns:1.02fr .98fr; gap:56px; align-items:center; }
 .vv-studios { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
@@ -550,11 +550,11 @@ const LightField = () => (
       >
         <defs>
           <linearGradient id={`vvFieldGrad${index}`} x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#F59E0B" stopOpacity="0" />
-            <stop offset="20%" stopColor="#F59E0B" stopOpacity="0.55" />
-            <stop offset="50%" stopColor="#22D3EE" stopOpacity="1" />
-            <stop offset="80%" stopColor="#FCD34D" stopOpacity="0.55" />
-            <stop offset="100%" stopColor="#F59E0B" stopOpacity="0" />
+            <stop offset="0%" stopColor="#D6AB4A" stopOpacity="0" />
+            <stop offset="20%" stopColor="#D6AB4A" stopOpacity="0.55" />
+            <stop offset="50%" stopColor="#F3D58B" stopOpacity="1" />
+            <stop offset="80%" stopColor="#FFE8AB" stopOpacity="0.55" />
+            <stop offset="100%" stopColor="#D6AB4A" stopOpacity="0" />
           </linearGradient>
           <filter id={`vvFieldBlur${index}`} x="-10%" y="-45%" width="120%" height="190%">
             <feGaussianBlur stdDeviation={layer.blur} />
@@ -1436,7 +1436,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
           height: size,
           objectFit: 'contain',
           display: 'block',
-          filter: 'drop-shadow(0 0 10px rgba(245,158,11,0.55))',
+          filter: 'drop-shadow(0 0 10px rgba(214,171,74,0.55))',
         }}
       />
     ) : (
@@ -1558,7 +1558,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
 
             {deliveryNotice && (
               <div
-                style={{ marginTop: 16, borderRadius: 12, padding: '12px 14px', fontSize: 13, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', color: BRAND_HI }}
+                style={{ marginTop: 16, borderRadius: 12, padding: '12px 14px', fontSize: 13, background: 'rgba(214,171,74,0.08)', border: '1px solid rgba(214,171,74,0.3)', color: BRAND_HI }}
                 data-testid="text-delivery-notice"
               >
                 {deliveryNotice}
@@ -1765,7 +1765,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
           justifyContent: 'space-between',
           gap: 16,
           padding: '0 24px',
-          background: scrolled ? 'rgba(10,10,15,.88)' : 'linear-gradient(180deg, rgba(10,10,15,.9), transparent)',
+          background: scrolled ? 'rgba(8,9,11,.88)' : 'linear-gradient(180deg, rgba(8,9,11,.9), transparent)',
           borderBottom: scrolled ? `1px solid ${LINE}` : '1px solid transparent',
           backdropFilter: 'blur(14px)',
           WebkitBackdropFilter: 'blur(14px)',
@@ -1804,8 +1804,8 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
                   gap: 8,
                   padding: '6px 13px',
                   borderRadius: 999,
-                  border: '1px solid rgba(245,158,11,.3)',
-                  background: 'rgba(245,158,11,.07)',
+                  border: '1px solid rgba(214,171,74,.3)',
+                  background: 'rgba(214,171,74,.07)',
                   marginBottom: 24,
                   fontSize: 11.5,
                   letterSpacing: '0.1em',
@@ -1854,7 +1854,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
                 style={{
                   position: 'absolute',
                   inset: '-14% -8%',
-                  background: 'radial-gradient(closest-side, rgba(245,158,11,.22), transparent 72%)',
+                  background: 'radial-gradient(closest-side, rgba(214,171,74,.22), transparent 72%)',
                   filter: 'blur(14px)',
                   pointerEvents: 'none',
                 }}
@@ -1885,8 +1885,8 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
                     bottom: 16,
                     padding: '6px 12px',
                     borderRadius: 999,
-                    background: 'rgba(10,10,15,.78)',
-                    border: '1px solid rgba(245,158,11,.35)',
+                    background: 'rgba(8,9,11,.78)',
+                    border: '1px solid rgba(214,171,74,.35)',
                     color: BRAND_HI,
                     fontSize: 11,
                     fontFamily: MONO,
@@ -1996,8 +1996,8 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
                       alignSelf: 'flex-start',
                       padding: '4px 10px',
                       borderRadius: 999,
-                      border: '1px solid rgba(245,158,11,.3)',
-                      background: 'rgba(245,158,11,.07)',
+                      border: '1px solid rgba(214,171,74,.3)',
+                      background: 'rgba(214,171,74,.07)',
                       color: BRAND_HI,
                       fontSize: 10,
                       fontFamily: MONO,
@@ -2081,8 +2081,8 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
                     flexDirection: 'column',
                     padding: 26,
                     borderRadius: 12,
-                    background: plan.featured ? 'rgba(245,158,11,.06)' : CARD,
-                    border: plan.featured ? '1px solid rgba(245,158,11,.45)' : `1px solid ${LINE}`,
+                    background: plan.featured ? 'rgba(214,171,74,.06)' : CARD,
+                    border: plan.featured ? '1px solid rgba(214,171,74,.45)' : `1px solid ${LINE}`,
                     boxShadow: plan.featured ? BRAND_GLOW : 'none',
                   }}
                 >
@@ -2153,8 +2153,8 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
               style={{
                 padding: 'clamp(26px, 4vw, 44px)',
                 borderRadius: 12,
-                background: 'linear-gradient(120deg, rgba(245,158,11,.13), rgba(245,158,11,.04) 48%, rgba(17,17,24,.9))',
-                border: '1px solid rgba(245,158,11,.4)',
+                background: 'linear-gradient(120deg, rgba(214,171,74,.13), rgba(214,171,74,.04) 48%, rgba(17,14,7,.9))',
+                border: '1px solid rgba(214,171,74,.4)',
                 boxShadow: BRAND_GLOW,
               }}
             >
@@ -2260,7 +2260,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
               padding: 32,
               borderRadius: 12,
               background: CARD,
-              border: '1px solid rgba(245,158,11,.3)',
+              border: '1px solid rgba(214,171,74,.3)',
               boxShadow: '0 30px 80px rgba(0,0,0,.65)',
             }}
           >

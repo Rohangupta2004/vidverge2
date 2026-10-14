@@ -79,9 +79,9 @@ export const Stepper: React.FC<StepperProps> = function Stepper({
                     ? 'rgba(16,185,129,0.9)'
                     : active
                       ? GRADIENT.brand
-                      : 'rgba(245,158,11,0.08)',
+                      : 'rgba(212,146,10,0.08)',
                   border: '1px solid ' + (active || done ? 'transparent' : COLORS.border),
-                  boxShadow: active ? '0 0 16px rgba(245,158,11,0.45)' : 'none',
+                  boxShadow: active ? '0 0 16px rgba(212,146,10,0.45)' : 'none',
                   animation: active ? 'pulse 2.4s ease-in-out infinite' : undefined,
                 }}
               >
@@ -150,7 +150,7 @@ export const ProgressBar: React.FC<{
         style={{
           height: 6,
           borderRadius: 999,
-          background: 'rgba(245,158,11,0.12)',
+          background: 'rgba(212,146,10,0.12)',
           overflow: 'hidden',
         }}
       >
@@ -160,7 +160,7 @@ export const ProgressBar: React.FC<{
             height: '100%',
             borderRadius: 999,
             background: GRADIENT.brand,
-            boxShadow: '0 0 12px rgba(245,158,11,0.5)',
+            boxShadow: '0 0 12px rgba(212,146,10,0.5)',
             transition: 'width 420ms ease',
           }}
         />
@@ -174,10 +174,10 @@ export const ProgressBar: React.FC<{
 export const StatChip: React.FC<{
   label: string;
   value: React.ReactNode;
-  tone?: 'violet' | 'cyan' | 'muted';
+  tone?: 'brand' | 'cyan' | 'muted';
   icon?: React.ReactNode;
   style?: React.CSSProperties;
-}> = function StatChip({ label, value, tone = 'violet', icon, style }) {
+}> = function StatChip({ label, value, tone = 'brand', icon, style }) {
   const fg =
     tone === 'cyan' ? COLORS.accentGlow : tone === 'muted' ? COLORS.textMuted : COLORS.primaryGlow;
   return (
@@ -187,7 +187,7 @@ export const StatChip: React.FC<{
         alignItems: 'center',
         gap: 9,
         padding: '8px 12px',
-        background: 'rgba(245,158,11,0.06)',
+        background: 'rgba(212,146,10,0.06)',
         border: '1px solid ' + COLORS.border,
         borderRadius: RADIUS.sm,
         minWidth: 92,
@@ -265,9 +265,9 @@ export const Waveform: React.FC<{
   bars?: number;
   active?: boolean;
   height?: number;
-  tone?: 'violet' | 'cyan';
+  tone?: 'brand' | 'cyan';
   style?: React.CSSProperties;
-}> = function Waveform({ bars = 40, active = true, height = 54, tone = 'violet', style }) {
+}> = function Waveform({ bars = 40, active = true, height = 54, tone = 'brand', style }) {
   const items = [];
   for (let i = 0; i < bars; i += 1) items.push(i);
   const base = tone === 'cyan' ? COLORS.accentGlow : COLORS.primaryGlow;
@@ -366,8 +366,8 @@ export const UploadZone: React.FC<UploadZoneProps> = function UploadZone({
         textAlign: 'center',
         borderRadius: RADIUS.lg,
         border: '2px dashed ' + (over ? COLORS.primaryGlow : COLORS.borderHover),
-        background: over ? 'rgba(245,158,11,0.1)' : 'rgba(245,158,11,0.035)',
-        boxShadow: over ? '0 0 32px rgba(245,158,11,0.3) inset' : 'none',
+        background: over ? 'rgba(212,146,10,0.1)' : 'rgba(212,146,10,0.035)',
+        boxShadow: over ? '0 0 32px rgba(212,146,10,0.3) inset' : 'none',
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.55 : 1,
         transition: 'border-color 160ms ease, background 160ms ease, box-shadow 200ms ease',
@@ -431,7 +431,7 @@ export const PhoneFrame: React.FC<{
           borderRadius: 28,
           border: '1px solid ' + COLORS.borderHover,
           background: COLORS.surface,
-          boxShadow: '0 0 34px rgba(245,158,11,0.18), inset 0 0 40px rgba(6,182,212,0.05)',
+          boxShadow: '0 0 34px rgba(212,146,10,0.18), inset 0 0 40px rgba(6,182,212,0.05)',
           overflow: 'hidden',
         }}
       >
@@ -445,7 +445,7 @@ export const PhoneFrame: React.FC<{
             width: 52,
             height: 4,
             borderRadius: 999,
-            background: 'rgba(245,158,11,0.4)',
+            background: 'rgba(212,146,10,0.4)',
             zIndex: 2,
           }}
         />
@@ -489,7 +489,7 @@ export const EmptyState: React.FC<{
         textAlign: 'center',
         borderRadius: RADIUS.lg,
         border: '1px dashed ' + COLORS.border,
-        background: 'rgba(245,158,11,0.03)',
+        background: 'rgba(212,146,10,0.03)',
         ...style,
       }}
     >

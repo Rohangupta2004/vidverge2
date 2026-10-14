@@ -55,6 +55,7 @@ import {
   skipNarrationLayer, skipSfxLayer, withMusicPreset, withVoiceSource,
 } from './audio';
 import type { VoiceSourceId } from './voiceSource';
+import { DEFAULT_MAX_SCENES, validateSceneDurations } from '../../../lib/videoEngines';
 
 export interface RunHooks {
   onFilm?: (patch: Partial<Film>) => void;
@@ -219,10 +220,11 @@ function applyDualReference(params: {
   prompt: string;
   referenceType: ReferenceType;
   characterId?: string | null;
+  modelId?: string | null;
 }): { assets: ReferenceAsset[]; prompt: string; referenceType: ReferenceType } {
   const charRef = characterRefUrl(params.film);
   if (!charRef) return { assets: params.assets, prompt: params.prompt, referenceType: params.referenceType };
-  const model = resolveVideoModel(params.film.video_model);
+  const model = resolveVideoModel(params.modelId || params.film.video_model);
   const assets = params.assets.filter((a) => a.url !== charRef);
   if (!assets.some((a) => a.role === 'first_frame')) {
     assets.unshift({ role: 'first_frame', url: charRef });
@@ -269,10 +271,10 @@ async function resolveFilmAtReferences(script: string): Promise<AtReference[]> {
  * reference already in `assets` keeps its claim on that budget — on Seedance
  * (one image) that means the character wins and the stored references travel
  * as the written note below instead. */
-function withAtReferences(film: Film, assets: ReferenceAsset[]): ReferenceAsset[] {
+function withAtReferences(film: Film, assets: ReferenceAsset[], modelId?: string | null): ReferenceAsset[] {
   const stored = Array.isArray(film.at_references) ? film.at_references : [];
   if (!stored.length) return assets;
-  const model = resolveVideoModel(film.video_model);
+  const model = resolveVideoModel(modelId || film.video_model);
   // Seedance has ONE image slot and it is the seed frame, so a stored
   // reference travels as a picture there only while that slot is free (an
   // opening scene with no character reference) — never as a thumbnail the
@@ -295,12 +297,12 @@ function withAtReferences(film: Film, assets: ReferenceAsset[]): ReferenceAsset[
 
 /** The stored references' appearance notes in words, so a model carrying
  * fewer pictures than the script summoned still gets their identity. */
-function appendAtReferenceNote(film: Film, prompt: string): string {
+function appendAtReferenceNote(film: Film, prompt: string, modelId?: string | null): string {
   const described = (Array.isArray(film.at_references) ? film.at_references : [])
     .filter((r) => String(r?.description || '').trim());
   if (!described.length) return prompt;
   const note = `Stored references (match them exactly): ${described.map((r) => `${r.name} — ${capText(String(r.description), 1000)}`).join('; ')}`;
-  return appendPromptNote(prompt, capText(note, 5000), resolveVideoModel(film.video_model).promptMaxChars);
+  return appendPromptNote(prompt, capText(note, 5000), resolveVideoModel(modelId || film.video_model).promptMaxChars);
 }
 
 /**
@@ -314,14 +316,16 @@ function applyStyleLock(film: Film, scene: FilmScene, prompt: string): string {
   const lock = String(film.style_lock_description || '').trim();
   if (film.style_lock !== true || !lock || scene.idx === 0) return prompt;
   const head = `STYLE LOCK (maintain exactly):\n${lock}\n\n`;
-  const room = Math.max(200, resolveVideoModel(film.video_model).promptMaxChars - head.length);
+  const modelId = ((scene.spec || {}) as VideoClipSpec).engine_id || film.video_model;
+  const room = Math.max(200, resolveVideoModel(modelId).promptMaxChars - head.length);
   return `${head}${capText(prompt, room)}`;
 }
 
 /** Everything a prepared prompt carries beyond the scene itself: the stored
  * reference notes, then the film's locked style. */
 function finishScenePrompt(film: Film, scene: FilmScene, prompt: string): string {
-  return applyStyleLock(film, scene, appendAtReferenceNote(film, prompt));
+  const modelId = ((scene.spec || {}) as VideoClipSpec).engine_id || film.video_model;
+  return applyStyleLock(film, scene, appendAtReferenceNote(film, prompt, modelId));
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +371,7 @@ export async function createAndSegmentFilm(params: {
       referenceImageUrl: params.referenceImageUrl,
     });
     await setState(film, hooks, 'SEGMENTING_SCRIPT', `Story understood — breaking it into ${plan.scenes.length} sequential clips…`);
+    plan.notes.forEach((note) => say(hooks, `Planning guardrail: ${note}`));
 
     const planScenes = plan.scenes.map((s, i) => ({
       scene_key: newSceneKey(),
@@ -375,7 +380,17 @@ export async function createAndSegmentFilm(params: {
       script_segment: s.script_segment,
       duration_s: s.duration_s,
       continuity_group: null,
-      spec: { summary: s.summary, visual_goal: s.visual_goal, characters: s.characters, duration_s: s.duration_s } as VideoClipSpec,
+      spec: {
+        summary: s.summary,
+        visual_goal: s.visual_goal,
+        characters: s.characters,
+        shot_intent: s.shot_intent,
+        workflow_kind: s.workflow_kind,
+        engine_id: s.engine_id,
+        engine_reason: s.engine_reason,
+        duration_notes: s.duration_notes,
+        duration_s: s.duration_s,
+      } as VideoClipSpec,
       dialogue: s.dialogue || null,
       summary: s.summary,
       visual_goal: s.visual_goal,
@@ -407,6 +422,7 @@ export async function createAndSegmentFilm(params: {
         visual_style: plan.visual_style,
         characters: plan.characters,
         scenes: planScenes,
+        assumptions: plan.notes,
         input_mode: 'ai',
       },
       character_refs: characterRefs,
@@ -521,10 +537,15 @@ export async function prepareScene(
     // DUAL REFERENCE (n+1): the uploaded character reference rides along with
     // the previous scene's final frame, or stands in as the reference frame
     // when this clip has no frame to continue from.
-    const dual = applyDualReference({ film, assets, prompt: prepared.prompt, referenceType, characterId: prepared.needs_character });
+    const existingSpec = (scene.spec || {}) as VideoClipSpec;
+    const sceneModelId = existingSpec.engine_id || film.video_model;
+    const dual = applyDualReference({
+      film, assets, prompt: prepared.prompt, referenceType,
+      characterId: prepared.needs_character, modelId: sceneModelId,
+    });
 
     const spec: VideoClipSpec = {
-      ...((scene.spec || {}) as VideoClipSpec),
+      ...existingSpec,
       negative: prepared.negative,
       reasoning: prepared.reasoning,
     };
@@ -534,7 +555,7 @@ export async function prepareScene(
       prompt: finishScenePrompt(film, scene, dual.prompt),
       continuation,
       reference_type: dual.referenceType,
-      reference_assets: withAtReferences(film, dual.assets),
+      reference_assets: withAtReferences(film, dual.assets, sceneModelId),
       spec,
       clip_fingerprint: sceneFingerprint({ type: scene.type, spec }, (film.aspect_ratio || '16:9') as Aspect),
     });
@@ -591,6 +612,7 @@ async function prepareManualScene(
         maxChars: model.promptMaxChars,
       }),
       referenceType: continuation ? 'previous_final_frame' : 'none',
+      modelId: model.apiModel,
     });
 
     const nextSpec: VideoClipSpec = {
@@ -606,7 +628,7 @@ async function prepareManualScene(
       prompt: finishScenePrompt(film, scene, dual.prompt),
       continuation,
       reference_type: dual.referenceType,
-      reference_assets: withAtReferences(film, dual.assets),
+      reference_assets: withAtReferences(film, dual.assets, model.apiModel),
       spec: nextSpec,
       clip_fingerprint: sceneFingerprint({ type: scene.type, spec: nextSpec }, (film.aspect_ratio || '16:9') as Aspect),
     });
@@ -785,9 +807,16 @@ export async function generateScene(
     const aspect = (film.aspect_ratio || '16:9') as Aspect;
     const durationS = Number(scene.duration_s) || 6;
     const hasSeedFrame = (scene.reference_assets || []).some((asset) => asset?.role === 'first_frame');
-    // The film's chosen model (Create screen); unknown/null ids fall back
-    // to the default so pre-picker films keep rendering on Omni Flash.
-    const chosenModel = resolveVideoModel(film.video_model);
+    // AI plans carry a per-shot routed engine. Manual and legacy scenes fall
+    // back to the film-level choice so existing projects keep working.
+    const chosenModel = resolveVideoModel(spec.engine_id || film.video_model);
+    const durationProblems = validateSceneDurations(chosenModel.apiModel, [durationS], {
+      expectedTotalS: durationS,
+      maxScenes: DEFAULT_MAX_SCENES,
+    });
+    if (durationProblems.length) {
+      throw new Error(`Scene ${scene.idx + 1} cannot be submitted: ${durationProblems.join(' ')}`);
+    }
 
     // 400 LADDER (see ./resilience): original prompt → rephrased prompt →
     // rephrased prompt on the next provider. The aspect, duration, references,

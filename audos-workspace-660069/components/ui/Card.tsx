@@ -18,7 +18,7 @@ export interface CardProps {
   /** Inner padding in px. */
   padding?: number;
   /** Accent the glow with cyan instead of amber. */
-  tone?: 'violet' | 'cyan';
+  tone?: 'brand' | 'cyan';
   title?: string;
 }
 
@@ -30,7 +30,7 @@ const Card: React.FC<CardProps> = function Card({
   active = false,
   disabled = false,
   padding = 20,
-  tone = 'violet',
+  tone = 'brand',
   title,
 }) {
   const [hover, setHover] = React.useState(false);

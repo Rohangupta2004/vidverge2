@@ -273,7 +273,7 @@ export const PRESETS: PresetPack[] = [
     punchInEvery: 7,
     graphicDuration: 2.8,
     accent: '#22D3EE',
-    accent2: '#818CF8',
+    accent2: '#F0B429',
     switchFont: 'mono',
     switchAnim: 'trackingReveal',
     grade: 'cool',

@@ -30,9 +30,12 @@ import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
 import type { VidvergeAttachment } from '../../lib/vidvergeHandoff';
 import VideoIntegrationPicker from '../../components/VideoIntegrationPicker';
 import VergeLoader from '../../components/VergeLoader';
+import VideoErrorCard from '../../components/video/VideoErrorCard';
+import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 import {
   loadVideoSelection, saveVideoSelection, type VideoIntegrationId,
 } from '../../lib/videoIntegrations';
+import { withBrandContext } from '../../components/BrandContextLayer';
 
 type Tab = 'create' | 'history';
 type View = 'form' | 'progress' | 'result';
@@ -109,7 +112,7 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
       background: F.card, border: `1px solid ${F.warn}`, borderRadius: 16,
       backdropFilter: F.glass, WebkitBackdropFilter: F.glass,
       padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10,
-      boxShadow: '0 18px 40px rgba(120,80,0,0.12)',
+      boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
     }}>
       <AlertTriangle size={15} color={F.warn} style={{ flexShrink: 0, marginTop: 1 }} />
       <span style={{ fontSize: 13, color: F.soft, lineHeight: 1.5, flex: 1 }}>{message}</span>
@@ -151,7 +154,7 @@ function Terminal({ lines }: { lines: LogLine[] }) {
     <div style={{
       background: F.terminalBg, border: `1px solid ${F.line}`, borderRadius: 16,
       backdropFilter: F.glass, WebkitBackdropFilter: F.glass,
-      boxShadow: 'inset 0 1px 0 rgba(180,120,0,0.08), 0 18px 48px rgba(120,80,0,0.12)',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 24px rgba(0,0,0,0.4)',
       padding: '20px 22px', fontFamily: F.mono, fontSize: 13.5, lineHeight: 1.9,
       minHeight: 240, maxHeight: 460, overflowY: 'auto',
     }}>
@@ -174,7 +177,9 @@ function Terminal({ lines }: { lines: LogLine[] }) {
 
 // --------------------------------------------------------------- the app ----
 
-export default function FacelessContentApp() {
+const BrandedFacelessContentApp = withBrandContext(FacelessContentApp, 'Faceless Content');
+export default BrandedFacelessContentApp;
+function FacelessContentApp() {
   const [tab, setTab] = useState<Tab>('create');
   const [view, setView] = useState<View>('form');
 
@@ -268,7 +273,9 @@ export default function FacelessContentApp() {
       if (live.length_target) setLengthTarget(live.length_target);
       if (live.orientation) setOrientation(live.orientation);
       setView('progress');
-    })();
+    })().catch((resumeError) => {
+      console.warn('[FacelessContent] could not resume the latest run:', resumeError);
+    });
     return () => { alive = false; };
   }, [refreshHistory]);
 
@@ -304,8 +311,10 @@ export default function FacelessContentApp() {
         setError('This run has not moved for a while — the tab that was driving it was most likely closed before it finished. Try again runs it from the top; nothing already finished is lost.');
       }
     };
-    void tick();
-    const timer = window.setInterval(() => { void tick(); }, 2000);
+    void tick().catch((pollError) => console.warn('[FacelessContent] project refresh failed:', pollError));
+    const timer = window.setInterval(() => {
+      void tick().catch((pollError) => console.warn('[FacelessContent] project refresh failed:', pollError));
+    }, 2000);
     return () => { alive = false; window.clearInterval(timer); };
   }, [view, projectId, refreshHistory]);
 
@@ -522,21 +531,24 @@ export default function FacelessContentApp() {
             />
 
             {error ? null : (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 18px' }}>
-                <VergeLoader size={120} caption={project?.stage || 'Starting the run'} />
-              </div>
+              <VideoGeneratingState
+                label={project?.stage || 'Generating your faceless video'}
+                detail="Researching, scripting, filming and assembling each scene"
+                style={{ marginBottom: 18 }}
+              />
             )}
 
             <Terminal lines={logLines} />
 
             {error ? (
-              <div style={{ ...cardStyle, marginTop: 16, borderColor: F.bad }}>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: F.bad, fontSize: 13.5, lineHeight: 1.6 }}>
-                  <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
-                  <span>{error}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-                  <GhostBtn onClick={() => void handleGenerate()}><RefreshCw size={14} /> Try again</GhostBtn>
+              <div style={{ marginTop: 16 }}>
+                <VideoErrorCard
+                  error={error}
+                  engineId={videoModelId}
+                  subject="this faceless video"
+                  onRetry={() => void handleGenerate()}
+                />
+                <div style={{ marginTop: 12 }}>
                   <GhostBtn onClick={startNew}><Plus size={14} /> New video</GhostBtn>
                 </div>
               </div>
@@ -557,7 +569,7 @@ export default function FacelessContentApp() {
         {/* ================= RESULT ================= */}
         {tab === 'create' && view === 'result' && project && (
           <div>
-            <div style={{ background: '#000', borderRadius: 18, overflow: 'hidden', border: `1px solid ${F.lineStrong}`, boxShadow: '0 24px 64px rgba(120,80,0,0.12)' }}>
+            <div style={{ background: '#000', borderRadius: 18, overflow: 'hidden', border: `1px solid ${F.lineStrong}`, boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }}>
               <video
                 src={project.final_video_url || ''}
                 controls

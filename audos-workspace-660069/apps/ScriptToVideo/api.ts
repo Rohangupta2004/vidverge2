@@ -13,7 +13,7 @@
  * fingerprint, so regenerating one scene never touches the others.
  */
 
-import { LB } from '../../components/LightBeam';
+import type { ShotIntent } from '../../lib/videoEngines';
 
 // ---------------------------------------------------------------------------
 // Session / auth plumbing
@@ -277,8 +277,15 @@ export interface VideoClipSpec {
   summary?: string;              // what happens in this clip (director's one-liner)
   visual_goal?: string;          // the visual outcome this clip must land
   negative?: string;             // negative prompt sent with the generation
-  reasoning?: string;            // Opus's continuation/reference reasoning
+  reasoning?: string;            // director's continuation/reference reasoning
   characters?: string[];         // character ids appearing in this clip
+  /** Creative decision → shared routeShotIntent() → concrete workflow/engine. */
+  shot_intent?: ShotIntent;
+  workflow_kind?: 'engine' | 'recipe' | 'code' | 'unavailable';
+  engine_id?: string | null;
+  engine_reason?: string;
+  /** Every duration adjustment or violation is surfaced, never silent. */
+  duration_notes?: string[];
   duration_s?: number;
   /** Manual Script Mode: this scene exactly as parsed from the pasted script. */
   manual?: ParsedScene;
@@ -729,22 +736,23 @@ export function frameSize(aspect: Aspect): { W: number; H: number } {
 }
 
 // ---------------------------------------------------------------------------
-// Design tokens — LightBeam (components/LightBeam.tsx): dark-cosmic canvas,
-// amber-bordered cards, amber-to-cyan accent. Shared with the other studio
-// apps so the whole shell reads as one product.
+// Design tokens — derived directly from the shared --space-* contract in
+// config.json. Script-to-Video keeps its compact T API, but it no longer owns
+// a second palette: shell changes flow through every one of its sub-screens.
 // ---------------------------------------------------------------------------
 
 export const T = {
-  canvas: LB.bg,                      // '#050508'
-  raised: LB.bgCardHover,             // '#111120' — card / divider surface
-  card: LB.bgCard,                    // '#0d0d14' — LightBeam card bg
-  line: 'rgba(180,120,0,0.14)',       // LightBeam card border
-  bone: '#1A1000',
-  muted: '#3D2800',
-  dim: '#7A6030',
-  live: LB.accent,                    // '#f59e0b'
-  done: '#166534',
-  fault: '#991B1B',
+  canvas: 'var(--space-surface-bg, #08090B)',
+  raised: 'var(--space-surface-panel, #171A21)',
+  card: 'var(--space-surface-card, #111318)',
+  input: 'var(--space-surface-muted, #0E1014)',
+  line: 'var(--space-border-default, rgba(255,255,255,0.07))',
+  bone: 'var(--space-text-primary, #F6F3EB)',
+  muted: 'var(--space-text-secondary, #B8B2A7)',
+  dim: 'var(--space-text-muted, #77736B)',
+  live: 'var(--space-brand-primary-500, #D6AB4A)',
+  done: 'var(--space-semantic-success-500, #4ade80)',
+  fault: 'var(--space-semantic-danger-500, #f87171)',
   mono: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
   sans: "'Inter', system-ui, sans-serif",
 } as const;

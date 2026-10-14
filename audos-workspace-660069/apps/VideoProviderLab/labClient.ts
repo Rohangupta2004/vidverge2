@@ -21,7 +21,7 @@
  */
 
 import { capPromptText, validateGroupAInputs, runwayVideoRatio, clampRunwayDuration } from '../../lib/videoEngines';
-import { isOpenRouterRunwayModel } from './labModels';
+import { klingCameraControl } from './labModels';
 import type { LabModel, LabRunInput } from './labModels';
 
 // ---------------------------------------------------------------------------
@@ -245,8 +245,6 @@ export interface RunResult {
   /** What actually produced the clip — printed verbatim on the result card. */
   modelUsed: string;
   detail?: string;
-  /** Kling task id, so extend and lip-sync can be run on the finished clip. */
-  klingTaskId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -273,10 +271,19 @@ export async function uploadImageForPublicUrl(dataUrl: string, ctx: RunContext):
 }
 
 // ---------------------------------------------------------------------------
-// Group A — Seedance, Veo, Sora, Gemini Omni Flash
+// Group A — Seedance, Veo and Gemini Omni Flash
 // ---------------------------------------------------------------------------
 
 function pollVeoStatus(ctx: RunContext, operationId: string, label: string, capMs: number): Promise<string> {
+  // Before the first status poll: a synthetic error id means the upstream
+  // submission was refused, so there is no real job behind it and polling
+  // would just run until the cap for nothing. Fail fast instead.
+  if (/_error_[0-9]+$/.test(operationId) || /^(veo_video_error|sora_error|openrouter_error)_/.test(operationId)) {
+    throw new Error(
+      `Provider refused: the proxy returned a synthetic error ID (${operationId}) instead of a real job. `
+      + 'This model is not accepting submissions right now — try Veo 3.1, Veo 3.1 Fast, or Seedance 2.0 Fast instead.',
+    );
+  }
   const path = `/api/veo/status/${encodeURIComponent(operationId)}`;
   ctx.tried(`GET ${path}`);
   const poller = pollWithInterval<string>({
@@ -319,13 +326,11 @@ async function runGroupA(ctx: RunContext, model: LabModel, input: LabRunInput): 
 
   // The same rules the proxy enforces with a 400, checked before the wallet is
   // touched so an impossible combination costs nothing.
-  const violation = isOpenRouterRunwayModel(model.modelId)
-    ? null
-    : validateGroupAInputs(model.modelId, {
-      prompt: input.prompt,
-      imageData: seedImage,
-      referenceImages,
-    });
+  const violation = validateGroupAInputs(model.modelId, {
+    prompt: input.prompt,
+    imageData: seedImage,
+    referenceImages,
+  });
   if (violation) throw new Error(violation);
 
   const body: Record<string, unknown> = {
@@ -407,395 +412,6 @@ async function runVeoManaged(ctx: RunContext, model: LabModel, input: LabRunInpu
     modelUsed: 'server-pinned veo-3.1-generate-preview',
     detail: 'This endpoint takes no model field — the version is whatever the platform currently pins.',
   };
-}
-
-// ---------------------------------------------------------------------------
-// Kling
-// ---------------------------------------------------------------------------
-
-function pollKlingTask(ctx: RunContext, taskId: string, label: string, capMs: number): Promise<string> {
-  const path = `/api/generate/kling/status/${encodeURIComponent(taskId)}`;
-  ctx.tried(`GET ${path}`);
-  const poller = pollWithInterval<string>({
-    everyMs: POLL_MS,
-    capMs,
-    onNote: ctx.note,
-    timeoutMessage: `${label} is still working after ${Math.round(capMs / 1000)}s. Task ${taskId} may still finish — poll it again rather than resubmitting.`,
-    step: async (elapsed) => {
-      const state = await jsonFetch(path, { headers: workspaceHeaders() });
-      const status = String(state?.status || '');
-      if (status === 'failed') {
-        throw new Error(String(state?.errorMessage || `${label} reported the generation failed.`));
-      }
-      if (status === 'completed') {
-        const url = String(state?.videoUrl || '');
-        if (!url) throw new Error(`${label} completed but returned no videoUrl.`);
-        return { done: true, value: url };
-      }
-      return { done: false, note: waitingNote(label, status, elapsed) };
-    },
-  });
-  ctx.register(poller.cancel);
-  return poller.promise;
-}
-
-function klingDuration(seconds: number): string {
-  return Number(seconds) >= 8 ? '10' : '5';
-}
-
-/**
- * One Kling entry covers three routes, and the attached images decide which:
- * none runs text-to-video, one runs image-to-video, and two to four runs
- * Elements (multi-image). The card reports the route that was used.
- */
-async function runKling(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
-  const images = input.images;
-  const route = images.length >= 2 ? 'multi-image' : images.length === 1 ? 'image-to-video' : 'text-to-video';
-  const path = `/api/generate/kling/${route}`;
-
-  const body: Record<string, unknown> = {
-    model: model.modelId,
-    mode: input.mode || 'std',
-    duration: klingDuration(input.duration),
-  };
-  const prompt = input.prompt.trim();
-  if (prompt) body.prompt = capPromptText(prompt, 2500);
-  if (input.negativePrompt.trim()) body.negativePrompt = capPromptText(input.negativePrompt, 2500);
-  if (Number.isFinite(input.cfgScale)) body.cfgScale = Math.max(0, Math.min(1, input.cfgScale));
-  const seed = Number.parseInt(input.seed, 10);
-  if (Number.isFinite(seed)) body.seed = seed;
-
-  if (route === 'text-to-video') {
-    // Only the text-to-video body carries an aspect ratio; on the image routes
-    // the source image sets the frame and the field is not in the schema.
-    body.aspectRatio = input.aspectRatio;
-    if (input.camera) body.cameraControl = { type: input.camera };
-  } else if (route === 'image-to-video') {
-    body.imageData = images[0];
-    if (input.camera) body.cameraControl = { type: input.camera };
-  } else {
-    body.images = images.slice(0, 4);
-  }
-
-  ctx.note(`Submitting to Kling ${route}…`);
-  ctx.tried(`POST ${path} · model=${model.modelId} · mode=${String(body.mode)}`);
-  let start: Record<string, unknown> | null = null;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      start = await jsonFetch(path, {
-        method: 'POST',
-        headers: workspaceHeaders(),
-        body: JSON.stringify(body),
-      });
-      break;
-    } catch (err) {
-      if (err instanceof RequestError && err.status === 503 && attempt < 3) {
-        ctx.note(`Kling returned 503 — retrying in 5s (attempt ${attempt + 1}/3)…`);
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise<void>((resolve) => { window.setTimeout(resolve, 5000); });
-      } else {
-        throw err;
-      }
-    }
-  }
-  if (!start) throw new Error('Kling did not respond after 3 attempts.');
-
-  const taskId = String(start?.taskId || '');
-  if (!taskId) throw new Error('Kling accepted the request but returned no taskId.');
-  const detail = [
-    `Route: ${route}.`,
-    start?.modelFallback ? `Kling fell back: ${String(start.modelFallback)}` : '',
-  ].filter(Boolean).join(' ');
-
-  const videoUrl = await pollKlingTask(ctx, taskId, `Kling ${route}`, model.capMs);
-  return { videoUrl, modelUsed: `${model.modelId} · ${route}`, detail, klingTaskId: taskId };
-}
-
-/** Lengthen a finished Kling clip by ~5s. The proxy resolves the Kling
- *  video-level id from the source task, so only the task id is sent. */
-export async function runKlingExtend(ctx: RunContext, sourceTaskId: string, prompt: string, capMs: number): Promise<RunResult> {
-  const path = '/api/generate/kling/extend';
-  ctx.note('Submitting a Kling extend…');
-  ctx.tried(`POST ${path} · sourceTaskId=${sourceTaskId}`);
-  const body: Record<string, unknown> = { sourceTaskId };
-  if (prompt.trim()) body.prompt = capPromptText(prompt, 2500);
-  const start = await jsonFetch(path, {
-    method: 'POST',
-    headers: workspaceHeaders(),
-    body: JSON.stringify(body),
-  });
-  const taskId = String(start?.taskId || '');
-  if (!taskId) throw new Error('The Kling extend was accepted but returned no taskId.');
-  const videoUrl = await pollKlingTask(ctx, taskId, 'Kling extend', capMs);
-  return {
-    videoUrl,
-    modelUsed: 'kling extend (+~5s)',
-    detail: `Extended from task ${sourceTaskId}. Billed separately at $0.25.`,
-    klingTaskId: taskId,
-  };
-}
-
-/** Apply TTS lip-sync to a finished Kling clip. */
-export async function runKlingLipSync(ctx: RunContext, videoTaskId: string, text: string, capMs: number): Promise<RunResult> {
-  const path = '/api/generate/kling/lip-sync';
-  const spoken = text.trim();
-  if (!spoken) throw new Error('Lip-sync needs the line you want spoken.');
-  ctx.note('Submitting a Kling lip-sync…');
-  ctx.tried(`POST ${path} · videoTaskId=${videoTaskId}`);
-  const start = await jsonFetch(path, {
-    method: 'POST',
-    headers: workspaceHeaders(),
-    body: JSON.stringify({
-      videoTaskId,
-      audioType: 'text',
-      text: spoken.slice(0, 500),
-      voiceLanguage: 'en',
-      voiceSpeed: 1,
-    }),
-  });
-  const taskId = String(start?.taskId || '');
-  if (!taskId) throw new Error('The Kling lip-sync was accepted but returned no taskId.');
-  const videoUrl = await pollKlingTask(ctx, taskId, 'Kling lip-sync', capMs);
-  return {
-    videoUrl,
-    modelUsed: 'kling lip-sync (TTS)',
-    detail: `Synced onto task ${videoTaskId}. Billed separately at $0.25.`,
-    klingTaskId: taskId,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Higgsfield
-// ---------------------------------------------------------------------------
-
-function pollHiggsfield(ctx: RunContext, requestId: string, label: string, capMs: number): Promise<string> {
-  const path = `/api/generate/higgsfield/status/${encodeURIComponent(requestId)}`;
-  ctx.tried(`GET ${path}`);
-  const poller = pollWithInterval<string>({
-    everyMs: POLL_MS,
-    capMs,
-    onNote: ctx.note,
-    timeoutMessage: `${label} is still working after ${Math.round(capMs / 1000)}s. Request ${requestId} may still finish.`,
-    step: async (elapsed) => {
-      const state = await jsonFetch(path, { headers: workspaceHeaders() });
-      const status = String(state?.status || '');
-      if (status === 'nsfw') {
-        throw new Error('Higgsfield moderation rejected that prompt (status "nsfw"). Reword it and run again.');
-      }
-      if (status === 'failed') {
-        throw new Error(String(state?.errorMessage || `${label} reported the generation failed.`));
-      }
-      if (status === 'completed') {
-        const url = String(state?.videoUrl || state?.images?.[0]?.url || '');
-        if (!url) throw new Error(`${label} completed but returned no videoUrl.`);
-        return { done: true, value: url };
-      }
-      return { done: false, note: waitingNote(label, status, elapsed) };
-    },
-  });
-  ctx.register(poller.cancel);
-  return poller.promise;
-}
-
-async function runHiggsfieldText(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
-  const path = '/api/generate/higgsfield/video';
-  const body: Record<string, unknown> = {
-    prompt: capPromptText(input.prompt, 2000),
-    model: model.modelId,
-    aspectRatio: input.aspectRatio,
-    durationSeconds: Math.max(1, Math.min(15, Math.round(input.duration))),
-  };
-  const seed = Number.parseInt(input.seed, 10);
-  if (Number.isFinite(seed)) body.seed = seed;
-
-  ctx.note('Submitting to Higgsfield text-to-video…');
-  ctx.tried(`POST ${path} · model=${model.modelId}`);
-  const start = await jsonFetch(path, {
-    method: 'POST',
-    headers: workspaceHeaders(),
-    body: JSON.stringify(body),
-  });
-  const requestId = String(start?.requestId || '');
-  if (!requestId) throw new Error('Higgsfield accepted the request but returned no requestId.');
-  const videoUrl = await pollHiggsfield(ctx, requestId, model.name, model.capMs);
-  return {
-    videoUrl,
-    modelUsed: model.modelId,
-    detail: start?.modelFallback ? `Higgsfield fell back: ${String(start.modelFallback)}` : '',
-  };
-}
-
-async function runHiggsfieldImage(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
-  const path = '/api/generate/higgsfield/image-to-video';
-  if (!input.images.length) throw new Error(`${model.name} needs one source image.`);
-  const body: Record<string, unknown> = {
-    imageData: input.images[0],
-    model: model.modelId,
-  };
-  if (input.prompt.trim()) body.prompt = capPromptText(input.prompt, 2000);
-  const seed = Number.parseInt(input.seed, 10);
-  if (Number.isFinite(seed)) body.seed = seed;
-
-  ctx.note('Submitting to Higgsfield image-to-video…');
-  ctx.tried(`POST ${path} · model=${model.modelId}`);
-  const start = await jsonFetch(path, {
-    method: 'POST',
-    headers: workspaceHeaders(),
-    body: JSON.stringify(body),
-  });
-  const requestId = String(start?.requestId || '');
-  if (!requestId) throw new Error('Higgsfield accepted the request but returned no requestId.');
-  const videoUrl = await pollHiggsfield(ctx, requestId, model.name, model.capMs);
-  return {
-    videoUrl,
-    modelUsed: model.modelId,
-    detail: start?.modelFallback ? `Higgsfield fell back: ${String(start.modelFallback)}` : '',
-  };
-}
-
-// ---------------------------------------------------------------------------
-// HeyGen
-// ---------------------------------------------------------------------------
-
-function heygenBase(): string {
-  const id = workspaceId();
-  if (!id) {
-    throw new Error('This page exposed no workspace id, so the HeyGen proxy path cannot be built. Reload the space and retry.');
-  }
-  return `/api/workspaces/${id}/provider-credentials/heygen/proxy`;
-}
-
-function pollHeyGenVideo(ctx: RunContext, base: string, videoId: string, capMs: number): Promise<string> {
-  const path = `${base}/v3/videos/${encodeURIComponent(videoId)}`;
-  ctx.tried(`GET ${path}`);
-  const poller = pollWithInterval<string>({
-    everyMs: POLL_MS,
-    capMs,
-    onNote: ctx.note,
-    timeoutMessage: `HeyGen is still rendering after ${Math.round(capMs / 1000)}s. Video ${videoId} may still finish.`,
-    step: async (elapsed) => {
-      const state = await jsonFetch(path);
-      const video = state?.data || state;
-      const status = String(video?.status || '');
-      if (status === 'failed') {
-        const code = video?.failure_code ? `${String(video.failure_code)}: ` : '';
-        throw new Error(`${code}${String(video?.failure_message || 'HeyGen reported the render failed.')}`);
-      }
-      if (status === 'completed') {
-        const url = String(video?.video_url || '');
-        if (!url) throw new Error('HeyGen completed but returned no video_url.');
-        return { done: true, value: url };
-      }
-      return { done: false, note: waitingNote('HeyGen', status, elapsed) };
-    },
-  });
-  ctx.register(poller.cancel);
-  return poller.promise;
-}
-
-/** HeyGen's script field is the only place the lab truncates a prompt hard:
- *  a long script turns a smoke test into a multi-minute paid render. */
-const HEYGEN_SCRIPT_CHARS = 500;
-
-async function runHeyGenAvatar(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
-  const base = heygenBase();
-
-  ctx.note('Loading HeyGen avatar looks…');
-  const looksPath = `${base}/v3/avatars/looks?limit=50`;
-  ctx.tried(`GET ${looksPath}`);
-  const looks = await jsonFetch(looksPath);
-  const list: any[] = Array.isArray(looks?.data) ? looks.data : [];
-  // Prefer a look that carries both a default voice and a usable v3 engine.
-  const look = list.filter((entry) => entry?.default_voice_id
-    && Array.isArray(entry?.supported_api_engines)
-    && entry.supported_api_engines.length)[0] || list[0];
-  if (!look) throw new Error('No HeyGen avatar looks found.');
-
-  const supported: string[] = Array.isArray(look.supported_api_engines)
-    ? look.supported_api_engines.map((entry: unknown) => String(entry))
-    : [];
-  // v3 accepts only avatar_iii / avatar_iv / avatar_v, and only the ones this
-  // look lists — anything else comes back 400 invalid_parameter.
-  const engine = ['avatar_iv', 'avatar_v', 'avatar_iii']
-    .filter((candidate) => supported.indexOf(candidate) !== -1)[0]
-    || supported[0]
-    || 'avatar_iv';
-  if (!look.default_voice_id) {
-    throw new Error(`HeyGen look ${String(look.id)} carries no default_voice_id, and v3 requires an explicit voice_id.`);
-  }
-
-  ctx.note(`Creating a HeyGen render on ${engine}…`);
-  ctx.tried(`POST ${base}/v3/videos · engine=${engine}`);
-  const created = await jsonFetch(`${base}/v3/videos`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'avatar',
-      avatar_id: look.id,
-      engine: { type: engine },
-      script: input.prompt.trim().slice(0, HEYGEN_SCRIPT_CHARS),
-      voice_id: look.default_voice_id,
-      voice_settings: { speed: Math.max(0.5, Math.min(1.5, input.voiceSpeed || 1)) },
-      resolution: input.resolution || '720p',
-      aspect_ratio: input.aspectRatio,
-      fit: input.fit,
-      output_format: 'mp4',
-    }),
-  });
-
-  const detail = `Avatar ${String(look.id)} · engine ${engine} · voice ${String(look.default_voice_id)}`
-    + (input.prompt.trim().length > HEYGEN_SCRIPT_CHARS
-      ? ` · script truncated to ${HEYGEN_SCRIPT_CHARS} characters to keep the test render short`
-      : '');
-  const immediate = String(created?.data?.video_url || created?.video_url || '');
-  if (immediate) return { videoUrl: immediate, modelUsed: `heygen/${engine}`, detail };
-
-  const videoId = String(created?.data?.video_id || created?.video_id || '');
-  if (!videoId) throw new Error('HeyGen did not return data.video_id.');
-  const videoUrl = await pollHeyGenVideo(ctx, base, videoId, model.capMs);
-  return { videoUrl, modelUsed: `heygen/${engine}`, detail };
-}
-
-/**
- * The prompt-driven Video Agent is a DIFFERENT v3 API: it takes `orientation`
- * rather than `aspect_ratio`, and the integration doc stops at the request
- * shape. So this runner reports the creation response keys it got back and
- * only polls when an id is actually present — it never claims a contract the
- * doc does not state.
- */
-async function runHeyGenAgent(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
-  const base = heygenBase();
-  const path = `${base}/v3/video-agents`;
-  const orientation = input.aspectRatio === '9:16' ? 'portrait' : 'landscape';
-
-  ctx.note(`Creating a HeyGen Video Agent render (${orientation})…`);
-  ctx.tried(`POST ${path} · orientation=${orientation}`);
-  const created = await jsonFetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt: input.prompt.trim().slice(0, 1000),
-      mode: 'generate',
-      orientation,
-    }),
-  });
-
-  const payload = created?.data || created;
-  const immediate = String(payload?.video_url || '');
-  const responseKeys = payload && typeof payload === 'object' ? Object.keys(payload).join(', ') : 'none';
-  const detail = `Video Agent · orientation ${orientation} · creation response keys: ${responseKeys}`;
-  if (immediate) return { videoUrl: immediate, modelUsed: 'heygen/video-agent', detail };
-
-  const videoId = String(payload?.video_id || payload?.id || payload?.task_id || '');
-  if (!videoId) {
-    throw new Error(
-      'HeyGen accepted the Video Agent request but returned no video id, and the integration doc does not '
-      + `document this endpoint's response or poll shape. Creation response keys: ${responseKeys}.`,
-    );
-  }
-  const videoUrl = await pollHeyGenVideo(ctx, base, videoId, model.capMs);
-  return { videoUrl, modelUsed: 'heygen/video-agent', detail };
 }
 
 // ---------------------------------------------------------------------------
@@ -890,6 +506,339 @@ async function runRunway(ctx: RunContext, model: LabModel, input: LabRunInput): 
 }
 
 // ---------------------------------------------------------------------------
+// Higgsfield — POST /api/generate/higgsfield/video
+// ---------------------------------------------------------------------------
+
+async function runHiggsfield(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
+  // WALLET ATTRIBUTION (the 400 "A billable workspace could not be resolved"
+  // fix): unlike the Veo and Runway proxies, the Higgsfield proxy does NOT
+  // resolve the billable workspace from X-Workspace-DB-Token — per its docs it
+  // needs an x-app-id header, a ?workspaceId= query param, or workspaceId in
+  // the body. Send the body field plus the header so either one resolves it.
+  const wsId = workspaceId();
+  const appId = typeof window === 'undefined'
+    ? ''
+    : String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || '');
+  const headers = workspaceHeaders(appId ? { 'X-App-Id': appId } : undefined);
+
+  // Text-to-video and image-to-video are SEPARATE endpoints on this proxy.
+  const useImage = input.images.length > 0 && model.image !== 'none';
+  const submitPath = useImage
+    ? '/api/generate/higgsfield/image-to-video'
+    : '/api/generate/higgsfield/video';
+  const body: Record<string, unknown> = {
+    model: model.modelId,
+    prompt: capPromptText(input.prompt, 2000),
+  };
+  if (wsId) body.workspaceId = wsId;
+  if (useImage) {
+    // Higgsfield's own file storage refuses inline uploads today — a data: URL
+    // makes the proxy answer 502 "Higgsfield image upload failed (403)" — but a
+    // public HTTPS URL passes straight through (both verified live 13 Oct
+    // 2026). So the attached image is staged to workspace storage first,
+    // exactly like the Runway runner does.
+    body.imageData = await uploadImageForPublicUrl(input.images[0], ctx);
+  } else {
+    body.aspectRatio = input.aspectRatio;
+    body.durationSeconds = input.duration;
+  }
+
+  ctx.note(`Submitting ${model.modelId} to Higgsfield…`);
+  ctx.tried(`POST ${submitPath} · model=${model.modelId}`);
+  const task = await jsonFetch(submitPath, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  const requestId = String(task?.requestId || task?.jobId || task?.taskId || task?.id || '');
+  if (!requestId) throw new Error('Higgsfield accepted the request but returned no request ID.');
+
+  // Unknown model ids never fail on this proxy — they fall back to the mode
+  // default and the kickoff carries a modelFallback note. A comparison tool
+  // must say so rather than labelling the clip with the id that was asked for.
+  const fallbackNote = task?.modelFallback ? String(task.modelFallback) : '';
+  const modelUsed = String(task?.model || model.modelId);
+  if (fallbackNote) ctx.note(`Higgsfield model fallback: ${fallbackNote}`);
+
+  const statusPath = `/api/generate/higgsfield/status/${encodeURIComponent(requestId)}`;
+  ctx.tried(`GET ${statusPath}`);
+  const poller = pollWithInterval<string>({
+    everyMs: POLL_MS,
+    capMs: model.capMs,
+    onNote: ctx.note,
+    timeoutMessage: `Higgsfield is still rendering after ${Math.round(model.capMs / 1000)}s. Request ID: ${requestId}.`,
+    step: async (elapsed) => {
+      const state = await jsonFetch(statusPath, { headers: workspaceHeaders() });
+      const status = String(state?.status || '').toLowerCase();
+      if (status === 'succeeded' || status === 'completed' || status === 'done') {
+        const url = firstMediaUrl(state) || String(state?.videoUrl || state?.video_url || '');
+        if (!url) throw new Error('Higgsfield finished but returned no video URL.');
+        return { done: true, value: url };
+      }
+      if (status === 'failed' || status === 'error' || status === 'nsfw') {
+        const detail = String(state?.errorMessage || state?.error || state?.error_message
+          || (status === 'nsfw' ? 'moderation rejected the generation — adjust the prompt and retry' : 'no detail'));
+        throw new Error(`Higgsfield ${status}: ${detail}`);
+      }
+      return { done: false, note: waitingNote('Higgsfield', status, elapsed) };
+    },
+  });
+  ctx.register(poller.cancel);
+  return {
+    videoUrl: await poller.promise,
+    modelUsed,
+    detail: fallbackNote
+      ? `The proxy fell back to its mode default: ${fallbackNote}`
+      : (useImage ? 'Sent through the image-to-video route with the attached image.' : ''),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Kling — POST /api/generate/kling/text-to-video
+//         POST /api/generate/kling/image-to-video
+// ---------------------------------------------------------------------------
+
+async function runKling(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
+  const imageToVideo = input.images.length > 0 && model.image !== 'none';
+  const submitPath = imageToVideo
+    ? '/api/generate/kling/image-to-video'
+    : '/api/generate/kling/text-to-video';
+
+  const body: Record<string, unknown> = {
+    model: model.modelId,
+    prompt: capPromptText(input.prompt, 2500),
+    // Kling duration tokens are strings ("5" / "10"), not integers.
+    duration: String(input.duration),
+  };
+  if (input.negativePrompt.trim()) body.negativePrompt = capPromptText(input.negativePrompt, 2500);
+
+  if (model.params.modes.length && input.mode) body.mode = input.mode;
+
+  if (model.params.camera && input.cameraPreset && input.cameraPreset !== 'none') {
+    const cameraControl = klingCameraControl(input.cameraPreset);
+    if (cameraControl) body.cameraControl = cameraControl;
+  }
+  if (model.params.cfgScale && input.cfgScale !== undefined) {
+    body.cfgScale = Math.min(1, Math.max(0, Number(input.cfgScale) || 0));
+  }
+  if (model.params.seed && input.seed !== null && input.seed !== undefined && Number.isFinite(Number(input.seed))) {
+    body.seed = Math.trunc(Number(input.seed));
+  }
+
+  if (imageToVideo) {
+    // Send inline data: URL — if Kling requires a public URL the 400 response
+    // from the proxy will say so verbatim on the card. The image-to-video
+    // contract has no aspectRatio field (the ratio follows the input image),
+    // so it is only sent on the text-to-video route.
+    body.imageData = input.images[0];
+  } else {
+    body.aspectRatio = input.aspectRatio;
+  }
+
+  ctx.note(`Submitting ${model.modelId} to Kling…`);
+  ctx.tried(`POST ${submitPath} · model=${model.modelId}`);
+
+  const task = await jsonFetch(submitPath, {
+    method: 'POST',
+    headers: workspaceHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  const taskId = String(task?.taskId || task?.id || task?.task_id || '');
+  if (!taskId) throw new Error('Kling accepted the request but returned no task ID.');
+
+  // The proxy never rejects an unknown model id — it falls back to its mode
+  // default and notes it in modelFallback. A comparison tool must say so
+  // rather than labelling the clip with the id that was asked for. This is
+  // how the new kling-2.5/2.6/3.0 ids reveal whether the proxy routes them
+  // as themselves or substitutes the default.
+  const fallbackNote = task?.modelFallback ? String(task.modelFallback) : '';
+  const modelUsed = String(task?.model || model.modelId);
+  if (fallbackNote) ctx.note(`Kling model fallback: ${fallbackNote}`);
+
+  const statusPath = `/api/generate/kling/status/${encodeURIComponent(taskId)}`;
+  ctx.tried(`GET ${statusPath}`);
+
+  const poller = pollWithInterval<string>({
+    everyMs: POLL_MS,
+    capMs: model.capMs,
+    onNote: ctx.note,
+    timeoutMessage: `Kling is still rendering after ${Math.round(model.capMs / 1000)}s. Task ID: ${taskId}.`,
+    step: async (elapsed) => {
+      const state = await jsonFetch(statusPath, { headers: workspaceHeaders() });
+      const status = String(state?.status || '').toLowerCase();
+      if (status === 'succeeded' || status === 'completed' || status === 'done') {
+        const url = firstMediaUrl(state) || String(state?.videoUrl || state?.video_url || '');
+        if (!url) throw new Error('Kling finished but returned no video URL.');
+        return { done: true, value: url };
+      }
+      if (status === 'failed' || status === 'error') {
+        throw new Error(`Kling ${status}: ${String(state?.errorMessage || state?.error || 'no detail')}`);
+      }
+      return { done: false, note: waitingNote('Kling', status, elapsed, state?.progress) };
+    },
+  });
+  ctx.register(poller.cancel);
+  return {
+    videoUrl: await poller.promise,
+    modelUsed,
+    detail: [
+      fallbackNote ? `The proxy fell back to its default model: ${fallbackNote}` : '',
+      imageToVideo ? 'Sent through the image-to-video route.' : '',
+      body.cameraControl ? `Camera preset: ${input.cameraPreset}.` : '',
+      `Task ID: ${taskId} — paste it into Kling — Video Extend or Lip Sync to build on this clip.`,
+    ].filter(Boolean).join(' '),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Kling Elements, Video Extend and Lip Sync. All three kick off a task and
+// poll the same status route as text-to-video and image-to-video.
+// ---------------------------------------------------------------------------
+
+function readKlingKickoff(task: any, label: string, requestedModel: string) {
+  const taskId = String(task?.taskId || task?.id || task?.task_id || '');
+  if (!taskId) throw new Error(`${label} accepted the request but returned no task ID.`);
+  return {
+    taskId,
+    fallbackNote: task?.modelFallback ? String(task.modelFallback) : '',
+    modelUsed: String(task?.model || requestedModel),
+  };
+}
+
+async function pollKlingStatus(ctx: RunContext, taskId: string, capMs: number): Promise<string> {
+  const statusPath = `/api/generate/kling/status/${encodeURIComponent(taskId)}`;
+  ctx.tried(`GET ${statusPath}`);
+  const poller = pollWithInterval<string>({
+    everyMs: POLL_MS,
+    capMs,
+    onNote: ctx.note,
+    timeoutMessage: `Kling is still rendering after ${Math.round(capMs / 1000)}s. Task ID: ${taskId}.`,
+    step: async (elapsed) => {
+      const state = await jsonFetch(statusPath, { headers: workspaceHeaders() });
+      const status = String(state?.status || '').toLowerCase();
+      if (status === 'succeeded' || status === 'completed' || status === 'done') {
+        const url = firstMediaUrl(state) || String(state?.videoUrl || state?.video_url || '');
+        if (!url) throw new Error('Kling finished but returned no video URL.');
+        return { done: true, value: url };
+      }
+      if (status === 'failed' || status === 'error') {
+        throw new Error(`Kling ${status}: ${String(state?.errorMessage || state?.error || 'no detail')}`);
+      }
+      return { done: false, note: waitingNote('Kling', status, elapsed, state?.progress) };
+    },
+  });
+  ctx.register(poller.cancel);
+  return poller.promise;
+}
+
+/** POST /api/generate/kling/multi-image — character consistency from 2-4 references. */
+async function runKlingMultiImage(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
+  const submitPath = '/api/generate/kling/multi-image';
+  if (input.images.length < 2) {
+    throw new Error(`${model.name} needs 2\u2013${model.maxImages} reference images — attach at least 2 with the paperclip.`);
+  }
+
+  const body: Record<string, unknown> = {
+    model: model.modelId,
+    prompt: capPromptText(input.prompt, 2500),
+    images: input.images.slice(0, model.maxImages).map((dataUrl) => ({
+      imageData: dataUrl,
+      mimeType: dataUrlMimeType(dataUrl) || 'image/png',
+    })),
+    duration: String(input.duration),
+    aspectRatio: input.aspectRatio,
+  };
+  if (input.negativePrompt.trim()) body.negativePrompt = capPromptText(input.negativePrompt, 2500);
+  if (model.params.modes.length && input.mode) body.mode = input.mode;
+
+  ctx.note(`Submitting ${model.modelId} (${(body.images as unknown[]).length} references) to Kling…`);
+  ctx.tried(`POST ${submitPath} · model=${model.modelId} · images=${(body.images as unknown[]).length}`);
+  const task = await jsonFetch(submitPath, {
+    method: 'POST',
+    headers: workspaceHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  const { taskId, fallbackNote, modelUsed } = readKlingKickoff(task, 'Kling', model.modelId);
+  if (fallbackNote) ctx.note(`Kling model fallback: ${fallbackNote}`);
+
+  const videoUrl = await pollKlingStatus(ctx, taskId, model.capMs);
+  return {
+    videoUrl,
+    modelUsed,
+    detail: [
+      fallbackNote ? `The proxy fell back to its default model: ${fallbackNote}` : '',
+      `Sent ${(body.images as unknown[]).length} reference images through the multi-image (Elements) route.`,
+      `Task ID: ${taskId} — paste it into Kling — Video Extend or Lip Sync to build on this clip.`,
+    ].filter(Boolean).join(' '),
+  };
+}
+
+/** POST /api/generate/kling/extend — lengthen a finished clip by ~5s ($0.25). */
+async function runKlingExtend(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
+  const submitPath = '/api/generate/kling/extend';
+  const sourceTaskId = input.sourceTaskId.trim();
+  if (!sourceTaskId) throw new Error('Video Extend needs the task ID of a finished Kling clip.');
+
+  const body: Record<string, unknown> = { taskId: sourceTaskId };
+  if (input.prompt.trim()) body.prompt = capPromptText(input.prompt, 2500);
+  if (input.negativePrompt.trim()) body.negativePrompt = capPromptText(input.negativePrompt, 2500);
+
+  ctx.note('Submitting the extend request to Kling…');
+  ctx.tried(`POST ${submitPath} · taskId=${sourceTaskId}`);
+  const task = await jsonFetch(submitPath, {
+    method: 'POST',
+    headers: workspaceHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  const { taskId, modelUsed } = readKlingKickoff(task, 'Kling', `extend of ${sourceTaskId}`);
+  const videoUrl = await pollKlingStatus(ctx, taskId, model.capMs);
+  return {
+    videoUrl,
+    modelUsed,
+    detail: `Extended clip ${sourceTaskId}. New task ID: ${taskId} — paste it to extend or lip sync again.`,
+  };
+}
+
+/** POST /api/generate/kling/lip-sync — add speech to a finished clip ($0.25). */
+async function runKlingLipSync(ctx: RunContext, model: LabModel, input: LabRunInput): Promise<RunResult> {
+  const submitPath = '/api/generate/kling/lip-sync';
+  const sourceTaskId = input.sourceTaskId.trim();
+  if (!sourceTaskId) throw new Error('Lip Sync needs the task ID of a finished Kling clip.');
+  const text = input.lipSyncText.trim();
+  const audioUrl = input.lipSyncAudioUrl.trim();
+  if (!text && !audioUrl) throw new Error('Lip Sync needs either text to speak or an audio URL.');
+
+  const body: Record<string, unknown> = { taskId: sourceTaskId };
+  if (text) body.text = text;
+  if (audioUrl) body.audioUrl = audioUrl;
+  if (input.voiceId.trim()) body.voiceId = input.voiceId.trim();
+  if (input.language.trim()) body.language = input.language.trim();
+  if (model.params.voiceSpeed && text && Number.isFinite(Number(input.voiceSpeed))) {
+    body.speed = Number(input.voiceSpeed);
+  }
+
+  ctx.note('Submitting the lip-sync request to Kling…');
+  ctx.tried(`POST ${submitPath} · taskId=${sourceTaskId}`);
+  const task = await jsonFetch(submitPath, {
+    method: 'POST',
+    headers: workspaceHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  const { taskId, modelUsed } = readKlingKickoff(task, 'Kling', `lip-sync of ${sourceTaskId}`);
+  const videoUrl = await pollKlingStatus(ctx, taskId, model.capMs);
+  return {
+    videoUrl,
+    modelUsed,
+    detail: `Lip-synced clip ${sourceTaskId} from ${audioUrl && !text ? 'an audio URL' : 'text-to-speech'}. New task ID: ${taskId}.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -897,12 +846,13 @@ export function runLabModel(model: LabModel, input: LabRunInput, ctx: RunContext
   switch (model.runner) {
     case 'group-a': return runGroupA(ctx, model, input);
     case 'veo-managed': return runVeoManaged(ctx, model, input);
-    case 'kling': return runKling(ctx, model, input);
-    case 'higgsfield-text': return runHiggsfieldText(ctx, model, input);
-    case 'higgsfield-image': return runHiggsfieldImage(ctx, model, input);
-    case 'heygen-avatar': return runHeyGenAvatar(ctx, model, input);
-    case 'heygen-agent': return runHeyGenAgent(ctx, model, input);
     case 'runway': return runRunway(ctx, model, input);
+    case 'higgsfield': return runHiggsfield(ctx, model, input);
+    case 'kling':
+      if (model.params.extend) return runKlingExtend(ctx, model, input);
+      if (model.params.lipSync) return runKlingLipSync(ctx, model, input);
+      if (model.params.multiImage) return runKlingMultiImage(ctx, model, input);
+      return runKling(ctx, model, input);
     default:
       return Promise.reject(new Error(
         model.unavailableReason || `${model.name} has no endpoint on this platform, so the lab will not call one.`,

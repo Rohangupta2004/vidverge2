@@ -1,12 +1,12 @@
 /**
  * Script-to-Video — sequential AI clip pipeline (Sep 2026 rebuild).
  *
- *   Script → Opus 5 reads the WHOLE story → sequential clip plan (4/6/8/10s)
+ *   Script → creative planner reads the WHOLE story → intent-led scene plan
+ *          → shared routing resolves an engine and legal duration per shot
  *          → one prompt at a time (global + scene + continuity context)
- *          → generation on the Google video model (Omni Flash), fired by
- *            auto-generate the moment a prompt is ready — or by a click
+ *          → auto-generate when ready, or an explicit click
  *          → FFmpeg extracts + validates each clip's real final frame
- *          → Opus decides continuation vs. independent scene for the next clip
+ *          → planner decides continuation vs. independent next scene
  *          → FFmpeg assembles the final film
  *
  * Prompt preparation and generation are SEPARATE operations; dependent clips
@@ -54,6 +54,7 @@ import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
 import type { VidvergeAttachment } from '../../lib/vidvergeHandoff';
 import { saveVideoSelection } from '../../lib/videoIntegrations';
 import AppShell from '../../components/ui/AppShell';
+import { withBrandContext } from '../../components/BrandContextLayer';
 
 type Screen = 'library' | 'create' | 'board' | 'final' | 'legacy' | 'tester';
 
@@ -88,18 +89,18 @@ function writeAutoPref(filmId: number, on: boolean) {
 const APP_CSS = `
   .s2v-app button { transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease; }
   .s2v-app button:focus-visible, .s2v-app a:focus-visible { outline: 2px solid ${T.live}; outline-offset: 2px; }
-  .s2v-app input:focus-visible, .s2v-app textarea:focus-visible, .s2v-app select:focus-visible { outline: none; border-color: ${T.live} !important; box-shadow: 0 0 0 3px rgba(200,146,10,0.18); }
+  .s2v-app input:focus-visible, .s2v-app textarea:focus-visible, .s2v-app select:focus-visible { outline: none; border-color: ${T.live} !important; box-shadow: 0 0 0 3px color-mix(in srgb, ${T.live} 18%, transparent); }
   ${LB_SHIMMER_CSS}
   .s2v-app input, .s2v-app textarea, .s2v-app select { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
   .s2v-row { transition: background-color 0.16s ease; border-radius: 10px; }
-  .s2v-row:hover { background: rgba(200,146,10,0.07) !important; }
-  .s2v-lift:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(120,80,0,0.12); }
+  .s2v-row:hover { background: color-mix(in srgb, ${T.live} 7%, transparent) !important; }
+  .s2v-lift:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(0,0,0,0.32); }
   .s2v-lift:active:not(:disabled) { transform: translateY(0); }
-  .s2v-ghost:hover:not(:disabled) { color: ${T.bone} !important; background: rgba(200,146,10,0.1) !important; }
+  .s2v-ghost:hover:not(:disabled) { color: ${T.bone} !important; background: color-mix(in srgb, ${T.live} 10%, transparent) !important; }
   .s2v-app ::-webkit-scrollbar { width: 6px; height: 6px; }
-  .s2v-app ::-webkit-scrollbar-thumb { background: rgba(200,146,10,0.4); border-radius: 999px; }
-  .s2v-app ::-webkit-scrollbar-thumb:hover { background: rgba(200,146,10,0.7); }
-  .s2v-app ::-webkit-scrollbar-track { background: #FFFAEB; }
+  .s2v-app ::-webkit-scrollbar-thumb { background: color-mix(in srgb, ${T.live} 36%, transparent); border-radius: 999px; }
+  .s2v-app ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, ${T.live} 58%, transparent); }
+  .s2v-app ::-webkit-scrollbar-track { background: ${T.canvas}; }
   @media (prefers-reduced-motion: reduce) {
     .s2v-app *, .s2v-app *::before, .s2v-app *::after { transition-duration: 0.01ms !important; }
     .s2v-app .animate-spin, .s2v-app .lb-shimmer { animation: none !important; }
@@ -108,13 +109,13 @@ const APP_CSS = `
 
 /** The studio canvas. A flat fill read cheap next to the rest of the suite, so
  * the shell sits on a subtle amber wash over the dark-cosmic ground instead. */
-const CANVAS_GRADIENT = 'linear-gradient(160deg, #FFFDF4, #FFF3D6)';
+const CANVAS_GRADIENT = 'radial-gradient(ellipse 72% 48% at 50% -10%, color-mix(in srgb, var(--space-brand-primary-500) 14%, transparent), transparent 64%), linear-gradient(160deg, var(--space-surface-bg), var(--space-surface-card))';
 
-/** The LightBeam CTA: the brand's amber-to-cyan sweep. */
-const CTA_GRADIENT = 'linear-gradient(135deg, #E8B737, #C8920A)';
+/** The premium champagne-gold CTA, derived from the shared brand tokens. */
+const CTA_GRADIENT = 'linear-gradient(135deg, var(--space-brand-primary-500), var(--space-brand-highlight-500))';
 
 /** Text that sits on CTA_GRADIENT and on the solid accent. */
-const ON_ACCENT = '#ffffff';
+const ON_ACCENT = 'var(--space-text-on-primary, #ffffff)';
 
 function ScriptToVideoApp() {
   const [screen, setScreen] = useState<Screen>('library');
@@ -727,7 +728,7 @@ function ScriptToVideoApp() {
                 disabled={screen === 'tester'}
                 title="Generate a single clip from one prompt on any Runway model — it never touches your film projects."
                 onClick={() => { setScreen('tester'); setAuto(false); autoRef.current = false; }}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, background: screen === 'tester' ? T.live : 'rgba(200,146,10,0.12)', border: `1px solid ${T.live}`, color: screen === 'tester' ? ON_ACCENT : T.live, fontSize: 12.5, fontWeight: 750, cursor: screen === 'tester' ? 'default' : 'pointer', padding: '7px 13px', borderRadius: 999 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, background: screen === 'tester' ? T.live : 'color-mix(in srgb, var(--space-brand-primary-500) 12%, transparent)', border: `1px solid ${T.live}`, color: screen === 'tester' ? ON_ACCENT : T.live, fontSize: 12.5, fontWeight: 750, cursor: screen === 'tester' ? 'default' : 'pointer', padding: '7px 13px', borderRadius: 999 }}
               >
                 <Sparkles size={14} /> Agent Studio
               </button>
@@ -859,7 +860,7 @@ function LegacyViewer({ legacy: item }: { legacy: LegacyFilm }) {
           <div style={{ marginTop: 16 }}>
             <video src={finalUrl} controls style={{ maxWidth: '100%', maxHeight: 440, borderRadius: 12, background: '#000' }} />
             <div style={{ marginTop: 12 }}>
-              <a className="s2v-lift" href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: CTA_GRADIENT, color: ON_ACCENT, borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 0 24px rgba(200,146,10,0.3)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
+              <a className="s2v-lift" href={finalUrl} download target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: CTA_GRADIENT, color: ON_ACCENT, borderRadius: 10, padding: '11px 22px', fontSize: 13.5, fontWeight: 700, textDecoration: 'none', boxShadow: '0 0 24px color-mix(in srgb, var(--space-brand-primary-500) 28%, transparent)', transition: 'transform 0.18s ease, box-shadow 0.18s ease' }}>
                 <Download size={14} /> Download MP4
               </a>
             </div>
@@ -884,7 +885,7 @@ class S2VBoundary extends Component<{ children?: ReactNode }, { error: Error | n
     if (this.state.error) {
       return (
         <div style={{ width: '100%', height: '100%', minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: CANVAS_GRADIENT, fontFamily: T.sans }}>
-          <div style={{ maxWidth: 460, textAlign: 'center', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 16, padding: '32px 28px', boxShadow: '0 24px 60px rgba(120,80,0,0.12)' }}>
+          <div style={{ maxWidth: 460, textAlign: 'center', background: T.raised, border: `1px solid ${T.dim}`, borderRadius: 16, padding: '32px 28px', boxShadow: '0 24px 60px rgba(0,0,0,0.48)' }}>
             <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(153,27,27,0.1)', border: '1px solid rgba(153,27,27,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
               <AlertCircle size={24} color={T.fault} />
             </div>
@@ -903,7 +904,9 @@ class S2VBoundary extends Component<{ children?: ReactNode }, { error: Error | n
   }
 }
 
-export default function App() {
+const BrandedScriptToVideo = withBrandContext(App, 'Script-to-Video');
+export default BrandedScriptToVideo;
+function App() {
   return (
     <S2VBoundary>
       <ScriptToVideoApp />
