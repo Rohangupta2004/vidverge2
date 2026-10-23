@@ -11,8 +11,8 @@
  *   3  Compare           a seven-row table with every cell filled from those
  *                        reads, editable, exportable as a PNG, with the
  *                        positioning read-out beside it.
- *   4  Video             a 30-45s script written from the read-out, filmed by
- *                        Veo and finished by Remotion with the brand graphics.
+ *   4  Strategize        ranked CreativeBriefs become style-specific scripts
+ *                        and enter the shared five-stage Script-to-Video engine.
  *
  * WHY THE SAVE IS AUTOMATIC AND DEBOUNCED. Each screen is minutes of real
  * research and real wallet spend, so losing it to a closed tab would be the
@@ -27,32 +27,36 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, BarChart3, Ghost, Plus } from 'lucide-react';
+import { Archive, BarChart3, Plus, Target } from 'lucide-react';
 import { ownerKey } from './api';
 import {
   Analysis, Competitor, Insights, Matrix, Profile, SavedSummary,
   autoName, emptyAnalysis, includedCompetitors, listSaved, loadAnalysis,
-  recordHandoff, removeAnalysis, saveAnalysis,
+  removeAnalysis, saveAnalysis,
 } from './store';
 import { DEFAULT_ACCENT, INK, LINE, MONO, SPIN_CSS, TEXT, TEXT_DIM, TEXT_MUTED, normalizeHex, rgba } from './theme';
-import { AccentProvider, Button, Notice, Breadcrumb, Pill, useAccent } from './ui';
-import { openVidvergeStudio, saveVidvergeHandoff } from '../../lib/vidvergeHandoff';
+import { AccentProvider, Button, Notice, Pill, useAccent } from './ui';
+import { openVidvergeStudio } from '../../lib/vidvergeHandoff';
 import AppShell from '../../components/ui/AppShell';
 import { withBrandContext } from '../../components/BrandContextLayer';
+import { useBrandContext } from '../../components/brandContextStore';
+import { VideoHistory } from '../../components/VideoHistory';
 import BrandScreen from './screens/BrandScreen';
 import CompetitorsScreen from './screens/CompetitorsScreen';
 import CompareScreen from './screens/CompareScreen';
-import VideoScreen from './screens/VideoScreen';
 import SavedScreen from './screens/SavedScreen';
+import CreativeStrategyScreen from '../AdsStudio/CreativeStrategyScreen';
+import { emptyCreativeStrategy, upgradeCreativeStrategy, type CreativeStrategyState } from '../AdsStudio/creativeStrategy';
 
-type ScreenId = 'brand' | 'competitors' | 'compare' | 'video';
+type ScreenId = 'brand' | 'competitors' | 'compare' | 'strategize';
 
-const STEPS: Array<{ id: ScreenId; label: string }> = [
-  { id: 'brand', label: 'Your brand' },
-  { id: 'competitors', label: 'Competitors' },
-  { id: 'compare', label: 'Compare' },
-  { id: 'video', label: 'Video' },
-];
+const PRODUCT_STAGES = [
+  { id: 'discover', label: 'Discover', state: 'ready' },
+  { id: 'research', label: 'Research', state: 'ready' },
+  { id: 'strategize', label: 'Strategize', state: 'ready' },
+  { id: 'create', label: 'Create', state: 'engine' },
+  { id: 'edit', label: 'Edit', state: 'engine' },
+] as const;
 
 function Header({
   analysis, onSaved, savedCount, showingSaved, onNew, saving,
@@ -75,12 +79,12 @@ function Header({
         background: rgba(accent, 0.15), border: `1px solid ${rgba(accent, 0.4)}`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        <Ghost size={19} style={{ color: accent }} />
+        <Target size={19} style={{ color: accent }} />
       </div>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: 1.7, color: TEXT }}>VERGEYE</div>
+        <div style={{ fontSize: 15.5, fontWeight: 800, letterSpacing: 1.7, color: TEXT }}>VERGEYE ADS STUDIO</div>
         <div style={{ fontSize: 10.4, color: TEXT_MUTED, fontFamily: MONO, letterSpacing: 0.5 }}>
-          {analysis.brandName ? autoName(analysis.brandName, analysis.competitors) : 'Competitive positioning'}
+          {analysis.brandName ? autoName(analysis.brandName, analysis.competitors) : 'Research intelligence → one production engine'}
         </div>
       </div>
 
@@ -97,9 +101,9 @@ function Header({
   );
 }
 
-const BrandedVergeyeApp = withBrandContext(VergeyeApp, 'Vergeye', { useBrand: true });
+const BrandedVergeyeApp = withBrandContext(VergeyeApp, 'Vergeye Ads Studio', { useBrand: true });
 export default BrandedVergeyeApp;
-function VergeyeApp() {
+export function VergeyeApp(_props: { onOpenCreate?: () => void } = {}) {
   const [analysis, setAnalysis] = useState<Analysis>(emptyAnalysis);
   const [screen, setScreen] = useState<ScreenId>('brand');
   const [showSaved, setShowSaved] = useState(false);
@@ -107,7 +111,7 @@ function VergeyeApp() {
   const [loadingSaved, setLoadingSaved] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [handoffNote, setHandoffNote] = useState('');
+  const { save: saveBrandContext } = useBrandContext();
 
   const live = useRef(analysis);
   const saveTimer = useRef<number | null>(null);
@@ -161,10 +165,22 @@ function VergeyeApp() {
     }, 1200);
   }, [refreshSaved]);
 
-  useEffect(() => () => { if (saveTimer.current) window.clearTimeout(saveTimer.current); }, []);
+  useEffect(() => () => {
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    if (!dirty.current || !live.current.brand) return;
+    const current = live.current;
+    void saveAnalysis({
+      ...current,
+      name: current.name || autoName(current.brandName, current.competitors),
+    }).catch(() => { /* the next open keeps the local handoff; autosave remains best-effort */ });
+  }, []);
 
   const patch = useCallback((next: Partial<Analysis>) => {
-    setAnalysis((prev) => ({ ...prev, ...next }));
+    setAnalysis((prev) => {
+      const merged = { ...prev, ...next };
+      live.current = merged;
+      return merged;
+    });
     scheduleSave();
   }, [scheduleSave]);
 
@@ -187,7 +203,10 @@ function VergeyeApp() {
   };
 
   const onMatrix = (matrix: Matrix) => patch({ matrix, status: 'compared' });
-  const onInsights = (insights: Insights) => patch({ insights, status: 'compared' });
+  const onInsights = (insights: Insights) => patch({
+    insights: { ...insights, creativeStrategy: live.current.insights?.creativeStrategy },
+    status: 'compared',
+  });
 
   const openSaved = async (id: number) => {
     setError('');
@@ -197,7 +216,7 @@ function VergeyeApp() {
       live.current = loaded;
       setShowSaved(false);
       setScreen(
-        loaded.scriptPlan || loaded.videoUrl ? 'video'
+        loaded.insights?.creativeStrategy?.campaignGoal ? 'strategize'
           : loaded.matrix ? 'compare'
             : loaded.competitors.length > 0 ? 'competitors'
               : 'brand',
@@ -231,43 +250,41 @@ function VergeyeApp() {
     setShowSaved(false);
   };
 
-  /**
-   * Hand the finished script to Ads Studio. The hand-off is recorded on the
-   * saved comparison so there is a durable record of what was sent, and passed
-   * through the shell's own hand-off channel so Ads Studio actually opens on
-   * step 1 with the script already in it.
-   */
-  const useInAdsStudio = async () => {
-    const current = live.current;
-    const script = current.scriptPlan?.script || current.script;
-    if (!script) return;
-    setHandoffNote('');
-    try {
-      if (current.id) await recordHandoff(current.id, 'ads-studio');
-      saveVidvergeHandoff({
-        appId: 'ads-studio',
-        prompt: [
-          `${current.brandName || 'Our product'} — competitive positioning ad.`,
-          current.brandUrl,
-          '',
-          script,
-        ].filter(Boolean).join('\n'),
-        attachment: current.mockupUrl
-          ? { url: current.mockupUrl, name: 'product-mockup.png', type: 'image/png' }
-          : null,
-      });
-      patch({ handoff: { app: 'ads-studio', at: new Date().toISOString() } });
-      openVidvergeStudio('ads-studio');
-    } catch (e: any) {
-      setHandoffNote(`The script could not be handed over: ${String(e?.message || e)}`);
-    }
+  const openCreate = () => {
+    // Phase 3 invariant: Vergeye orchestrates strategy, while every paid video
+    // project is created by the existing five-stage Script-to-Video engine.
+    // The mature Ads Studio implementation remains source-compatible but is no
+    // longer a second Vergeye renderer, queue, storyboard or editor.
+    openVidvergeStudio('script-to-video');
   };
 
-  const reachable = (id: ScreenId): boolean => {
-    if (id === 'brand') return true;
-    if (id === 'competitors') return !!analysis.brand;
-    if (id === 'compare') return includedCompetitors(analysis).length > 0;
-    return !!analysis.matrix;
+  const openExistingApp = (appId: string) => {
+    openVidvergeStudio(appId === 'ads-studio' ? 'script-to-video' : appId);
+  };
+
+  const updateCreativeStrategy = (creativeStrategy: CreativeStrategyState) => {
+    const current = live.current.insights || {
+      competitorsBetter: [], yourAdvantages: [], positioningGaps: [], messagingImprovements: [],
+    };
+    patch({ insights: { ...current, creativeStrategy } });
+  };
+
+  const approveBrand = async (brand: Profile) => {
+    const verified = brand.fetched ? 'VERIFIED from public source' : 'AI-INFERRED / manual — human approved';
+    const context = [
+      `Brand Name: ${brand.name || ''}`,
+      `Tagline: ${brand.tagline || ''}`,
+      `Source: ${brand.url || 'manual description'} (${verified})`,
+      `Category: ${brand.category || ''}`,
+      `Audience: ${brand.audience || ''}`,
+      `Products: ${(brand.features || []).join(', ')}`,
+      `Positioning: ${brand.positioning || brand.usp || ''}`,
+      `Pricing: ${brand.pricing || 'Not public'}`,
+      `Colors: ${(brand.colors || []).join(', ') || brand.accent || ''}`,
+      `Logo: ${brand.logoUrl || 'Not found'}`,
+      `Human review: Approved in Vergeye Ads Studio on ${new Date().toISOString()}`,
+    ].join('\n');
+    await saveBrandContext(context);
   };
 
   const body = showSaved ? (
@@ -289,6 +306,8 @@ function VergeyeApp() {
       onBrand={onBrand}
       onAccent={(next) => patch({ accentColor: normalizeHex(next) })}
       onContinue={() => setScreen('competitors')}
+      onQuickStart={openCreate}
+      onApprove={approveBrand}
     />
   ) : screen === 'competitors' && analysis.brand ? (
     <CompetitorsScreen
@@ -296,6 +315,7 @@ function VergeyeApp() {
       competitors={analysis.competitors}
       onCompetitors={onCompetitors}
       onContinue={() => setScreen('compare')}
+      onSkip={() => setScreen('strategize')}
     />
   ) : screen === 'compare' && analysis.brand ? (
     <CompareScreen
@@ -305,17 +325,17 @@ function VergeyeApp() {
       insights={analysis.insights}
       onMatrix={onMatrix}
       onInsights={onInsights}
-      onContinue={() => setScreen('video')}
+      onContinue={() => setScreen('strategize')}
     />
-  ) : screen === 'video' && analysis.brand ? (
-    <VideoScreen
-      analysis={analysis}
+  ) : screen === 'strategize' && analysis.brand ? (
+    <CreativeStrategyScreen
       brand={analysis.brand}
       competitors={includedCompetitors(analysis)}
       insights={analysis.insights}
-      matrix={analysis.matrix}
-      onPatch={patch}
-      onUseInAdsStudio={useInAdsStudio}
+      strategy={upgradeCreativeStrategy(analysis.insights?.creativeStrategy || emptyCreativeStrategy())}
+      onChange={updateCreativeStrategy}
+      onBackToResearch={() => setScreen(analysis.matrix ? 'compare' : 'competitors')}
+      onOpenApp={openExistingApp}
     />
   ) : (
     <BrandScreen
@@ -326,6 +346,8 @@ function VergeyeApp() {
       onBrand={onBrand}
       onAccent={(next) => patch({ accentColor: normalizeHex(next) })}
       onContinue={() => setScreen('competitors')}
+      onQuickStart={openCreate}
+      onApprove={approveBrand}
     />
   );
 
@@ -335,7 +357,7 @@ function VergeyeApp() {
           customer's site, so the title block has to wear their brand, not the
           shared amber one. The shell supplies the ground, beams and grid. */}
       <AppShell
-        title="Vergeye"
+        title="Vergeye Ads Studio"
         header={false}
         watermark={false}
         maxWidth={1420}
@@ -358,13 +380,35 @@ function VergeyeApp() {
           />
 
           {!showSaved ? (
-            <div style={{ marginBottom: 22 }}>
-              <Breadcrumb steps={STEPS} current={screen} reachable={reachable} onJump={(id) => setScreen(id as ScreenId)} />
-            </div>
+            <nav aria-label="Vergeye workflow" style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 22, paddingBottom: 3 }}>
+              {PRODUCT_STAGES.map((stage) => {
+                const active = stage.id === 'discover' ? screen === 'brand'
+                  : stage.id === 'research' ? (screen === 'competitors' || screen === 'compare')
+                    : stage.id === 'strategize' ? screen === 'strategize'
+                      : false;
+                const disabled = (stage.id === 'research' || stage.id === 'strategize') && !analysis.brand;
+                return (
+                  <button
+                    key={stage.id}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      if (stage.id === 'discover') setScreen('brand');
+                      else if (stage.id === 'research' && analysis.brand) setScreen(analysis.matrix ? 'compare' : 'competitors');
+                      else if (stage.id === 'strategize' && analysis.brand) setScreen('strategize');
+                      else if (stage.id === 'create') openCreate();
+                      else if (stage.id === 'edit') openExistingApp('video-enhancer');
+                    }}
+                    style={{ minWidth: 118, minHeight: 44, padding: '9px 12px', borderRadius: 10, border: `1px solid ${active ? rgba(accent, 0.48) : LINE}`, background: active ? rgba(accent, 0.13) : 'transparent', color: disabled ? TEXT_MUTED : active ? TEXT : TEXT_DIM, cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 650 }}
+                  >
+                    {stage.label}{disabled ? <span style={{ display: 'block', marginTop: 2, fontSize: 9.5, fontFamily: MONO }}>BRAND FIRST</span> : null}
+                  </button>
+                );
+              })}
+            </nav>
           ) : null}
 
           {error ? <Notice tone="bad">{error}</Notice> : null}
-          {handoffNote ? <Notice tone="bad">{handoffNote}</Notice> : null}
 
           {body}
 
@@ -375,9 +419,13 @@ function VergeyeApp() {
           }}>
             <BarChart3 size={13} />
             <span style={{ color: TEXT_DIM }}>
-              Everything Vergeye says comes from each product&apos;s own public website, read at the time you ran the analysis.
+              Verified findings link to the public source read during this run. Inferences and hypotheses are labelled for human review; unavailable sources stay unavailable rather than being invented.
             </span>
             <span style={{ marginLeft: 'auto', fontFamily: MONO, opacity: 0.7 }}>{ownerKey().slice(0, 10)}</span>
+          </div>
+
+          <div style={{ marginTop: 28 }}>
+            <VideoHistory />
           </div>
         </div>
       </AppShell>

@@ -139,6 +139,7 @@ function smokeInput(model: LabModel, testImage: string): LabRunInput {
   return effectiveRunInput(model, {
     ...base,
     prompt: SMOKE_PROMPT,
+    duration: model.params.durationMin ?? model.params.durations[0] ?? base.duration,
     audio: false,
     images: needsImage && testImage ? [testImage] : [],
   });

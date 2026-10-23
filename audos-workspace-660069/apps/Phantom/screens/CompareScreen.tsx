@@ -17,9 +17,9 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowRight, Download, Lightbulb, MessageSquare, Pencil, RefreshCw, Sparkles, Target, TrendingUp,
+  ArrowRight, CheckCircle2, Download, ExternalLink, Lightbulb, MessageSquare, Pencil, RefreshCw, Search, Sparkles, Target, TrendingUp,
 } from 'lucide-react';
-import { Competitor, Insights, Matrix, Profile, buildInsights, buildMatrix } from '../store';
+import { Competitor, Insights, MATRIX_ROWS, Matrix, Profile, buildDeterministicResearch, buildInsights, buildMatrix } from '../store';
 import { CARD, CARD_HI, INK, INK_DEEP, LINE, LINE_HI, MONO, TEXT, TEXT_DIM, TEXT_MUTED, readableOn, rgba } from '../theme';
 import { BrandMark, Button, LogStream, Notice, Panel, SectionTitle, Spinner, useAccent } from '../ui';
 
@@ -58,13 +58,16 @@ function loadHtml2Canvas(): Promise<any> {
 }
 
 const ROW_HINTS: Record<string, string> = {
-  Pricing: 'Quoted from each pricing page',
-  'Key features': 'What each site puts first',
-  'Target audience': 'Who each one says it is for',
-  USP: 'The one claim each one leads with',
-  Strengths: 'Judged across this set',
-  Weaknesses: 'Including what is simply not published',
-  Positioning: 'The slot each one occupies',
+  Positioning: 'The slot each one publicly occupies',
+  Audience: 'Who each company says it serves',
+  Offering: 'Published products and key features',
+  Pricing: 'Public pricing only',
+  Strengths: 'Evidence-backed advantages to review',
+  Weaknesses: 'Not self-published; always requires review',
+  Content: 'Official site plus available public content sources',
+  'Advertising hooks': 'Only authorised ad-library evidence',
+  CTA: 'Observed public call to action',
+  Opportunities: 'Clearly labelled strategic hypotheses',
 };
 
 function Cell({
@@ -166,6 +169,7 @@ export default function CompareScreen({
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [exportNote, setExportNote] = useState('');
+  const [findingQuery, setFindingQuery] = useState('');
   const tableRef = useRef<HTMLDivElement>(null);
 
   const columnProfiles = useMemo(() => {
@@ -179,13 +183,43 @@ export default function CompareScreen({
   const build = useCallback(async () => {
     setBusy(true);
     setError('');
-    setLog(['Lining the columns up\u2026', 'Filling every cell from what each site actually says\u2026']);
+    setLog([
+      'Starting independent Ads, Social, Product and Opportunity agents in parallel…',
+      'Each finding will keep its source URL, observation date, evidence status and confidence…',
+    ]);
     try {
-      const nextMatrix = await buildMatrix(brand, competitors);
+      const [rawMatrix, research] = await Promise.all([
+        buildMatrix(brand, competitors),
+        Promise.resolve(buildDeterministicResearch(brand, competitors)),
+      ]);
+      const profiles: Record<string, Partial<Profile>> = { you: brand };
+      competitors.forEach((item) => { profiles[item.id] = item; });
+      const oldRows = rawMatrix.rows || [];
+      const cells: Record<string, string> = {};
+      const valueFor = (row: string, profile: Partial<Profile>, own: boolean): string => {
+        if (row === 'Positioning') return String(profile.positioning || profile.usp || 'Not published');
+        if (row === 'Audience') return String(profile.audience || 'Not published');
+        if (row === 'Offering') return (profile.features || []).slice(0, 5).join(', ') || 'Not published';
+        if (row === 'Pricing') return String(profile.pricing || 'Not published');
+        if (row === 'Strengths') return String(profile.usp || profile.tagline || 'Review needed');
+        if (row === 'Weaknesses') return 'Not stated by the company; requires human review.';
+        if (row === 'Content') return 'Official website reviewed; social feeds unavailable in this run.';
+        if (row === 'Advertising hooks') return 'Ad-library source unavailable; no hook fabricated.';
+        if (row === 'CTA') return String(profile.tagline || 'No public CTA captured');
+        return own ? 'Hypothesis: test a clearer, evidence-backed contrast against the selected competitors.' : 'Reference point for differentiated creative; validate before use.';
+      };
+      MATRIX_ROWS.forEach((row, rowIndex) => {
+        rawMatrix.columns.forEach((columnId) => {
+          const previousIndex = oldRows.findIndex((item) => item.toLowerCase() === row.toLowerCase());
+          const previous = previousIndex >= 0 ? rawMatrix.cells[`${previousIndex}:${columnId}`] : '';
+          cells[`${rowIndex}:${columnId}`] = String(previous || valueFor(row, profiles[columnId] || {}, columnId === 'you'));
+        });
+      });
+      const nextMatrix: Matrix = { ...rawMatrix, rows: [...MATRIX_ROWS], cells };
       onMatrix(nextMatrix);
-      setLog((lines) => lines.concat('Table built. Reading it back for the positioning analysis\u2026'));
+      setLog((lines) => lines.concat('Parallel source passes complete. Agent E is deduplicating and removing unsupported claims…'));
       const nextInsights = await buildInsights(brand, competitors, nextMatrix);
-      onInsights(nextInsights);
+      onInsights({ ...nextInsights, research });
       setLog([]);
     } catch (e: any) {
       setError(String(e?.message || e));
@@ -197,10 +231,10 @@ export default function CompareScreen({
 
   const started = useRef(false);
   useEffect(() => {
-    if (started.current || matrix) return;
+    if (started.current || (matrix && insights?.research)) return;
     started.current = true;
     build();
-  }, [matrix, build]);
+  }, [matrix, insights?.research, build]);
 
   const setCell = (key: string, value: string) => {
     if (!matrix) return;
@@ -244,7 +278,7 @@ export default function CompareScreen({
           <Panel style={{ padding: '54px 32px', textAlign: 'center' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}><Spinner size={120} caption="Building your comparison" /></div>
             <div style={{ fontSize: 13.3, color: TEXT_DIM, maxWidth: 460, margin: '0 auto 18px', lineHeight: 1.6 }}>
-              {competitors.filter((c) => c.included && c.fetched).length + 1} columns, seven rows, then the positioning read-out.
+              {competitors.filter((c) => c.included && c.fetched).length + 1} columns, ten evidence-aware rows, then the positioning read-out.
             </div>
             <LogStream lines={log} busy />
           </Panel>
@@ -258,21 +292,34 @@ export default function CompareScreen({
   return (
     <div className="vergeye-rise">
       <SectionTitle
-        hint="Click any cell to correct it. Your column is highlighted. Export PNG saves exactly what you see."
+        hint="Click any cell to correct it. Review evidence and approve the report before it feeds creative work. Cached results are reused until Refresh research is pressed."
         right={(
           <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
-            <Button busy={busy} onClick={build}><RefreshCw size={14} /> Rebuild</Button>
+            <Button busy={busy} onClick={build}><RefreshCw size={14} /> Refresh research</Button>
             <Button busy={exporting} onClick={exportPng}><Download size={14} /> Export PNG</Button>
-            <Button variant="primary" onClick={onContinue}>Make the video <ArrowRight size={15} /></Button>
+            {insights?.research?.approvedAt ? <Button variant="primary" onClick={onContinue}>Continue to Strategize <ArrowRight size={15} /></Button> : null}
           </div>
         )}
       >
-        The comparison
+        Competitive Intelligence Report
       </SectionTitle>
 
       {error ? <Notice tone="bad">{error}</Notice> : null}
       {exportNote ? <Notice tone={exportNote.startsWith('Saved') ? 'good' : 'bad'}>{exportNote}</Notice> : null}
       {log.length > 0 ? <div style={{ marginBottom: 15 }}><LogStream lines={log} busy={busy} /></div> : null}
+
+      {insights?.research ? (
+        <Panel style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            {insights.research.agents.map((agent) => (
+              <span key={agent.id} title={agent.note} style={{ padding: '7px 10px', border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 11.5, color: agent.status === 'done' ? TEXT : TEXT_MUTED }}>
+                {agent.label} · {agent.status}
+              </span>
+            ))}
+            <span style={{ marginLeft: 'auto', fontSize: 11.3, color: TEXT_MUTED, fontFamily: MONO }}>cached {new Date(insights.research.refreshedAt).toLocaleString()}</span>
+          </div>
+        </Panel>
+      ) : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 316px', gap: 18, alignItems: 'start' }} className="vergeye-two-col">
         <div className="vergeye-scroll" style={{ overflowX: 'auto', borderRadius: 18, border: `1px solid ${LINE}` }}>
@@ -401,15 +448,44 @@ export default function CompareScreen({
                 fontSize: 11.8, color: TEXT_MUTED, lineHeight: 1.55,
               }}>
                 <Lightbulb size={14} style={{ color: accent, flexShrink: 0, marginTop: 1 }} />
-                The video script on the next screen is written from your advantages and these gaps.
+                Approved advantages and gaps become context for the existing Create engine.
               </div>
             </>
           )}
         </Panel>
       </div>
 
+      {insights?.research ? (
+        <Panel style={{ padding: 20, marginTop: 18 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>Evidence &amp; findings</div>
+            <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
+              <Search size={13} style={{ position: 'absolute', left: 10, top: 10, color: TEXT_MUTED }} />
+              <input value={findingQuery} onChange={(event) => setFindingQuery(event.target.value)} placeholder="Filter findings" style={{ width: '100%', padding: '8px 10px 8px 30px', borderRadius: 9, border: `1px solid ${LINE}`, background: INK_DEEP, color: TEXT }} />
+            </div>
+            <Button variant={insights.research.approvedAt ? 'ghost' : 'primary'} onClick={() => onInsights({ ...insights, research: { ...insights.research!, approvedAt: new Date().toISOString() } })}>
+              <CheckCircle2 size={14} /> {insights.research.approvedAt ? 'Approved' : 'Approve findings'}
+            </Button>
+          </div>
+          <div style={{ display: 'grid', gap: 9, maxHeight: 360, overflowY: 'auto' }}>
+            {insights.research.findings.filter((item) => `${item.category} ${item.claim} ${item.evidence}`.toLowerCase().includes(findingQuery.toLowerCase())).map((item) => (
+              <div key={item.id} style={{ padding: 12, border: `1px solid ${LINE}`, borderRadius: 10, background: CARD }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6, fontSize: 10.8, fontFamily: MONO }}>
+                  <span style={{ color: item.evidenceType === 'verified' ? '#166534' : item.evidenceType === 'hypothesis' ? accent : TEXT_MUTED }}>{item.evidenceType.toUpperCase()}</span>
+                  <span style={{ color: TEXT_MUTED }}>{item.confidence} confidence · {new Date(item.observedAt).toLocaleDateString()}</span>
+                  {item.sourceUrl ? <a href={item.sourceUrl} target="_blank" rel="noreferrer" style={{ marginLeft: 'auto', color: accent, display: 'inline-flex', gap: 4, alignItems: 'center' }}>Source <ExternalLink size={11} /></a> : null}
+                </div>
+                <div style={{ fontSize: 12.6, color: TEXT_DIM, lineHeight: 1.5 }}>{item.claim}</div>
+                <div style={{ marginTop: 5, fontSize: 11.4, color: TEXT_MUTED }}>{item.evidence}</div>
+              </div>
+            ))}
+          </div>
+          {insights.research.unavailableSources.length ? <div style={{ marginTop: 12, fontSize: 11.5, color: TEXT_MUTED }}>Unavailable in this run: {insights.research.unavailableSources.join(', ')}. No data was invented.</div> : null}
+        </Panel>
+      ) : null}
+
       <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 7, fontSize: 11.6, color: TEXT_MUTED }}>
-        <Pencil size={12} /> Edits are kept with the saved comparison, and the exported PNG matches them.
+        <Pencil size={12} /> Edits, evidence and approval are kept with the saved report.
         <span style={{ marginLeft: 'auto', fontFamily: MONO, border: `1px solid ${LINE_HI}`, borderRadius: 7, padding: '3px 8px' }}>
           {columns.length} columns · {matrix.rows.length} rows
         </span>

@@ -21,6 +21,7 @@ import type { DurableJob } from './lib/runwayJobs';
 import { formatUsd, hasWorkspaceToken, SESSION_NOT_READY } from './lib/runtime';
 import type { JobStatus, PipelineId, PipelineReporter, VideoJob } from './types';
 import { withBrandContext } from '../../components/BrandContextLayer';
+import { saveVideoToHistory } from '../../lib/videoHistory';
 
 /**
  * What a stopped job says when its row carries no reason.
@@ -75,6 +76,23 @@ function VidvergeEngine() {
   const cancelled = useRef(false);
   const spec = pipelineSpec(pipeline);
 
+  // ---- shared cross-app history -----------------------------------------
+  // A job can finish down three different paths (the row poll, a resumed
+  // watch, and the awaited run), so the id is remembered to keep one finished
+  // video from landing in "Your videos" more than once.
+  const savedToHistory = useRef<Set<string>>(new Set());
+  const recordInHistory = useCallback((entry: VideoJob | null) => {
+    if (!entry?.id || !entry.master_video_url) return;
+    if (savedToHistory.current.has(entry.id)) return;
+    savedToHistory.current.add(entry.id);
+    void saveVideoToHistory({
+      appId: 'vidverge',
+      title: entry.project_name,
+      videoUrl: entry.master_video_url,
+      durationSec: entry.target_duration_sec,
+    });
+  }, []);
+
   // ---- recent jobs -------------------------------------------------------
   const refreshRecent = useCallback(() => {
     if (!hasWorkspaceToken()) return;
@@ -118,6 +136,7 @@ function VidvergeEngine() {
           setError((current) => current || row.error_message || null);
         }
         if (row.status === 'COMPLETED' && row.master_video_url) {
+          recordInHistory(row);
           setStatus('COMPLETED');
           setPhase('done');
           refreshRecent();
@@ -127,7 +146,7 @@ function VidvergeEngine() {
       }
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [phase, job?.id, refreshRecent]);
+  }, [phase, job?.id, refreshRecent, recordInHistory]);
 
   const reporter: PipelineReporter = useMemo(
     () => ({
@@ -173,6 +192,7 @@ function VidvergeEngine() {
         const row = await getJob(entry.id);
         if (row) setJob(row);
         if (final?.phase === 'completed' && final.masterVideoUrl) {
+          recordInHistory(row);
           setStatus('COMPLETED');
           setPhase('done');
         } else if (final && (final.phase === 'failed' || final.phase === 'cancelled')) {
@@ -190,7 +210,7 @@ function VidvergeEngine() {
         ]);
       }
     },
-    [refreshRecent],
+    [refreshRecent, recordInHistory],
   );
 
   const canSubmit =
@@ -249,6 +269,7 @@ function VidvergeEngine() {
 
       const finished = await getJob(result.jobId);
       setJob(finished);
+      recordInHistory(finished);
       setPhase('done');
       refreshRecent();
     } catch (caught: any) {
@@ -271,7 +292,7 @@ function VidvergeEngine() {
   return (
     <div className="h-full overflow-y-auto bg-[radial-gradient(ellipse_76%_44%_at_50%_-8%,color-mix(in_srgb,var(--space-brand-primary-500)_12%,transparent),transparent_64%),var(--space-surface-bg)] text-[var(--space-text-primary)]">
       <div className="mx-auto w-full max-w-[940px] px-5 py-7 md:px-8 md:py-10">
-        <header className="relative mb-7 overflow-hidden rounded-3xl border border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-card)_90%,transparent)] p-6 shadow-[0_24px_64px_rgba(0,0,0,0.32)] md:p-7">
+        <header className="relative mb-7 overflow-hidden rounded-2xl border border-[var(--vg-border)] bg-[image:var(--vg-gradient-surface)] p-6 md:p-7">
           <span
             className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]"
             style={{
@@ -308,8 +329,9 @@ function VidvergeEngine() {
                 onClick={() => setView(tab.id)}
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12.5px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
-                  background: active ? 'var(--space-brand-primary-500)' : 'transparent',
-                  color: active ? 'var(--space-text-on-primary)' : 'var(--space-text-secondary)',
+                  background: active ? 'var(--vg-gradient-selected)' : 'transparent',
+                  color: active ? 'var(--vg-text)' : 'var(--vg-secondary)',
+                  borderBottom: active ? '2px solid var(--vg-accent)' : '2px solid transparent',
                 }}
               >
                 <TabIcon className="h-3.5 w-3.5" />
@@ -385,11 +407,7 @@ function VidvergeEngine() {
                   type="button"
                   onClick={start}
                   disabled={!canSubmit || phase === 'running'}
-                  className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[13.5px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-45 hover:opacity-90"
-                  style={{
-                    background: 'var(--space-brand-primary-500)',
-                    color: 'var(--space-text-on-primary)',
-                  }}
+                  className="vg-primary-action inline-flex items-center gap-2 px-4 text-[13.5px] disabled:cursor-not-allowed"
                 >
                   {phase === 'running' ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -465,11 +483,11 @@ function VidvergeEngine() {
 }
 
 const inputClass = [
-  'w-full rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)]',
+  'w-full min-h-11 rounded-[10px] border border-[var(--vg-control-border)] bg-[var(--vg-bg)]',
   'px-3.5 py-2.5 text-[13.5px] text-[var(--space-text-primary)]',
   'placeholder:text-[var(--space-text-muted)]',
   'outline-none transition-colors',
-  'focus:border-[var(--space-brand-primary-500)]',
+  'focus:border-[var(--vg-focus)] focus:outline focus:outline-2 focus:outline-offset-[3px] focus:outline-[var(--vg-focus)]',
   'disabled:opacity-60',
 ].join(' ');
 
@@ -497,7 +515,7 @@ function StatusPill({ status }: { status: JobStatus }) {
       ? 'var(--space-semantic-success-500)'
       : status === 'FAILED'
         ? 'var(--space-semantic-danger-500)'
-        : 'var(--space-brand-highlight-500)';
+        : 'var(--vg-info)';
   return (
     <span
       className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold"

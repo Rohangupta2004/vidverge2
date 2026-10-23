@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSpaceRuntime } from '../SpaceRuntimeContext';
 import VergeLoader from './VergeLoader';
+import FreeVideoAnalyzer from './FreeVideoAnalyzer';
+import { saveVidvergeHandoff } from '../lib/vidvergeHandoff';
 import type { DesktopThemeTokens } from '../types';
 
 // Version marker for auto-upgrade detection
 // Increment this when making breaking changes that stale copies need
-export const EMAIL_GATE_VERSION = 113; // v113: premium obsidian + champagne-gold brand refresh across landing, OTP and modal surfaces; auth flow untouched
+export const EMAIL_GATE_VERSION = 118; // v118: Vergeye Creative Intelligence copy + 60-credit starter policy; auth unchanged
 
 type ParsedResponseBody = { data: unknown; rawText: string };
 
@@ -158,20 +160,20 @@ type GateStep = 'loading' | 'email' | 'code' | 'complete';
 // layered dark-gold studio light, mirroring components/theme.ts so the gate and
 // the shell behind it read as one product. No rainbow gradients, no pastels,
 // no white surfaces anywhere.
-const BG = '#08090B';
-const BG_DEEP = '#050609';
-const CARD = '#111318';
-const LINE = 'rgba(255,255,255,0.09)';
-const BRAND = '#D6AB4A';
-const BRAND_HI = '#F3D58B';
+const BG = '#101214';
+const BG_DEEP = '#101214';
+const CARD = '#171A1E';
+const LINE = '#343A43';
+const BRAND = '#D9A441';
+const BRAND_HI = '#E5B75A';
 /** Text sitting on a BRAND-filled surface. */
-const INK = '#08090B';
-const TEXT = '#F6F3EB';
-const MUTED = '#B8B2A7';
-const DIM = '#77736B';
-const BRAND_GLOW = '0 0 30px rgba(214,171,74,0.24)';
-const MONO = "ui-monospace, SFMono-Regular, Menlo, 'SF Mono', monospace";
-const FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+const INK = '#17120A';
+const TEXT = '#F4F5F7';
+const MUTED = '#C4C9D0';
+const DIM = '#9AA3AF';
+const BRAND_GLOW = 'none';
+const MONO = "ui-monospace, 'SFMono-Regular', Consolas, monospace";
+const FONT = "'Manrope', 'Segoe UI', sans-serif";
 const CONTAINER = 1180;
 
 // ── Section 3 · Finished customer renders ───────────────────────────────
@@ -296,7 +298,7 @@ export const PLACEHOLDER_CLIPS: PlaceholderClip[] = [
   { slot: 'final-cta', url: GALLERY[2].items[0].url },
 ];
 
-// ── Section 4 · The six studios ─────────────────────────────────────────
+// ── Section 4 · The five studio families ─────────────────────────────────
 // `shot` is a dark-mode interface still of the studio it labels.
 type Studio = { tag: string; name: string; benefit: string; shot: string; shotAlt: string };
 
@@ -330,18 +332,11 @@ const STUDIOS: Studio[] = [
     shotAlt: 'Product Video studio parsing a product URL into a shot plan',
   },
   {
-    tag: 'Paid',
-    name: 'Ads Studio',
-    benefit: 'Ad creatives that actually convert.',
-    shot: 'https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1791363470504-rzquln.jpg',
-    shotAlt: 'Ads Studio comparing four ad creative variants',
-  },
-  {
-    tag: 'Intel',
-    name: 'Vergeye',
-    benefit: 'Outsmart your competitors before you post.',
+    tag: 'Intel → Ads',
+    name: 'Vergeye Ads Studio',
+    benefit: 'Research competitors, rank creative angles, approve briefs, then create in one flow.',
     shot: 'https://storage.googleapis.com/audos-images/generated-images/agent/workspace-660069/img-1791363514872-2w5o8i.jpg',
-    shotAlt: 'Vergeye competitive intelligence dashboard',
+    shotAlt: 'Vergeye Ads Studio competitive intelligence dashboard and creative workflow',
   },
 ];
 
@@ -362,7 +357,7 @@ const PLANS: Plan[] = [
     name: 'Free Trial',
     price: '$0',
     period: 'to start',
-    credits: '30 credits',
+    credits: '60 credits',
     features: ['No card required', 'Every studio unlocked', 'Watermarked export'],
     cta: 'Start free',
     featured: false,
@@ -398,14 +393,15 @@ const PLANS: Plan[] = [
 ];
 
 const PROOF_STATS: Array<{ value: string; label: string }> = [
-  { value: '6', label: 'studios, one login' },
+  { value: '5', label: 'studio families, one login' },
   { value: '0', label: 'character drift' },
   { value: '1s', label: 'of video per credit' },
 ];
 
 // ── Injected CSS (keyframes, beams, hovers, responsive grids) ───────────
 const GATE_STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap');
+h1,h2,h3,h4 { font-family:'Space Grotesk','Segoe UI',sans-serif; font-synthesis:none; }
 @keyframes vvFadeUp { from { opacity:0; transform:translateY(34px); } to { opacity:1; transform:translateY(0); } }
 @keyframes vvPulse { 0%,100% { opacity:.5; } 50% { opacity:1; } }
 @keyframes vvFieldA { 0%,100% { transform:translate3d(-1.4%,-1%,0) scale(1.04); } 50% { transform:translate3d(1.4%,1%,0) scale(1.09); } }
@@ -422,14 +418,12 @@ const GATE_STYLES = `
   background:radial-gradient(1300px 820px at 50% 42%, transparent 0%, rgba(8,9,11,.26) 62%, rgba(8,9,11,.64) 100%);
 }
 .vv-layer { position:absolute; inset:0; width:100%; height:100%; mix-blend-mode:screen; will-change:transform; }
-.vv-field-a { animation:vvFieldA 36s ease-in-out infinite; }
-.vv-field-b { animation:vvFieldB 46s ease-in-out infinite; }
-.vv-field-c { animation:vvFieldC 40s ease-in-out infinite; }
+.vv-field-a, .vv-field-b, .vv-field-c { animation:none; }
 .vv-bloom {
   position:absolute; left:50%; top:44%; width:min(1020px, 94vw); height:min(620px, 56vw);
   transform:translate(-50%,-50%);
   background:radial-gradient(closest-side, rgba(255,209,104,.17), rgba(214,171,74,.05) 50%, transparent 74%);
-  filter:blur(26px); animation:vvPulse 12s ease-in-out infinite;
+  filter:blur(26px); animation:none;
 }
 
 /* Session check in flight: fade the loader in a beat late so a cached session
@@ -439,12 +433,13 @@ const GATE_STYLES = `
 .vv-reveal { opacity:0; }
 .vv-reveal.vv-in { animation:vvFadeUp .6s cubic-bezier(.16,1,.3,1) forwards; }
 
-.vv-cta { background:${BRAND}; color:${INK}; font-weight:700; border:none; border-radius:12px; cursor:pointer; transition:transform .18s ease, box-shadow .25s ease, filter .18s ease; }
-.vv-cta:hover { transform:translateY(-1px); filter:brightness(1.06); box-shadow:0 12px 34px rgba(214,171,74,.32); }
-.vv-ghost { background:rgba(255,255,255,.03); border:1px solid ${LINE}; color:${TEXT}; border-radius:12px; cursor:pointer; font-weight:600; transition:transform .18s ease, border-color .18s ease, background .18s ease; }
-.vv-ghost:hover { transform:translateY(-1px); border-color:rgba(214,171,74,.45); background:rgba(214,171,74,.07); }
-.vv-navcta { border:1px solid rgba(214,171,74,.35); background:rgba(214,171,74,.1); color:${BRAND_HI}; border-radius:999px; cursor:pointer; font-weight:600; transition:transform .18s ease, background .18s ease; }
-.vv-navcta:hover { transform:translateY(-1px); background:rgba(214,171,74,.18); }
+.vv-cta { min-height:44px; background:linear-gradient(115deg,#E69A24 0%,#F8C85C 52%,#FFDF8F 100%); color:${INK}; font-weight:600; border:none; border-radius:10px; cursor:pointer; transition:background .12s cubic-bezier(.2,0,0,1),transform .12s cubic-bezier(.2,0,0,1); }
+.vv-cta:hover:not(:disabled) { background:linear-gradient(115deg,#F0AC3C 0%,#FFD477 52%,#FFE8AE 100%); }
+.vv-cta:active:not(:disabled) { background:#D69529; transform:translateY(1px); }
+.vv-ghost { min-height:44px; background:${CARD}; border:1px solid #747D8B; color:${TEXT}; border-radius:10px; cursor:pointer; font-weight:600; transition:background .12s cubic-bezier(.2,0,0,1); }
+.vv-ghost:hover:not(:disabled) { background:#2A2E35; }
+.vv-navcta { min-height:44px; border:1px solid #747D8B; background:${CARD}; color:${TEXT}; border-radius:10px; cursor:pointer; font-weight:600; transition:background .12s cubic-bezier(.2,0,0,1); }
+.vv-navcta:hover { background:#2A2E35; }
 .vv-navlink { color:${MUTED}; background:none; border:none; cursor:pointer; font-size:13px; font-weight:500; transition:color .18s ease; text-decoration:none; }
 .vv-navlink:hover { color:${TEXT}; }
 .vv-input::placeholder { color:#4B5563; }
@@ -798,26 +793,68 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
     }
   }, [resendCooldown]);
 
+  // A stored session is a claim, not proof. Ask the server whether this exact
+  // session was proven with a one-time code. `rejected` means the server
+  // answered and does not hold it as verified — every email-only session
+  // issued before v114 lands there. `unknown` means the server could not be
+  // reached, which is neither proof nor grounds for revoking anything.
+  const confirmStoredSession = async (
+    candidateSessionId: string,
+    storedEmail: string | null,
+  ): Promise<'verified' | 'rejected' | 'unknown'> => {
+    if (!workspaceId) return 'rejected';
+    try {
+      const query = new URLSearchParams({ workspaceId, sessionUuid: candidateSessionId });
+      const response = await fetch(`/api/auth/otp/space/check-session?${query.toString()}`, {
+        credentials: 'include',
+      });
+      const { data } = await parseResponseBody(response);
+      if (!response.ok || !isRecord(data)) return 'unknown';
+      if (data.verified !== true) return 'rejected';
+      const serverEmail = typeof data.email === 'string' ? data.email.toLowerCase() : '';
+      if (storedEmail && serverEmail && serverEmail !== storedEmail.toLowerCase()) return 'rejected';
+      return 'verified';
+    } catch {
+      return 'unknown';
+    }
+  };
+
+  // The platform session cookie is HttpOnly, so only the server can retire a
+  // session this browser must stop holding. Best effort: if the call fails the
+  // dead session simply lingers server-side until the next sign-out.
+  const revokeStaleSession = async (staleSessionId: string) => {
+    try {
+      const sharedSpacePath = `/space/${encodeURIComponent(spaceId)}`;
+      const logoutUrl = window.location.pathname === sharedSpacePath
+        ? `${sharedSpacePath}/logout`
+        : `/api/space/${encodeURIComponent(spaceId)}/logout`;
+      await fetch(logoutUrl, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Id': staleSessionId },
+        body: JSON.stringify({ sessionId: staleSessionId }),
+      });
+    } catch {}
+  };
+
   const checkExistingSession = async () => {
     const sessionKey = `space_session_${spaceId}`;
+    let storedSessionId: string | null = null;
+    let storedEmail: string | null = null;
+
     try {
       const existingSession = localStorage.getItem(sessionKey);
       const parsed: unknown = existingSession ? JSON.parse(existingSession) : null;
       const session = isRecord(parsed) ? parsed : null;
-      const storedSessionId = session
+      storedSessionId = session
         ? [session.workspaceSessionId, session.sessionId, session.id].find(
             (value): value is string => typeof value === 'string' && value.length > 0,
           ) ?? null
         : null;
+      storedEmail = session && typeof session.email === 'string' ? session.email : null;
 
-      if (storedSessionId && storedSessionId.startsWith('wses_') && session?.verified === true) {
-        acceptDataSession(storedSessionId);
-        setSessionId(storedSessionId);
-        setStep('complete');
-        return;
-      }
-
-      // Guest sessions don’t need OTP, so allow those too.
+      // A guest session holds no account, no credits and no history, so it was
+      // never behind the code.
       if (storedSessionId && storedSessionId.startsWith('guest_')) {
         acceptDataSession(storedSessionId);
         setSessionId(storedSessionId);
@@ -825,12 +862,31 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
         return;
       }
 
-      // Remove ids created only in the browser (notably the old pro_* flow).
-      // They suppress the gate but can never authenticate a WorkspaceDB call.
-      if (existingSession) localStorage.removeItem(sessionKey);
+      // Ids invented in the browser (notably the old pro_* flow) suppress the
+      // gate but can never authenticate a WorkspaceDB call.
+      if (existingSession && (!storedSessionId || !storedSessionId.startsWith('wses_'))) {
+        localStorage.removeItem(sessionKey);
+        storedSessionId = null;
+      }
     } catch (e) {
-      console.warn('[EmailGate] Could not reuse the stored session; asking the visitor to sign in again.', e);
+      console.warn('[EmailGate] Could not read the stored session; asking the visitor to sign in again.', e);
       try { localStorage.removeItem(sessionKey); } catch {}
+      storedSessionId = null;
+    }
+
+    if (storedSessionId) {
+      const verdict = await confirmStoredSession(storedSessionId, storedEmail);
+      if (verdict === 'verified') {
+        acceptDataSession(storedSessionId);
+        setSessionId(storedSessionId);
+        setStep('complete');
+        return;
+      }
+      if (verdict === 'rejected') {
+        try { localStorage.removeItem(sessionKey); } catch {}
+        void revokeStaleSession(storedSessionId);
+      }
+      if (storedEmail) setEmail(storedEmail);
     }
 
     setStep('email');
@@ -903,18 +959,12 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
         const resolvedWorkspaceId = typeof registerBody.workspaceId === 'string' ? registerBody.workspaceId : workspaceId;
         const provisionalSessionToken = typeof registerBody.provisionalSessionToken === 'string' ? registerBody.provisionalSessionToken : '';
 
-        // Case 1: server already authenticated the user (no OTP needed)
-        if (
-          typeof registerBody.workspaceSessionId === 'string' &&
-          registerBody.workspaceSessionId.startsWith('wses_')
-        ) {
-          await completeVerifiedSession(registerBody.workspaceSessionId);
-          return;
-        }
-
-        // Case 2: OTP flow — server returned a provisional token
+        // Registering an address never signs anyone in. The `workspaceSessionId`
+        // that register also returns is unverified until a one-time code proves
+        // the address, so it is deliberately ignored: adopting it was what let
+        // anyone who knew an existing customer’s email open that account.
         if (!resolvedWorkspaceId || !provisionalSessionToken) {
-          setError('Email verification is required, but this workspace did not return an OTP challenge. Please contact the workspace owner.');
+          setError('We could not start email verification for this address. Please try again in a moment.');
           setLoading(false);
           return;
         }
@@ -1094,10 +1144,10 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
     }
   };
 
+  // Reached only from handleCodeSubmit, once the server has accepted a
+  // one-time code for this address. Nothing else may call it: the canonical
+  // session is what proving the address earns, not what naming it earns.
   const completeVerifiedSession = async (adoptedSessionId?: string) => {
-    // Prefer the server-corrected canonical session (returned by OTP verify)
-    // over the client’s pending session, so a returning member always lands
-    // on the session their history lives under.
     const finalSessionId = adoptedSessionId;
     if (!isCanonicalWorkspaceSession(finalSessionId)) {
       setError('Your session could not be verified. Please sign in again.');
@@ -1122,6 +1172,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
       email: normalizedEmail,
       timestamp: Date.now(),
       verified: true,
+      identityMode: 'strict_verified',
       isReturningUser: true,
       metadata: verifiedMetadata,
     };
@@ -1495,7 +1546,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
               <span style={{ color: BRAND_HI, fontWeight: 600 }}>{email}</span>
             </p>
             <p style={{ margin: '10px 0 0', fontSize: 12.5, color: DIM }}>
-              can’t find it? Check your spam or junk folder.
+              The code expires in 10 minutes and works once. can’t find it? Check your spam or junk folder.
             </p>
           </div>
 
@@ -1613,14 +1664,18 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
     }, 420);
   };
 
-  // The signup form itself — untouched submit path, rendered inline in the
-  // hero and again inside the modal that the lower CTAs open.
+  // The sign-in form itself — rendered inline in the hero and again inside
+  // the modal that the lower CTAs open. Both submit into the same flow, which
+  // always ends at the emailed code, never at the address alone.
   const renderEmailForm = (variant: 'hero' | 'modal') => {
     const isModal = variant === 'modal';
     const suffix = isModal ? '-modal' : '';
 
     return (
       <form onSubmit={handleEmailSubmit} style={{ width: '100%' }}>
+        <p style={{ margin: '0 0 10px', fontSize: 13.5, lineHeight: 1.5, color: MUTED }}>
+          Enter your email → we’ll send you a one-time code to sign in.
+        </p>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <input
             ref={isModal ? modalEmailInputRef : heroEmailInputRef}
@@ -1667,7 +1722,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
                 Sending…
               </span>
             ) : (
-              'Start Free →'
+              'Email me a code →'
             )}
           </button>
         </div>
@@ -1700,7 +1755,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
         )}
 
         <p style={{ margin: '14px 0 0', fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', fontFamily: MONO, color: DIM }}>
-          No credit card · 30 free credits · Instant access
+          No credit card · 30 free credits · Code by email
         </p>
 
         {(socialProviders.length > 0 || guestModeEnabled) && (
@@ -1777,6 +1832,7 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
           <span style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.03em', color: TEXT }}>{brandName}</span>
         </div>
         <div className="vv-navlinks" style={{ display: 'flex', alignItems: 'center', gap: 26 }}>
+          <button type="button" className="vv-navlink" onClick={() => scrollToId('analyser')}>Free analyser</button>
           <button type="button" className="vv-navlink" onClick={() => scrollToId('showcase')}>Showcase</button>
           <button type="button" className="vv-navlink" onClick={() => scrollToId('studios')}>Studios</button>
           <button type="button" className="vv-navlink" onClick={() => scrollToId('pricing')}>Pricing</button>
@@ -1921,7 +1977,25 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
         </div>
       </section>
 
-      {/* ===== 4 · VIDEO GALLERY (real finished renders) ===== */}
+      {/* ===== 4 · FREE VIDEO ANALYSER ===== */}
+      <section id="analyser" style={{ position: 'relative', zIndex: 2, padding: '76px 0 24px', scrollMarginTop: 72 }}>
+        <div style={{ maxWidth: CONTAINER, margin: '0 auto', padding: '0 24px' }}>
+          <Reveal reduceMotion={reduceMotion}>
+            <FreeVideoAnalyzer
+              onFix={(edit) => {
+                saveVidvergeHandoff({
+                  appId: 'video-enhancer',
+                  prompt: `Apply this recommended edit at ${edit.timestamp}: ${edit.issue} Fix: ${edit.fix}`,
+                });
+                window.location.hash = 'video-enhancer';
+                openGate('start');
+              }}
+            />
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ===== 5 · VIDEO GALLERY (real finished renders) ===== */}
       <section id="showcase" style={{ position: 'relative', zIndex: 2, padding: '96px 0 40px' }}>
         <div style={{ maxWidth: CONTAINER, margin: '0 auto', padding: '0 24px' }}>
           <Reveal reduceMotion={reduceMotion}>
@@ -2291,12 +2365,12 @@ export default function EmailGate({ spaceId, branding }: EmailGateProps) {
               <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.03em', color: TEXT }}>{brandName}</span>
             </div>
             <h2 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 800, letterSpacing: '-0.03em', color: TEXT }}>
-              {gateMode === 'concierge' ? 'Join the concierge waitlist' : 'Start free'}
+              {gateMode === 'concierge' ? 'Join the concierge waitlist' : 'Sign in or start free'}
             </h2>
             <p style={{ margin: '0 0 20px', fontSize: 14, lineHeight: 1.55, color: MUTED }}>
               {gateMode === 'concierge'
                 ? 'Leave your email and we’ll reach out when done-for-you videos open up.'
-                : 'Enter your email and your 30 free credits are ready in seconds.'}
+                : 'We’ll email you a one-time code. Your 30 free credits are waiting on the other side.'}
             </p>
             {renderEmailForm('modal')}
           </div>

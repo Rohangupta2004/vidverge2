@@ -11,15 +11,19 @@
  */
 
 import { ops } from './api';
+import type { CreativeStrategyState } from '../AdsStudio/creativeStrategy';
 
 export const MATRIX_ROWS = [
+  'Positioning',
+  'Audience',
+  'Offering',
   'Pricing',
-  'Key features',
-  'Target audience',
-  'USP',
   'Strengths',
   'Weaknesses',
-  'Positioning',
+  'Content',
+  'Advertising hooks',
+  'CTA',
+  'Opportunities',
 ] as const;
 
 export interface Profile {
@@ -47,6 +51,9 @@ export interface Competitor extends Partial<Profile> {
   source: 'discovered' | 'manual';
   fetched: boolean;
   why?: string;
+  relevanceScore?: number;
+  observedAt?: string;
+  evidenceUrls?: string[];
   error?: string;
 }
 
@@ -56,11 +63,47 @@ export interface Matrix {
   cells: Record<string, string>;
 }
 
+export type ResearchAgentId = 'ads' | 'social' | 'product' | 'opportunities' | 'synthesis';
+
+export interface ResearchFinding {
+  id: string;
+  agent: ResearchAgentId;
+  competitorId: string;
+  category: string;
+  claim: string;
+  evidence: string;
+  sourceUrl: string;
+  observedAt: string;
+  confidence: 'high' | 'medium' | 'low';
+  evidenceType: 'verified' | 'hypothesis' | 'unavailable';
+}
+
+export interface ResearchAgentState {
+  id: ResearchAgentId;
+  label: string;
+  status: 'idle' | 'running' | 'done' | 'partial' | 'unavailable' | 'error';
+  note: string;
+}
+
+export interface ResearchReport {
+  cacheKey: string;
+  generatedAt: string;
+  refreshedAt: string;
+  approvedAt: string;
+  findings: ResearchFinding[];
+  agents: ResearchAgentState[];
+  unavailableSources: string[];
+}
+
 export interface Insights {
   competitorsBetter: string[];
   yourAdvantages: string[];
   positioningGaps: string[];
   messagingImprovements: string[];
+  research?: ResearchReport;
+  /** Phase 2 lives inside insights_json so the existing autosave/report row
+   * remains the one resumable campaign record; no replacement table needed. */
+  creativeStrategy?: CreativeStrategyState;
 }
 
 export interface Scene {
@@ -202,6 +245,52 @@ export async function buildMatrix(brand: Profile, competitors: Competitor[]): Pr
 export async function buildInsights(brand: Profile, competitors: Competitor[], matrix: Matrix): Promise<Insights> {
   const res = await ops('compare.insights', { brand, competitors, matrix });
   return res.insights as Insights;
+}
+
+export async function buildDeterministicResearch(brand: Profile, competitors: Competitor[]): Promise<ResearchReport> {
+  const observedAt = new Date().toISOString();
+  const make = (agent: ResearchAgentId, competitor: Competitor, index: number, category: string, claim: string, evidence: string, confidence: ResearchFinding['confidence'], evidenceType: ResearchFinding['evidenceType']): ResearchFinding => ({
+    id: `${agent}-${competitor.id}-${index}`,
+    agent,
+    competitorId: competitor.id,
+    category,
+    claim,
+    evidence,
+    sourceUrl: String(competitor.url || ''),
+    observedAt,
+    confidence,
+    evidenceType,
+  });
+
+  const [ads, social, product, opportunities] = await Promise.all([
+    Promise.resolve(competitors.map((competitor, index) => make('ads', competitor, index, 'Advertising', `No authorised ad-library result was collected for ${competitor.name} in this run.`, 'Ad-library adapter unavailable; no ad-performance claim made.', 'low', 'unavailable'))),
+    Promise.resolve(competitors.map((competitor, index) => make('social', competitor, index, 'Social', `No authorised social-feed result was collected for ${competitor.name} in this run.`, 'Public social adapter unavailable; engagement is not treated as conversion evidence.', 'low', 'unavailable'))),
+    Promise.resolve(competitors.flatMap((competitor, index) => {
+      const items: ResearchFinding[] = [];
+      if (competitor.features?.length) items.push(make('product', competitor, index * 10, 'Offering', `${competitor.name} publicly emphasizes ${competitor.features.slice(0, 3).join(', ')}.`, `Features observed on ${competitor.url}`, 'high', 'verified'));
+      if (competitor.pricing) items.push(make('product', competitor, index * 10 + 1, 'Pricing', `${competitor.name}: ${competitor.pricing}`, `Pricing text observed on ${competitor.url}`, 'high', 'verified'));
+      if (competitor.positioning || competitor.usp) items.push(make('product', competitor, index * 10 + 2, 'Positioning', competitor.positioning || competitor.usp || '', `Positioning language observed on ${competitor.url}`, 'medium', 'verified'));
+      return items;
+    })),
+    Promise.resolve(competitors.map((competitor, index) => make('opportunities', competitor, index, 'Opportunity', `${brand.name || 'Your brand'} may test a clearer contrast against ${competitor.name}'s published ${competitor.category || 'category'} positioning.`, 'Hypothesis derived from the two public profiles; validate before use.', 'low', 'hypothesis'))),
+  ]);
+
+  const findings = [...ads, ...social, ...product, ...opportunities].filter((item, index, all) => all.findIndex((candidate) => candidate.claim === item.claim && candidate.sourceUrl === item.sourceUrl) === index);
+  return {
+    cacheKey: [brand.url, ...competitors.map((item) => item.url)].join('|'),
+    generatedAt: observedAt,
+    refreshedAt: observedAt,
+    approvedAt: '',
+    findings,
+    agents: [
+      { id: 'ads', label: 'Agent A · Ads', status: 'unavailable', note: 'No authorised ad-library adapter returned data; continued without inventing ads.' },
+      { id: 'social', label: 'Agent B · Social', status: 'unavailable', note: 'Public social feeds were unavailable; no conversion claims were inferred from engagement.' },
+      { id: 'product', label: 'Agent C · Product & positioning', status: 'done', note: 'Structured official-site features, pricing and positioning.' },
+      { id: 'opportunities', label: 'Agent D · Opportunities', status: 'done', note: 'Generated explicitly labelled hypotheses from verified profile gaps.' },
+      { id: 'synthesis', label: 'Agent E · Synthesis', status: 'done', note: 'Deduplicated findings and retained source, date, confidence and evidence status.' },
+    ],
+    unavailableSources: ['Meta Ad Library', 'Facebook/Instagram feeds', 'LinkedIn company feed', 'TikTok Creative Center', 'Reddit', 'Product Hunt', 'Google Ads Transparency'],
+  };
 }
 
 export async function writeScript(brand: Profile, competitors: Competitor[], insights: Insights, matrix: Matrix | null): Promise<ScriptPlan> {

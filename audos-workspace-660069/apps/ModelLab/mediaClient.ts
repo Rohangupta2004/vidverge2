@@ -18,6 +18,12 @@
  * translated into one sentence a person can act on rather than a status code.
  */
 import type { ImageModelCard, VideoModelCard } from './mediaModels';
+import {
+  callHook as callWorkspaceHook,
+  getWorkspaceToken,
+  workspaceTokenNow,
+} from '../../lib/workspace';
+import { poll, PollTimeoutError } from '../../lib/poll';
 
 export type GenerationKind = 'image' | 'video';
 
@@ -44,15 +50,8 @@ export interface GenerateArgs {
 // Plumbing
 // ---------------------------------------------------------------------------
 
-export function wsToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
-
-function appId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
-}
+/** Backward-compatible synchronous token alias for existing consumers. */
+export const wsToken = workspaceTokenNow;
 
 export function errorText(e: unknown): string {
   if (e instanceof Error) return e.message;
@@ -94,21 +93,8 @@ async function readJson(res: Response): Promise<any> {
   return res.json().catch(() => null);
 }
 
-const sleep = (ms: number, signal?: AbortSignal) =>
-  new Promise<void>((resolve, reject) => {
-    const t = window.setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => { window.clearTimeout(t); reject(new Error('Cancelled.')); }, { once: true });
-  });
-
 export async function callHook(name: string, payload: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`/api/hooks/execute/${appId()}/${name}`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(payload),
-  });
-  const raw = await readJson(res);
-  const data = raw && typeof raw === 'object' && raw.response !== undefined && raw._meta !== undefined ? raw.response : raw;
-  if (!res.ok) throw new Error(String(data?.error || `The ${name} service answered HTTP ${res.status}.`));
+  const data = await callWorkspaceHook(name, payload);
   if (data && data.success === false && data.error) throw new Error(String(data.error));
   return data || {};
 }
@@ -181,19 +167,33 @@ async function generateManagedImage(args: GenerateArgs): Promise<GenerationResul
 }
 
 async function pollHiggsfield(requestId: string, signal?: AbortSignal, onProgress?: (n: string) => void): Promise<any> {
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    if (signal?.aborted) throw new Error('Cancelled.');
-    const res = await fetch(`/api/generate/higgsfield/status/${encodeURIComponent(requestId)}`, { headers: authHeaders(), signal });
-    const data = await readJson(res);
-    if (!res.ok) throw providerError(res.status, data, 'Higgsfield');
-    const status = String(data?.status || '');
-    if (status === 'completed') return data;
-    if (status === 'nsfw') throw new Error('Higgsfield moderation rejected that prompt. Reword it and try again.');
-    if (status === 'failed') throw new Error(String(data?.errorMessage || 'Higgsfield reported the generation failed.'));
-    onProgress?.(`Higgsfield is ${status || 'working'}… (${attempt * 5}s)`);
-    await sleep(5000, signal);
+  try {
+    return await poll(
+      async () => {
+        const res = await fetch(`/api/generate/higgsfield/status/${encodeURIComponent(requestId)}`, { headers: authHeaders(), signal });
+        const data = await readJson(res);
+        if (!res.ok) throw providerError(res.status, data, 'Higgsfield');
+        const status = String(data?.status || '');
+        if (status === 'nsfw') throw new Error('Higgsfield moderation rejected that prompt. Reword it and try again.');
+        if (status === 'failed') throw new Error(String(data?.errorMessage || 'Higgsfield reported the generation failed.'));
+        return data;
+      },
+      {
+        interval: 5000,
+        timeout: 450000,
+        tolerateErrors: 1,
+        signal,
+        until: (data) => String(data?.status || '') === 'completed',
+        onTick: (data, attempt) => {
+          const status = String(data?.status || '');
+          if (status !== 'completed') onProgress?.(`Higgsfield is ${status || 'working'}… (${(attempt - 1) * 5}s)`);
+        },
+      },
+    );
+  } catch (error) {
+    if (error instanceof PollTimeoutError) throw new Error('Higgsfield is still working after 7 minutes. Check back shortly.');
+    throw error;
   }
-  throw new Error('Higgsfield is still working after 7 minutes. Check back shortly.');
 }
 
 async function generateHiggsfieldImage(args: GenerateArgs): Promise<GenerationResult> {
@@ -249,20 +249,31 @@ async function generateGroupAVideo(args: GenerateArgs): Promise<GenerationResult
     throw new Error(`${args.card.name} rejected the job upstream (${operationId}). Try another engine — Veo 3.1 Fast is the reliable fallback.`);
   }
 
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    if (args.signal?.aborted) throw new Error('Cancelled.');
-    const poll = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, { headers: authHeaders(), signal: args.signal });
-    const state = await readJson(poll);
-    if (!poll.ok) throw providerError(poll.status, state, args.card.name);
-    const status = String(state?.status || '');
-    if (status === 'completed' && state?.videoUrl) {
-      return { url: String(state.videoUrl), kind: 'video', modelUsed: args.card.id, note: '', elapsedMs: Date.now() - started };
-    }
-    if (status === 'failed') throw new Error(String(state?.errorMessage || `${args.card.name} reported the render failed.`));
-    args.onProgress?.(`${args.card.name} is rendering… ${Number(state?.progress) || Math.min(95, attempt * 3)}%`);
-    await sleep(5000, args.signal);
+  try {
+    const state = await poll(
+      async () => {
+        const response = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, { headers: authHeaders(), signal: args.signal });
+        const next = await readJson(response);
+        if (!response.ok) throw providerError(response.status, next, args.card.name);
+        if (String(next?.status || '') === 'failed') throw new Error(String(next?.errorMessage || `${args.card.name} reported the render failed.`));
+        return next;
+      },
+      {
+        interval: 5000,
+        timeout: 450000,
+        tolerateErrors: 1,
+        signal: args.signal,
+        until: (value) => String(value?.status || '') === 'completed' && Boolean(value?.videoUrl),
+        onTick: (value, attempt) => {
+          if (String(value?.status || '') !== 'completed') args.onProgress?.(`${args.card.name} is rendering… ${Number(value?.progress) || Math.min(95, (attempt - 1) * 3)}%`);
+        },
+      },
+    );
+    return { url: String(state.videoUrl), kind: 'video', modelUsed: args.card.id, note: '', elapsedMs: Date.now() - started };
+  } catch (error) {
+    if (error instanceof PollTimeoutError) throw new Error(`${args.card.name} is still rendering after 7 minutes. Check back shortly.`);
+    throw error;
   }
-  throw new Error(`${args.card.name} is still rendering after 7 minutes. Check back shortly.`);
 }
 
 async function generateKlingVideo(args: GenerateArgs): Promise<GenerationResult> {
@@ -273,9 +284,7 @@ async function generateKlingVideo(args: GenerateArgs): Promise<GenerationResult>
     model: args.card.id,
     prompt: args.prompt,
     duration: args.options.duration || '5',
-    // v2-master is std-only; the card hides the control and this keeps the
-    // request honest even if an old option value is still in state.
-    mode: args.card.id === 'kling-v2-master' ? 'std' : args.options.mode || 'std',
+    mode: args.options.mode || 'std',
   };
   if (!imageToVideo) body.aspectRatio = args.options.aspectRatio || '16:9';
   if (imageToVideo) body.imageData = args.imageUrl;
@@ -288,20 +297,32 @@ async function generateKlingVideo(args: GenerateArgs): Promise<GenerationResult>
   if (!res.ok || !data?.taskId) throw providerError(res.status, data, 'Kling');
   const taskId = String(data.taskId);
 
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    if (args.signal?.aborted) throw new Error('Cancelled.');
-    const poll = await fetch(`/api/generate/kling/status/${encodeURIComponent(taskId)}`, { headers: authHeaders(), signal: args.signal });
-    const state = await readJson(poll);
-    if (!poll.ok) throw providerError(poll.status, state, 'Kling');
-    const status = String(state?.status || '');
-    if (status === 'completed' && state?.videoUrl) {
-      return { url: String(state.videoUrl), kind: 'video', modelUsed: args.card.id, note: String(data?.modelFallback || ''), elapsedMs: Date.now() - started };
-    }
-    if (status === 'failed') throw new Error(String(state?.errorMessage || 'Kling reported the generation failed.'));
-    args.onProgress?.(`Kling is ${status || 'working'}… (${attempt * 5}s)`);
-    await sleep(5000, args.signal);
+  try {
+    const state = await poll(
+      async () => {
+        const response = await fetch(`/api/generate/kling/status/${encodeURIComponent(taskId)}`, { headers: authHeaders(), signal: args.signal });
+        const next = await readJson(response);
+        if (!response.ok) throw providerError(response.status, next, 'Kling');
+        if (String(next?.status || '') === 'failed') throw new Error(String(next?.errorMessage || 'Kling reported the generation failed.'));
+        return next;
+      },
+      {
+        interval: 5000,
+        timeout: 450000,
+        tolerateErrors: 1,
+        signal: args.signal,
+        until: (value) => String(value?.status || '') === 'completed' && Boolean(value?.videoUrl),
+        onTick: (value, attempt) => {
+          const status = String(value?.status || '');
+          if (status !== 'completed') args.onProgress?.(`Kling is ${status || 'working'}… (${(attempt - 1) * 5}s)`);
+        },
+      },
+    );
+    return { url: String(state.videoUrl), kind: 'video', modelUsed: args.card.id, note: String(data?.modelFallback || ''), elapsedMs: Date.now() - started };
+  } catch (error) {
+    if (error instanceof PollTimeoutError) throw new Error('Kling is still working after 7 minutes. Check back shortly.');
+    throw error;
   }
-  throw new Error('Kling is still working after 7 minutes. Check back shortly.');
 }
 
 async function generateRunwayVideo(args: GenerateArgs): Promise<GenerationResult> {
@@ -334,27 +355,38 @@ async function generateRunwayVideo(args: GenerateArgs): Promise<GenerationResult
   const taskId = String(data?.taskId || data?.id || '');
   if (!taskId) throw new Error('Runway accepted the request but returned no task id.');
 
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    if (args.signal?.aborted) throw new Error('Cancelled.');
-    const poll = await fetch(`/api/generate/runway/status/${encodeURIComponent(taskId)}`, { headers: authHeaders(), signal: args.signal });
-    const state = await readJson(poll);
-    if (!poll.ok) throw providerError(poll.status, state, 'Runway');
-    const status = String(state?.status || '');
-    if (status === 'succeeded') {
-      const url = String(state?.outputs?.[0]?.url || state?.output?.[0] || state?.videoUrl || '');
-      if (!url) throw new Error('Runway succeeded but returned no media URL.');
-      return { url, kind: 'video', modelUsed: args.card.id, note: '', elapsedMs: Date.now() - started };
-    }
-    if (status === 'failed' || status === 'cancelled') {
-      throw new Error(`Runway ended ${status}: ${String(state?.error?.message || state?.error || 'no successful output')}`);
-    }
-    if (status === 'uncertain') {
-      throw new Error('Runway cannot confirm that job either way. Do not resubmit — check your Runway usage before trying again.');
-    }
-    args.onProgress?.(`Runway is ${status || 'working'}… (${attempt * 5}s)`);
-    await sleep(5000, args.signal);
+  try {
+    const state = await poll(
+      async () => {
+        const response = await fetch(`/api/generate/runway/status/${encodeURIComponent(taskId)}`, { headers: authHeaders(), signal: args.signal });
+        const next = await readJson(response);
+        if (!response.ok) throw providerError(response.status, next, 'Runway');
+        const status = String(next?.status || '');
+        if (status === 'failed' || status === 'cancelled') {
+          throw new Error(`Runway ended ${status}: ${String(next?.error?.message || next?.error || 'no successful output')}`);
+        }
+        if (status === 'uncertain') throw new Error('Runway cannot confirm that job either way. Do not resubmit — check your Runway usage before trying again.');
+        return next;
+      },
+      {
+        interval: 5000,
+        timeout: 450000,
+        tolerateErrors: 1,
+        signal: args.signal,
+        until: (value) => String(value?.status || '') === 'succeeded',
+        onTick: (value, attempt) => {
+          const status = String(value?.status || '');
+          if (status !== 'succeeded') args.onProgress?.(`Runway is ${status || 'working'}… (${(attempt - 1) * 5}s)`);
+        },
+      },
+    );
+    const url = String(state?.outputs?.[0]?.url || state?.output?.[0] || state?.videoUrl || '');
+    if (!url) throw new Error('Runway succeeded but returned no media URL.');
+    return { url, kind: 'video', modelUsed: args.card.id, note: '', elapsedMs: Date.now() - started };
+  } catch (error) {
+    if (error instanceof PollTimeoutError) throw new Error('Runway is still working after 7 minutes. Check back shortly.');
+    throw error;
   }
-  throw new Error('Runway is still working after 7 minutes. Check back shortly.');
 }
 
 async function generateHiggsfieldVideo(args: GenerateArgs): Promise<GenerationResult> {
@@ -393,6 +425,8 @@ async function generateHiggsfieldVideo(args: GenerateArgs): Promise<GenerationRe
 export async function generate(args: GenerateArgs): Promise<GenerationResult> {
   const prompt = args.prompt.trim();
   if (prompt.length < 10) throw new Error('Write at least ten characters of prompt — every provider rejects anything shorter.');
+  const token = await getWorkspaceToken();
+  if (!token) throw new Error('This page has no workspace credential. Reload and try again.');
   const card = args.card;
   const isVideo = 'durations' in card;
 
@@ -443,7 +477,7 @@ export async function writePrompt(
   idea: string,
   signal?: AbortSignal,
 ): Promise<{ prompt: string; model: string }> {
-  const token = wsToken();
+  const token = await getWorkspaceToken();
   if (!token) throw new Error('This page has no workspace credential, so the AI proxy will refuse the call. Reload and try again.');
   const system = writerSystem(card);
   const user = `Write the prompt for this idea:\n\n${idea.trim()}`;

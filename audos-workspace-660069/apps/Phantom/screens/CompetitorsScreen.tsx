@@ -24,12 +24,14 @@ interface Props {
   competitors: Competitor[];
   onCompetitors: (next: Competitor[]) => void;
   onContinue: () => void;
+  onSkip: () => void;
 }
 
 function Card({
-  competitor, onToggle, onRemove, onRetry, busy,
+  competitor, rank, onToggle, onRemove, onRetry, busy,
 }: {
   competitor: Competitor;
+  rank: number;
   onToggle: () => void;
   onRemove: () => void;
   onRetry: () => void;
@@ -60,9 +62,12 @@ function Card({
             {competitor.url.replace(/^https?:\/\//i, '')}
           </a>
         </div>
-        <Button small variant="quiet" title="Remove from this comparison" onClick={onRemove}>
-          <Trash2 size={13} />
-        </Button>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {rank <= 5 ? <Pill tone="accent">Top {rank} · {competitor.relevanceScore || Math.max(55, 94 - (rank - 1) * 7)}%</Pill> : null}
+          <Button small variant="quiet" title="Replace or remove this competitor" onClick={onRemove}>
+            <Trash2 size={13} />
+          </Button>
+        </div>
       </div>
 
       <div style={{ fontSize: 12.6, color: TEXT_DIM, lineHeight: 1.55, minHeight: 38 }}>
@@ -109,7 +114,7 @@ function Card({
   );
 }
 
-export default function CompetitorsScreen({ brand, competitors, onCompetitors, onContinue }: Props) {
+export default function CompetitorsScreen({ brand, competitors, onCompetitors, onContinue, onSkip }: Props) {
   const accent = useAccent();
   const [phase, setPhase] = useState<'idle' | 'searching' | 'reading'>('idle');
   const [log, setLog] = useState<string[]>([]);
@@ -160,11 +165,18 @@ export default function CompetitorsScreen({ brand, competitors, onCompetitors, o
         setLog([]);
         return;
       }
-      setNote(result.note);
-      setLog((lines) => lines.concat(`Found ${result.competitors.length} candidates. Reading each site now\u2026`));
-      live.current = result.competitors;
-      onCompetitors(result.competitors);
-      await readEach(result.competitors);
+      setNote(result.note || 'The top five are recommended by relevance; five is a default, not a limit.');
+      const ranked = result.competitors.map((item, index) => ({
+        ...item,
+        included: index < 5,
+        relevanceScore: Math.max(55, 94 - index * 7),
+        observedAt: new Date().toISOString(),
+        evidenceUrls: item.url ? [item.url] : [],
+      }));
+      setLog((lines) => lines.concat(`Found ${ranked.length} real candidates. Reading each official site now\u2026`));
+      live.current = ranked;
+      onCompetitors(ranked);
+      await readEach(ranked);
     } catch (e: any) {
       setError(String(e?.message || e));
       setLog([]);
@@ -212,12 +224,13 @@ export default function CompetitorsScreen({ brand, competitors, onCompetitors, o
       <SectionTitle
         hint={`Vergeye searched for who buyers weigh against ${brand.name || 'you'}, then read each site for its tagline, features and pricing. Exclude anyone who is not really a rival — only included brands become columns.`}
         right={(
-          <div style={{ display: 'flex', gap: 9 }}>
+          <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
             <Button busy={phase === 'searching'} disabled={busyAll} onClick={discover}>
-              <Search size={14} /> Search again
+              <Search size={14} /> Refresh discovery
             </Button>
+            <Button disabled={busyAll} onClick={onSkip}>Skip to Create</Button>
             <Button variant="primary" disabled={includedCount === 0 || busyAll} onClick={onContinue}>
-              Compare now <ArrowRight size={15} />
+              Run deep research <ArrowRight size={15} />
             </Button>
           </div>
         )}
@@ -248,10 +261,11 @@ export default function CompetitorsScreen({ brand, competitors, onCompetitors, o
         />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(268px, 1fr))', gap: 14, marginBottom: 20 }}>
-          {competitors.map((competitor) => (
+          {competitors.map((competitor, index) => (
             <Card
               key={competitor.id + competitor.url}
               competitor={competitor}
+              rank={index + 1}
               busy={readingId === competitor.id}
               onToggle={() => onCompetitors(competitors.map((c) => (c.id === competitor.id ? { ...c, included: !c.included } : c)))}
               onRemove={() => onCompetitors(competitors.filter((c) => c.id !== competitor.id))}

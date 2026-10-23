@@ -14,11 +14,16 @@
  * this app or reaches the browser: every request goes to a same-origin /api
  * path where the platform adds the provider credential server-side and bills
  * the workspace wallet. `X-Workspace-DB-Token` is the only credential sent.
+ *
+ * The owner-only HEALTH view (./HealthPanel) sits beside the conversation. It
+ * reads the live provider catalogs and reports ok/error plus latency per
+ * endpoint, and it generates nothing — it is the live answer that replaced the
+ * hand-written availability verdicts in lib/videoEngines.ts.
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  AlertCircle, ChevronDown, ChevronUp, Download, FileText, Film, Music, Paperclip, Send, X,
+  Activity, AlertCircle, ChevronDown, ChevronUp, Download, FileText, Film, Music, Paperclip, Send, X,
 } from 'lucide-react';
 
 import {
@@ -39,15 +44,21 @@ import {
   MAX_IMAGE_BYTES,
   describeError,
   errorText,
+  listLabRuns,
   readImageFile,
+  reconcileLabRun,
   runLabModel,
+  watchLabJob,
   workspaceToken,
 } from './labClient';
-import type { RunContext, RunResult } from './labClient';
+import type { LabRun, RunContext, RunResult } from './labClient';
+import HealthPanel from './HealthPanel';
 import { useSpaceRuntime } from '../../SpaceRuntimeContext';
 import AppShell from '../../components/ui/AppShell';
-import { COLORS, alpha } from '../../components/theme';
+import { COLORS, FONT as THEME_FONT, alpha } from '../../components/theme';
 import { withBrandContext } from '../../components/BrandContextLayer';
+import { VideoHistory } from '../../components/VideoHistory';
+import { saveVideoToHistory } from '../../lib/videoHistory';
 
 // ---------------------------------------------------------------------------
 // Look
@@ -70,8 +81,8 @@ const C = {
   headerBg: COLORS.surface,
   headerText: COLORS.text,
 };
-const FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+const FONT = THEME_FONT.body;
+const MONO = THEME_FONT.mono;
 
 const MAX_ATTACHED_IMAGES = 4;
 /** A data URL is held in memory and posted inline, so a feature-length upload
@@ -120,9 +131,24 @@ interface RunMessage {
   error: string;
   startedAt: number;
   finishedMs: number;
+  /** Set once the run is saved in the server ledger — the render has been charged by then. */
+  jobId?: number;
 }
 
 type ChatMessage = UserMessage | RunMessage;
+
+const CREDIT_SENTENCES = [
+  ' Credits were charged when the render was submitted and are NOT refunded automatically.',
+  ' Credits may already have been charged for this render; nothing is refunded automatically from this app.',
+];
+
+/** Separates the headline reason from the credit sentence the server appends, so the charge gets its own callout. */
+function splitRunError(raw: string): { timedOut: boolean; message: string } {
+  let message = String(raw || '');
+  CREDIT_SENTENCES.forEach((sentence) => { message = message.split(sentence).join(''); });
+  message = message.trim();
+  return { timedOut: /^timed out|made no progress for/i.test(message), message };
+}
 
 function messageId(prefix: string): string {
   return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 7)}`;
@@ -171,13 +197,12 @@ function useLabStyles() {
       '.vpl-btn:hover:not(:disabled) { filter: brightness(1.15); }',
       '.vpl-btn:active:not(:disabled) { transform: translateY(1px); }',
       '.vpl-btn:disabled { opacity: 0.4; cursor: not-allowed; }',
-      '.vpl-turn { animation: vpl-rise 180ms ease both; }',
+      '.vpl-turn { animation: none; }',
       '.vpl-scroll::-webkit-scrollbar { height: 6px; width: 6px; }',
-      '.vpl-scroll::-webkit-scrollbar-thumb { background: #2A2410; border-radius: 99px; }',
-      '.vpl-scroll::-webkit-scrollbar-thumb:hover { background: #6E5F38; }',
+      `.vpl-scroll::-webkit-scrollbar-thumb { background: ${COLORS.border}; border-radius: 6px; }`,
+      `.vpl-scroll::-webkit-scrollbar-thumb:hover { background: ${COLORS.controlBorder}; }`,
       '.vpl-scroll::-webkit-scrollbar-track { background: transparent; }',
-      '.vpl-input:focus { outline: none; }',
-      '.vpl-select:focus { outline: none; border-color: rgba(212,146,10,0.7); box-shadow: 0 0 0 3px rgba(212,146,10,0.22); }',
+      `.vpl-input:focus, .vpl-select:focus { outline: 2px solid ${COLORS.focus}; outline-offset: 3px; border-color: ${COLORS.focus}; box-shadow: none; }`,
     ].join('\n');
     document.head.appendChild(style);
   }, []);
@@ -292,8 +317,9 @@ const FIELD_STYLE: CSSProperties = {
   background: COLORS.input,
   color: C.ink,
   border: `1px solid ${C.lineStrong}`,
-  borderRadius: 8,
-  padding: '7px 9px',
+  minHeight: 44,
+  borderRadius: 10,
+  padding: '8px 12px',
   fontSize: 12.5,
   fontFamily: FONT,
   minWidth: 0,
@@ -408,8 +434,14 @@ function VideoProviderLab() {
   const [attachNotice, setAttachNotice] = useState('');
   const [tick, setTick] = useState(0);
   const [controlsOpen, setControlsOpen] = useState(true);
+  // The Health view replaces the conversation rather than floating over it, so
+  // a diagnostic read can never be mistaken for a run in the thread.
+  const [showHealth, setShowHealth] = useState(false);
+  // Bumped whenever a run lands so the shared Your videos list reloads.
+  const [historyKey, setHistoryKey] = useState(0);
 
   const mounted = useRef(true);
+  const knownJobs = useRef<Set<number>>(new Set());
   const cancels = useRef<Record<string, Array<() => void>>>({});
   const fileRef = useRef<HTMLInputElement | null>(null);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
@@ -440,6 +472,108 @@ function VideoProviderLab() {
       message.kind === 'run' && message.id === runId ? { ...message, ...next } : message
     )));
   }, []);
+
+  const refreshHistory = useCallback(() => {
+    if (mounted.current) setHistoryKey((value) => value + 1);
+  }, []);
+
+  // RESUME. A render submitted and then abandoned (tab closed, space reloaded)
+  // lives in the server ledger, not in this thread. On open, bring back every run
+  // that is still in flight — watching it to its verdict — plus the last day's
+  // failed or timed-out runs so the outcome and the credit note stay visible, and
+  // re-check timed-out runs once because the provider may have finished them.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const runs = await listLabRuns(24);
+      if (cancelled || !mounted.current || !runs.length) return;
+      const nowMs = Date.now();
+      const startedAtOf = (run: LabRun) => new Date(run.started_at || run.created_at).getTime() || nowMs;
+      const fresh = runs.filter((run) => !knownJobs.current.has(run.job_id));
+      const open = fresh.filter((run) => run.status !== 'done' && run.status !== 'error');
+      const failed = fresh
+        .filter((run) => run.status === 'error' && nowMs - startedAtOf(run) < 24 * 60 * 60 * 1000)
+        .slice(0, 5);
+      const resumed = [...failed, ...open].sort((a, b) => startedAtOf(a) - startedAtOf(b));
+      if (!resumed.length) return;
+
+      const added: ChatMessage[] = [];
+      resumed.forEach((run) => {
+        knownJobs.current.add(run.job_id);
+        const isOpen = run.status !== 'error';
+        const startedAt = startedAtOf(run);
+        added.push({ kind: 'user', id: `earlier-you:${run.job_id}`, text: run.prompt || 'Earlier run', attachments: [] });
+        added.push({
+          kind: 'run',
+          id: `job:${run.job_id}`,
+          modelKey: 'resumed',
+          modelName: run.model_name,
+          provider: `earlier run #${run.job_id}`,
+          phase: isOpen ? 'generating' : 'error',
+          note: isOpen ? 'Picked up where you left off — checking with the provider…' : '',
+          videoUrl: '',
+          modelUsed: '',
+          detail: '',
+          error: run.error_msg || '',
+          startedAt,
+          finishedMs: isOpen ? 0 : Math.max(0, (new Date(run.updated_at).getTime() || startedAt) - startedAt),
+          jobId: run.job_id,
+        });
+      });
+      setMessages((prev) => [...added, ...prev].slice(-MAX_RUNS));
+
+      resumed.forEach((run) => {
+        const id = `job:${run.job_id}`;
+        const startedAt = startedAtOf(run);
+        if (run.status === 'error') {
+          if (!run.recoverable) return;
+          void reconcileLabRun(run).then((outcome) => {
+            if (outcome.state !== 'done' || !outcome.run.result_url) return;
+            patchRun(id, {
+              phase: 'done',
+              error: '',
+              videoUrl: outcome.run.result_url,
+              modelUsed: outcome.run.model_used,
+              detail: outcome.run.verification || 'Recovered: the provider finished this render after the wait limit closed it.',
+              finishedMs: Date.now() - startedAt,
+            });
+            refreshHistory();
+          });
+          return;
+        }
+        void watchLabJob({
+          jobId: run.job_id,
+          label: run.model_name,
+          fallbackModel: run.model_used,
+          capMs: run.cap_ms,
+          ctx: {
+            note: (note) => patchRun(id, { note }),
+            register: (cancel) => {
+              if (!cancels.current[id]) cancels.current[id] = [];
+              cancels.current[id].push(cancel);
+            },
+          },
+        }).then((result) => {
+          patchRun(id, {
+            phase: 'done',
+            note: '',
+            videoUrl: result.videoUrl,
+            modelUsed: result.modelUsed,
+            detail: result.detail || '',
+            finishedMs: Date.now() - startedAt,
+          });
+          refreshHistory();
+        }).catch((error) => {
+          if (errorText(error) === CANCELLED) {
+            patchRun(id, { phase: 'stopped', note: '', finishedMs: Date.now() - startedAt });
+          } else {
+            patchRun(id, { phase: 'error', note: '', error: describeError(error, []), finishedMs: Date.now() - startedAt });
+          }
+        });
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [patchRun, refreshHistory]);
 
   const runningCount = useMemo(
     () => messages.filter((message) => message.kind === 'run' && message.phase === 'generating').length,
@@ -491,6 +625,26 @@ function VideoProviderLab() {
   // or attachment and are gated on their own required fields instead.
   const tool = isKlingTool(active);
   const toolBlock = tool ? describeRunBlock(active, { ...input, prompt, images: [] }) : null;
+
+  // The controls strip is not Kling-only. Any entry that offers a choice of
+  // clip length gets it too, because a long-form model is unusable without
+  // one. Seedance uses a whole-second stepper so legal values are not snapped
+  // to an outdated fixed list. Entries whose length the provider fixes still
+  // provider fixes (the Higgsfield DoP image-to-video models) still show
+  // nothing, rather than a control that is silently ignored.
+  const showControls =
+    tool ||
+    active.group === 'kling' ||
+    active.params.durations.length > 0 ||
+    (active.params.durationMin !== null && active.params.durationMax !== null) ||
+    active.params.resolutions.length > 0 ||
+    active.params.audio;
+  const controlsLabel = active.group === 'kling' ? 'Kling controls' : 'Run controls';
+  const controlsHint = active.params.durationMin !== null && active.params.durationMax !== null
+    ? `${active.name} accepts every whole second from ${active.params.durationMin} to ${active.params.durationMax}. The exact value is sent with the run — longer clips cost more.`
+    : active.params.durations.length
+      ? `${active.name} accepts ${active.params.durations.join(' / ')}s. The length picked here is sent with the run — longer clips cost more, and a length the provider refuses comes back verbatim on the run card.`
+      : 'Only the controls this model accepts are shown; everything else is left to the provider.';
 
   // -------------------------------------------------------------------------
   // Attachments
@@ -597,6 +751,10 @@ function VideoProviderLab() {
         if (!cancels.current[run.id]) cancels.current[run.id] = [];
         cancels.current[run.id].push(cancel);
       },
+      adopted: (jobId) => {
+        knownJobs.current.add(jobId);
+        patchRun(run.id, { jobId });
+      },
     };
 
     void (async () => {
@@ -610,6 +768,12 @@ function VideoProviderLab() {
           detail: result.detail || '',
           finishedMs: Date.now() - run.startedAt,
         });
+        void saveVideoToHistory({
+          appId: 'video-provider-lab',
+          title: `${model.name} test render`,
+          videoUrl: result.videoUrl,
+        }).then(refreshHistory);
+        refreshHistory();
       } catch (error) {
         if (errorText(error) === CANCELLED) {
           patchRun(run.id, { phase: 'stopped', note: '', finishedMs: Date.now() - run.startedAt });
@@ -625,7 +789,7 @@ function VideoProviderLab() {
         cancels.current[run.id] = [];
       }
     })();
-  }, [patchRun, pushMessage, seedRun]);
+  }, [patchRun, pushMessage, refreshHistory, seedRun]);
 
   const send = useCallback(() => {
     if (busy) return;
@@ -677,8 +841,10 @@ function VideoProviderLab() {
         style={{
           display: 'flex',
           flexDirection: 'column',
-          height: '100dvh',
+          height: '100%',
+          width: '100%',
           minHeight: 0,
+          overflow: 'hidden',
           background: C.bg,
         }}
       >
@@ -690,8 +856,9 @@ function VideoProviderLab() {
             minHeight: 56,
             display: 'flex',
             alignItems: 'center',
-            gap: 12,
-            padding: '0 16px',
+            flexWrap: 'wrap',
+            gap: 8,
+            padding: '8px 16px',
             background: C.headerBg,
             borderBottom: `1px solid ${C.line}`,
           }}
@@ -712,13 +879,37 @@ function VideoProviderLab() {
               {credentialWarning}
             </span>
           ) : null}
+          <button
+            type="button"
+            className="vpl-btn"
+            onClick={() => setShowHealth((value) => !value)}
+            title="Owner-only diagnostics: read the live provider catalogs and report ok/error plus latency. Generates nothing and charges nothing."
+            style={{
+              marginLeft: 'auto',
+              minHeight: 44,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: showHealth ? C.accentSurface : 'transparent',
+              color: showHealth ? C.accent : C.soft,
+              border: `1px solid ${showHealth ? alpha(COLORS.primary, 0.45) : C.line}`,
+              borderRadius: 9,
+              padding: '7px 11px',
+              fontSize: 12,
+              fontWeight: 700,
+              fontFamily: FONT,
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+            }}
+          >
+            <Activity size={13} /> Health
+          </button>
           <select
             className="vpl-select"
             value={activeKey}
             onChange={(event) => selectModel(event.target.value)}
             title={`${active.provider} · ${active.costHint}`}
             style={{
-              marginLeft: 'auto',
               background: COLORS.input,
               color: C.headerText,
               border: `1px solid ${alpha(COLORS.primary, 0.4)}`,
@@ -726,8 +917,10 @@ function VideoProviderLab() {
               padding: '8px 10px',
               fontSize: 12.5,
               fontFamily: FONT,
+              flex: '1 1 220px',
               maxWidth: 320,
               minWidth: 0,
+              minHeight: 44,
               cursor: 'pointer',
             }}
           >
@@ -761,7 +954,9 @@ function VideoProviderLab() {
           </select>
         </div>
 
-        {/* Row 2 — conversation */}
+        {/* Row 2 — the owner-only health read, or the conversation */}
+        {showHealth ? <HealthPanel onClose={() => setShowHealth(false)} /> : null}
+
         <div
           ref={scrollRef}
           className="vpl-scroll"
@@ -770,7 +965,7 @@ function VideoProviderLab() {
             minHeight: 0,
             overflowY: 'auto',
             padding: '18px 16px',
-            display: 'flex',
+            display: showHealth ? 'none' : 'flex',
             flexDirection: 'column',
             gap: 14,
             background: C.bg,
@@ -957,18 +1152,43 @@ function VideoProviderLab() {
                       }}
                     >
                       <AlertCircle size={14} color={C.bad} style={{ flexShrink: 0, marginTop: 2 }} />
-                      <div
-                        style={{
-                          fontSize: 11.5,
-                          color: COLORS.error,
-                          lineHeight: 1.6,
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                          fontFamily: MONO,
-                        }}
-                      >
-                        {message.error}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                        {message.jobId !== undefined ? (
+                          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: COLORS.error }}>
+                            {splitRunError(message.error).timedOut ? 'Timed out' : 'Render failed'}
+                          </div>
+                        ) : null}
+                        <div
+                          style={{
+                            fontSize: 11.5,
+                            color: COLORS.error,
+                            lineHeight: 1.6,
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            fontFamily: MONO,
+                          }}
+                        >
+                          {message.jobId !== undefined ? splitRunError(message.error).message : message.error}
+                        </div>
                       </div>
+                    </div>
+                  ) : null}
+
+                  {message.phase === 'error' && message.jobId !== undefined ? (
+                    <div
+                      style={{
+                        background: alpha(COLORS.warning, 0.1),
+                        border: `1px solid ${alpha(COLORS.warning, 0.35)}`,
+                        borderRadius: 9,
+                        padding: '8px 11px',
+                        fontSize: 11.5,
+                        lineHeight: 1.6,
+                        color: C.soft,
+                      }}
+                    >
+                      <strong style={{ color: C.warn }}>Credit charge: </strong>
+                      credits for this render were taken when it was submitted. A failed or timed-out run is not refunded
+                      automatically — ask Otto to review run #{message.jobId} if you want the charge looked at.
                     </div>
                   ) : null}
 
@@ -982,10 +1202,14 @@ function VideoProviderLab() {
               </div>
             );
           })}
+
+          <div style={{ marginTop: 4 }}>
+            <VideoHistory key={historyKey} />
+          </div>
         </div>
 
-        {/* Row 2b — Kling controls */}
-        {active.group === 'kling' ? (
+        {/* Row 2b — run controls */}
+        {showControls && !showHealth ? (
           <div
             className="vpl-scroll"
             style={{
@@ -1018,12 +1242,23 @@ function VideoProviderLab() {
               }}
             >
               {controlsOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
-              Kling controls
+              {controlsLabel}
             </button>
 
             {controlsOpen ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8, alignItems: 'flex-end' }}>
-                {active.params.durations.length ? (
+                {active.params.durationMin !== null && active.params.durationMax !== null ? (
+                  <Field label={`Duration (${active.params.durationMin}–${active.params.durationMax}s)`} width={126}>
+                    <NumberInput
+                      value={input.duration}
+                      onCommit={(next) => patchInput({ duration: next ?? active.params.durationMin ?? input.duration })}
+                      min={active.params.durationMin}
+                      max={active.params.durationMax}
+                      step={active.params.durationStep}
+                      integer
+                    />
+                  </Field>
+                ) : active.params.durations.length ? (
                   <Field label="Duration" width={86}>
                     <select
                       className="vpl-select"
@@ -1050,6 +1285,43 @@ function VideoProviderLab() {
                         <option key={ratio} value={ratio}>{ratio}</option>
                       ))}
                     </select>
+                  </Field>
+                ) : null}
+
+                {active.params.resolutions.length ? (
+                  <Field label="Resolution" width={96}>
+                    <select
+                      className="vpl-select"
+                      value={input.resolution}
+                      onChange={(event) => patchInput({ resolution: event.target.value })}
+                      style={FIELD_STYLE}
+                    >
+                      {active.params.resolutions.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : null}
+
+                {active.params.audio ? (
+                  <Field label="Audio" width={86}>
+                    <span
+                      style={{
+                        ...FIELD_STYLE,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 7,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={input.audio}
+                        onChange={(event) => patchInput({ audio: event.target.checked })}
+                        style={{ margin: 0, cursor: 'pointer' }}
+                      />
+                      {input.audio ? 'On' : 'Off'}
+                    </span>
                   </Field>
                 ) : null}
 
@@ -1151,39 +1423,6 @@ function VideoProviderLab() {
                         style={FIELD_STYLE}
                       />
                     </Field>
-                    <Field label="Voice ID" width={130}>
-                      <input
-                        className="vpl-select"
-                        type="text"
-                        value={input.voiceId}
-                        onChange={(event) => patchInput({ voiceId: event.target.value })}
-                        placeholder="optional"
-                        spellCheck={false}
-                        style={FIELD_STYLE}
-                      />
-                    </Field>
-                    <Field label="Language" width={100}>
-                      <input
-                        className="vpl-select"
-                        type="text"
-                        value={input.language}
-                        onChange={(event) => patchInput({ language: event.target.value })}
-                        placeholder="e.g. en"
-                        spellCheck={false}
-                        style={FIELD_STYLE}
-                      />
-                    </Field>
-                    {active.params.voiceSpeed ? (
-                      <Field label="Voice speed" width={90}>
-                        <NumberInput
-                          value={input.voiceSpeed}
-                          onCommit={(next) => patchInput({ voiceSpeed: next ?? 1 })}
-                          min={0.5}
-                          max={2}
-                          step={0.1}
-                        />
-                      </Field>
-                    ) : null}
                   </>
                 ) : null}
 
@@ -1193,8 +1432,10 @@ function VideoProviderLab() {
                     : active.params.extend
                       ? 'Every finished Kling clip prints its task ID under the video. The prompt bar is optional here and steers how the clip continues.'
                       : active.params.lipSync
-                        ? 'Type dialogue for text-to-speech, or give an audio URL instead. The prompt bar is not used for Lip Sync.'
-                        : 'Camera preset, CFG scale and seed are sent only when the model accepts them — a refusal shows up verbatim on the run card.'}
+                        ? 'Type dialogue for text-to-speech, or give an audio URL instead. Voice, language and speed overrides are omitted because this proxy does not support them.'
+                        : active.group === 'kling'
+                          ? 'Only the current proxy-supported fields are sent. Camera control, CFG scale, seed and native audio are omitted because the proxy rejects them before billing.'
+                          : controlsHint}
                   {toolBlock ? <span style={{ color: C.warn }}>{` ${toolBlock}`}</span> : null}
                 </div>
               </div>
@@ -1206,6 +1447,7 @@ function VideoProviderLab() {
         <div
           style={{
             flexShrink: 0,
+            display: showHealth ? 'none' : 'block',
             background: C.card,
             borderTop: `1px solid ${C.line}`,
             padding: '10px 16px 14px',
@@ -1224,6 +1466,10 @@ function VideoProviderLab() {
           {attachNotice ? (
             <div style={{ fontSize: 11.5, color: C.warn, lineHeight: 1.55, marginBottom: 8 }}>{attachNotice}</div>
           ) : null}
+
+          <div style={{ marginBottom: 7, fontSize: 11, color: C.muted, lineHeight: 1.45 }} role="note">
+            Cost before send: {active.costHint}. Longer clips and optional audio can cost more.
+          </div>
 
           <div
             style={{
@@ -1255,8 +1501,8 @@ function VideoProviderLab() {
               title="Attach files"
               style={{
                 position: 'relative',
-                width: 36,
-                height: 36,
+                width: 44,
+                height: 44,
                 flexShrink: 0,
                 display: 'flex',
                 alignItems: 'center',
@@ -1336,8 +1582,8 @@ function VideoProviderLab() {
               disabled={!canSend}
               title={busy ? 'A run is already generating' : `Run ${active.name}`}
               style={{
-                width: 36,
-                height: 36,
+                width: 44,
+                height: 44,
                 flexShrink: 0,
                 display: 'flex',
                 alignItems: 'center',

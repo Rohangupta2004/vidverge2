@@ -1,3 +1,5 @@
+import { WORKSPACE_ID } from '../../../lib/workspace';
+
 /**
  * Short Video Enhancer — the project model and the timeline compiler.
  *
@@ -22,7 +24,7 @@ export const CANVAS_H = 1920;
 export const SAFE_MARGIN = 90;
 /** Bumped whenever the motion maths changes, so a stored project says which engine drew it. */
 export const MOTION_SPEC_VERSION = 3;
-export const SVE_WORKSPACE_ID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
+export const SVE_WORKSPACE_ID = WORKSPACE_ID;
 
 /** Shortest transition that is still a transition rather than a cut. */
 export const MIN_TRANSITION_S = 0.08;

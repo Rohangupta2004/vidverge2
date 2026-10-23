@@ -52,6 +52,7 @@ import {
   DEFAULT_VIDEO_MODEL,
 } from './videoTypes';
 import type { CharacterRef } from './videoTypes';
+import { callHook, getSessionId, spaceId, workspaceTokenNow } from '../../lib/workspace';
 
 export { generateImage, uploadImage, describeImage, CHARACTER_VISION_PROMPT };
 
@@ -59,19 +60,11 @@ export { generateImage, uploadImage, describeImage, CHARACTER_VISION_PROMPT };
 // Runtime identity
 // ---------------------------------------------------------------------------
 export function scopedSpaceId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  const w = window as any;
-  const id = w.__SPACE_ID__ || w.__APP_ID__ || (w.__SPACE_CONFIG__ && w.__SPACE_CONFIG__.id) || 'workspace-660069';
-  return String(id).startsWith('workspace-') ? String(id) : `workspace-${id}`;
+  return spaceId();
 }
 
 export function sessionId(): string | null {
-  if (typeof window === 'undefined') return null;
-  const w = window as any;
-  if (typeof w.__spaceSessionId === 'string' && w.__spaceSessionId) return w.__spaceSessionId;
-  const db = w.__workspaceDb;
-  if (db && typeof db.sessionId === 'string' && db.sessionId) return db.sessionId;
-  return null;
+  return getSessionId() || null;
 }
 
 function db(): any {
@@ -81,8 +74,7 @@ function db(): any {
 
 /** Public workspace data-plane credential required by provider proxies such as Kling. */
 export function workspaceDbToken(): string {
-  const client = db();
-  return client && typeof client.token === 'string' ? client.token : '';
+  return workspaceTokenNow();
 }
 
 function hookHeaders(sid: string | null = sessionId()): Record<string, string> {
@@ -146,7 +138,7 @@ async function postHook(
   body: Record<string, unknown>,
   sid: string | null = sessionId(),
 ): Promise<any> {
-  const payload = body;
+  const payload = sid ? { session_id: sid, ...body } : body;
 
   let lastError = `Request failed (${name}).`;
   for (let attempt = 1; attempt <= HOOK_MAX_ATTEMPTS; attempt++) {
@@ -155,23 +147,14 @@ async function postHook(
     const controller = new AbortController();
     const abortTimer = setTimeout(() => controller.abort(), HOOK_FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(`/api/hooks/execute/${scopedSpaceId()}/${name}`, {
-        method: 'POST',
-        headers: hookHeaders(sid),
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      status = res.status;
-      const data = await res.json().catch(() => null);
-      if (res.ok) return data;
-      lastError = userSafeVideoError(
-        data && data.error,
-        'The video service could not complete that request. Please try again.',
-      );
+      return await callHook(name, payload, { signal: controller.signal });
     } catch (e: any) {
+      status = Number(e?.status) || 0;
       lastError = userSafeVideoError(
         controller.signal.aborted ? 'The request timed out. Please try again.' : e,
-        'The video service is temporarily unavailable. Please try again.',
+        status > 0
+          ? 'The video service could not complete that request. Please try again.'
+          : 'The video service is temporarily unavailable. Please try again.',
       );
     } finally {
       clearTimeout(abortTimer);

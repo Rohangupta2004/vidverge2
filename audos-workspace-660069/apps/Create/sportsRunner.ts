@@ -68,6 +68,7 @@
  */
 import { useEffect, useState } from 'react';
 import { aiProxyHeaders, generateImage } from '../../lib/reelioStudio';
+import { poll, PollTimeoutError } from '../../lib/poll';
 import {
   approveAndFinalizeJob,
   CHARACTER_VISION_PROMPT,
@@ -772,10 +773,6 @@ async function writeKeyframePrompts(
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // ---------------------------------------------------------------------------
 // The run loop
 // ---------------------------------------------------------------------------
@@ -1049,7 +1046,6 @@ async function runScene(run: number, index: number, referenceUrl: string, status
     }
 
     // Poll with a fast bounded backoff (1s → 4s), bounded twice.
-    let delay = SCENE_POLL_MIN_MS;
     let failures = 0;
     let likenessRetryUsed = false;
     // ONE automatic approval per submit: the pipeline NEVER waits for the
@@ -1058,15 +1054,9 @@ async function runScene(run: number, index: number, referenceUrl: string, status
     // immediately. Individual scenes stay regenerable afterwards.
     let autoApprovalSent = false;
     const startedAt = Date.now();
-    while (true) {
-      if (run !== runSeq) return;
-      if (Date.now() - startedAt > SCENE_MAX_POLL_MS) {
-        throw new Error('The render engine stopped answering for this scene. Retry it — every other scene is safe.');
-      }
-      await sleep(delay);
-      delay = Math.min(SCENE_POLL_MAX_MS, delay * 2);
-      if (run !== runSeq) return;
-
+    try {
+      await poll(async () => {
+        if (run !== runSeq) return true;
       // A status check that never answers is a FAILED poll, not a frozen run:
       // the bounded consecutive-failure counter below decides when to give up.
       // The error text is kept so a hard "job not found" can be told apart
@@ -1076,7 +1066,7 @@ async function runScene(run: number, index: number, referenceUrl: string, status
         STATUS_POLL_TIMEOUT_MS,
         'The render status check',
       ).catch((e: unknown) => ({ success: false, error: e instanceof Error ? e.message : String(e) } as RenderStatus));
-      if (run !== runSeq) return;
+      if (run !== runSeq) return true;
 
       if (!status.success) {
         // HARD 404 / LOST-JOB FAILURE (Sep 12 2026): when the render service
@@ -1094,7 +1084,7 @@ async function runScene(run: number, index: number, referenceUrl: string, status
           throw new Error('We lost contact with the render service for this scene. Retry it in a moment.');
         }
         patchScene(index, { message: label(failures > 2 ? 'Reconnecting…' : 'Polling…') });
-        continue;
+        return false;
       }
       failures = 0;
 
@@ -1106,13 +1096,12 @@ async function runScene(run: number, index: number, referenceUrl: string, status
           likenessRetryUsed = true;
           patchScene(index, { phase: 'submitting', message: label('Adjusting the reference and retrying…'), progress: 0.32 });
           const retry = await withStageTimeout(submitOnce(false), SUBMIT_STAGE_TIMEOUT_MS, 'The adjusted render submit');
-          if (run !== runSeq) return;
+          if (run !== runSeq) return true;
           if (!retry.success || !retry.jobId) throw new Error(retry.error || 'The retry could not be started.');
           activeJobId = retry.jobId;
           patchScene(index, { jobId: activeJobId, phase: 'queued', message: label('Queued…'), progress: 0.34 });
-          delay = SCENE_POLL_MIN_MS;
           autoApprovalSent = false;
-          continue;
+          return false;
         }
         throw new Error(refusal);
       }
@@ -1125,7 +1114,7 @@ async function runScene(run: number, index: number, referenceUrl: string, status
       }
       if (ready && status.download_url) {
         patchScene(index, { videoUrl: status.download_url, phase: 'extracting', message: label('Extracting frames…'), progress: 0.93 });
-        break;
+        return true;
       }
 
       // NO PER-SCENE APPROVAL GATE: a job parked in the review window
@@ -1144,7 +1133,6 @@ async function runScene(run: number, index: number, referenceUrl: string, status
               console.warn(`[Sports] scene ${index + 1}: auto-approval call failed (the backend still auto-finalizes):`, approval.error);
             }
           });
-          delay = SCENE_POLL_MIN_MS;
         }
         const statusClip = Array.isArray(status.clip_urls)
           ? status.clip_urls.find((clipCandidate) => isHttpUrl(clipCandidate)) || ''
@@ -1157,18 +1145,18 @@ async function runScene(run: number, index: number, referenceUrl: string, status
             )
           ).find((clipCandidate) => isHttpUrl(clipCandidate)) ||
           '';
-        if (run !== runSeq) return;
+        if (run !== runSeq) return true;
         if (clipUrl) {
           console.log(`[Sports] scene ${index + 1}: finished clip accepted for chaining: ${clipUrl}`);
           patchScene(index, { videoUrl: clipUrl, phase: 'extracting', message: label('Extracting frames…'), progress: 0.93 });
-          break;
+          return true;
         }
         patchScene(index, {
           phase: 'processing',
           message: label('Finalizing this scene…'),
           progress: Math.max(state.scenes[index]?.progress || 0, 0.9),
         });
-        continue;
+        return false;
       }
 
       // Still rendering: keep the bar honestly alive with a time-based creep.
@@ -1179,7 +1167,22 @@ async function runScene(run: number, index: number, referenceUrl: string, status
         message: label(status.user_message || 'Rendering…'),
         progress: Math.max(state.scenes[index]?.progress || 0, creep),
       });
+      return false;
+      }, {
+        interval: SCENE_POLL_MIN_MS,
+        timeout: SCENE_MAX_POLL_MS,
+        backoff: 2,
+        maxInterval: SCENE_POLL_MAX_MS,
+        tolerateErrors: 1,
+        until: Boolean,
+      });
+    } catch (error) {
+      if (error instanceof PollTimeoutError) {
+        throw new Error('The render engine stopped answering for this scene. Retry it — every other scene is safe.');
+      }
+      throw error;
     }
+    if (run !== runSeq) return;
 
     // Last-frame extraction — the chain link into the next scene: the frame
     // captured here is exactly what scene N+1 anchors its start on.

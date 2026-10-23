@@ -19,17 +19,15 @@
  * fall back to the first landscape-capable stock look from the v3 catalog.
  */
 import type { IngestedClip } from '../types';
+import { poll, PollTimeoutError } from '../../../../lib/poll';
+import { WORKSPACE_ID } from '../../../../lib/workspace';
 import { probeToClip } from './probe';
 
 export class HeyGenError extends Error {}
 
-function workspaceId(): string {
-  return String((window as any).__workspaceDb?.workspaceId || (window as any).__WORKSPACE_ID__ || '');
-}
-
 async function heygen(path: string, init?: RequestInit): Promise<any> {
   const response = await fetch(
-    `/api/workspaces/${workspaceId()}/provider-credentials/heygen/proxy/${path.replace(/^\/+/, '')}`,
+    `/api/workspaces/${WORKSPACE_ID}/provider-credentials/heygen/proxy/${path.replace(/^\/+/, '')}`,
     { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } },
   );
   const body = await response.json().catch(() => null);
@@ -67,21 +65,35 @@ export async function generateCharacterImage(brief: string, onProgress?: (messag
     });
     const generationId = created?.data?.generation_id || created?.generation_id;
     if (!generationId) throw new HeyGenError('HeyGen did not return a generation id for the character image.');
-    for (let attempt = 0; attempt < 60; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 4000));
+    const data = await poll(async () => {
       const status = await heygen(`v2/photo_avatar/generation/${encodeURIComponent(String(generationId))}`);
-      const data = status?.data || status;
-      const state = String(data?.status || '').toLowerCase();
-      onProgress?.(`Character image ${state || 'processing'}…`);
-      if (state === 'success' || state === 'completed') {
-        const url = data?.image_url_list?.[0] || data?.image_url;
-        const key = data?.image_key_list?.[0] || data?.image_key || null;
-        if (!url) throw new HeyGenError('HeyGen finished but returned no character image.');
-        return { imageUrl: String(url), imageKey: key ? String(key) : null, kind: 'photo-avatar' };
+      return status?.data || status;
+    }, {
+      interval: 4_000,
+      timeout: 60 * 4_000,
+      tolerateErrors: 1,
+      until: (status) => {
+        const state = String(status?.status || '').toLowerCase();
+        return state === 'success' || state === 'completed' || state === 'failed' || state === 'error';
+      },
+      onTick: (status) => {
+        const state = String(status?.status || '').toLowerCase();
+        onProgress?.(`Character image ${state || 'processing'}…`);
+      },
+    }).catch((error) => {
+      if (error instanceof PollTimeoutError) {
+        throw new HeyGenError('HeyGen character image generation timed out.');
       }
-      if (state === 'failed' || state === 'error') throw new HeyGenError(data?.msg || data?.error || 'HeyGen character image generation failed.');
+      throw error;
+    });
+    const state = String(data?.status || '').toLowerCase();
+    if (state === 'failed' || state === 'error') {
+      throw new HeyGenError(data?.msg || data?.error || 'HeyGen character image generation failed.');
     }
-    throw new HeyGenError('HeyGen character image generation timed out.');
+    const url = data?.image_url_list?.[0] || data?.image_url;
+    const key = data?.image_key_list?.[0] || data?.image_key || null;
+    if (!url) throw new HeyGenError('HeyGen finished but returned no character image.');
+    return { imageUrl: String(url), imageKey: key ? String(key) : null, kind: 'photo-avatar' };
   } catch (caught) {
     // Fallback: stock look from the v3 catalog (approval still happens in-app).
     onProgress?.('Photo-avatar generation unavailable — selecting a stock presenter look…');
@@ -177,16 +189,20 @@ export async function renderAvatarClip(
   }
 
   if (!videoId) throw new HeyGenError('HeyGen did not return a video id.');
-  for (let attempt = 0; attempt < 150; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 6000));
-    const status = await heygen(pollPath(videoId));
-    const { state, url, error } = readStatus(status);
-    onProgress?.(`Presenter clip ${state || 'processing'}…`);
-    if ((state === 'completed' || state === 'complete') && url) {
-      onProgress?.('Measuring the presenter clip’s true frame rate…');
-      return await probeToClip(url, 'heygen', 'presenter.mp4', clipId);
-    }
-    if (state === 'failed' || state === 'error') throw new HeyGenError(error || 'The HeyGen render failed.');
+  const result = await poll(async () => readStatus(await heygen(pollPath(videoId))), {
+    interval: 6_000,
+    timeout: 150 * 6_000,
+    tolerateErrors: 1,
+    until: ({ state }) => state === 'completed' || state === 'complete' || state === 'failed' || state === 'error',
+    onTick: ({ state }) => onProgress?.(`Presenter clip ${state || 'processing'}…`),
+  }).catch((error) => {
+    if (error instanceof PollTimeoutError) throw new HeyGenError('The HeyGen render timed out.');
+    throw error;
+  });
+  if (result.state === 'failed' || result.state === 'error') {
+    throw new HeyGenError(result.error || 'The HeyGen render failed.');
   }
-  throw new HeyGenError('The HeyGen render timed out.');
+  if (!result.url) throw new HeyGenError('The HeyGen render finished without a video URL.');
+  onProgress?.('Measuring the presenter clip’s true frame rate…');
+  return await probeToClip(result.url, 'heygen', 'presenter.mp4', clipId);
 }

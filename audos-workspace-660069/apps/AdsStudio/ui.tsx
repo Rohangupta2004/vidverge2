@@ -14,8 +14,8 @@ export const card: CSSProperties = {
   background: T.card,
   border: `1px solid ${T.line}`,
   borderRadius: 12,
-  padding: 16,
-  boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+  padding: 24,
+  boxShadow: 'none',
 };
 
 export const inputStyle: CSSProperties = {
@@ -23,8 +23,9 @@ export const inputStyle: CSSProperties = {
   // The input well sits BELOW the card it is in, not level with it, so a
   // field still reads as a field on a dark ground.
   background: T.input,
-  border: '1px solid rgba(255,255,255,0.1)',
-  borderRadius: 8,
+  minHeight: 44,
+  border: '1px solid var(--vg-control-border)',
+  borderRadius: 10,
   padding: '10px 12px',
   color: T.ink,
   fontSize: 14,
@@ -37,8 +38,7 @@ export const labelStyle: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   color: T.muted,
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
+  letterSpacing: 0,
   marginBottom: 6,
   display: 'block',
 };
@@ -55,11 +55,11 @@ export function Btn(props: {
   const { kind = 'ghost', small } = props;
   const bg =
     kind === 'primary'
-      ? 'linear-gradient(135deg, var(--space-brand-primary-500) 0%, var(--space-brand-highlight-500) 100%)'
+      ? 'var(--vg-gradient-action)'
       : kind === 'danger'
-        ? 'rgba(248,113,113,0.14)'
+        ? 'var(--vg-danger-bg)'
         : 'var(--space-surface-panel-strong)';
-  const color = kind === 'primary' ? 'var(--space-text-on-primary)' : kind === 'danger' ? T.bad : T.soft;
+  const color = kind === 'primary' ? 'var(--vg-on-accent)' : kind === 'danger' ? T.bad : T.soft;
   return (
     <button
       type="button"
@@ -69,7 +69,7 @@ export function Btn(props: {
       disabled={props.disabled}
       style={{
         background: bg, color, border: `1px solid ${kind === 'ghost' ? T.line : 'transparent'}`,
-        borderRadius: 8, padding: small ? '6px 10px' : '10px 16px', fontSize: small ? 12 : 14,
+        minHeight: 44, borderRadius: 10, padding: small ? '8px 10px' : '10px 16px', fontSize: small ? 12 : 14,
         fontWeight: 600, fontFamily: T.sans, cursor: props.disabled ? 'not-allowed' : 'pointer',
         opacity: props.disabled ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', gap: 7,
       }}
@@ -80,7 +80,7 @@ export function Btn(props: {
 export function Tag(props: { children: any; tone?: 'ok' | 'warn' | 'bad' | 'info' }) {
   const toneColor = props.tone === 'ok' ? T.good : props.tone === 'warn' ? T.warn : props.tone === 'bad' ? T.bad : T.accent;
   return (
-    <span style={{ fontSize: 11, fontWeight: 700, color: toneColor, border: `1px solid ${toneColor}`, borderRadius: 999, padding: '2px 9px', opacity: 0.95, whiteSpace: 'nowrap' }}>
+    <span style={{ fontSize: 11, fontWeight: 700, color: toneColor, border: `1px solid ${toneColor}`, borderRadius: 6, padding: '2px 9px', opacity: 0.95, whiteSpace: 'nowrap' }}>
       {props.children}
     </span>
   );

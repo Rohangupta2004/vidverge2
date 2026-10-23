@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, CreditCard, Coins, Crown, LogOut, Clock, CheckCircle2, AlertCircle, Loader2, ExternalLink, CalendarX } from 'lucide-react';
+import { CreditCard, Coins, Crown, LogOut, Clock, CheckCircle2, AlertCircle, Loader2, ExternalLink, CalendarX } from 'lucide-react';
 import { useSpaceRuntime } from '../SpaceRuntimeContext';
 import { settingsStyles } from '../lib/colors';
 import { isPaidTier, isProTier, openPricing, useUserTier } from '../lib/plans';
@@ -56,7 +56,7 @@ function getSessionStorageKey(spaceId: string) {
 }
 
 export default function Settings({ spaceId }: SettingsProps) {
-  const { setSessionId, sessionId: contextSessionId } = useSpaceRuntime();
+  const { sessionId: contextSessionId } = useSpaceRuntime();
   // VidVerge access tier from the `subscriptions` table (email -> tier +
   // video_limit). This is separate from the platform's Stripe subscription
   // state below: a row here grants access directly, so it is shown first, and
@@ -77,8 +77,6 @@ export default function Settings({ spaceId }: SettingsProps) {
         ? 'Pay-as-you-go'
         : 'Free Trial';
   const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   
   const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
@@ -93,12 +91,9 @@ export default function Settings({ spaceId }: SettingsProps) {
     // Re-read when spaceId or contextSessionId changes (session update trigger)
     const sessionKey = getSessionStorageKey(spaceId);
     const existingSession = localStorage.getItem(sessionKey);
-    console.log('[Settings] Loading session for:', spaceId, 'session:', existingSession, 'contextSessionId:', contextSessionId);
-    
     if (existingSession) {
       try {
         const session = JSON.parse(existingSession);
-        console.log('[Settings] Found session email:', session.email);
         setEmail(session.email || '');
       } catch (e) {
         console.error('Failed to parse session:', e);
@@ -109,9 +104,7 @@ export default function Settings({ spaceId }: SettingsProps) {
   }, [spaceId, contextSessionId]);
 
   useEffect(() => {
-    console.log('[Settings] Email effect triggered, email:', email, 'spaceId:', spaceId);
     if (email && email.includes('@')) {
-      console.log('[Settings] Loading subscription status for:', email);
       loadSubscriptionStatus();
     }
   }, [email, spaceId]);
@@ -123,8 +116,8 @@ export default function Settings({ spaceId }: SettingsProps) {
         const config = await response.json();
         setPaymentConfig(config);
       }
-    } catch (e) {
-      console.log('Payment config not found');
+    } catch {
+      // Billing configuration is optional for directly granted accounts.
     }
   };
 
@@ -146,103 +139,73 @@ export default function Settings({ spaceId }: SettingsProps) {
     }
   };
 
-  const syncSessionIdentity = async (rawEmail: string) => {
-    const normalizedEmail = rawEmail.trim().toLowerCase();
-    if (!normalizedEmail || !normalizedEmail.includes('@')) {
-      throw new Error('Please enter a valid email address');
-    }
-
+  // Billing acts on the identity this browser already proved with a one-time
+  // code at sign-in. It deliberately cannot register or adopt a different
+  // address: typing somebody else's email must never move this browser onto
+  // their account, their credits or their subscription.
+  const requireVerifiedIdentity = (): { email: string; workspaceSessionId: string } => {
     const sessionKey = getSessionStorageKey(spaceId);
-    const existingSessionRaw = localStorage.getItem(sessionKey);
-    const existingSession: StoredSession | null = existingSessionRaw
-      ? JSON.parse(existingSessionRaw)
-      : null;
-
-    const existingSessionId =
-      existingSession?.workspaceSessionId ||
-      existingSession?.sessionId ||
-      existingSession?.id ||
-      `anon_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-
-    const visitorId = document.cookie.match(/audos_vid=([^;]+)/)?.[1] || null;
-    const response = await fetch(`/api/space/${spaceId}/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: normalizedEmail,
-        sessionId: existingSessionId,
-        visitorId,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || 'Failed to save settings');
-    }
-
-    const registerData = await response.json();
-    const workspaceSessionId =
-      registerData.workspaceSessionId ||
-      registerData.sessionId ||
-      existingSession?.workspaceSessionId ||
-      existingSession?.sessionId ||
-      existingSessionId;
-
-    const nextSession: StoredSession = {
-      ...existingSession,
-      id: workspaceSessionId,
-      sessionId: workspaceSessionId,
-      workspaceSessionId,
-      email: normalizedEmail,
-      createdAt: existingSession?.createdAt || new Date().toISOString(),
-      timestamp: Date.now(),
-      metadata: registerData.metadata || existingSession?.metadata,
-      isReturningUser: registerData.isReturningUser === true,
-      workspaceId: registerData.workspaceId || existingSession?.workspaceId,
-    };
-
-    localStorage.setItem(sessionKey, JSON.stringify(nextSession));
-    setSessionId(workspaceSessionId);
-    setEmail(normalizedEmail);
-
-    return { email: normalizedEmail, workspaceSessionId };
-  };
-
-  const handleSave = async () => {
-    setError('');
-    setLoading(true);
-    
+    let session: StoredSession | null = null;
     try {
-      const synced = await syncSessionIdentity(email);
-
-      setSaved(true);
-      setTimeout(() => {
-        setSaved(false);
-      }, 2000);
-
-      // Reload subscription status after registration
-      await loadSubscriptionStatus(synced.email);
-    } catch (e) {
-      console.error('Failed to save session:', e);
-      setError(e instanceof Error ? e.message : 'Failed to save settings');
-    } finally {
-      setLoading(false);
+      const raw = localStorage.getItem(sessionKey);
+      session = raw ? (JSON.parse(raw) as StoredSession) : null;
+    } catch {
+      session = null;
     }
+
+    const workspaceSessionId =
+      session?.workspaceSessionId || session?.sessionId || session?.id || '';
+    const verifiedEmail = (session?.email || '').trim().toLowerCase();
+
+    if (!workspaceSessionId.startsWith('wses_') || !verifiedEmail.includes('@')) {
+      throw new Error('Please sign in with your email code before managing billing.');
+    }
+
+    return { email: verifiedEmail, workspaceSessionId };
   };
 
-  const handleSignOut = () => {
+  // Signing out is a platform call. The space session cookie is HttpOnly, so
+  // clearing localStorage alone leaves the next person on this browser signed
+  // in as the previous visitor. Name the session this app is holding too — the
+  // cookie points at only one of a visitor's records.
+  const handleSignOut = async () => {
     const sessionKey = getSessionStorageKey(spaceId);
-    localStorage.removeItem(sessionKey);
+    let heldSessionId = '';
+    try {
+      const raw = localStorage.getItem(sessionKey);
+      const session: StoredSession | null = raw ? (JSON.parse(raw) as StoredSession) : null;
+      heldSessionId = session?.workspaceSessionId || session?.sessionId || session?.id || '';
+    } catch {}
+
+    try {
+      const sharedSpacePath = `/space/${encodeURIComponent(spaceId)}`;
+      const logoutUrl = window.location.pathname === sharedSpacePath
+        ? `${sharedSpacePath}/logout`
+        : `/api/space/${encodeURIComponent(spaceId)}/logout`;
+      await fetch(logoutUrl, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(heldSessionId ? { 'X-Session-Id': heldSessionId } : {}),
+        },
+        body: JSON.stringify(heldSessionId ? { sessionId: heldSessionId } : {}),
+      });
+    } catch (e) {
+      console.warn('[Settings] Platform sign-out call failed; clearing this browser anyway.', e);
+    }
+
+    try { localStorage.removeItem(sessionKey); } catch {}
+    try { sessionStorage.removeItem('space_session_id'); } catch {}
     setEmail('');
     setSubscriptionStatus(null);
-    setSessionId('');
     window.location.reload();
   };
 
   const handleSubscribe = async () => {
     setSubscribing(true);
     try {
-      const synced = await syncSessionIdentity(email);
+      const synced = requireVerifiedIdentity();
       const appId = getPaymentAppId(spaceId);
       const response = await fetch('/api/payments/subscribe', {
         method: 'POST',
@@ -268,7 +231,6 @@ export default function Settings({ spaceId }: SettingsProps) {
       });
 
       const data = await response.json();
-      console.log('[Settings] Subscribe response:', data);
       
       if (data.checkoutUrl) {
         // Task #1480: Reddit Pixel InitiateCheckout — fired immediately before
@@ -286,7 +248,6 @@ export default function Settings({ spaceId }: SettingsProps) {
             }
             const conversionId = `checkout_${spaceId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
             rdt('track', 'InitiateCheckout', { conversionId });
-            console.log('[Settings] Reddit Pixel InitiateCheckout fired (conversionId=' + conversionId + ')');
           }
         } catch (e) {
           console.warn('[Settings] Reddit Pixel InitiateCheckout failed:', e);
@@ -309,7 +270,7 @@ export default function Settings({ spaceId }: SettingsProps) {
     setError('');
     setPortalMessage('');
     try {
-      const synced = await syncSessionIdentity(email);
+      const synced = requireVerifiedIdentity();
       const appId = getPaymentAppId(spaceId);
       const response = await fetch('/api/payments/portal/request-link', {
         method: 'POST',
@@ -352,17 +313,13 @@ export default function Settings({ spaceId }: SettingsProps) {
     }
   };
 
-  const formatPrice = (cents: number) => {
-    return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
-  };
-
   const getStatusBadge = () => {
     if (!subscriptionStatus) return null;
 
     switch (subscriptionStatus.status) {
       case 'active':
         return (
-          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${subscriptionStatus.cancelAtPeriodEnd ? 'bg-amber-500/15 text-amber-400' : 'bg-green-500/15 text-green-400'}`}>
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm font-medium ${subscriptionStatus.cancelAtPeriodEnd ? 'border-[var(--vg-warning)] bg-[var(--vg-warning-bg)] text-[var(--vg-warning)]' : 'border-[var(--vg-success)] bg-[var(--vg-success-bg)] text-[var(--vg-success)]'}`}>
             {subscriptionStatus.cancelAtPeriodEnd ? (
               <>
                 <CalendarX className="w-4 h-4" />
@@ -373,7 +330,7 @@ export default function Settings({ spaceId }: SettingsProps) {
             ) : (
               <>
                 <CheckCircle2 className="w-4 h-4" />
-                Active Subscription
+                Active subscription
               </>
             )}
           </div>
@@ -381,21 +338,21 @@ export default function Settings({ spaceId }: SettingsProps) {
       case 'trial':
       case 'trialing':
         return (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/15 text-blue-400 rounded-full text-sm font-medium">
+          <div className="flex items-center gap-1.5 rounded-md border border-[var(--vg-info)] bg-[var(--vg-info-bg)] px-3 py-1.5 text-sm font-medium text-[var(--vg-info)]">
             <Clock className="w-4 h-4" />
             {subscriptionStatus.trialDaysRemaining} days left in trial
           </div>
         );
       case 'trial_expired':
         return (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 text-amber-400 rounded-full text-sm font-medium">
+          <div className="flex items-center gap-1.5 rounded-md border border-[var(--vg-warning)] bg-[var(--vg-warning-bg)] px-3 py-1.5 text-sm font-medium text-[var(--vg-warning)]">
             <AlertCircle className="w-4 h-4" />
             Trial expired
           </div>
         );
       case 'past_due':
         return (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/15 text-red-400 rounded-full text-sm font-medium">
+          <div className="flex items-center gap-1.5 rounded-md border border-[var(--vg-danger)] bg-[var(--vg-danger-bg)] px-3 py-1.5 text-sm font-medium text-[var(--vg-danger)]">
             <AlertCircle className="w-4 h-4" />
             Payment past due
           </div>
@@ -441,7 +398,7 @@ export default function Settings({ spaceId }: SettingsProps) {
             {email && (
               <button
                 onClick={handleSignOut}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:text-[var(--vg-danger)] hover:bg-[var(--vg-danger-bg)] rounded-lg transition-colors"
                 data-testid="button-sign-out"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -451,48 +408,33 @@ export default function Settings({ spaceId }: SettingsProps) {
           </div>
 
           <div>
-            <label htmlFor="settings-email" className={settingsStyles.label}>
-              Email Address
-            </label>
-            <input
-              type="email"
-              id="settings-email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setError('');
-              }}
-              placeholder="you@example.com"
-              className={settingsStyles.input(!!error)}
-              data-testid="input-settings-email"
-            />
+            <p className={settingsStyles.label}>Email Address</p>
+            <div
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-muted)] px-4 py-3"
+              data-testid="row-settings-email"
+            >
+              <span className="text-sm text-[var(--space-text-primary)]">{email || 'Not signed in'}</span>
+              {email && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--space-brand-primary-500)_14%,transparent)] px-3 py-1 text-xs font-semibold text-[var(--space-text-brand)]">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Verified by email code
+                </span>
+              )}
+            </div>
+            <p className="mt-2 text-xs text-[var(--space-text-muted)]">
+              This account is tied to the address you verified at sign-in. To use a different one, sign out and sign in with that email.
+            </p>
             {error && (
               <p className={settingsStyles.errorText} data-testid="text-settings-error">
                 {error}
               </p>
             )}
             {portalMessage && (
-              <p className="text-sm text-green-400" role="status">
+              <p className="text-sm text-[var(--vg-success)]" role="status">
                 {portalMessage}
               </p>
             )}
           </div>
-
-          <button
-            onClick={handleSave}
-            disabled={loading || !email || saved}
-            className={settingsStyles.saveButton(loading || !email || saved)}
-            data-testid="button-save-settings"
-          >
-            {saved ? (
-              <>
-                <Save className="w-4 h-4" />
-                Saved
-              </>
-            ) : (
-              'Save Changes'
-            )}
-          </button>
         </div>
 
         {/* Subscription Section */}
@@ -531,7 +473,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                 </span>
                 <button
                   onClick={() => openPricing('nav')}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all hover:brightness-110 text-[var(--space-text-on-primary)] bg-[var(--space-brand-primary)]"
+                  className="vg-primary-action px-3 text-xs"
                   data-testid="button-settings-topup"
                 >
                   Top up
@@ -555,7 +497,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                   <span className="text-xs text-[var(--space-text-muted)]">
                     {credits && credits.rollover && credits.monthlyCredits > 0
                       ? `${formatCredits(credits.monthlyCredits)} credits a month, rolling over`
-                      : 'Credits never expire — top up in $9 blocks any time'}
+                      : 'Credits never expire — add a credit pack any time'}
                   </span>
                 </span>
                 <span
@@ -563,7 +505,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                   style={{
                     color: subscriber ? 'var(--space-text-on-primary)' : 'var(--space-text-secondary)',
                     background: subscriber
-                      ? 'linear-gradient(135deg, var(--space-brand-primary, #D6AB4A) 0%, var(--space-brand-highlight, #F3D58B) 100%)'
+                      ? 'var(--vg-gradient-action)'
                       : 'var(--space-surface-panel-strong)',
                   }}
                   data-testid="badge-settings-tier"
@@ -624,7 +566,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                     </div>
                     <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-gradient-to-r from-[var(--space-brand-primary)] to-[var(--space-brand-highlight)] rounded-full transition-all"
+                        className="h-full rounded-full bg-[var(--vg-info)] transition-all"
                         style={{ 
                           width: `${((subscriptionStatus.trialDays - subscriptionStatus.trialDaysRemaining) / subscriptionStatus.trialDays) * 100}%` 
                         }}
@@ -650,7 +592,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                   </div>
                 )}
 
-                {/* Active Subscription Info */}
+                {/* Active subscription Info */}
                 {subscriptionStatus?.status === 'active' && (
                   <div className={`p-4 bg-gradient-to-r ${subscriptionStatus.cancelAtPeriodEnd ? 'from-amber-500/10 to-orange-500/5 border-amber-500/30' : 'from-green-500/10 to-emerald-500/5 border-green-500/30'} rounded-xl border`}>
                     {subscriptionStatus.cancelAtPeriodEnd ? (
@@ -725,10 +667,10 @@ export default function Settings({ spaceId }: SettingsProps) {
                       <div className="p-4 bg-[var(--space-surface-muted)] rounded-xl">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-sm font-medium text-[var(--space-text-primary)]">
-                            Monthly Subscription
+                            Creator plan
                           </span>
-                          <span className="text-lg font-bold text-[var(--space-text-primary)]">
-                            {formatPrice(paymentConfig.defaultPriceCents)}/mo
+                          <span className="text-sm font-bold text-[var(--space-text-brand)]">
+                            250 credits monthly
                           </span>
                         </div>
                         <div className="flex items-center gap-3 text-xs text-[var(--space-text-secondary)]">
@@ -747,7 +689,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                     <button
                       onClick={handleSubscribe}
                       disabled={subscribing}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[var(--space-brand-primary)] to-[var(--space-brand-highlight)] hover:brightness-110 text-[var(--space-text-on-primary)] font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="vg-primary-action w-full justify-center gap-2 px-4 disabled:opacity-50 disabled:cursor-not-allowed"
                       data-testid="button-subscribe"
                     >
                       {subscribing ? (
@@ -766,7 +708,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                     </button>
 
                     <p className="text-center text-xs text-[var(--space-text-muted)]">
-                      Secure payment powered by Stripe
+                      Secure hosted payment
                     </p>
                   </div>
                 )}
@@ -775,7 +717,7 @@ export default function Settings({ spaceId }: SettingsProps) {
                 {(!subscriptionStatus || subscriptionStatus.status === 'not_registered') && (
                   <div className="p-4 bg-[var(--space-surface-muted)] rounded-xl text-center">
                     <p className="text-sm text-[var(--space-text-secondary)]">
-                      Save your email to start your free trial
+                      No plan on this account yet — see VidVerge plans to start
                     </p>
                   </div>
                 )}

@@ -51,27 +51,9 @@ export const brand = {
  * Semantic colors - Use for status and feedback
  */
 export const semantic = {
-  success: {
-    50: '#f0fdf4',
-    100: '#dcfce7',
-    500: '#22c55e',
-    600: '#16a34a',
-    700: '#15803d',
-  },
-  warning: {
-    50: '#fffbeb',
-    100: '#fef3c7',
-    500: '#f59e0b',
-    600: '#d97706',
-    700: '#a16207',
-  },
-  danger: {
-    50: '#fef2f2',
-    100: '#fee2e2',
-    500: '#ef4444',
-    600: '#dc2626',
-    700: '#b91c1c',
-  },
+  success: { 50: 'var(--vg-success-bg)', 100: 'var(--vg-success-bg)', 500: 'var(--vg-success)', 600: 'var(--vg-success)', 700: 'var(--vg-success)' },
+  warning: { 50: 'var(--vg-warning-bg)', 100: 'var(--vg-warning-bg)', 500: 'var(--vg-warning)', 600: 'var(--vg-warning)', 700: 'var(--vg-warning)' },
+  danger: { 50: 'var(--vg-danger-bg)', 100: 'var(--vg-danger-bg)', 500: 'var(--vg-danger)', 600: 'var(--vg-danger)', 700: 'var(--vg-danger)' },
 } as const;
 
 /**
@@ -104,7 +86,7 @@ export const neutral = {
 export const typography = {
   // Font family - loaded via Google Fonts link in Desktop.tsx
   // UPDATE: Replace "Inter" with the workspace headingFont from config.desktop.branding
-  fontFamily: 'var(--space-font-family, "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif)',
+  fontFamily: 'var(--space-font-family, "Manrope", "Segoe UI", sans-serif)',
   
   // Font sizes with line heights
   size: {
@@ -133,7 +115,7 @@ export const typography = {
     secondary: 'text-[var(--space-text-secondary)]',  // Body text, descriptions
     tertiary: 'text-[var(--space-text-secondary)]',   // Subtle text, captions
     muted: 'text-[var(--space-text-muted)]',           // Placeholder, disabled
-    inverse: 'text-white',                             // On dark backgrounds
+    inverse: 'text-[var(--vg-on-accent)]',                             // On dark backgrounds
     brand: 'text-[var(--space-text-brand)]',
     accent: 'text-[var(--space-text-accent)]',
     danger: 'text-[var(--space-semantic-danger)]',     // Error text
@@ -183,13 +165,13 @@ export const tw = {
   // ---------------------------------------------------------------------------
   button: {
     // Primary action button (main CTA)
-    primary: 'bg-[var(--space-brand-primary)] hover:brightness-95 text-[var(--space-text-on-primary)] font-medium transition-all',
-    brand: 'bg-[var(--space-brand-primary)] hover:brightness-95 text-[var(--space-text-on-primary)] font-medium transition-all',
-    accent: 'bg-[var(--space-brand-highlight)] hover:brightness-95 text-[var(--space-text-on-highlight)] font-medium transition-all',
+    primary: 'bg-[image:var(--vg-gradient-action)] hover:bg-[image:var(--vg-gradient-action-hover)] text-[var(--vg-on-accent)] font-semibold transition-colors',
+    brand: 'bg-[image:var(--vg-gradient-action)] hover:bg-[image:var(--vg-gradient-action-hover)] text-[var(--vg-on-accent)] font-semibold transition-colors',
+    accent: 'bg-[image:var(--vg-gradient-action)] hover:bg-[image:var(--vg-gradient-action-hover)] text-[var(--vg-on-accent)] font-semibold transition-colors',
     // Secondary button
-    secondary: 'bg-[var(--space-surface-muted)] hover:brightness-95 text-[var(--space-text-primary)] font-medium transition-all',
+    secondary: 'bg-[var(--vg-surface)] hover:bg-[var(--vg-hover)] border border-[var(--vg-control-border)] text-[var(--vg-text)] font-semibold transition-colors',
     // Danger button
-    danger: 'bg-[var(--space-semantic-danger-600)] hover:bg-[var(--space-semantic-danger-500)] text-white font-medium transition-all',
+    danger: 'bg-[var(--vg-danger-bg)] border border-[var(--vg-danger)] text-[var(--vg-danger)] font-semibold transition-colors',
     // Ghost button (transparent)
     ghost: 'hover:bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)] transition-all',
     // Disabled state modifier
@@ -201,9 +183,9 @@ export const tw = {
   // ---------------------------------------------------------------------------
   input: {
     // Base input styles
-    base: 'w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all',
+    base: 'w-full min-h-11 px-3 border rounded-[10px] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--vg-bg)] transition-colors',
     // Default state
-    default: 'border-[var(--space-border-default)] bg-[var(--space-surface-card)] text-[var(--space-text-primary)] focus:ring-[var(--space-brand-primary)]',
+    default: 'border-[var(--vg-control-border)] bg-[var(--vg-bg)] text-[var(--vg-text)] focus:ring-[var(--vg-focus)]',
     // Error state
     error: 'border-[var(--space-semantic-danger-500)] focus:ring-[var(--space-semantic-danger-500)]',
     // Disabled state
@@ -243,17 +225,17 @@ export const tw = {
   // CARDS
   // ---------------------------------------------------------------------------
   card: {
-    default: 'bg-[var(--space-surface-card)] border border-[var(--space-border-default)] rounded-lg shadow-sm hover:shadow-md transition-shadow',
-    elevated: 'bg-[var(--space-surface-card)] rounded-2xl shadow-xl',
-    glass: 'bg-[var(--space-surface-panel)] backdrop-blur-md border border-[var(--space-border-default)] rounded-2xl shadow-lg',
-    flat: 'bg-[var(--space-surface-muted)] rounded-lg border border-[var(--space-border-default)]',
+    default: 'bg-[var(--vg-surface)] border border-[var(--vg-border)] rounded-xl transition-colors',
+    elevated: 'bg-[var(--vg-raised)] border border-[var(--vg-border)] rounded-2xl',
+    glass: 'bg-[var(--vg-surface)] border border-[var(--vg-border)] rounded-xl',
+    flat: 'bg-[var(--vg-raised)] rounded-xl border border-[var(--vg-border)]',
   },
   
   // ---------------------------------------------------------------------------
   // BADGES / PILLS - UPDATE accent with brand color (NOT purple)
   // ---------------------------------------------------------------------------
   badge: {
-    default: 'px-2 py-0.5 text-xs font-medium rounded-full',
+    default: 'px-2 py-0.5 text-xs font-medium rounded-md',
     primary: 'bg-[var(--space-surface-accent-soft)] text-[var(--space-text-brand)]',
     accent: 'bg-[var(--space-brand-highlight-100)] text-[var(--space-text-accent)]',
     success: 'bg-[var(--space-semantic-success-50)] text-[var(--space-semantic-success)]',
@@ -362,7 +344,7 @@ export const authStyles = {
  */
 export const settingsStyles = {
   container: 'h-full overflow-y-auto',
-  innerContainer: 'w-full p-8',
+  innerContainer: 'w-full p-4 md:p-6 xl:p-8',
   section: 'space-y-6',
   label: `block ${typography.size.sm} ${typography.weight.medium} ${typography.color.primary} mb-2`,
   input: (hasError: boolean) => 
@@ -387,7 +369,7 @@ export function getGradientClass(gradient?: string): string {
  * Get font family style object for inline styles
  */
 export function getFontFamily(): React.CSSProperties {
-  return { fontFamily: "var(--space-font-family, Inter, system-ui, sans-serif)" };
+  return { fontFamily: "var(--space-font-family, Manrope, 'Segoe UI', sans-serif)" };
 }
 
 /**

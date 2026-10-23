@@ -14,7 +14,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, Globe, Pencil, Plus, Search, Sparkles, X } from 'lucide-react';
+import { ArrowRight, Brain, FastForward, Globe, Pencil, Plus, Search, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { Profile, analyzeBrand } from '../store';
 import { DEFAULT_ACCENT, INK_DEEP, LINE, LINE_HI, MONO, TEXT, TEXT_DIM, TEXT_MUTED, normalizeHex, readableOn, rgba } from '../theme';
 import { BrandMark, Button, Field, LogStream, Notice, Panel, Pill, SectionTitle, Spinner, useAccent } from '../ui';
@@ -27,6 +27,8 @@ interface Props {
   onBrand: (brand: Profile, accent: string) => void;
   onAccent: (accent: string) => void;
   onContinue: () => void;
+  onQuickStart: () => void;
+  onApprove: (brand: Profile) => Promise<void>;
 }
 
 function FeatureList({ features, onChange }: { features: string[]; onChange: (next: string[]) => void }) {
@@ -82,24 +84,43 @@ function FeatureList({ features, onChange }: { features: string[]; onChange: (ne
 }
 
 export default function BrandScreen({
-  brand, brandUrl, accent, onUrlChange, onBrand, onAccent, onContinue,
+  brand, brandUrl, accent, onUrlChange, onBrand, onAccent, onContinue, onQuickStart, onApprove,
 }: Props) {
   const liveAccent = useAccent();
   const [url, setUrl] = useState(brandUrl);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [log, setLog] = useState<string[]>([]);
+  const [approvalNote, setApprovalNote] = useState('');
 
   useEffect(() => { setUrl(brandUrl); }, [brandUrl]);
 
   const run = async () => {
     const target = url.trim();
-    if (!target) { setError('Enter the address of your own website first.'); return; }
+    if (!target) { setError('Add one source or a short description, or choose Quick Start.'); return; }
     setBusy(true);
     setError('');
-    setLog([`Reading ${target.replace(/^https?:\/\//i, '')}\u2026`, 'Looking for a pricing page\u2026', 'Pulling out your positioning, audience and features\u2026']);
+    const foundUrl = target.match(/https?:\/\/[^\s]+|(?:www\.)?[a-z0-9][a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s]*)?/i)?.[0] || '';
+    if (!foundUrl) {
+      const firstLine = target.split(/\n|\.|,/)[0].trim().slice(0, 80);
+      const inferred: Profile = {
+        id: `manual-${Date.now()}`,
+        url: '',
+        name: firstLine || 'Untitled brand',
+        tagline: target.slice(0, 240),
+        category: '', audience: '', pricing: '', usp: '', positioning: target.slice(0, 500),
+        features: [], colors: [], accent: '', logoUrl: '', fetched: false,
+      };
+      setLog([]);
+      onUrlChange('');
+      onBrand(inferred, '');
+      setBusy(false);
+      return;
+    }
+    const normalizedUrl = /^https?:\/\//i.test(foundUrl) ? foundUrl : `https://${foundUrl}`;
+    setLog([`Reading ${normalizedUrl.replace(/^https?:\/\//i, '')}\u2026`, 'Looking for product and pricing pages\u2026', 'Separating source-backed facts from AI interpretation\u2026']);
     try {
-      const result = await analyzeBrand(target);
+      const result = await analyzeBrand(normalizedUrl);
       if (!result.brand) {
         setError(result.error);
         setLog([]);
@@ -129,33 +150,36 @@ export default function BrandScreen({
       {!brand ? (
         <Panel style={{ padding: '46px 36px', background: `linear-gradient(160deg, ${rgba(liveAccent, 0.11)} 0%, ${INK_DEEP} 58%)`, border: `1px solid ${rgba(liveAccent, 0.22)}` }}>
           <div style={{ maxWidth: 720 }}>
-            <Pill tone="accent">Step 1 of 4</Pill>
+            <Pill tone="accent">Discover · Brand intelligence</Pill>
             <h2 style={{ margin: '18px 0 0', fontSize: 34, lineHeight: 1.1, letterSpacing: -0.9, color: TEXT }}>
-              Start with your own brand.
+              Start with anything you have.
             </h2>
-            <p style={{ margin: '12px 0 26px', fontSize: 14.6, color: TEXT_DIM, lineHeight: 1.65, maxWidth: 620 }}>
-              Paste your website. Vergeye reads your home page and your pricing page, pulls out what you sell, who you sell it
-              to and what you charge, then goes and finds who you are really up against.
+            <p style={{ margin: '12px 0 26px', fontSize: 14.6, color: TEXT_DIM, lineHeight: 1.65, maxWidth: 680 }}>
+              Paste one website, product URL, YouTube channel, Instagram, Facebook or LinkedIn page, a company name, or a manual description. No field is required. Vergeye keeps sourced facts separate from AI-inferred interpretation.
             </p>
 
-            <div className="vergeye-hero-input" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ position: 'relative' }}>
                 <Globe size={17} style={{ position: 'absolute', left: 16, top: 17, color: TEXT_MUTED }} />
-                <input
+                <textarea
                   value={url}
                   autoFocus
-                  placeholder="yourcompany.com"
+                  aria-label="Brand source or description"
+                  placeholder="https://yourcompany.com — or describe the company, product and audience"
                   onChange={(e) => setUrl(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !busy) run(); }}
                   style={{
-                    width: '100%', background: INK_DEEP, border: `1px solid ${LINE_HI}`, borderRadius: 14,
-                    padding: '16px 18px 16px 44px', color: TEXT, fontSize: 16.5, fontFamily: 'inherit',
+                    width: '100%', minHeight: 96, resize: 'vertical', background: INK_DEEP, border: `1px solid ${LINE_HI}`, borderRadius: 14,
+                    padding: '15px 18px 15px 44px', color: TEXT, fontSize: 15, lineHeight: 1.55, fontFamily: 'inherit',
                   }}
                 />
               </div>
-              <Button variant="primary" busy={busy} onClick={run}>
-                <Sparkles size={15} /> Analyze my brand
-              </Button>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <Button variant="primary" busy={busy} onClick={run}>
+                  <Sparkles size={15} /> Build Brand Profile
+                </Button>
+                <Button onClick={onQuickStart}><FastForward size={14} /> Quick Start — go to Create</Button>
+              </div>
+              <div style={{ fontSize: 11.7, color: TEXT_MUTED }}>Research estimate: no video credits. Search and AI analysis use the workspace research allowance; you will review findings before creative work.</div>
             </div>
 
             {error ? <div style={{ marginTop: 18 }}><Notice tone="bad">{error}</Notice></div> : null}
@@ -163,7 +187,7 @@ export default function BrandScreen({
             {log.length > 0 ? <div style={{ marginTop: 18 }}><LogStream lines={log} busy={busy} /></div> : null}
 
             <div style={{ marginTop: 26, fontSize: 11.8, color: TEXT_MUTED, fontFamily: MONO, letterSpacing: 0.4 }}>
-              Your brand · Competitors · Compare · Video
+              Discover · Research · Strategize · Create · Edit
             </div>
           </div>
         </Panel>
@@ -172,8 +196,9 @@ export default function BrandScreen({
           <SectionTitle
             hint="This is what your website says about you, and it is what every later screen argues from. Correct anything that reads wrong before you continue — especially the price."
             right={(
-              <div style={{ display: 'flex', gap: 9 }}>
-                <Button busy={busy} onClick={run}><Search size={14} /> Re-read site</Button>
+              <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                <Button busy={busy} onClick={run}><Search size={14} /> Refresh sources</Button>
+                <Button onClick={async () => { try { setApprovalNote('Saving approved profile…'); await onApprove(brand); setApprovalNote('Approved profile saved to Brand Kit.'); } catch (saveError: any) { setApprovalNote(`Brand Kit save failed: ${String(saveError?.message || saveError)}`); } }}><ShieldCheck size={14} /> Approve &amp; save to Brand Kit</Button>
                 <Button variant="primary" onClick={onContinue}>Find my competitors <ArrowRight size={15} /></Button>
               </div>
             )}
@@ -182,7 +207,8 @@ export default function BrandScreen({
           </SectionTitle>
 
           {error ? <Notice tone="bad">{error}</Notice> : null}
-          {busy ? <div style={{ marginBottom: 15, display: 'flex', justifyContent: 'center' }}><Spinner size={120} caption="Re-reading your site" /></div> : null}
+          {approvalNote ? <Notice tone={approvalNote.startsWith('Approved') ? 'good' : approvalNote.startsWith('Brand Kit save failed') ? 'bad' : 'warn'}>{approvalNote}</Notice> : null}
+          {busy ? <div style={{ marginBottom: 15, display: 'flex', justifyContent: 'center' }}><Spinner size={120} caption="Refreshing brand sources" /></div> : null}
           {log.length > 0 ? <div style={{ marginBottom: 15 }}><LogStream lines={log} busy={busy} /></div> : null}
 
           <Panel style={{ padding: 24, marginBottom: 16 }}>
@@ -190,18 +216,24 @@ export default function BrandScreen({
               <BrandMark name={brand.name} logoUrl={brand.logoUrl} size={54} radius={15} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 21, fontWeight: 760, color: TEXT, letterSpacing: -0.3 }}>{brand.name || 'Your brand'}</div>
-                <a
-                  href={brand.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ fontSize: 12.3, color: liveAccent, fontFamily: MONO, textDecoration: 'none' }}
-                >
-                  {brand.url.replace(/^https?:\/\//i, '')}
-                </a>
+                {brand.url ? (
+                  <a
+                    href={brand.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ fontSize: 12.3, color: liveAccent, fontFamily: MONO, textDecoration: 'none' }}
+                  >
+                    {brand.url.replace(/^https?:\/\//i, '')}
+                  </a>
+                ) : <div style={{ fontSize: 12.3, color: TEXT_MUTED, fontFamily: MONO }}>Manual description · no verified URL</div>}
               </div>
-              <Pill tone="good">Read successfully</Pill>
+              <Pill tone={brand.fetched ? 'good' : 'accent'}>{brand.fetched ? 'VERIFIED source profile' : 'AI-INFERRED / manual profile'}</Pill>
             </div>
 
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18, fontSize: 11.7, color: TEXT_MUTED }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ShieldCheck size={13} /> VERIFIED = observed on the source URL</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Brain size={13} /> AI-INFERRED = interpretation to review</span>
+            </div>
             <div className="vergeye-two-col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
               <div>
                 <Field label="Product name" value={brand.name} onChange={(name) => patch({ name })} />

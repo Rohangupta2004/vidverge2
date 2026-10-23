@@ -21,6 +21,7 @@
  */
 
 import { capPromptText, validateGroupAInputs, runwayVideoRatio, clampRunwayDuration } from '../../lib/videoEngines';
+import { spaceSessionId } from '../../lib/plans';
 import { klingCameraControl } from './labModels';
 import type { LabModel, LabRunInput } from './labModels';
 
@@ -231,6 +232,310 @@ function waitingNote(label: string, status: string, elapsedMs: number, progress?
 }
 
 // ---------------------------------------------------------------------------
+// Durable background adoption for Veo / Seedance operations
+// ---------------------------------------------------------------------------
+
+const SPACE_REF = 'workspace-660069';
+
+function spaceRef(): string {
+  if (typeof window === 'undefined') return SPACE_REF;
+  const runtime = window as any;
+  return String(runtime.__APP_ID__ || runtime.__SPACE_ID__ || SPACE_REF);
+}
+
+function unwrapHookPayload(raw: any): any {
+  if (!raw || typeof raw !== 'object') return raw;
+  return raw.response && typeof raw.response === 'object' ? raw.response : raw;
+}
+
+async function backgroundCall(payload: Record<string, unknown>): Promise<any> {
+  const sessionId = spaceSessionId();
+  if (!sessionId) throw new Error('A signed-in workspace session is required for background completion.');
+  const path = `/api/hooks/execute/${spaceRef()}/vpl-background`;
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Session-Id': sessionId,
+      'X-App-Id': spaceRef(),
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = unwrapHookPayload(await response.json().catch(() => null));
+  if (!response.ok || !data || data.error) {
+    throw new RequestError(String(data?.error || `Background worker request failed: ${response.status}`), response.status, path);
+  }
+  return data;
+}
+
+async function adoptVeoOperation(
+  ctx: RunContext,
+  model: LabModel,
+  input: LabRunInput,
+  operationId: string,
+  kickoff: any,
+): Promise<RunResult | null> {
+  let registered: any;
+  try {
+    ctx.note('Saving the operation for server-side completion…');
+    registered = await backgroundCall({
+      op: 'register',
+      provider: 'veo',
+      operation_id: operationId,
+      model_id: model.modelId || 'server-pinned-veo',
+      model_name: model.name,
+      prompt: input.prompt,
+      duration: input.duration,
+      cost: kickoff?.cost == null ? null : String(kickoff.cost),
+      estimated_duration: kickoff?.estimatedDuration == null ? null : String(kickoff.estimatedDuration),
+    });
+  } catch (error) {
+    // The provider operation already exists. Never resubmit it: keep watching
+    // that exact id in this tab if durable registration was unavailable.
+    console.warn('[video-provider-lab] background adoption failed; polling the existing operation locally', error);
+    ctx.note('The server handoff failed; this tab is watching the existing operation without resubmitting it.');
+    return null;
+  }
+
+  const jobId = Number(registered?.job_id);
+  if (!Number.isFinite(jobId) || jobId <= 0) throw new Error('The background worker saved no job id.');
+  if (ctx.adopted) ctx.adopted(jobId);
+  ctx.note(`Saved as background run #${jobId}. If you close this tab, reopen Video Provider Lab and the run picks up where it left off.`);
+  return watchLabJob({
+    jobId,
+    label: `${model.name} · background #${jobId}`,
+    fallbackModel: model.modelId || 'server-pinned Veo',
+    capMs: Number(registered?.cap_ms) || labCapMs(input.duration),
+    ctx,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Lab run ledger: wait limit, provider reconciliation, resume
+// ---------------------------------------------------------------------------
+
+/**
+ * The total wait for one run, measured from submission. Mirrors the same table
+ * in the vpl-background and creatables-worker server functions so the browser
+ * and the server close a run at the same moment: 20 minutes for clips up to
+ * 10s, one more minute per extra second, never more than 40.
+ */
+export function labCapMs(durationSeconds: number): number {
+  const seconds = Math.max(1, Math.min(30, Math.round(Number(durationSeconds) || 0)));
+  const minutes = seconds <= 10 ? 20 : Math.min(40, 20 + (seconds - 10));
+  return minutes * 60 * 1000;
+}
+
+/** One row of the server-side Lab ledger (creatables_jobs, kind video-provider-lab). */
+export interface LabRun {
+  job_id: number;
+  status: string;
+  operation_id: string;
+  model_used: string;
+  model_name: string;
+  prompt: string;
+  duration: number;
+  cost: string | null;
+  result_url: string | null;
+  error_msg: string | null;
+  verification: string | null;
+  started_at: string;
+  created_at: string;
+  updated_at: string;
+  cap_ms: number;
+  /** A timed-out run the provider may still have finished — worth one re-check. */
+  recoverable: boolean;
+}
+
+function normalizeLabRun(raw: any): LabRun {
+  return {
+    job_id: Number(raw?.job_id),
+    status: String(raw?.status || 'running').toLowerCase(),
+    operation_id: String(raw?.operation_id || ''),
+    model_used: String(raw?.model_used || ''),
+    model_name: String(raw?.model_name || 'Video model'),
+    prompt: String(raw?.prompt || ''),
+    duration: Number(raw?.duration) || 0,
+    cost: raw?.cost == null ? null : String(raw.cost),
+    result_url: raw?.result_url ? String(raw.result_url) : null,
+    error_msg: raw?.error_msg ? String(raw.error_msg) : null,
+    verification: raw?.verification ? String(raw.verification) : null,
+    started_at: String(raw?.started_at || raw?.created_at || ''),
+    created_at: String(raw?.created_at || raw?.started_at || ''),
+    updated_at: String(raw?.updated_at || ''),
+    cap_ms: Number(raw?.cap_ms) || labCapMs(Number(raw?.duration) || 0),
+    recoverable: Boolean(raw?.recoverable),
+  };
+}
+
+/** This visitor's Lab runs, newest first. Resolves [] when the ledger cannot be read. */
+export async function listLabRuns(limit = 24): Promise<LabRun[]> {
+  try {
+    const data = await backgroundCall({ op: 'list', limit });
+    const runs = Array.isArray(data?.runs) ? data.runs : [];
+    return runs.map(normalizeLabRun).filter((run: LabRun) => Number.isFinite(run.job_id) && run.job_id > 0);
+  } catch (error) {
+    console.warn('[video-provider-lab] could not read the run ledger', error);
+    return [];
+  }
+}
+
+type ProviderRead =
+  | { kind: 'completed'; url: string }
+  | { kind: 'failed'; error: string }
+  | { kind: 'processing'; status: string; progress?: unknown }
+  | { kind: 'unknown'; note: string };
+
+/**
+ * One provider status read with the browser's workspace credential. Seedance 2.5
+ * status can only be read this way (a server function answers 401), which is why
+ * the browser settles those runs instead of the server worker.
+ */
+async function readProviderStatus(operationId: string): Promise<ProviderRead> {
+  if (!workspaceToken()) return { kind: 'unknown', note: 'no workspace credential — reload the space' };
+  const path = `/api/veo/status/${encodeURIComponent(operationId)}`;
+  let response: Response;
+  try {
+    response = await fetch(path, { headers: workspaceHeaders() });
+  } catch (error) {
+    return { kind: 'unknown', note: errorText(error) };
+  }
+  const data = await response.json().catch(() => null);
+  if (response.status === 404 || response.status === 410) {
+    return { kind: 'failed', error: `The video service has no record of this render (HTTP ${response.status}); it may have expired.` };
+  }
+  if (!response.ok) {
+    return { kind: 'unknown', note: String(data?.error?.message || data?.error || `status HTTP ${response.status}`) };
+  }
+  const status = String(data?.status || '').toLowerCase();
+  const url = String(data?.videoUrl || data?.video_url || '');
+  if ((status === 'completed' || status === 'succeeded' || status === 'done' || data?.done === true) && url) {
+    return { kind: 'completed', url };
+  }
+  if (['failed', 'error', 'expired', 'cancelled', 'canceled', 'timeout', 'timed_out', 'rejected'].indexOf(status) !== -1) {
+    return { kind: 'failed', error: String(data?.errorMessage || data?.error || `The provider reported this render as ${status}.`) };
+  }
+  return { kind: 'processing', status: status || 'processing', progress: data?.progress };
+}
+
+async function settleLabRun(jobId: number, payload: Record<string, unknown>): Promise<LabRun | null> {
+  try {
+    const data = await backgroundCall({ op: 'settle', job_id: jobId, ...payload });
+    return data?.run ? normalizeLabRun(data.run) : null;
+  } catch (error) {
+    console.warn('[video-provider-lab] could not settle run', jobId, error);
+    return null;
+  }
+}
+
+export interface LabReconcile {
+  state: 'done' | 'error' | 'running';
+  run: LabRun;
+  note: string;
+}
+
+/**
+ * Ask the provider, with the browser credential, where one ledger run stands and
+ * write the verdict back: a finished clip lands on the row (and in Your videos),
+ * a provider-reported failure or a run past its wait limit is closed with a
+ * plain reason. A run the server already closed as timed out is re-checked once
+ * per call, because the provider may have finished it after the limit.
+ */
+export async function reconcileLabRun(run: LabRun): Promise<LabReconcile> {
+  if (run.status === 'done' && run.result_url) return { state: 'done', run, note: '' };
+  const running = run.status !== 'error' && run.status !== 'done';
+  if (!running && !run.recoverable) return { state: 'error', run, note: '' };
+
+  const read = await readProviderStatus(run.operation_id);
+
+  if (read.kind === 'completed') {
+    const settled = await settleLabRun(run.job_id, { outcome: 'completed', video_url: read.url });
+    return {
+      state: 'done',
+      run: settled || { ...run, status: 'done', result_url: read.url, error_msg: null },
+      note: '',
+    };
+  }
+
+  if (read.kind === 'failed') {
+    if (!running) return { state: 'error', run, note: '' };
+    const settled = await settleLabRun(run.job_id, { outcome: 'failed', error: read.error });
+    return {
+      state: 'error',
+      run: settled || { ...run, status: 'error', error_msg: `${read.error} Credits may already have been charged for this render; nothing is refunded automatically from this app.` },
+      note: '',
+    };
+  }
+
+  if (!running) return { state: 'error', run, note: '' };
+
+  const age = Date.now() - new Date(run.started_at || run.created_at).getTime();
+  if (age >= run.cap_ms) {
+    const settled = await settleLabRun(run.job_id, { outcome: 'timeout' });
+    const minutes = Math.round(run.cap_ms / 60000);
+    return {
+      state: 'error',
+      run: settled || {
+        ...run,
+        status: 'error',
+        error_msg: `Timed out: no finished video was confirmed within ${minutes} minutes of submission, so this run was closed. Credits were charged when the render was submitted and are NOT refunded automatically. If the provider did finish it, reopen Video Provider Lab: it re-checks timed-out runs and recovers the clip.`,
+      },
+      note: '',
+    };
+  }
+
+  return {
+    state: 'running',
+    run,
+    note: read.kind === 'processing'
+      ? `provider says ${read.status}${Number(read.progress) > 0 ? ` ${Math.min(99, Math.round(Number(read.progress)))}%` : ''}`
+      : `waiting — ${read.note}`,
+  };
+}
+
+function labRunResult(run: LabRun, fallbackModel: string): RunResult {
+  return {
+    videoUrl: String(run.result_url),
+    modelUsed: run.model_used || fallbackModel,
+    detail: run.verification || `Background run #${run.job_id} completed.`,
+  };
+}
+
+/**
+ * Watch one registered run until it settles. Every tick reads the ledger row (the
+ * server worker may have finished it) and then asks the provider directly, so a
+ * Seedance 2.5 run that the server cannot read still completes. The run is closed
+ * at its wait limit rather than polled forever.
+ */
+export function watchLabJob(opts: {
+  jobId: number;
+  label: string;
+  fallbackModel: string;
+  capMs: number;
+  ctx: Pick<RunContext, 'note' | 'register'>;
+}): Promise<RunResult> {
+  const { jobId, label, fallbackModel, capMs, ctx } = opts;
+  const poller = pollWithInterval<RunResult>({
+    everyMs: POLL_MS,
+    capMs: capMs + 120000,
+    onNote: ctx.note,
+    timeoutMessage: `${label} is still unresolved after ${Math.round(capMs / 60000)} minutes. Reopen Video Provider Lab to re-check run #${jobId}.`,
+    step: async (elapsed) => {
+      const row = normalizeLabRun({ ...(await backgroundCall({ op: 'status', job_id: jobId })), job_id: jobId });
+      const outcome = await reconcileLabRun(row);
+      if (outcome.state === 'done') return { done: true, value: labRunResult(outcome.run, fallbackModel) };
+      if (outcome.state === 'error') throw new Error(outcome.run.error_msg || 'The run failed.');
+      const shown = outcome.note ? `${label} · ${outcome.note}` : label;
+      return { done: false, note: waitingNote(shown, 'running', elapsed) };
+    },
+  });
+  ctx.register(poller.cancel);
+  return poller.promise;
+}
+
+export { labRunResult };
+
+// ---------------------------------------------------------------------------
 // Run contract
 // ---------------------------------------------------------------------------
 
@@ -238,6 +543,8 @@ export interface RunContext {
   note: (text: string) => void;
   tried: (path: string) => void;
   register: (cancel: () => void) => void;
+  /** Called once the operation is saved in the server ledger, with its row id. */
+  adopted?: (jobId: number) => void;
 }
 
 export interface RunResult {
@@ -332,6 +639,14 @@ async function runGroupA(ctx: RunContext, model: LabModel, input: LabRunInput): 
     referenceImages,
   });
   if (violation) throw new Error(violation);
+  if (!Number.isInteger(input.duration)) throw new Error(`${model.name} duration must be a whole number of seconds.`);
+  if (model.params.durationMin !== null && model.params.durationMax !== null
+    && (input.duration < model.params.durationMin || input.duration > model.params.durationMax)) {
+    throw new Error(`${model.name} accepts ${model.params.durationMin}–${model.params.durationMax} seconds.`);
+  }
+  if (model.params.durations.length && model.params.durations.indexOf(input.duration) < 0) {
+    throw new Error(`${model.name} accepts ${model.params.durations.join(' / ')} seconds.`);
+  }
 
   const body: Record<string, unknown> = {
     model: model.modelId,
@@ -374,6 +689,8 @@ async function runGroupA(ctx: RunContext, model: LabModel, input: LabRunInput): 
     );
   }
 
+  const adopted = await adoptVeoOperation(ctx, model, input, operationId, start);
+  if (adopted) return adopted;
   const videoUrl = await pollVeoStatus(ctx, operationId, model.name, model.capMs);
   const detail = [
     start?.cost !== undefined && start?.cost !== null ? `Proxy quoted $${String(start.cost)}.` : '',
@@ -406,10 +723,12 @@ async function runVeoManaged(ctx: RunContext, model: LabModel, input: LabRunInpu
   if (/_error_/.test(operationId)) {
     throw new Error(`The managed proxy was rejected upstream (${operationId}).`);
   }
+  const adopted = await adoptVeoOperation(ctx, model, input, operationId, start);
+  if (adopted) return adopted;
   const videoUrl = await pollVeoStatus(ctx, operationId, 'Managed Veo', model.capMs);
   return {
     videoUrl,
-    modelUsed: 'server-pinned veo-3.1-generate-preview',
+    modelUsed: 'server-pinned Veo',
     detail: 'This endpoint takes no model field — the version is whatever the platform currently pins.',
   };
 }
@@ -782,12 +1101,12 @@ async function runKlingExtend(ctx: RunContext, model: LabModel, input: LabRunInp
   const sourceTaskId = input.sourceTaskId.trim();
   if (!sourceTaskId) throw new Error('Video Extend needs the task ID of a finished Kling clip.');
 
-  const body: Record<string, unknown> = { taskId: sourceTaskId };
+  const body: Record<string, unknown> = { sourceTaskId };
   if (input.prompt.trim()) body.prompt = capPromptText(input.prompt, 2500);
   if (input.negativePrompt.trim()) body.negativePrompt = capPromptText(input.negativePrompt, 2500);
 
   ctx.note('Submitting the extend request to Kling…');
-  ctx.tried(`POST ${submitPath} · taskId=${sourceTaskId}`);
+  ctx.tried(`POST ${submitPath} · sourceTaskId=${sourceTaskId}`);
   const task = await jsonFetch(submitPath, {
     method: 'POST',
     headers: workspaceHeaders(),
@@ -812,17 +1131,15 @@ async function runKlingLipSync(ctx: RunContext, model: LabModel, input: LabRunIn
   const audioUrl = input.lipSyncAudioUrl.trim();
   if (!text && !audioUrl) throw new Error('Lip Sync needs either text to speak or an audio URL.');
 
-  const body: Record<string, unknown> = { taskId: sourceTaskId };
+  const body: Record<string, unknown> = {
+    videoTaskId: sourceTaskId,
+    audioType: audioUrl && !text ? 'audio' : 'text',
+  };
   if (text) body.text = text;
-  if (audioUrl) body.audioUrl = audioUrl;
-  if (input.voiceId.trim()) body.voiceId = input.voiceId.trim();
-  if (input.language.trim()) body.language = input.language.trim();
-  if (model.params.voiceSpeed && text && Number.isFinite(Number(input.voiceSpeed))) {
-    body.speed = Number(input.voiceSpeed);
-  }
+  if (audioUrl && !text) body.audioUrl = audioUrl;
 
   ctx.note('Submitting the lip-sync request to Kling…');
-  ctx.tried(`POST ${submitPath} · taskId=${sourceTaskId}`);
+  ctx.tried(`POST ${submitPath} · videoTaskId=${sourceTaskId}`);
   const task = await jsonFetch(submitPath, {
     method: 'POST',
     headers: workspaceHeaders(),

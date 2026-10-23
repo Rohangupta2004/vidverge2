@@ -11,6 +11,7 @@
  * minimum 1080p (shorter edge >= 1080px).
  */
 import { CLIP_RULES, type IngestedClip, type ClipSource } from '../types';
+import { WORKSPACE_ID, workspaceTokenNow } from '../../../../lib/workspace';
 
 export class ClipError extends Error {}
 
@@ -18,16 +19,6 @@ const STANDARD_RATES = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 120];
 const SNAP_TOLERANCE = 0.025; // 2.5%
 
 export interface ClipMeta { width: number; height: number; durationSeconds: number; fps: number; }
-
-function workspaceToken(): string {
-  const token = (window as any).__workspaceDb?.token;
-  if (!token) throw new ClipError('Your workspace session is still loading. Wait a moment, then try again.');
-  return String(token);
-}
-
-function activeWorkspaceId(): string {
-  return String((window as any).__workspaceDb?.workspaceId || (window as any).__WORKSPACE_ID__ || '');
-}
 
 export function validateClipFile(file: File): void {
   if (!(CLIP_RULES.acceptedTypes as readonly string[]).includes(file.type)) {
@@ -110,11 +101,13 @@ export async function probeClipMeta(url: string, label: string): Promise<ClipMet
 export async function uploadClip(file: File): Promise<string> {
   const form = new FormData();
   form.append('file', file, file.name);
-  form.append('workspaceId', activeWorkspaceId());
+  form.append('workspaceId', WORKSPACE_ID);
   form.append('folder', 'screens-to-motion/clips');
+  const token = workspaceTokenNow();
+  if (!token) throw new ClipError('Your workspace session is still loading. Wait a moment, then try again.');
   const response = await fetch('/api/upload/file', {
     method: 'POST',
-    headers: { 'X-Workspace-DB-Token': workspaceToken() },
+    headers: { 'X-Workspace-DB-Token': token },
     body: form,
   });
   const body = await response.json().catch(() => null);

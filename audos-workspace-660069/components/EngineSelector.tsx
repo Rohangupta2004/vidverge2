@@ -6,20 +6,23 @@
  *                  Video Enhancer and Ads Studio next to their generate
  *                  buttons.
  *
- * Health-probe failures stay visible but disabled with an Unavailable badge
- * and the real probe reason. Runway catalog entries that have a documented
- * Omni fallback remain selectable because they still produce a clip.
+ * An entry the catalog marks unavailable stays visible but disabled, with the
+ * real reason. Runway catalog entries that have a documented Omni fallback
+ * remain selectable because they still produce a clip.
  *
  * Kling and Higgsfield route through /api/generate/kling/* and
- * /api/generate/higgsfield/* with X-Workspace-DB-Token on every call.
+ * /api/generate/higgsfield/* with X-Workspace-DB-Token on every call. The
+ * Kling roster is live and selectable — only an entry that really is a preview
+ * (or a shut-down id a stale selection still names) is called out.
  *
  * The full card grid lives in the Creatables app; this component stays small
  * so existing apps embed it without layout surgery.
  */
 import { CSSProperties, useCallback, useEffect, useState } from 'react';
 import {
-  DEFAULT_ENGINE_ID, GROUP_A_MODELS, HIGGSFIELD_VIDEO_MODELS, IMAGE_MODELS, KLING_MODELS, KLING_COMING_SOON_MESSAGE, RUNWAY_MODELS,
+  DEFAULT_ENGINE_ID, GROUP_A_MODELS, HIGGSFIELD_VIDEO_MODELS, IMAGE_MODELS, KLING_MODELS, RUNWAY_MODELS,
   engineAvailabilityBadge, engineHealthWarning, groupAModel, isEngineAvailable, isKlingModel,
+  isRetiredKlingModel, klingCapabilityNote, klingModel, klingUnsupportedMessage,
   runwayInputLabel, runwayModel, runwayVideoModel,
   subscribeRunwayCatalog, syncRunwayCatalog, tierColor, EngineTier,
 } from '../lib/videoEngines';
@@ -132,6 +135,11 @@ export function EnginePicker(props: EnginePickerProps) {
   const selectedA = groupAModel(props.value);
   const selectedRunway = runwayModel(props.value);
   const selectedKling = isKlingModel(props.value);
+  const selectedKlingModel = klingModel(props.value);
+  // A live Kling model is an ordinary choice. Only a genuine preview entry, or
+  // a shut-down id a saved selection still names, gets called out.
+  const klingPreview = Boolean(selectedKlingModel?.comingSoon)
+    || isRetiredKlingModel(props.value);
   const tier: EngineTier | undefined = selectedA?.tier
     || (selectedRunway && selectedRunway.available
       ? (selectedRunway.speed === 'fast' ? 'Fast' : selectedRunway.type === 'image' ? 'Recipe' : 'Cinematic')
@@ -158,7 +166,8 @@ export function EnginePicker(props: EnginePickerProps) {
       ? (selectedRunway.available
         ? `${runwayInputLabel(selectedRunway)} · ${selectedRunway.blurb} · ${selectedRunway.priceNote}`
         : `${runwayInputLabel(selectedRunway)} · The platform does not accept this model today, so it renders on ${OMNI_FALLBACK_LABEL}. ${selectedRunway.unavailableReason || ''}`)
-      : selectedKling ? KLING_COMING_SOON_MESSAGE : '';
+      : selectedKlingModel ? klingCapabilityNote(props.value)
+        : selectedKling ? klingUnsupportedMessage(props.value) : '';
 
   return (
     <div style={props.style}>
@@ -216,7 +225,8 @@ export function EnginePicker(props: EnginePickerProps) {
         </select>
         {tier ? <EngineBadge tier={tier} label={selectedRunway?.speed === 'fast' ? '⚡ Fast' : undefined} /> : null}
         {viaFallback ? <EngineBadge tier="Gated" label={OMNI_FALLBACK_LABEL} /> : null}
-        {selectedKling ? <EngineBadge tier="Coming Soon" /> : null}
+        {selectedKlingModel?.tier && !klingPreview ? <EngineBadge tier={selectedKlingModel.tier} /> : null}
+        {klingPreview ? <EngineBadge tier="Coming Soon" /> : null}
         {selectedBadge ? <EngineBadge tier="Unavailable" label={selectedBadge.label} /> : null}
       </div>
       {/* The health warning goes ABOVE the capability line: what a model can

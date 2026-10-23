@@ -88,17 +88,29 @@ export function describeVideoFailure(
 
   const base = { alternatives, detail };
 
-  // The wallet is the single most common hard stop, and only the founder can
-  // clear it, so it is checked before anything else.
-  if (status === 402 || text.includes('insufficient') || text.includes('wallet balance') || text.includes('not enough credit')) {
+  // Provider funding and a customer's Vidverge balance are different wallets
+  // with different remedies. Never send a customer to Plans when only the
+  // workspace owner can fund the upstream provider.
+  if (text.includes('workspace wallet') || text.includes('wallet balance is too low')) {
     return {
       ...base,
-      title: 'Out of workspace credit',
+      title: 'Provider funding required',
       message:
-        'The workspace wallet does not have enough balance to render this video. Top it up and the render will go through unchanged.',
+        'The studio’s paid video-provider wallet is empty. This is separate from your Vidverge credit balance; your saved work is safe, and the workspace owner must fund the provider wallet before rendering can continue.',
       alternatives: [],
       canRetry: false,
       needsFounder: true,
+    };
+  }
+
+  if (text.includes('insufficient credits') || text.includes('not enough credit') || text.includes('this video needs') || text.includes('video credits')) {
+    return {
+      ...base,
+      title: 'Not enough Vidverge credits',
+      message: 'This render costs more Vidverge credits than your current balance. Add credits from Plans & Credits, then retry; your saved work is unchanged.',
+      alternatives: [],
+      canRetry: false,
+      needsFounder: false,
     };
   }
 
@@ -113,6 +125,22 @@ export function describeVideoFailure(
         (health?.note ? health.note + ' ' : 'This video provider is not set up on the platform yet. ') +
         (altNames ? `${altNames} ${alternatives.length > 1 ? 'are' : 'is'} available right now.` : ''),
       canRetry: false,
+      needsFounder: false,
+    };
+  }
+
+  // A session-gated server function (executeAuth: "workspace_session") refused
+  // the call because no validated visitor session travelled with it. This is a
+  // sign-in problem — nothing was charged — and it must never read as a wallet
+  // or provider failure.
+  if (text.includes('workspace session required') || text.includes('session required')) {
+    return {
+      ...base,
+      title: 'Sign in to generate videos',
+      message:
+        'The render was refused because this browser has no verified sign-in session. Refresh the page and sign in again, then retry — nothing was charged.',
+      alternatives: [],
+      canRetry: true,
       needsFounder: false,
     };
   }

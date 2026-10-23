@@ -18,26 +18,18 @@
  */
 
 import { FacelessError, type PipelineStageId } from '../types/editorial';
+import {
+  HookError,
+  SPACE_ID,
+  WORKSPACE_ID as WORKSPACE_UUID,
+  callHook as callWorkspaceHook,
+  spaceId,
+  workspaceTokenNow,
+} from '../../../lib/workspace';
 
-export const SPACE_ID = 'workspace-660069';
-export const WORKSPACE_UUID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
-
-const HOOK_BASE = `/api/hooks/execute/${SPACE_ID}`;
-
-export function appId(): string {
-  if (typeof window === 'undefined') return SPACE_ID;
-  const w = window as any;
-  return String(w.__APP_ID__ || w.__SPACE_ID__ || SPACE_ID);
-}
-
-/**
- * The workspace token. Read at call time — it is rotated, and a copy taken at
- * module load goes stale on a long run.
- */
-export function workspaceToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
+export { SPACE_ID, WORKSPACE_UUID };
+export const appId = spaceId;
+export const workspaceToken = workspaceTokenNow;
 
 export function requireToken(stage: PipelineStageId): string {
   const token = workspaceToken();
@@ -81,10 +73,6 @@ export async function readJson(res: Response): Promise<any> {
   }
 }
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // ---------------------------------------------------------------------------
 // Server functions
 // ---------------------------------------------------------------------------
@@ -99,29 +87,20 @@ export async function callHook<T = any>(
   body: Record<string, unknown>,
   stage: PipelineStageId,
 ): Promise<T> {
-  let res: Response;
   try {
-    res = await fetch(`${HOOK_BASE}/${name}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-App-Id': appId(),
-        'X-Workspace-DB-Token': workspaceToken(),
-      },
-      body: JSON.stringify(body),
-    });
+    const data = await callWorkspaceHook<T>(name, body);
+    if (!data || (data as any).error) {
+      throw new FacelessError(errorText(200, data, `${name} failed`), stage, 'hook_failed');
+    }
+    return data;
   } catch (error: any) {
+    if (error instanceof FacelessError) throw error;
     throw new FacelessError(
       `${name} could not be reached: ${clip(error?.message || error, 160)}`,
       stage,
-      'network',
+      error instanceof HookError ? 'hook_failed' : 'network',
     );
   }
-  const data = await readJson(res);
-  if (!res.ok || !data || data.error) {
-    throw new FacelessError(errorText(res.status, data, `${name} failed`), stage, 'hook_failed');
-  }
-  return data as T;
 }
 
 // ---------------------------------------------------------------------------

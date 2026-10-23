@@ -14,10 +14,16 @@
  */
 
 import {
-  SVE_WORKSPACE_ID, hydrateProject,
+  hydrateProject,
   type IconId, type InsertKind, type Project, type TranscriptWord,
 } from './model';
 import { SVE_COMPOSITION_TSX } from './composition';
+import {
+  WORKSPACE_ID,
+  callHook as callWorkspaceHook,
+  spaceId,
+  workspaceTokenNow,
+} from '../../../lib/workspace';
 
 export const PROJECT_TABLE = 'svenhancer_projects';
 export const ASSET_TABLE = 'svenhancer_assets';
@@ -32,14 +38,7 @@ function wdb(): any {
   return (window as any).__workspaceDb || null;
 }
 
-export function workspaceToken(): string {
-  return String(wdb()?.token || '');
-}
-
-function appId(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || '');
-}
+export const workspaceToken = workspaceTokenNow;
 
 function msg(e: unknown): string { return e instanceof Error ? e.message : String(e); }
 
@@ -54,10 +53,10 @@ async function uploadBuffered(file: File, folder: string): Promise<UploadResult>
   if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
   const form = new FormData();
   form.append('file', file, file.name);
-  form.append('workspaceId', SVE_WORKSPACE_ID);
+  form.append('workspaceId', WORKSPACE_ID);
   form.append('folder', folder);
   const headers: Record<string, string> = { 'X-Workspace-DB-Token': token };
-  const id = appId();
+  const id = spaceId();
   if (id) headers['X-App-Id'] = id;
   const res = await fetch('/api/upload/file', { method: 'POST', headers, body: form });
   const data = await res.json().catch(() => null);
@@ -111,7 +110,7 @@ async function postTimestamped(blob: Blob, filename: string): Promise<Transcript
   if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
   const form = new FormData();
   form.append('audio', blob, filename);
-  const res = await fetch('/api/workspaces/' + SVE_WORKSPACE_ID + '/audio/transcribe-timestamped', {
+  const res = await fetch('/api/workspaces/' + WORKSPACE_ID + '/audio/transcribe-timestamped', {
     method: 'POST',
     headers: { 'X-Workspace-DB-Token': token },
     body: form,
@@ -346,7 +345,7 @@ export async function locateSubject(imageBase64: string, mimeType = 'image/jpeg'
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const token = workspaceToken();
     if (token) headers['X-Workspace-DB-Token'] = token;
-    const id = appId();
+    const id = spaceId();
     if (id) headers['X-App-Id'] = id;
     const res = await fetch('/api/generate/vision', {
       method: 'POST',
@@ -393,15 +392,7 @@ export async function executeHook<T = Record<string, unknown>>(name: string, bod
   const controller = new AbortController();
   const giveUp = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch('/api/hooks/execute/' + SVE_WORKSPACE_ID + '/' + name, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, wt: workspaceToken() }),
-      signal: controller.signal,
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(String((data && (data.error || data.message)) || 'The ' + name + ' service answered HTTP ' + res.status + '.'));
-    return (data || {}) as T;
+    return await callWorkspaceHook<T>(name, body, { signal: controller.signal });
   } finally {
     window.clearTimeout(giveUp);
   }

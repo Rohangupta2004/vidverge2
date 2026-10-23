@@ -1,8 +1,7 @@
 /**
- * MODEL GRID — the card grid every Script-to-Video surface uses to pick a
- * video model. One component so the Agent Studio and the film Create screen
- * can never drift apart, and so a model is always presented with its name, its
- * family, what it accepts and why it is disabled when it is.
+ * MODEL GRID — the card grid the Script-to-Video Create and Plan surfaces use
+ * to pick a video model. One component keeps the model name, accepted inputs,
+ * capability facts and unavailable reason consistent across the main flow.
  *
  * An unavailable model is kept VISIBLE and greyed out rather than hidden: the
  * roster is part of how the product explains itself, and a model that silently
@@ -63,6 +62,9 @@ export default function ModelGrid(props: {
             className={clickable ? 's2v-lift' : undefined}
             style={{
               position: 'relative',
+              minHeight: compact ? 92 : 112,
+              minWidth: 0,
+              overflowWrap: 'anywhere',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'flex-start',

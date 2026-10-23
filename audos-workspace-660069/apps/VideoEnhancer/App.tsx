@@ -39,12 +39,14 @@ import {
 import { LB_SHIMMER_CSS } from '../../components/LightBeam';
 import AppShell from '../../components/ui/AppShell';
 import RunwayStudio from '../../components/RunwayStudio';
+import { VideoHistory } from '../../components/VideoHistory';
+import { saveVideoToHistory } from '../../lib/videoHistory';
 import { AgentChatProvider } from '../../components/AgentChat/AgentChatContext';
 import { AgentChatButton } from '../../components/AgentChat/AgentChatButton';
 import { AgentChatPanel } from '../../components/AgentChat/AgentChatPanel';
 import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
-import { APP_IDS, MODEL_CHOICES, VEO_31_FAST_MODEL } from '../../lib/appIds';
-import { generationHeaders, postGeneration } from '../../lib/videoEngineClient';
+import { MODEL_CHOICES, VEO_31_FAST_MODEL } from '../../lib/appIds';
+import { poll, PollTimeoutError } from '../../lib/poll';
 import { MUSIC_BEDS, callHook } from './nleCore';
 import { fetchVideoAsFile, uploadVideo, workspaceToken } from './enhancerCore';
 import {
@@ -121,8 +123,9 @@ const WORKSPACE_LOGO = 'https://storage.googleapis.com/audos-images/attachments/
  */
 function msg(e: unknown): string {
   const raw = (e instanceof Error ? e.message : typeof e === 'string' ? e : '').trim();
+  if (/session required|workspace session/i.test(raw)) return 'Your sign-in session could not be verified, so this step was refused before anything was charged. Refresh, sign in again, then retry.';
   if (/no_credentials|\b401\b/i.test(raw)) return 'Your workspace session is still waking up. Try again in a moment.';
-  if (/insufficient|payment|\b402\b/i.test(raw)) return 'This step needs more workspace credits before it can run.';
+  if (/insufficient|wallet balance|\b402\b/i.test(raw)) return 'This step needs more workspace credits before it can run.';
   if (/rate.?limit|\b429\b/i.test(raw)) return 'Things are busy right now. Wait a few seconds, then try again.';
   if (/provider[_ -]?error|\b50[0234]\b|service unavailable|timed out|timeout/i.test(raw)) {
     return 'That step could not finish just now. Your edit is saved — try again shortly.';
@@ -142,11 +145,11 @@ const STUDIO_CSS = `
 .vs-btn, .ve-btn { transition: filter .15s ease, background .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease; }
 .vs-btn:hover:not(:disabled), .ve-btn:hover:not(:disabled) { filter: brightness(1.15); }
 .vs-btn:disabled, .ve-btn:disabled { opacity: .5; cursor: default; }
-.vs-input:focus, .ve-input:focus { outline: none; border-color: rgba(212,146,10,0.55) !important; box-shadow: 0 0 0 3px rgba(212,146,10,0.18); }
+.vs-input:focus, .ve-input:focus { outline: 2px solid var(--vg-focus); outline-offset: 3px; border-color: var(--vg-focus) !important; box-shadow: none; }
 @keyframes vs-progress { 0% { background-position: 0 0; } 100% { background-position: 28px 0; } }
 .vs-progress { background-image: linear-gradient(45deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%, transparent); background-size: 28px 28px; animation: vs-progress .9s linear infinite; }
 .vs-rail::-webkit-scrollbar { width: 8px; }
-.vs-rail::-webkit-scrollbar-thumb { background: #2A2410; border-radius: 8px; }
+.vs-rail::-webkit-scrollbar-thumb { background: var(--vg-border); border-radius: 6px; }
 ${LB_SHIMMER_CSS}
 ${GUIDE_CSS}
 /* Resizable timeline: the bottom grid row follows --ve-tl-h (auto when unset or collapsed). */
@@ -154,11 +157,11 @@ ${GUIDE_CSS}
 .vp-root .vp-stagecol { grid-column: 1; grid-row: 1; min-height: 0; }
 .vp-root .vp-tl { grid-column: 1; grid-row: 2; }
 .vp-root .vp-side { display: none; }
-.vp-root .vp-side.open { display: flex; position: fixed; z-index: 82; top: 68px; right: 16px; bottom: 16px; width: min(460px, calc(100vw - 32px)); min-height: 0; border: 1px solid rgba(255,255,255,.07); border-radius: 18px; background: rgba(21,18,10,.97); backdrop-filter: blur(22px); box-shadow: 0 4px 24px rgba(0,0,0,.4),0 0 46px rgba(212,146,10,.08); overflow: hidden; }
-.vp-root .vp-drawerhead { flex:0 0 auto; display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.07); background:linear-gradient(135deg,rgba(212,146,10,.12),rgba(28,24,8,.96)); }
+.vp-root .vp-side.open { display: flex; position: fixed; z-index: 82; top: 64px; right: 16px; bottom: 16px; width: min(460px, calc(100vw - 32px)); min-height: 0; border: 1px solid var(--vg-border); border-radius: 16px; background: var(--vg-raised); box-shadow: 0 18px 48px rgba(0,0,0,.52); overflow: hidden; }
+.vp-root .vp-drawerhead { flex:0 0 auto; display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid var(--vg-border); background:var(--vg-raised); }
 .vp-root .vp-drawerhead > span { display:grid; gap:2px; min-width:0; }
-.vp-root .vp-drawerhead b { color:#F5E9C8; font-size:13px; letter-spacing:.01em; }
-.vp-root .vp-drawerhead small { color:#9E8B55; font-size:10.5px; }
+.vp-root .vp-drawerhead b { color:var(--vg-text); font-size:14px; letter-spacing:0; }
+.vp-root .vp-drawerhead small { color:var(--vg-muted); font-size:12px; }
 .vp-root .vp-drawerhead button { margin-left:auto; }
 .vp-root .vp-toolstack { display:flex; flex-direction:column; gap:0; border:1px solid rgba(255,255,255,.07); border-radius:12px; background:rgba(255,255,255,.03); overflow:visible; }
 .vp-root .vp-toolstack-head { display:flex; align-items:center; padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.07); background:rgba(212,146,10,.08); }
@@ -202,14 +205,26 @@ async function filmBroll(prompt: string, durationS: number, aspect: AspectId, mo
     aspect: aspect === '16:9' ? '16:9' : '9:16',
     durationS: Math.min(8, Math.max(4, Math.round(durationS) || 5)),
   });
-  while (alive() && out?.status === 'generating' && out.operationId) {
-    out = await callHook('veh-broll-generate', { operationId: out.operationId });
+  if (out?.status === 'generating' && out.operationId) {
+    const operationId = String(out.operationId);
+    out = await poll(
+      async () => (alive()
+        ? callHook('veh-broll-generate', { operationId })
+        : { status: 'cancelled' }),
+      {
+        interval: 4_000,
+        timeout: 15 * 60 * 1_000,
+        backoff: 1.1,
+        maxInterval: 15_000,
+        until: (status) => status?.status !== 'generating',
+      },
+    );
   }
   if (out?.status === 'completed' && out.videoUrl) return { url: String(out.videoUrl), error: '' };
   return { url: '', error: String(out?.error || 'The b-roll generation did not complete.') };
 }
 
-/** Generate one fast, subject-matched cutaway through the documented video proxy. */
+/** Generate one fast, subject-matched cutaway through the shared B-roll hook. */
 async function generateOmniBroll(
   prompt: string,
   model: string,
@@ -218,44 +233,44 @@ async function generateOmniBroll(
   onProgress: (progress: number) => void,
   alive: () => boolean,
 ): Promise<string> {
-  const token = workspaceToken();
-  if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
   const label = modelLabel(model);
-  const body: Record<string, unknown> = {
+  const started = await callHook('veh-broll-generate', {
     model,
     prompt,
-    aspectRatio: aspect === '16:9' ? '16:9' : '9:16',
-    duration: 5,
-    resolution: '1080p',
-    generateAudio: false,
-  };
-  if (referenceImage) {
-    body.referenceImages = [{ imageData: referenceImage, referenceType: 'asset' }];
+    aspect: aspect === '16:9' ? '16:9' : '9:16',
+    durationS: 5,
+    ...(referenceImage ? { referenceImage } : {}),
+  });
+  onProgress(Number(started?.progress) || 10);
+  if (started?.status === 'completed' && started.videoUrl) return String(started.videoUrl);
+  if (started?.status === 'failed') {
+    throw new Error(String(started.error || started.errorMessage || `${label} could not generate this clip.`));
   }
-  const { res: start, data: started } = await postGeneration('/api/veo/generate/video', body, APP_IDS.videoEnhancer);
-  if (!start.ok || !started?.operationId) {
-    const details = Array.isArray(started?.details)
-      ? started.details.map((d: { message?: string }) => d?.message).filter(Boolean).join('; ')
-      : '';
-    throw new Error(details || String(started?.error || `${label} could not start (HTTP ${start.status}).`));
+  if (!started?.operationId) {
+    throw new Error(String(started?.error || `${label} could not start.`));
   }
 
   const operationId = String(started.operationId);
-  onProgress(Number(started.progress) || 10);
-  for (let attempt = 0; attempt < 72 && alive(); attempt += 1) {
-    await new Promise((resolve) => { setTimeout(resolve, 5000); });
-    if (!alive()) return '';
-    const statusRes = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, {
-      headers: generationHeaders(APP_IDS.videoEnhancer),
+  try {
+    const final = await poll(async () => {
+      if (!alive()) return { cancelled: true as const, status: null as any };
+      const status = await callHook('veh-broll-generate', { operationId });
+      return { cancelled: false as const, status };
+    }, {
+      interval: 5_000,
+      timeout: 6 * 60 * 1_000,
+      until: (result) => Boolean(result.cancelled || result.status?.status === 'completed' || result.status?.status === 'failed'),
+      onTick: (result) => {
+        if (result.status) onProgress(Number(result.status.progress) || 0);
+      },
     });
-    const status = await statusRes.json().catch(() => null);
-    if (!statusRes.ok || !status) throw new Error(`Could not check ${label} status (HTTP ${statusRes.status}).`);
-    onProgress(Number(status.progress) || 0);
-    if (status.status === 'completed' && status.videoUrl) return String(status.videoUrl);
-    if (status.status === 'failed') throw new Error(String(status.errorMessage || `${label} could not generate this clip.`));
+    if (final.cancelled) return '';
+    if (final.status?.status === 'completed' && final.status.videoUrl) return String(final.status.videoUrl);
+    throw new Error(String(final.status?.error || final.status?.errorMessage || `${label} could not generate this clip.`));
+  } catch (e) {
+    if (e instanceof PollTimeoutError) throw new Error(`${label} took too long to finish. Retry to start a fresh clip.`);
+    throw e;
   }
-  if (!alive()) return '';
-  throw new Error(`${label} took too long to finish. Retry to start a fresh clip.`);
 }
 
 function probeDuration(url: string): Promise<number> {
@@ -2173,8 +2188,21 @@ function VideoStudio() {
         let out = await callHook('veh-render', renderPayload(d, aspect));
         // The poll call carries the aspect and geometry back so the hook can
         // still run its true-portrait up-convert on the finishing pass.
-        while (aliveRef.current && out?.status === 'rendering' && out.operationId) {
-          out = await callHook('veh-render', { operationId: out.operationId, geometry: out.geometry, aspect });
+        if (out?.status === 'rendering' && out.operationId) {
+          const operationId = String(out.operationId);
+          const geometry = out.geometry;
+          out = await poll(
+            async () => (aliveRef.current
+              ? callHook('veh-render', { operationId, geometry, aspect })
+              : { status: 'cancelled' }),
+            {
+              interval: 4_000,
+              timeout: 15 * 60 * 1_000,
+              backoff: 1.1,
+              maxInterval: 15_000,
+              until: (status) => status?.status !== 'rendering',
+            },
+          );
         }
         if (out?.status === 'complete' && out.renderUrl) {
           done.push({ aspect, url: String(out.renderUrl), geometry: String(out.geometry || '') });
@@ -2204,6 +2232,15 @@ function VideoStudio() {
     }
     if (!d.captionSettings.burnIn && d.captions.length) downloadSrt();
     void saveProject();
+    // Every finished master also lands in the suite-wide video history. One row
+    // per format, because each aspect really is a separate deliverable.
+    for (const render of done) {
+      void saveVideoToHistory({
+        appId: 'video-enhancer',
+        title: `${d.title || 'Video export'} (${render.aspect})`,
+        videoUrl: render.url,
+      });
+    }
     // Download the first finished master straight away.
     if (done.length) {
       const a = document.createElement('a');
@@ -3635,6 +3672,10 @@ function VideoStudio() {
           </div>
         </div>
       ) : null}
+
+      <div style={{ padding: '0 16px 20px' }}>
+        <VideoHistory />
+      </div>
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
 

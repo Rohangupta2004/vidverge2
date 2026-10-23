@@ -8,10 +8,10 @@
  * it plugs into the editor as one more tool without touching the edit state.
  * Generated clips are durable URLs — download one and drop it into your edit.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Clapperboard, Download, Upload, Wand2, X } from 'lucide-react';
 import { EnginePicker } from '../../components/EngineSelector';
-import { groupAModel, validateGroupAInputs } from '../../lib/videoEngines';
+import { groupAMinDurationS, groupAModel, validateGroupAInputs } from '../../lib/videoEngines';
 import { renderGroupAResilient } from '../../lib/videoEngineClient';
 import { uploadVideo } from './enhancerCore';
 import { LightBeamLoader } from '../../components/design-system/index';
@@ -31,6 +31,14 @@ export default function AiClipsPanel() {
   const [clips, setClips] = useState<MadeClip[]>([]);
 
   const model = groupAModel(engine);
+  const durationMinS = groupAMinDurationS(model);
+  const durationMaxS = Math.max(8, model?.maxDurationS || 8);
+  // Switching engines can strand the length outside the new model's range
+  // (6s on a 15s-minimum model, 39s on an 8s-maximum one) — land it on that
+  // model's own default.
+  useEffect(() => {
+    if (model && (duration < durationMinS || duration > durationMaxS)) setDuration(model.defaultDurationS);
+  }, [model?.id, durationMinS, durationMaxS, duration]); // eslint-disable-line react-hooks/exhaustive-deps
   const violation = model ? validateGroupAInputs(engine, { prompt, imageData: seed || null }) : 'Pick an available engine.';
   const ready = !busy && !violation;
 
@@ -86,7 +94,7 @@ export default function AiClipsPanel() {
           </div>
           <label style={{ fontSize: 11.5, color: 'var(--space-text-secondary)', display: 'flex', alignItems: 'center', gap: 7 }}>
             {duration}s
-            <input type="range" min={4} max={Math.max(8, model?.maxDurationS || 8)} value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={{ width: 110, accentColor: 'var(--space-brand-primary-500)', cursor: 'pointer' }} />
+            <input type="range" min={durationMinS} max={durationMaxS} value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={{ width: 110, accentColor: 'var(--space-brand-primary-500)', cursor: 'pointer' }} />
           </label>
           <label className="ve-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600, color: 'var(--space-text-brand)', background: 'transparent', border: '1px dashed var(--space-border-strong)', borderRadius: 8, padding: '5px 10px', cursor: 'pointer' }}>
             {seedBusy ? <LightBeamLoader height={2} style={{ width: 28 }} /> : <Upload size={12} />} {seed ? 'Replace seed image' : 'Seed image (optional)'}

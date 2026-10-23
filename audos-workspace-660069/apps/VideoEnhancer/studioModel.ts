@@ -9,11 +9,12 @@
  * Transport (callHook) and the timeline primitives that predate the studio
  * rework are reused from nleCore so there is a single implementation of each.
  */
+import { WORKSPACE_ID } from '../../lib/workspace';
 import { LB, callHook, nleToken } from './nleCore';
 
 export { LB, callHook, nleToken };
 
-export const WORKSPACE_UUID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
+export const WORKSPACE_UUID = WORKSPACE_ID;
 
 export function newId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;

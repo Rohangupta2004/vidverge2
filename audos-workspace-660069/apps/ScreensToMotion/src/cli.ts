@@ -14,12 +14,12 @@
  *   runPipeline({ files, brief, token })            — full pipeline
  *   runFixtureRender({ urlA, urlB, token })         — T1: fixture plan → mp4
  */
+import { poll } from '../../../lib/poll';
+import { readRender, submitRender as submitRemotionRender } from '../../../lib/render/remotion';
 import { buildCompositionSource } from './render/composition';
 import { FIXTURE_PLAN, FIXTURE_ANALYSES, fixtureImages } from './render/fixturePlan';
 import { buildMixFixture, verifyMixFixture, type MixFixtureInput, type MixVerification } from './render/mixFixture';
 import type { VideoPlan, ScreenAnalysis, IngestedScreen, CompositionProps } from './types';
-
-const FPS = 30;
 
 export interface RenderHandle { operationId: string; }
 
@@ -29,26 +29,15 @@ export async function submitRender(
   workspaceId: string,
   base = '',
 ): Promise<RenderHandle> {
+  void workspaceId;
+  void base;
   const durationInFrames = Math.max(60, props.plan.scenes.reduce((sum, s) => sum + s.duration, 0));
-  const response = await fetch(`${base}/api/render/remotion`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
-    body: JSON.stringify({
-      workspaceId,
-      compositionTsx: buildCompositionSource(),
-      props,
-      durationInFrames,
-      fps: FPS,
-      width: props.plan.meta.width,
-      height: props.plan.meta.height,
-    }),
-  });
-  const body = await response.json().catch(() => null);
-  if (response.status === 402) throw new Error('The workspace wallet needs funds before this video can be rendered.');
-  if (!response.ok || !body?.operationId) {
-    throw new Error(body?.error || `The render could not be started (${response.status}).`);
-  }
-  return { operationId: String(body.operationId) };
+  return submitRemotionRender({
+    compositionTsx: buildCompositionSource(),
+    props: props as unknown as Record<string, unknown>,
+    durationInFrames,
+    aspect: '16:9',
+  }, token);
 }
 
 export async function pollRender(
@@ -57,20 +46,18 @@ export async function pollRender(
   onProgress?: (status: string, progress: number) => void,
   base = '',
 ): Promise<string> {
-  for (let attempt = 0; attempt < 240; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    const response = await fetch(`${base}/api/render/remotion/${encodeURIComponent(handle.operationId)}`, {
-      headers: { 'X-Workspace-DB-Token': token },
-    });
-    const status = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(status?.error || `Could not check the render (${response.status}).`);
-    const state = String(status?.status || '').toLowerCase();
-    onProgress?.(state, Number(status?.progress) || 0);
-    const url = status?.videoUrl || status?.downloadUrl || status?.video_url || status?.download_url;
-    if ((state === 'complete' || state === 'completed') && url) return String(url);
-    if (state === 'failed' || state === 'error') throw new Error(status?.error || 'The Remotion render failed.');
+  void token;
+  void base;
+  const status = await poll(() => readRender(handle.operationId), {
+    interval: 3_000,
+    timeout: 12 * 60 * 1_000,
+    until: (value) => value.state === 'complete' || value.state === 'failed',
+    onTick: (value) => onProgress?.(value.state, 0),
+  });
+  if (status.state === 'failed' || !status.videoUrl) {
+    throw new Error(status.error || 'The Remotion render failed.');
   }
-  throw new Error('The render is taking longer than expected.');
+  return status.videoUrl;
 }
 
 /** T1 verification: hand-written fixture plan → platform render → MP4 URL. */

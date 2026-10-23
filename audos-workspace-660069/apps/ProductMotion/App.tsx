@@ -19,6 +19,7 @@ import {
   type MotionTemplate,
   type PresentationTemplateDefinition,
 } from './MotionTemplates';
+import { callHook } from '../../lib/workspace';
 
 type GenerationPhase = 'idle' | 'analyzing' | 'writing' | 'rendering' | 'done' | 'error';
 type BrandMood =
@@ -368,55 +369,35 @@ async function renderComposition(
   vision: VisionResult,
   durationInFrames: number,
 ): Promise<string> {
-  const token = workspaceToken();
-  const submit = await fetch('/api/render/remotion', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Workspace-DB-Token': token,
+  const created = await callHook<any>('vv-render-job', {
+    op: 'create',
+    app: 'product-motion',
+    title: 'Product Motion render',
+    aspect: '16:9',
+    compositionTsx,
+    durationInFrames,
+    props: {
+      images,
+      palette: vision.palette,
+      mood: vision.mood,
+      textEffect: vision.textEffect,
     },
-    body: JSON.stringify({
-      workspaceId: activeWorkspaceId(),
-      compositionTsx,
-      props: {
-        images,
-        palette: vision.palette,
-        mood: vision.mood,
-        textEffect: vision.textEffect,
-      },
-      durationInFrames,
-      fps: 30,
-      width: 1920,
-      height: 1080,
-    }),
   });
-  const submitted = await submit.json().catch(() => null);
-  const operationId = String(submitted?.operationId || '');
-  if (submit.status === 402) {
-    throw new Error('Your workspace wallet needs funds before this motion video can be rendered.');
-  }
-  if (!submit.ok || submitted?.success === false || !operationId) {
-    throw new Error(apiError(submitted, `The render could not be started (${submit.status}).`));
-  }
+  const jobId = String(created?.job_id || '');
+  if (!jobId) throw new Error(apiError(created, 'The durable render job could not be created.'));
 
+  // Read-only progress polling. The shared server worker owns submission,
+  // provider polling, retries, frame checks and the durable final URL.
   for (let attempt = 0; attempt < 200; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 3000));
-    const response = await fetch(`/api/render/remotion/${encodeURIComponent(operationId)}`, {
-      headers: { 'X-Workspace-DB-Token': token },
-    });
-    const status = await response.json().catch(() => null);
-    if (!response.ok || status?.success === false) {
-      throw new Error(apiError(status, `Could not check the render status (${response.status}).`));
+    const row = await callHook<any>('vv-render-job', { op: 'status', job_id: jobId });
+    const state = String(row?.status || '').toLowerCase();
+    if (state === 'complete' && row?.video_url) return String(row.video_url);
+    if (state === 'failed') {
+      throw new Error(String(row?.error_message || row?.stage_detail || 'The Remotion render failed.'));
     }
-    const state = String(status?.status || '').toLowerCase();
-    const resultUrl = status?.videoUrl || status?.downloadUrl || status?.video_url || status?.download_url;
-    if ((state === 'complete' || state === 'completed') && resultUrl) return String(resultUrl);
-    if (state === 'failed' || state === 'error') {
-      throw new Error(apiError(status, 'The Remotion render failed.'));
-    }
-    if (!state) throw new Error('The render service returned an unreadable status. Please try again.');
   }
-  throw new Error('The render is taking longer than expected. Try again to start a fresh render.');
+  throw new Error('The render is still running on the server. Reopen Product Motion to see its persisted progress.');
 }
 
 async function logRender(input: {
@@ -582,6 +563,36 @@ export function ProductMotionEmbed({ compact = false }: ProductMotionEmbedProps)
   useEffect(() => () => {
     objectUrls.current.forEach((url) => URL.revokeObjectURL(url));
     objectUrls.current.clear();
+  }, []);
+
+  // Reattach to the newest persisted Product Motion render. This is read-only:
+  // vv-render-job continues and adopts the final URL even with no page open.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof window.setTimeout> | null = null;
+    const readLatest = async () => {
+      try {
+        const data = await callHook<any>('vv-render-job', { op: 'list', app: 'product-motion', limit: 1 });
+        const latest = Array.isArray(data?.jobs) ? data.jobs[0] : null;
+        if (cancelled || !latest) return;
+        if (latest.status === 'complete' && latest.video_url) {
+          setVideoUrl(String(latest.video_url));
+          setPhase('done');
+          return;
+        }
+        if (latest.status === 'failed') {
+          setError(String(latest.error_message || latest.stage_detail || 'The saved render failed.'));
+          setPhase('error');
+          return;
+        }
+        setPhase('rendering');
+        timer = window.setTimeout(readLatest, 4000);
+      } catch {
+        // A cold-load read miss does not affect the durable server job.
+      }
+    };
+    void readLatest();
+    return () => { cancelled = true; if (timer) window.clearTimeout(timer); };
   }, []);
 
   const addFiles = (files: File[]) => {

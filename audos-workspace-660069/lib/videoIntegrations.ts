@@ -53,37 +53,37 @@ export const VIDEO_INTEGRATIONS: VideoIntegrationMeta[] = [
   {
     id: 'image-and-video-generation',
     label: 'Image & Video (unified)',
-    blurb: 'Seedance, Sora, Gemini Omni Flash, OpenRouter Veo — full schema proxy at /api/veo/generate/video.',
+    blurb: 'Best all-round picture quality for scenes with people, products and places.',
     role: 'scene',
   },
   {
     id: 'google-veo3',
     label: 'Google Veo',
-    blurb: 'Veo 2/3/3.1 and convenience /api/generate/video when you want the platform default.',
+    blurb: 'Strong motion and natural lighting. A safe default for most scenes.',
     role: 'scene',
   },
   {
     id: 'kling-video',
     label: 'Kling AI',
-    blurb: 'Text-to-video, image-to-video, Elements, extend, and lip-sync via /api/generate/kling/*.',
+    blurb: 'Keeps one character looking like the same person across every shot. Up to 15s per shot with sound.',
     role: 'scene',
   },
   {
     id: 'higgsfield-media',
     label: 'Higgsfield',
-    blurb: 'Cinematic text-to-video (Hailuo) and camera-motion image-to-video (DoP).',
+    blurb: 'Cinematic camera moves — push-ins, orbits and crane shots.',
     role: 'scene',
   },
   {
     id: 'heygen-video',
     label: 'HeyGen',
-    blurb: 'Avatar and prompt-driven presenter videos — use the HeyGen panels, not scene B-roll.',
+    blurb: 'A presenter on camera. Pick a look, give it a script. Not for background shots.',
     role: 'presenter',
   },
   {
     id: 'runway-recipes',
     label: 'Runway Gen-4',
-    blurb: 'Gen 4.5 / Turbo video plus product-ad recipes on /api/generate/runway/*.',
+    blurb: 'Product ads and user-style testimonial clips from a product photo.',
     role: 'scene',
   },
 ];
@@ -118,7 +118,7 @@ export function modelsForIntegration(integration: VideoIntegrationId): Integrati
       return GROUP_A_MODELS.filter((m) => !m.aliasOf).map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) }));
     case 'google-veo3':
       return [
-        { id: GOOGLE_VEO_CONVENIENCE_MODEL, label: 'Veo 3.1 (managed default)', hint: 'POST /api/generate/video' },
+        { id: GOOGLE_VEO_CONVENIENCE_MODEL, label: 'Veo 3.1 (managed default)', hint: 'The standard choice — good quality, no setup.' },
         ...GROUP_A_MODELS.filter((m) => !m.aliasOf && (m.provider === 'Google' || m.id.startsWith('openrouter/google/veo-'))).map((m) => ({ id: m.id, label: m.name, hint: withHealth(m.id, m.costHint) })),
 
       ];
@@ -133,7 +133,7 @@ export function modelsForIntegration(integration: VideoIntegrationId): Integrati
         hint: m.available ? m.priceNote : (m.unavailableReason || 'unavailable'),
       }));
     case 'heygen-video':
-      return [{ id: 'heygen-avatar', label: 'HeyGen avatar / agent', hint: 'Configure in the HeyGen character panel.' }];
+      return [{ id: 'heygen-avatar', label: 'Presenter on camera', hint: 'Pick the look in the presenter panel.' }];
     default:
       return [];
   }

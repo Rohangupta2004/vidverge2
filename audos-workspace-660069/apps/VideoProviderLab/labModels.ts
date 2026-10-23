@@ -19,20 +19,21 @@
  *
  * Dropped as confirmed broken or shut down: Sora 2 and Sora 2 Pro, Veo 3.0,
  * Veo 3.0 Fast and Veo 2.0 (the proxy answers 200 with a synthetic *_error_*
- * id instead of a real job), Seedance 2.5 Fast and both OpenRouter-hosted
- * Runway ids (not in the proxy's model enum), HeyGen, and the Luma / Pika
- * placeholders. KLING went LIVE on 14 Oct 2026 (the founder's credit pack is
- * active): kling-v2-master is discontinued upstream (502 wrapping Kling API
- * error 404, code 1203), and Kling's own API docs (kling.ai/document-api,
- * read 14 Oct 2026) list a NEW generation — kling-2.5-turbo, kling-2.6,
- * kling-3.0, kling-3.0-omni. At the founder's request the lab lists the FULL
- * Kling roster, including unverified and even the discontinued id, so they
- * can run each one and see exactly what the proxy does — the one deliberate
- * exception to the "only what runs" rule. Cards print the model actually
- * used, because the proxy substitutes its default for ids it does not
- * recognise (modelFallback). The
- * broken Group A ids were deleted from lib/videoEngines.ts outright on
- * 13 Oct 2026, so no app lists them anymore. Higgsfield is IN the lab:
+ * id instead of a real job), both OpenRouter-hosted Runway ids (not in the
+ * proxy's model enum), HeyGen, and the Luma / Pika placeholders.
+ *
+ * KLING is live, and the roster is the current generation only — kling-3.0-omni,
+ * kling-3.0, kling-2.6 and kling-2.5-turbo. The lab used to also list
+ * kling-v2-master and the kling-v1* ids so the founder could see what the
+ * proxy did with them; Kling has since shut all four down and the platform now
+ * answers a retired id by SUBSTITUTING the operation default and disclosing it
+ * in `modelFallback`, so running one tests the substitution rather than the
+ * model. They are gone from lib/videoEngines.ts and therefore from this grid.
+ * Cards still print the model actually used, because that substitution is real
+ * and a card that named the requested model would be stating something untrue.
+ *
+ * For live endpoint status, open the owner-only HEALTH view in the lab header:
+ * it reads the provider catalogs on demand and costs nothing. Higgsfield is IN the lab:
  * Hailuo 02 and the three DoP models were re-verified live on 13 Oct 2026.
  * Six Higgsfield marketplace ids were trialled the same day and removed
  * again — the proxy answers 200 but silently falls back to
@@ -96,7 +97,7 @@ export const LAB_GROUPS: LabGroup[] = [
   { id: 'google', label: 'Google · Veo & Gemini', note: 'Veo 3.1, the OpenRouter Veo 3.1 variants, and Gemini Omni Flash.' },
   { id: 'runway', label: 'Runway', note: 'Gen 4.5 and Gen 4 Turbo on the native Runway proxy.' },
   { id: 'higgsfield', label: 'Higgsfield', note: 'Native Audos Higgsfield proxy — MiniMax Hailuo text-to-video and the DoP camera-motion image-to-video models.' },
-  { id: 'kling', label: 'Kling AI', note: 'LIVE since 14 Oct 2026 (credit pack). Full roster on purpose — legacy kling-v1* ids plus the new 2.5/2.6/3.0 generation from Kling\u2019s current API docs — so you can test what the proxy actually accepts. Each card reports the model that actually rendered.' },
+  { id: 'kling', label: 'Kling AI', note: 'Current generation only: Kling 2.5 Turbo, 2.6, 3.0 and 3.0 Omni. Each result reports the model that actually rendered.' },
 ];
 
 export interface LabModeOption { id: string; label: string }
@@ -105,6 +106,12 @@ export interface LabModeOption { id: string; label: string }
 export interface LabParams {
   /** Selectable clip lengths in seconds. Empty = the provider decides. */
   durations: number[];
+  /** Preferred initial duration when the entry is first selected. Null = fall back to durations[0] or durationMin. */
+  defaultDuration: number | null;
+  /** A continuous whole-second range. When set, the UI renders a stepper instead of a fixed list. */
+  durationMin: number | null;
+  durationMax: number | null;
+  durationStep: number;
   /** Aspect ratios exactly as the endpoint wants them (Runway takes pixel pairs). */
   aspectRatios: string[];
   resolutions: string[];
@@ -136,6 +143,10 @@ export interface LabParams {
 
 const P = (over: Partial<LabParams> = {}): LabParams => ({
   durations: [],
+  defaultDuration: null,
+  durationMin: null,
+  durationMax: null,
+  durationStep: 1,
   aspectRatios: [],
   resolutions: [],
   audio: false,
@@ -197,6 +208,12 @@ interface GroupAExtra {
   styleNote: string;
   /** Whether this model accepts an uploaded video for editing. */
   videoUpload?: boolean;
+  /** Selectable clip lengths, for a model whose legal range is not the shared
+   *  Group A ladder clipped to maxDurationS. */
+  durations?: number[];
+  /** Continuous whole-second duration range. */
+  durationMin?: number;
+  durationMax?: number;
   /** Set when the proxy's model enum rejects this id outright, so the entry
    *  is greyed out instead of buying the customer a guaranteed 400. */
   unavailableReason?: string;
@@ -207,32 +224,42 @@ interface GroupAExtra {
  *  model enum, so they are attributed to that plugin alone. */
 const GROUP_A_EXTRA: Record<string, GroupAExtra> = {
   'gemini-omni-flash-preview': {
-    group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 300000, maxRefs: 10,
+    group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 1_800_000, maxRefs: 10,
     styleNote: 'character consistency',
     videoUpload: true,
   },
   'veo-3.1-generate-preview': {
-    group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 360000, maxRefs: 3,
+    group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 1_800_000, maxRefs: 3,
     styleNote: 'ingredients + last frame',
   },
   'veo-3.1-fast-generate-preview': {
-    group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 300000, maxRefs: 3,
+    group: 'google', plugins: GROUP_A_PLUGINS_BOTH, capMs: 1_800_000, maxRefs: 3,
     styleNote: 'ingredients + last frame',
   },
   'openrouter/bytedance/seedance-2.0-fast': {
-    group: 'bytedance', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 300000, maxRefs: 0,
-    styleNote: 'fast B-roll',
+    group: 'bytedance', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 1_800_000, maxRefs: 0,
+    styleNote: 'fast B-roll · verified provider ceiling 10s',
+    durationMin: 4,
+    durationMax: 10,
+  },
+  'openrouter/bytedance/seedance-2.5': {
+    group: 'bytedance', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 1_800_000, maxRefs: 3,
+    styleNote: 'premium · 4–30s · 3 refs',
+    // Founder-confirmed 30s result on the exact model id and request path below.
+    // The proxy accepts every whole second in this range; there is no fixed ladder.
+    durationMin: 4,
+    durationMax: 30,
   },
   'openrouter/google/veo-3.1': {
-    group: 'google', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 300000, maxRefs: 0,
+    group: 'google', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 1_800_000, maxRefs: 0,
     styleNote: 'OpenRouter route',
   },
   'openrouter/google/veo-3.1-fast': {
-    group: 'google', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 300000, maxRefs: 0,
+    group: 'google', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 1_800_000, maxRefs: 0,
     styleNote: 'OpenRouter route',
   },
   'openrouter/google/veo-3.1-lite': {
-    group: 'google', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 300000, maxRefs: 0,
+    group: 'google', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 1_800_000, maxRefs: 0,
     styleNote: 'cheapest Veo route',
   },
 };
@@ -240,14 +267,19 @@ const GROUP_A_EXTRA: Record<string, GroupAExtra> = {
 /** The proxy normalizes `duration` to the nearest value the model supports,
  *  so the lab only offers lengths at or under the model's documented ceiling. */
 function groupADurations(maxDurationS: number): number[] {
-  return [4, 5, 6, 8, 10, 12].filter((seconds) => seconds <= maxDurationS);
+  return [4, 5, 6, 8, 10, 12, 15, 20, 25, 30].filter((seconds) => seconds <= maxDurationS);
 }
 
 function fromGroupA(model: GroupAModel): LabModel {
   const extra: GroupAExtra = GROUP_A_EXTRA[model.id] || {
-    group: 'google', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 300000, maxRefs: 0, styleNote: model.tier,
+    group: 'google', plugins: GROUP_A_PLUGINS_UNIFIED, capMs: 1_800_000, maxRefs: 0, styleNote: model.tier,
   };
-  const resolutions = model.supports4k ? ['720p', '1080p', '4k'] : ['720p', '1080p'];
+  const resolutions = model.resolutions?.length
+    ? [...model.resolutions]
+    : (model.supports4k ? ['720p', '1080p', '4k'] : ['720p', '1080p']);
+  const aspectRatios = model.id === 'openrouter/bytedance/seedance-2.5'
+    ? ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9']
+    : ['16:9', '9:16', '1:1'];
   return {
     key: `groupa:${model.id}`,
     modelId: model.id,
@@ -270,8 +302,12 @@ function fromGroupA(model: GroupAModel): LabModel {
     image: 'optional',
     maxImages: Math.max(1, Math.min(4, extra.maxRefs || 1)),
     params: P({
-      durations: groupADurations(model.maxDurationS),
-      aspectRatios: ['16:9', '9:16', '1:1'],
+      durations: extra.durationMin !== undefined ? [] : (extra.durations ?? groupADurations(model.maxDurationS)),
+      defaultDuration: model.defaultDurationS,
+      durationMin: extra.durationMin ?? null,
+      durationMax: extra.durationMax ?? null,
+      durationStep: 1,
+      aspectRatios,
       resolutions,
       audio: model.supportsAudio,
       negativePrompt: model.supportsNegativePrompt,
@@ -307,7 +343,7 @@ const VEO_MANAGED: LabModel = {
     aspectRatios: ['16:9', '9:16', '1:1'],
     audio: true,
   }),
-  capMs: 360000,
+  capMs: 1_800_000,
   costHint: '≈ $0.40–0.80 / clip',
   available: true,
 };
@@ -348,7 +384,7 @@ function fromRunway(model: RunwayModel): LabModel {
       durations: runwayDurations(model),
       aspectRatios: model.ratios.length ? model.ratios : ['1280:720', '720:1280'],
     }),
-    capMs: 480000,
+    capMs: 1_800_000,
     costHint: model.priceNote,
     available: model.available,
     unavailableReason: model.unavailableReason,
@@ -408,7 +444,7 @@ function fromHiggsfield(model: HiggsfieldVideoModel): LabModel {
       durations,
       aspectRatios: ['16:9', '9:16', '1:1'],
     }),
-    capMs: 360000,
+    capMs: 1_800_000,
     costHint: HIGGSFIELD_COST_HINT[model.id] || 'per-second Higgsfield pricing',
     available: true,
   };
@@ -420,8 +456,8 @@ function fromHiggsfield(model: HiggsfieldVideoModel): LabModel {
 // ---------------------------------------------------------------------------
 
 function fromKling(model: KlingModel): LabModel {
-  // Modes come from the roster facts: the legacy model_name ids take std/pro,
-  // the 2.5+ model-scoped ids take no mode field at all.
+  // Modes come from the current proxy roster. Camera control, cfgScale and
+  // seed are deliberately absent because the proxy rejects them before billing.
   const modes: LabModeOption[] = (model.modes || []).map((mode) => (
     mode === 'pro' ? { id: 'pro', label: 'Pro' } : { id: 'std', label: 'Standard' }
   ));
@@ -451,12 +487,10 @@ function fromKling(model: KlingModel): LabModel {
     params: P({
       durations,
       aspectRatios: ['16:9', '9:16', '1:1'],
-      negativePrompt: true,
+      negativePrompt: model.id !== 'kling-3.0-omni',
       modes,
-      camera: true,
-      seed: true,
     }),
-    capMs: 300_000,
+    capMs: 1_800_000,
     costHint: 'proxy billing from $0.25 / 5s clip (std t2v); i2v from $0.28',
     available: true,
   };
@@ -511,8 +545,10 @@ export function klingCameraControl(presetId: string | null | undefined): { type:
 // Kling Elements — POST /api/generate/kling/multi-image
 // ---------------------------------------------------------------------------
 
-/** The models the proxy takes on the multi-image route, in display order. */
-const KLING_MULTI_IMAGE_IDS = ['kling-v1-5', 'kling-v1-6', 'kling-2.6', 'kling-3.0', 'kling-3.0-omni'];
+/** The models the proxy takes on the multi-image route, in display order.
+ * The kling-v1-5 / kling-v1-6 ids this list used to carry were shut down by
+ * Kling and are no longer catalogued, so they are gone from here too. */
+const KLING_MULTI_IMAGE_IDS = ['kling-2.6', 'kling-3.0', 'kling-3.0-omni'];
 
 function fromKlingMultiImage(model: KlingModel): LabModel {
   const modes: LabModeOption[] = (model.modes || []).map((mode) => (
@@ -545,7 +581,7 @@ function fromKlingMultiImage(model: KlingModel): LabModel {
       negativePrompt: true,
       modes,
     }),
-    capMs: 360_000,
+    capMs: 1_800_000,
     costHint: 'per-clip Kling proxy billing',
     available: true,
   };
@@ -565,12 +601,12 @@ const KLING_EXTEND: LabModel = {
   runner: 'kling',
   submitPath: 'POST /api/generate/kling/extend',
   statusPath: 'GET /api/generate/kling/status/:taskId',
-  blurb: 'Paste the task ID of any finished Kling clip to lengthen it by ~5 seconds. Costs $0.25 per extend.',
-  specs: ['+~5s per extend', 'finished clip task ID', 'no model selector', 'optional prompt'],
+  blurb: 'Paste the task ID of an older compatible Kling clip to lengthen it by ~5 seconds. Current 2.5/2.6/3.0 sources are refused by the proxy before billing. Costs $0.25 when accepted.',
+  specs: ['+~5s per extend', 'older compatible task ID', 'current-model sources refused', 'optional prompt'],
   image: 'none',
   maxImages: 0,
   params: P({ extend: true }),
-  capMs: 360_000,
+  capMs: 1_800_000,
   costHint: '$0.25 / extend',
   available: true,
 };
@@ -586,11 +622,11 @@ const KLING_LIPSYNC: LabModel = {
   submitPath: 'POST /api/generate/kling/lip-sync',
   statusPath: 'GET /api/generate/kling/status/:taskId',
   blurb: 'Add speech to any finished Kling clip. Type text for TTS, or paste an audio URL. Costs $0.25 per sync.',
-  specs: ['finished clip task ID', 'text-to-speech or audio URL', 'voice + language', 'no model selector'],
+  specs: ['finished clip task ID', 'text-to-speech or audio URL', 'current proxy fields only', 'no model selector'],
   image: 'none',
   maxImages: 0,
-  params: P({ lipSync: true, voiceSpeed: true }),
-  capMs: 360_000,
+  params: P({ lipSync: true }),
+  capMs: 1_800_000,
   costHint: '$0.25 / sync',
   available: true,
 };
@@ -619,12 +655,13 @@ export const LAB_MODELS: LabModel[] = [
   ...RUNWAY_MODELS.filter((model) => model.type === 'video' && model.available).map(fromRunway),
   // Higgsfield — the 4 models verified working live on 13 Oct 2026.
   ...HIGGSFIELD_VIDEO_MODELS.map(fromHiggsfield),
-  // Kling AI — key LIVE since 14 Oct 2026 (credit pack). The FULL roster is
-  // listed deliberately at the founder's request — legacy ids plus the new
-  // 2.5/2.6/3.0 generation from Kling's own API docs, and even the
-  // discontinued v2-master — so each one can be run to see what the proxy
-  // actually accepts. The comingSoon flag is ignored HERE on purpose; general
-  // pickers elsewhere still honor it. Cards print the model actually used.
+  // Kling AI — live, and the roster is the current generation only. The ids
+  // Kling shut down (v2-master and the whole v1 line) are no longer catalogued
+  // anywhere: the proxy answers a retired id by substituting its own default,
+  // so running one would test the substitution rather than the model. The
+  // comingSoon flag is still ignored HERE on purpose, so a genuine future
+  // preview can be tested before general pickers offer it. Cards print the
+  // model actually used, because that substitution is real.
   ...KLING_MODELS.map(fromKling),
   // Kling Elements — character consistency from 2-4 reference images.
   ...KLING_MULTI_IMAGE_IDS
@@ -694,13 +731,17 @@ export interface VerifiedResult {
   note: string;
 }
 
-export const LAB_VERIFIED_AT = '2026-10-09';
+export const LAB_VERIFIED_AT = '2026-10-21';
 
 export const LAB_VERIFIED: Record<string, VerifiedResult> = {
   'groupa:gemini-omni-flash-preview': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
   'groupa:veo-3.1-generate-preview': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
   'groupa:veo-3.1-fast-generate-preview': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
   'groupa:openrouter/bytedance/seedance-2.0-fast': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
+  'groupa:openrouter/bytedance/seedance-2.5': {
+    outcome: 'pass',
+    note: 'Founder-verified at 30 seconds on POST /api/veo/generate/video with model openrouter/bytedance/seedance-2.5; the returned MP4 was playable. Every whole second from 4 through 30 is accepted.'
+  },
   'groupa:openrouter/google/veo-3.1': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
   'groupa:openrouter/google/veo-3.1-fast': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
   'groupa:openrouter/google/veo-3.1-lite': { outcome: 'pass', note: 'Submitted, rendered and returned a playable MP4.' },
@@ -711,10 +752,6 @@ export const LAB_VERIFIED: Record<string, VerifiedResult> = {
   'higgsfield:dop-turbo': { outcome: 'pass', note: 'Re-verified live 13 Oct 2026 — rendered a playable MP4 from a source image. Higgsfield refuses inline images today, so the lab stages the attachment to workspace storage first.' },
   'higgsfield:dop-standard': { outcome: 'pass', note: 'Re-verified live 13 Oct 2026 — rendered a playable MP4 from a source image (staged to workspace storage first).' },
   'higgsfield:dop-lite': { outcome: 'pass', note: 'Re-verified live 13 Oct 2026 — rendered a playable MP4 from a source image (staged to workspace storage first).' },
-  'kling:kling-v2-master': { outcome: 'fail', note: 'Discontinued upstream: a live 14 Oct 2026 submit answered 502 wrapping Kling API error (404, code 1203) "The model has been discontinued". The wallet charge auto-refunded. Pick Kling 2.6 or 3.0 instead.' },
-  'kling:kling-v1-6': { outcome: 'inconclusive', note: 'The Kling key went LIVE 14 Oct 2026 (credit pack) — submits now reach Kling. This legacy id has not returned a clip yet and may be retired upstream like v2-master; run it from this panel to find out.' },
-  'kling:kling-v1-5': { outcome: 'inconclusive', note: 'Key live 14 Oct 2026 (credit pack). The proxy default tier — not yet proven end to end; run it from this panel.' },
-  'kling:kling-v1': { outcome: 'inconclusive', note: 'Key live 14 Oct 2026 (credit pack). Oldest legacy id — not yet proven end to end; run it from this panel.' },
   'kling:kling-2.5-turbo': { outcome: 'inconclusive', note: 'Current id in Kling\u2019s own API docs (read 14 Oct 2026). The platform proxy\u2019s static catalogue does not list it yet — if the proxy substitutes its default, this card will name the model that actually rendered.' },
   'kling:kling-2.6': { outcome: 'inconclusive', note: 'Current id in Kling\u2019s own API docs (read 14 Oct 2026) — text/image → video with native audio upstream. Unlisted in the proxy\u2019s static catalogue; the card reports the model actually used.' },
   'kling:kling-3.0': { outcome: 'inconclusive', note: 'Kling\u2019s current flagship per the 14 Oct 2026 API docs (multi-shot prompts, up to 4K / 3–15s upstream). Unlisted in the proxy\u2019s static catalogue; the card reports the model actually used.' },
@@ -782,7 +819,7 @@ export function defaultRunInput(model: LabModel, prompt: string): LabRunInput {
   return {
     prompt,
     negativePrompt: '',
-    duration: params.durations[0] ?? 5,
+    duration: params.defaultDuration ?? params.durations[0] ?? params.durationMin ?? 5,
     aspectRatio: params.aspectRatios[0] ?? '16:9',
     resolution: params.resolutions[0] ?? '720p',
     audio: false,
@@ -814,9 +851,14 @@ export function retargetRunInput(input: LabRunInput, model: LabModel): LabRunInp
   const params = model.params;
   const keep = <T,>(current: T, allowed: T[], fallback: T): T =>
     (allowed.length === 0 ? fallback : allowed.indexOf(current) >= 0 ? current : allowed[0]);
+  const rangedDuration = params.durationMin !== null && params.durationMax !== null
+    ? Math.max(params.durationMin, Math.min(params.durationMax, Math.round(input.duration)))
+    : null;
   return {
     ...input,
-    duration: keep(input.duration, params.durations, params.durations[0] ?? input.duration),
+    // A length the new entry also accepts is kept; continuous ranges preserve
+    // any legal whole-second value instead of snapping it to a stale ladder.
+    duration: rangedDuration ?? keep(input.duration, params.durations, params.defaultDuration ?? params.durations[0] ?? input.duration),
     aspectRatio: keep(input.aspectRatio, params.aspectRatios, params.aspectRatios[0] ?? input.aspectRatio),
     resolution: keep(input.resolution, params.resolutions, params.resolutions[0] ?? input.resolution),
     audio: params.audio ? input.audio : false,
@@ -870,6 +912,14 @@ export function describeRunBlock(model: LabModel, input: LabRunInput): string | 
   }
   const prompt = input.prompt.trim();
   if (prompt.length < 10) return 'This endpoint needs a prompt of at least 10 characters.';
+  if (!Number.isInteger(input.duration)) return `${model.name} duration must be a whole number of seconds.`;
+  if (model.params.durationMin !== null && model.params.durationMax !== null
+    && (input.duration < model.params.durationMin || input.duration > model.params.durationMax)) {
+    return `${model.name} accepts ${model.params.durationMin}–${model.params.durationMax} seconds.`;
+  }
+  if (model.params.durations.length && model.params.durations.indexOf(input.duration) < 0) {
+    return `${model.name} accepts ${model.params.durations.join(' / ')} seconds.`;
+  }
   if (model.image === 'required' && input.images.length === 0) {
     return `${model.name} is an image-to-video model — attach one image to run it.`;
   }

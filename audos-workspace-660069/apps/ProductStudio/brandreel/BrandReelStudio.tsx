@@ -31,8 +31,8 @@ import MockupBoard from './MockupBoard';
 import { Card, REEL_CSS, SectionLabel, StepRail } from './ui';
 import { LB_SHIMMER_CSS } from '../../../components/LightBeam';
 import { writeProductContext } from '../../../lib/productContext';
-
-const WORKSPACE_UUID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
+import { poll } from '../../../lib/poll';
+import { WORKSPACE_ID, workspaceTokenNow } from '../../../lib/workspace';
 const RENDER_KEY = 'ps-brandreel-render-v1';
 const STEPS = ['Your site', 'Pick a script', 'Preview & render'];
 
@@ -66,9 +66,9 @@ function writeStoredRender(state: StoredRender | null) {
 async function recordNarration(variant: ScriptVariant): Promise<string> {
   const script = variant.scenes.map((s) => s.voiceover).filter(Boolean).join(' ').slice(0, 2000);
   if (!script) return '';
-  const token = String((window as any).__workspaceDb?.token || '');
+  const token = workspaceTokenNow();
   if (!token) return '';
-  const res = await fetch(`/api/workspaces/${WORKSPACE_UUID}/audio/voiceover`, {
+  const res = await fetch(`/api/workspaces/${WORKSPACE_ID}/audio/voiceover`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
     body: JSON.stringify({ script }),
@@ -126,10 +126,12 @@ export default function BrandReelStudio() {
     setRenderNote('Picking up the render you already started…');
     void (async () => {
       try {
-        let out = await pollRender(stored.operationId as string);
-        while (aliveRef.current && out?.status === 'rendering' && out.operationId) {
-          out = await pollRender(out.operationId);
-        }
+        const out = await poll(() => pollRender(stored.operationId as string), {
+          interval: 2_000,
+          timeout: 30 * 60 * 1_000,
+          tolerateErrors: 1,
+          until: (status) => !aliveRef.current || status.status === 'complete' || status.status === 'failed',
+        });
         if (!aliveRef.current) return;
         if (out?.status === 'complete' && out.renderUrl) {
           setRenderUrl(out.renderUrl);
@@ -247,8 +249,14 @@ export default function BrandReelStudio() {
 
       let out = await submitRender(BRAND_REEL_TSX, props as unknown as Record<string, unknown>, durationInFrames);
       if (out?.operationId) writeStoredRender({ operationId: out.operationId });
-      while (aliveRef.current && out?.status === 'rendering' && out.operationId) {
-        out = await pollRender(out.operationId);
+      if (out?.status === 'rendering' && out.operationId) {
+        const operationId = out.operationId;
+        out = await poll(() => pollRender(operationId), {
+          interval: 2_000,
+          timeout: 30 * 60 * 1_000,
+          tolerateErrors: 1,
+          until: (status) => !aliveRef.current || status.status === 'complete' || status.status === 'failed',
+        });
       }
       if (!aliveRef.current) return;
       if (out?.status === 'complete' && out.renderUrl) {

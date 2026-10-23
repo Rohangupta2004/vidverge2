@@ -9,40 +9,49 @@
  *   Ready      → enabled, prominent  "FINAL ASSEMBLY"
  *   Assembling → "ASSEMBLING VIDEO… 72%" with real FFmpeg progress
  *   Complete   → "✓ FINAL VIDEO READY" + [Preview] [Download] [Edit]
+ *
+ * ASSEMBLY IS AUTOMATIC. Once every scene and every audio layer is ready the
+ * film assembles itself, so the big button is a way to start it sooner (or to
+ * re-run it), not the only way it ever happens. "Review before assembly" is
+ * the opt-in beside it for anyone who wants a look at the cut first.
  */
-import { AlertTriangle, Check, CircleDot, Download, Layers, Mic, Pencil, Play, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Check, Download, Layers, Mic, Pencil, Play, RefreshCw, Square } from 'lucide-react';
 import { Film, FilmScene, T } from './api';
-import { audioReady, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
+import { audioReady, isSpokenSource } from './pipeline/audio';
 import { AssemblyProgress } from './pipeline/orchestrator';
 import VergeLoader from '../../components/VergeLoader';
 
 const DONE = new Set(['completed', 'skipped']);
 
-function Chip({ state, label }: { state: 'done' | 'active' | 'failed' | 'todo'; label: string }) {
-  const color = state === 'done' ? T.done : state === 'active' ? T.live : state === 'failed' ? T.fault : T.dim;
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, border: `1px solid ${state === 'todo' ? T.dim : color}`, borderRadius: 999, padding: '3px 9px', whiteSpace: 'nowrap' }}>
-      {state === 'done' ? <Check size={11} /> : state === 'active' ? <VergeLoader size={26} label={label} /> : state === 'failed' ? <AlertTriangle size={11} /> : <CircleDot size={10} />}
-      {label}
-    </span>
-  );
-}
+const ON_ACCENT = 'var(--vg-on-accent, #1B1308)';
 
 const barBtn = (kind: 'accent' | 'disabled' | 'ghost' | 'fault') => ({
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-  background: kind === 'accent' ? T.live : kind === 'fault' ? 'rgba(153,27,27,0.12)' : T.raised,
-  color: kind === 'accent' ? '#1A1205' : kind === 'fault' ? T.fault : kind === 'ghost' ? T.bone : T.dim,
-  border: kind === 'ghost' ? `1px solid ${T.dim}` : kind === 'fault' ? '1px solid rgba(153,27,27,0.32)' : 'none',
-  borderRadius: 10, padding: '11px 20px', fontSize: 13, fontWeight: 800, letterSpacing: 0.4,
-  cursor: kind === 'disabled' ? 'default' : 'pointer', whiteSpace: 'nowrap' as const,
-  boxShadow: kind === 'accent' ? '0 2px 12px rgba(200,146,10,0.3)' : 'none',
+  background: kind === 'accent' ? 'var(--vg-gradient-action, var(--vg-accent, #D9A441))' : kind === 'fault' ? `color-mix(in srgb, ${T.fault} 14%, transparent)` : T.raised,
+  color: kind === 'accent' ? ON_ACCENT : kind === 'fault' ? T.fault : kind === 'ghost' ? T.bone : T.dim,
+  border: kind === 'fault' ? `1px solid color-mix(in srgb, ${T.fault} 45%, transparent)` : kind === 'accent' ? 'none' : `1px solid ${T.line}`,
+  borderRadius: 10, padding: '11px 20px', minHeight: 44, maxWidth: '100%', fontSize: 13, fontWeight: 800, letterSpacing: 0.4,
+  lineHeight: 1.25, textAlign: 'center' as const,
+  cursor: kind === 'disabled' ? 'not-allowed' : 'pointer', whiteSpace: 'normal' as const,
+  boxShadow: kind === 'accent' ? `0 2px 14px color-mix(in srgb, ${T.live} 32%, transparent)` : 'none',
 } as const);
 
 const miniBtn = {
-  display: 'inline-flex', alignItems: 'center', gap: 6, background: T.raised, color: T.bone,
-  border: `1px solid ${T.dim}`, borderRadius: 9, padding: '9px 14px', fontSize: 12, fontWeight: 650,
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: T.raised, color: T.bone,
+  border: `1px solid ${T.line}`, borderRadius: 9, padding: '9px 14px', minHeight: 40, fontSize: 12, fontWeight: 650,
   cursor: 'pointer', textDecoration: 'none', whiteSpace: 'nowrap' as const,
 } as const;
+
+const BAR_CSS = `
+.s2v-asm-bar button:disabled { opacity: 1; }
+.s2v-asm-bar button:not(:disabled):hover, .s2v-asm-bar a:hover { filter: brightness(1.1); }
+.s2v-asm-bar a:hover { border-color: ${T.live} !important; }
+.s2v-asm-bar button:focus-visible, .s2v-asm-bar a:focus-visible, .s2v-asm-bar input:focus-visible { outline: 2px solid var(--vg-focus, ${T.live}); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .s2v-asm-bar > div { flex: 1 1 100% !important; margin-left: 0 !important; }
+  .s2v-asm-bar > div > button, .s2v-asm-bar > div > a { flex: 1 1 auto; }
+}
+`;
 
 export default function AssemblyBar(props: {
   film: Film;
@@ -50,6 +59,7 @@ export default function AssemblyBar(props: {
   assembly: AssemblyProgress | null;
   busy: boolean;
   screen: 'board' | 'final';
+  onStop: () => void;
   onFinalAssembly: () => void;
   onPrepareAudio: () => void;
   onOpenFinal: () => void;
@@ -67,35 +77,30 @@ export default function AssemblyBar(props: {
   const assembling = film.status === 'assembling' || !!(assembly && assembly.running);
   const complete = !assembling && film.status === 'ready' && !!film.final_video_url;
 
-  const nReady = !!audio && narrationReady(audio);
-  const mReady = !!audio && musicReady(audio);
-  const sReady = !!audio && sfxReady(audio);
   const nFail = !!audio && audio.narration.some((n) => isSpokenSource(n.voice_source) && n.status === 'failed');
-  const silentVoice = audio?.voice_source === 'none';
   const mFail = audio?.music?.status === 'failed';
   const sFail = audio?.sfx_status === 'failed';
   const anyAudioFail = nFail || !!mFail || !!sFail;
   const audioIsReady = !!audio && audioReady(audio);
   const canAssemble = allDone && audioIsReady && !busy && !assembling;
 
-  const layerChip = (ready: boolean, failed: boolean, active: boolean): 'done' | 'active' | 'failed' | 'todo' =>
-    ready ? 'done' : failed ? 'failed' : active ? 'active' : 'todo';
-
   const pct = assembly ? assembly.percent : 0;
+  const activeStep = assembly?.steps.find((step) => step.status === 'active')?.label;
+  const statusLine = complete ? 'Ready to download'
+    : assembling ? (activeStep || 'Finishing the video')
+      : !allDone ? `Producing scenes ${completedN}/${total}`
+        : anyAudioFail ? 'Audio needs attention'
+          : audioRunning || busy ? 'Preparing narration, music and effects'
+            : canAssemble ? 'Everything is ready — final assembly is starting'
+              : 'Preparing post-production';
 
   return (
-    <div style={{ flexShrink: 0, borderTop: `1px solid ${T.raised}`, background: '#FFFFFF', padding: '9px 14px 10px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', boxShadow: '0 -8px 24px rgba(120,80,0,0.12)' }}>
-      {/* —— Real layer states —— */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', minWidth: 0, flex: '1 1 240px' }}>
-        <Chip state={allDone ? 'done' : sceneFailed ? 'failed' : 'active'} label={allDone ? `${completedN} Scenes` : `Scenes ${completedN}/${total}`} />
-        <Chip state={layerChip(nReady, nFail, audioRunning && !nReady)} label={silentVoice ? 'No voiceover' : 'Voiceover'} />
-        <Chip state={layerChip(mReady, !!mFail, audioRunning && nReady && !mReady)} label={audio?.music?.status === 'skipped' ? 'Music skipped' : 'Music'} />
-        <Chip state={layerChip(sReady, !!sFail, audioRunning && nReady && mReady && !sReady)} label={audio?.sfx_status === 'skipped' ? 'SFX skipped' : audio?.sfx_status === 'none' ? 'No SFX' : 'SFX'} />
-        {props.screen === 'board' && allDone && !complete ? (
-          <button className="s2v-ghost" onClick={props.onOpenFinal} style={{ background: 'none', border: 'none', color: T.muted, fontSize: 11.5, cursor: 'pointer', textDecoration: 'underline', padding: '2px 4px' }}>
-            Audio &amp; assembly ›
-          </button>
-        ) : null}
+    <div className="s2v-asm-bar" style={{ flexShrink: 0, minWidth: 0, maxWidth: '100%', borderTop: `1px solid ${T.line}`, background: T.card, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', boxShadow: '0 -8px 24px rgba(0,0,0,0.35)' }}>
+      <style>{BAR_CSS}</style>
+      <div role="status" aria-live="polite" style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0, flex: '1 1 240px', color: complete ? T.done : sceneFailed || anyAudioFail ? T.fault : T.muted, fontSize: 12.5, fontWeight: 700 }}>
+        {complete ? <Check size={13} /> : sceneFailed || anyAudioFail ? <AlertTriangle size={13} /> : assembling || audioRunning || busy ? <VergeLoader size={28} label={statusLine} /> : <Layers size={13} />}
+        <span>{statusLine}{assembling ? ` · ${pct}%` : ''}</span>
+        {props.screen === 'board' && allDone && !complete ? <button className="s2v-ghost" onClick={props.onOpenFinal} style={{ background: 'none', border: 'none', color: T.muted, fontSize: 11.5, cursor: 'pointer', textDecoration: 'underline', padding: '2px 4px' }}>Open finish</button> : null}
       </div>
 
       {/* —— The one Final Assembly control, with real states —— */}
@@ -115,21 +120,21 @@ export default function AssemblyBar(props: {
             ) : null}
           </>
         ) : assembling ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 110, height: 4, background: T.raised, borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${pct}%`, background: T.live, transition: 'width 0.5s ease' }} />
-            </div>
-            <button disabled style={barBtn('disabled')}>
-              <VergeLoader size={34} label="Assembling your video" /> ASSEMBLING VIDEO… {pct}%
-            </button>
-          </div>
+          <button type="button" onClick={props.onStop} style={barBtn('ghost')} title="Stop after the active step. Saved scenes and audio remain ready to resume.">
+            <Square size={13} fill="currentColor" /> Stop
+          </button>
         ) : !allDone ? (
           <button disabled style={barBtn('disabled')} title="Final Assembly unlocks when every scene is completed or skipped.">
             <Layers size={14} /> FINAL ASSEMBLY — {completedN}/{total} SCENES
           </button>
         ) : canAssemble ? (
-          <button className="s2v-lift" style={barBtn('accent')} onClick={props.onFinalAssembly} title="Existing scene videos + whatever audio layers are ready (voiceover is optional) → FFmpeg merge → final MP4. No scene is ever regenerated.">
-            <Layers size={15} /> FINAL ASSEMBLY
+          <button
+            className="s2v-lift"
+            style={barBtn('accent')}
+            onClick={props.onFinalAssembly}
+            title="Assembly starts automatically. Existing scene videos and ready audio layers are reused; no scene is regenerated."
+          >
+            <Layers size={15} /> FINAL ASSEMBLY — STARTING…
           </button>
         ) : anyAudioFail ? (
           <button style={barBtn('fault')} onClick={props.onOpenFinal} title="An audio layer failed — retry it, or continue without it: every layer, the voiceover included, is optional. Completed scenes are untouched.">

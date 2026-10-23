@@ -10,10 +10,19 @@
  * is not touched by anything in this file.
  */
 
-export const TRACKB_HOOK_ENDPOINT = '/api/hooks/execute/workspace-660069/trackb-project';
-export const SCRAPE_WEBSITE_HOOK_ENDPOINT = '/api/hooks/execute/workspace-660069/scrape-website';
-export const TRACKB_RENDER_ENDPOINT = '/api/hooks/execute/workspace-660069/trackb-render';
-export const AUDOS_WORKSPACE_UUID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
+import {
+  WORKSPACE_ID,
+  callHook,
+  getSessionId,
+  hookUrl,
+  spaceId,
+  workspaceTokenNow,
+} from '../workspace';
+
+export const TRACKB_HOOK_ENDPOINT = hookUrl('trackb-project');
+export const SCRAPE_WEBSITE_HOOK_ENDPOINT = hookUrl('scrape-website');
+export const TRACKB_RENDER_ENDPOINT = hookUrl('trackb-render');
+export const AUDOS_WORKSPACE_UUID = WORKSPACE_ID;
 
 export type SceneState = 'EDITABLE' | 'BAKED' | 'REGENERATING' | 'ERROR' | 'LOCKED';
 
@@ -184,28 +193,7 @@ export const STATE_EXPLAIN: Record<Exclude<SceneState, 'EDITABLE'>, string> = {
 };
 
 /** Resolve this visitor's space session id (same source the rest of the space uses). */
-export function resolveSessionId(): string {
-  if (typeof window === 'undefined') return '';
-  const w = window as any;
-  const direct = w.__workspaceDb?.sessionId || w.__SESSION_ID__ || w.__WORKSPACE_SESSION_ID__;
-  if (typeof direct === 'string' && direct) return direct;
-  const spaceId = w.__APP_ID__ || w.__SPACE_ID__ || 'workspace-660069';
-  try {
-    const raw = window.localStorage.getItem(`space_session_${spaceId}`);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        const fromJson = parsed?.sessionId || parsed?.session_id || parsed?.id;
-        if (typeof fromJson === 'string' && fromJson) return fromJson;
-      } catch {
-        return raw;
-      }
-    }
-  } catch {
-    /* storage unavailable — fall through */
-  }
-  return '';
-}
+export const resolveSessionId = getSessionId;
 
 export interface ScrapedProductBrief {
   success: boolean;
@@ -228,10 +216,7 @@ export interface ScrapedProductBrief {
   brand_evidence?: { palette?: { hex: string; count: number }[]; theme_color?: string | null; font_families?: string[] } | null;
 }
 
-function workspaceToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
+const workspaceToken = workspaceTokenNow;
 
 /** The visitor's workspace token — required by every platform proxy call (e.g. /proxy/anthropic/v1/messages). */
 export function getWorkspaceToken(): string {
@@ -239,28 +224,12 @@ export function getWorkspaceToken(): string {
 }
 
 async function call<T>(body: Record<string, unknown>, endpoint = TRACKB_HOOK_ENDPOINT): Promise<T> {
-  const token = workspaceToken();
-  const sessionId = resolveSessionId();
-  if (!token || !sessionId) throw new Error('Your verified workspace session is still loading. Please wait a moment and try again.');
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Workspace-DB-Token': token,
-      'X-Session-Id': sessionId,
-    },
-    body: JSON.stringify(body),
-  });
-  const payload = await res.json().catch(() => ({}));
-  // Hook responses are wrapped: the hook's respond() body may sit at the top
-  // level or under `response` depending on the execute path.
-  const data = (payload && typeof payload === 'object' && ('ok' in payload || 'success' in payload))
-    ? payload
-    : (payload?.response ?? payload);
-  if (!res.ok && (!data || typeof data !== 'object')) {
-    throw new Error(`Request failed (HTTP ${res.status}).`);
-  }
-  return data as T;
+  const hookName = endpoint === SCRAPE_WEBSITE_HOOK_ENDPOINT
+    ? 'scrape-website'
+    : endpoint === TRACKB_RENDER_ENDPOINT
+      ? 'trackb-render'
+      : 'trackb-project';
+  return callHook<T>(hookName, body);
 }
 
 export const trackB = {
@@ -353,7 +322,7 @@ export const trackB = {
       });
       const res = await fetch('/api/upload/image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-App-Id': String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || '') },
+        headers: { 'Content-Type': 'application/json', 'X-App-Id': spaceId() },
         body: JSON.stringify({ imageData, fileName: file.name }),
       });
       const data = await res.json().catch(() => null);

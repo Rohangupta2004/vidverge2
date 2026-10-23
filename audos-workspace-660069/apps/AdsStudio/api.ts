@@ -10,37 +10,33 @@
  *     → FFmpeg.wasm assembly (NO Remotion anywhere)
  *     → final downloadable MP4 + hook/body/CTA variations
  *
- * Standalone by design: Ads Studio shares no module with Product Video,
- * SceneForge, Video Enhancer or Script-to-Video.
+ * Vergeye supplies the research/intelligence entry point; this module remains
+ * the existing short-ad production engine. Long-form film production stays in
+ * Script-to-Video rather than being duplicated here.
  */
 
 import type { ShotIntent } from '../../lib/videoEngines';
+import {
+  WORKSPACE_ID,
+  callHook as callWorkspaceHook,
+  getSessionId,
+  spaceId,
+  workspaceTokenNow,
+} from '../../lib/workspace';
 
 // ---------------------------------------------------------------------------
 // Session / auth plumbing
 // ---------------------------------------------------------------------------
 
-export function wsToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
-
-export function sessionId(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__spaceSessionId || '');
-}
-
-export function appId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
-}
+export const wsToken = workspaceTokenNow;
+export const sessionId = getSessionId;
+export const appId = spaceId;
 
 /** The workspace's UUID, injected by the platform at serve time. Used for
  *  provider-credential proxy and server-stitch endpoints that address the
  *  workspace by UUID rather than by space id. */
 export function workspaceUuid(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__WORKSPACE_ID__ || '');
+  return WORKSPACE_ID;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +59,17 @@ export interface ProductResearch {
   customer_language: string[];
   positioning: string;
   proof_elements: string[];
+  brand_context?: {
+    website_url: string;
+    tone: string;
+    logo_url: string;
+    colors: string[];
+    fonts: string[];
+    images: string[];
+    social_links: string[];
+    pages_read: Array<{ url: string; status: string }>;
+    gaps: string[];
+  };
 }
 
 export const ANGLE_TYPES = [
@@ -85,10 +92,39 @@ export interface AdAngle {
   creative_direction: string;
 }
 
-export type ClipDuration = 4 | 6 | 8 | 10;
+/** Whole seconds. The familiar 4/6/8/10 ladder is only what short-clip
+ * engines offer — models with different legal ranges derive their choices from
+ * the canonical capability registry rather than a hard-coded provider belief. */
+export type ClipDuration = number;
+
+const LADDER_WORD_LIMITS: Record<number, number> = { 4: 9, 6: 13, 8: 17, 10: 22 };
+
+/** HARD word limit for a clip of this length (about 2.2 spoken words a second,
+ * matching the 4/6/8/10 ladder). */
+export function wordLimitFor(seconds: number): number {
+  const whole = Math.round(Number(seconds) || 0);
+  return LADDER_WORD_LIMITS[whole] ?? Math.max(1, Math.round(whole * 2.2));
+}
 
 /** HARD word limits per clip duration — enforced in the UI and in prompts. */
-export const WORD_LIMITS: Record<ClipDuration, number> = { 4: 9, 6: 13, 8: 17, 10: 22 };
+export const WORD_LIMITS: Record<number, number> = (() => {
+  const out: Record<number, number> = {};
+  for (let seconds = 1; seconds <= 60; seconds += 1) out[seconds] = wordLimitFor(seconds);
+  return out;
+})();
+
+/** The clip lengths the script step offers for an engine whose legal range is
+ * minS–maxS: the 4/6/8/10 ladder with anything below the engine's floor
+ * removed or, when the floor sits above the whole ladder, steps of five from
+ * the floor up to the maximum. */
+export function clipDurationChoices(limits: { minS: number; maxS: number }): ClipDuration[] {
+  const base = [4, 6, 8, 10].filter((d) => d >= limits.minS);
+  if (base.length) return base;
+  const out: number[] = [];
+  for (let d = limits.minS; d < limits.maxS; d += 5) out.push(d);
+  out.push(limits.maxS);
+  return out;
+}
 
 export function wordCount(line: string): number {
   return String(line || '').trim().split(/\s+/).filter(Boolean).length;
@@ -343,19 +379,7 @@ export async function uploadUserFile(file: File): Promise<UploadedAsset> {
 // ---------------------------------------------------------------------------
 
 export async function callHook(name: string, body: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`/api/hooks/execute/${appId()}/${name}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(wsToken() ? { 'X-Workspace-DB-Token': wsToken() } : {}),
-      ...(sessionId() ? { 'X-Session-Id': sessionId() } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  const raw = await res.json().catch(() => null);
-  const data = raw && typeof raw === 'object' && raw.response !== undefined && raw._meta !== undefined ? raw.response : raw;
-  if (!res.ok) throw new Error(String(data?.error || `The ${name} service answered HTTP ${res.status}.`));
-  return data;
+  return callWorkspaceHook(name, body);
 }
 
 /** Generate a bespoke image asset through the cached Asset Generator hook
@@ -374,25 +398,25 @@ export async function generateImageAsset(prompt: string, aspect: '9:16' | '16:9'
 // ---------------------------------------------------------------------------
 
 export const T = {
-  canvas: 'var(--space-surface-bg, #08090B)',
-  panel: 'var(--space-surface-panel, #171A21)',
-  card: 'var(--space-surface-card, #111318)',
-  raised: 'var(--space-surface-panel-strong, #1D212A)',
-  line: 'var(--space-border-default, rgba(255,255,255,0.07))',
-  lineStrong: 'var(--space-border-strong, rgba(255,255,255,0.18))',
-  ink: 'var(--space-text-primary, #F6F3EB)',
-  soft: 'var(--space-text-secondary, #B8B2A7)',
-  muted: 'var(--space-text-muted, #77736B)',
-  accent: 'var(--space-brand-primary-500, #D6AB4A)',
-  accentDeep: 'var(--space-brand-primary-600, #B8892F)',
-  highlight: 'var(--space-brand-highlight-500, #F3D58B)',
-  good: 'var(--space-semantic-success-500, #4ade80)',
-  bad: 'var(--space-semantic-danger-500, #f87171)',
-  warn: '#fbbf24',
+  canvas: 'var(--vg-bg, #0D0E10)',
+  panel: 'var(--vg-surface, #17191D)',
+  card: 'var(--vg-surface, #17191D)',
+  raised: 'var(--vg-raised, #21242A)',
+  line: 'var(--vg-border, #393E47)',
+  lineStrong: 'var(--vg-control-border, #747D8B)',
+  ink: 'var(--vg-text, #F6F2E9)',
+  soft: 'var(--vg-secondary, #B7BBC4)',
+  muted: 'var(--vg-muted, #929AA7)',
+  accent: 'var(--vg-accent, #F2B544)',
+  accentDeep: 'var(--vg-accent-pressed, #D69529)',
+  highlight: 'var(--vg-accent-hover, #FFD16F)',
+  good: 'var(--vg-success, #79D5A5)',
+  bad: 'var(--vg-danger, #FF9A9A)',
+  warn: 'var(--vg-warning, #F1C778)',
   /** Input well — recessed below a card rather than level with it. */
-  input: 'var(--space-surface-muted, #0E1014)',
-  sans: "'Inter', 'Geist', system-ui, -apple-system, sans-serif",
-  mono: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
+  input: 'var(--vg-bg, #0D0E10)',
+  sans: "'Manrope', 'Segoe UI', sans-serif",
+  mono: "ui-monospace, 'SFMono-Regular', Consolas, monospace",
 } as const;
 
 export function newId(prefix: string): string {

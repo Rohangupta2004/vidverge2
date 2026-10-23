@@ -1,0 +1,85 @@
+{
+  "id": "s2v-6-scenes",
+  "version": 1,
+  "name": "Golden script — 6 scenes, 1 character, 9:16",
+  "purpose": "Regression baseline for the Script-to-Video pipeline. Any change to segmentation, model routing, audio planning or final assembly is checked against this script first: it must still segment into 6 scenes, keep the single character consistent across all of them, and land inside the expected duration range.",
+  "input": {
+    "title": "Alex ships a launch video",
+    "aspect_ratio": "9:16",
+    "input_mode": "ai",
+    "style_lock": true,
+    "script": "Alex is a solo founder with a product nobody has seen yet. It is late, the office is empty, and the launch is tomorrow.\n\nAlex opens a laptop and types one paragraph about what the product does. That is the whole brief — no storyboard, no shot list, no crew.\n\nThe paragraph becomes six scenes. Each one carries the same look, the same lighting, the same Alex.\n\nThe clips render while Alex makes coffee. Narration, music and sound design arrive with them.\n\nIn the morning the finished film is already waiting, captioned and cut, ready to post.\n\nAlex hits publish. The product has a face now — and it took one paragraph.",
+    "characters": [
+      {
+        "id": "alex",
+        "name": "Alex",
+        "appearance": "Late twenties, short dark hair, light stubble, charcoal crew-neck sweater over a white tee, thin silver watch on the left wrist. Warm olive skin, calm and tired expression. Same wardrobe in every scene."
+      }
+    ]
+  },
+  "expectedSceneCount": 6,
+  "expectedDurationRange": [30, 60],
+  "durationNote": "The default engine (Kling 3.0 Omni) takes the literal durations 5 or 10 seconds, so 6 scenes span exactly 30-60s. A scene asking for anything in between snaps UP to the next legal length - never down, so no dialogue is ever cut short.",
+  "expectedCharacterCount": 1,
+  "expectedAspect": "9:16",
+  "expectedScenes": [
+    {
+      "idx": 0,
+      "type": "video_clip",
+      "summary": "Alex alone in a dark empty office the night before launch.",
+      "continuation": false,
+      "characters": ["alex"],
+      "duration_s": 10
+    },
+    {
+      "idx": 1,
+      "type": "video_clip",
+      "summary": "Close on the laptop as Alex types the one-paragraph brief.",
+      "continuation": true,
+      "characters": ["alex"],
+      "duration_s": 10
+    },
+    {
+      "idx": 2,
+      "type": "video_clip",
+      "summary": "The paragraph fans out into six matching shots — same look, same Alex.",
+      "continuation": true,
+      "characters": ["alex"],
+      "duration_s": 10
+    },
+    {
+      "idx": 3,
+      "type": "video_clip",
+      "summary": "Alex steps away to make coffee while the clips render behind them.",
+      "continuation": true,
+      "characters": ["alex"],
+      "duration_s": 10
+    },
+    {
+      "idx": 4,
+      "type": "video_clip",
+      "summary": "Morning light; the finished captioned film is already waiting on screen.",
+      "continuation": false,
+      "characters": ["alex"],
+      "duration_s": 10
+    },
+    {
+      "idx": 5,
+      "type": "video_clip",
+      "summary": "Alex presses publish and sits back — the product finally has a face.",
+      "continuation": true,
+      "characters": ["alex"],
+      "duration_s": 10
+    }
+  ],
+  "assertions": [
+    "The plan segments the script into exactly expectedSceneCount scenes.",
+    "plan.characters has exactly one entry and its id is stable across every scene that references it.",
+    "Every scene resolves to a real engine — no scene may end with workflow_kind 'unavailable'.",
+    "The default video model is a live model: never kling-v2-master and never any kling-v1 id.",
+    "style_lock is true by default, so scene 1's extracted fingerprint is prepended to scenes 2..6.",
+    "The summed scene durations fall inside expectedDurationRange (seconds).",
+    "Once every scene is completed or skipped, Final Assembly starts on its own — no manual click.",
+    "A missing music bed degrades to a warning; it never fails the film."
+  ]
+}

@@ -41,33 +41,19 @@ import { brandTheme } from './brandreel/types';
 import { buildBrandObject, scrapeBrand, writeScriptVariants } from './brandreel/api';
 import { BRAND_REEL_TSX, buildReelProps } from './brandreel/composition';
 import StoryboardColumns from './brandreel/StoryboardColumns';
-
-const WORKSPACE_UUID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
-
-function wsToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
-function appId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
-}
-async function callHook(name: string, payload: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`/api/hooks/execute/${appId()}/${name}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(wsToken() ? { 'X-Workspace-DB-Token': wsToken() } : {}) },
-    body: JSON.stringify(payload),
-  });
-  const raw = await res.json().catch(() => null);
-  const data = raw && typeof raw === 'object' && raw.response !== undefined && raw._meta !== undefined ? raw.response : raw;
-  if (!res.ok) throw new Error(String(data?.error || `The ${name} service answered HTTP ${res.status}.`));
-  return data || {};
-}
+import { poll } from '../../lib/poll';
+import { WORKSPACE_ID, callHook, getWorkspaceToken, workspaceTokenNow } from '../../lib/workspace';
 async function uploadImage(file: File): Promise<string> {
+  const token = await getWorkspaceToken();
   const form = new FormData();
   form.append('file', file);
+  form.append('workspaceId', WORKSPACE_ID);
   form.append('folder', 'remotion-studio');
-  const res = await fetch('/api/upload/file', { method: 'POST', body: form });
+  const res = await fetch('/api/upload/file', {
+    method: 'POST',
+    headers: token ? { 'X-Workspace-DB-Token': token } : undefined,
+    body: form,
+  });
   const data = await res.json().catch(() => null);
   if (!res.ok || !data?.url) throw new Error(String(data?.error || `Image upload failed (HTTP ${res.status}).`));
   return String(data.url);
@@ -200,10 +186,15 @@ export default function RemotionStudio() {
       setRenderNote('Rendering with Remotion…');
       void (async () => {
         try {
-          let out = await callHook('pv-render-composition', { operationId: s.operationId });
-          while (aliveRef.current && out?.status === 'rendering' && out.operationId) {
-            out = await callHook('pv-render-composition', { operationId: out.operationId });
-          }
+          const out = await poll(
+            () => callHook<any>('pv-render-composition', { operationId: s.operationId }),
+            {
+              interval: 2_000,
+              timeout: 30 * 60 * 1_000,
+              tolerateErrors: 1,
+              until: (status) => !aliveRef.current || status?.status === 'complete' || status?.status === 'failed',
+            },
+          );
           if (out?.status === 'complete' && out.renderUrl) {
             setRenderUrl(String(out.renderUrl));
             saveRenderState({ renderUrl: String(out.renderUrl) });
@@ -346,7 +337,7 @@ export default function RemotionStudio() {
       const url = await uploadImage(file);
       set({ url, subject: '', colors: [], analyzing: true });
       try {
-        const out = await callHook('pv-gemini-analyze', { imageUrl: url, wt: wsToken() });
+        const out = await callHook('pv-gemini-analyze', { imageUrl: url, wt: workspaceTokenNow() });
         set({ url, subject: String(out.subject || ''), colors: Array.isArray(out.dominantColors) ? out.dominantColors.map(String) : [], analyzing: false });
       } catch (e) {
         // The upload still counts — analysis is a bonus.
@@ -384,9 +375,9 @@ export default function RemotionStudio() {
             ]
         ).filter(Boolean).join(' ');
         try {
-          const token = wsToken();
+          const token = workspaceTokenNow();
           if (token) {
-            const res = await fetch(`/api/workspaces/${WORKSPACE_UUID}/audio/voiceover`, {
+            const res = await fetch(`/api/workspaces/${WORKSPACE_ID}/audio/voiceover`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
               body: JSON.stringify({ script: voScript.slice(0, 10000) }),
@@ -477,8 +468,17 @@ export default function RemotionStudio() {
         budgetMs: 20000,
       });
       if (out?.operationId) saveRenderState({ operationId: String(out.operationId) });
-      while (aliveRef.current && out?.status === 'rendering' && out.operationId) {
-        out = await callHook('pv-render-composition', { operationId: out.operationId });
+      if (out?.status === 'rendering' && out.operationId) {
+        const operationId = String(out.operationId);
+        out = await poll(
+          () => callHook<any>('pv-render-composition', { operationId }),
+          {
+            interval: 2_000,
+            timeout: 30 * 60 * 1_000,
+            tolerateErrors: 1,
+            until: (status) => !aliveRef.current || status?.status === 'complete' || status?.status === 'failed',
+          },
+        );
       }
       if (out?.status === 'complete' && out.renderUrl) {
         setRenderUrl(String(out.renderUrl));

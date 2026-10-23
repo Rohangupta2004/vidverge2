@@ -5,6 +5,7 @@ import { useSpaceRuntime } from './SpaceRuntimeContext';
 import FileBrowser from './components/FileBrowser';
 import EmailGate from './components/EmailGate';
 import Settings from './components/Settings';
+import VideoLibrary from './components/VideoLibrary';
 import PricingScreen from './components/PricingScreen';
 import CreditBalance from './components/CreditBalance';
 import {
@@ -20,11 +21,12 @@ import { consumeCheckoutReturn, refreshCredits } from './lib/credits';
 import { tw } from './lib/colors';
 import { isTenantDelegationCanvas } from './lib/tenant-delegation-canvas';
 import { LauncherFX } from './components/HomeLauncher';
-import AgentChatView from './components/AgentChatView';
 import VergeLoader from './components/VergeLoader';
 import BrandLogo from './components/BrandLogo';
-import { useAgentChatRuntime } from './components/useAgentChatRuntime';
 import GlobalStyles from './components/ui/GlobalStyles';
+import BackgroundJobsTray from './components/shared/BackgroundJobsTray';
+import { ShellDock, ShellHeader } from './components/ShellNav';
+import type { ShellNavItem, WorkspaceMode } from './components/ShellNav';
 
 const DESKTOP_VERSION = 2;
 
@@ -48,16 +50,6 @@ function useIsMobile() {
   }, []);
 
   return isMobile;
-}
-
-/**
- * HeroAgentChat — the VidVerge agent as the hero of the main screen.
- * Glue only: the platform-managed runtime hook + the per-space view
- * (components/AgentChatView.tsx). Do not rebuild chat logic here.
- */
-function HeroAgentChat({ spaceId }: { spaceId: string }) {
-  const runtime = useAgentChatRuntime({ spaceId });
-  return <AgentChatView runtime={runtime} />;
 }
 
 interface AppErrorBoundaryProps {
@@ -122,7 +114,7 @@ class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundary
 
 function buildFontFamily(fontName?: string): string {
   if (!fontName) {
-    return '"Inter", system-ui, -apple-system, sans-serif';
+    return '"Manrope", "Segoe UI", sans-serif';
   }
 
   return `"${fontName}", system-ui, -apple-system, sans-serif`;
@@ -134,7 +126,7 @@ function resolveGenesisRuntimeTheme(config: SpaceConfig) {
   const headingFont =
     themeTokens.typography?.headingFont ||
     branding.headingFont ||
-    'Sora';
+    'Space Grotesk';
   const bodyFont =
     themeTokens.typography?.bodyFont ||
     branding.bodyFont ||
@@ -251,9 +243,10 @@ iconMap['gear'] = SettingsIcon;
 // SIDEBAR
 // =============================================================================
 
-const SIDEBAR_WIDTH = 248;
-const SIDEBAR_WIDTH_COLLAPSED = 76;
+const SIDEBAR_WIDTH = 232;
+const SIDEBAR_WIDTH_COLLAPSED = 64;
 const SIDEBAR_COLLAPSE_KEY = 'vv-sidebar-collapsed';
+const WORKSPACE_MODE_KEY = 'vv-workspace-mode';
 const SIDEBAR_BORDER = 'var(--space-border-default, rgba(255,255,255,0.07))';
 
 /**
@@ -264,27 +257,19 @@ const SIDEBAR_BORDER = 'var(--space-border-default, rgba(255,255,255,0.07))';
  */
 const SIDEBAR_GROUPS: Array<{ label: string; emoji: string; appIds: string[] }> = [
   {
-    label: 'Video',
+    label: 'Studios',
     emoji: '\u{1F3AC}',
     appIds: [
       'vidverge-agent',
-      'vidverge-engine',
-      'sceneforge',
       'script-to-video',
+      'ads-studio',
       'faceless',
-      'faceless-content',
+      'sceneforge',
       'video-enhancer',
+      'studio',
+      'cineagent',
+      'brand-context',
     ],
-  },
-  {
-    label: 'Lab & Tools',
-    emoji: '\u{1F52C}',
-    appIds: ['video-provider-lab', 'cineagent', 'phantom'],
-  },
-  {
-    label: 'Creative',
-    emoji: '\u{1F3A8}',
-    appIds: ['ads-studio', 'motion-type', 'voice-studio', 'product-launch', 'brand-context'],
   },
 ];
 
@@ -292,6 +277,17 @@ interface SidebarSection {
   label: string;
   emoji: string;
   items: AppConfig[];
+}
+
+function appNavLabel(app: AppConfig): string {
+  // Display names only. The registry ids ('vidverge-agent', 'cineagent',
+  // 'brand-context') are what deep links, job rows and stored settings key
+  // off, so they are deliberately left alone — only the label a person reads
+  // changes here.
+  if (app.id === 'vidverge-agent') return 'Verger';
+  if (app.id === 'brand-context') return 'Brand Kit';
+  if (app.id === 'cineagent') return 'Studio';
+  return app.name;
 }
 
 function buildSidebarSections(apps: AppConfig[]): SidebarSection[] {
@@ -336,8 +332,8 @@ function SidebarNavItem({ icon: Icon, label, active, collapsed, onClick }: Sideb
         'relative flex w-full items-center rounded-[10px] transition-all duration-200 ease-out',
         collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5',
         active
-          ? 'bg-[var(--space-brand-primary)] text-[var(--space-text-on-primary)] shadow-[0_8px_28px_rgba(214,171,74,0.22)]'
-          : 'text-[var(--space-text-muted)] hover:bg-[rgba(255,255,255,0.055)] hover:text-[var(--space-text-primary)]',
+          ? 'bg-[image:var(--vg-gradient-selected)] text-[var(--space-text-primary)] border-l-2 border-l-[var(--vg-accent)]'
+          : 'text-[var(--space-text-muted)] hover:bg-[var(--vg-hover)] hover:text-[var(--space-text-primary)]',
       ].join(' ')}
     >
       <Icon className="w-[18px] h-[18px] shrink-0" />
@@ -350,6 +346,70 @@ function SidebarNavItem({ icon: Icon, label, active, collapsed, onClick }: Sideb
         </span>
       )}
     </button>
+  );
+}
+
+function ManualLauncher({
+  apps,
+  workspaceName,
+  onOpen,
+  onOpenLibrary,
+}: {
+  apps: AppConfig[];
+  workspaceName: string;
+  onOpen: (appId: string) => void;
+  onOpenLibrary: () => void;
+}) {
+  return (
+    <div className="relative h-full overflow-y-auto bg-[var(--space-surface-bg)] px-4 py-7 sm:px-8 sm:py-10">
+      <LauncherFX compact />
+      <div className="relative mx-auto w-full max-w-6xl">
+        <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--space-text-brand)]">Manual mode</p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--space-text-primary)] sm:text-3xl">Choose your studio</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--space-text-secondary)]">
+              Hands-on control across every {workspaceName} capability. Projects and finished videos stay in the same shared library Verger uses.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenLibrary}
+            className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[10px] border border-[var(--space-border-strong)] bg-[var(--space-surface-panel)] px-4 text-sm font-semibold text-[var(--space-text-primary)] transition-colors hover:bg-[var(--vg-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--vg-focus)]"
+          >
+            <Film className="h-4 w-4 text-[var(--space-text-brand)]" />
+            Shared video library
+          </button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {apps.map((app) => {
+            const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
+            const ownerOnly = Array.isArray((app as any).allowedRoles) && (app as any).allowedRoles.length > 0;
+            return (
+              <button
+                key={app.id}
+                type="button"
+                onClick={() => onOpen(app.id)}
+                className="group flex min-h-[168px] flex-col rounded-2xl border border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-card)_94%,transparent)] p-5 text-left shadow-[0_18px_50px_rgba(0,0,0,0.22)] transition duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_srgb,var(--space-brand-primary-500)_48%,transparent)] hover:bg-[var(--space-surface-card-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--vg-focus)]"
+              >
+                <span className="flex w-full items-start justify-between gap-3">
+                  <span className="grid h-11 w-11 place-items-center rounded-xl border border-[color-mix(in_srgb,var(--space-brand-primary-500)_32%,transparent)] bg-[var(--space-surface-accent-soft)] text-[var(--space-text-brand)]">
+                    <IconComponent className="h-5 w-5" />
+                  </span>
+                  {ownerOnly ? (
+                    <span className="rounded-md border border-[var(--space-border-default)] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--space-text-muted)]">Owner only</span>
+                  ) : null}
+                </span>
+                <span className="mt-4 text-base font-semibold text-[var(--space-text-primary)]">{appNavLabel(app)}</span>
+                <span className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--space-text-secondary)]">{app.description || 'Open this Vidverge studio.'}</span>
+                <span className="mt-auto pt-4 text-xs font-semibold text-[var(--space-text-brand)]">Open studio →</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -381,7 +441,7 @@ export default function SpaceDesktop({
   LoadingSpinner,
   initialAppId
 }: SpaceDesktopProps) {
-  const { sessionId, isBootstrappingSession, trackEvent, subscriptionReady } = useSpaceRuntime();
+  const { sessionId, isBootstrappingSession, trackEvent, subscriptionReady, userRole } = useSpaceRuntime();
   const isMobile = useIsMobile();
   // SUBSCRIPTION GATE TEMPORARILY DISABLED — all users have full access.
   // This used to be the visitor's tier from the `subscriptions` table, looked
@@ -391,6 +451,11 @@ export default function SpaceDesktop({
   // so nothing here can gate a feature or raise a paywall. Only the plan chrome
   // (the crown label / badge) still reads it.
   const { tier: userTier, unlimited } = useUserTier(spaceId, sessionId);
+  const effectiveRole = userRole || (mode === 'entrepreneur' ? 'owner' : 'customer');
+  const accessibleApps = config.apps.filter((app) => {
+    const allowedRoles = Array.isArray((app as any).allowedRoles) ? (app as any).allowedRoles as string[] : [];
+    return allowedRoles.length === 0 || allowedRoles.includes(effectiveRole);
+  });
   const isSubscriber = isPaidTier(userTier);
   const planLabel = isProTier(userTier)
     ? 'Pro'
@@ -448,10 +513,23 @@ export default function SpaceDesktop({
       body.style.left = '';
     };
   }, [isMobile]);
-  const [activeWindowId, setActiveWindowId] = useState<WindowId | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => {
+    if (typeof window === 'undefined') return 'agent';
+    try {
+      return window.localStorage.getItem(WORKSPACE_MODE_KEY) === 'manual' ? 'manual' : 'agent';
+    } catch {
+      return 'agent';
+    }
+  });
+  const [activeWindowId, setActiveWindowId] = useState<WindowId | null>(() => workspaceMode === 'manual' ? null : 'vidverge-agent');
   const [fileAccessLogs] = useState<FileAccessLog[]>([]);
   // Sidebar collapse is a per-visitor preference, so it is read straight out
   // of localStorage on first render rather than flashing expanded first.
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  // The floating dock collapses to a drawer on phones. The header owns the
+  // launcher, so the trigger can never sit under the on-screen keyboard or
+  // over an app's composer.
+  const [navDrawerOpen, setNavDrawerOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -480,11 +558,29 @@ export default function SpaceDesktop({
   // Track if space_entered has been tracked to avoid duplicates
   const hasTrackedSpaceEntry = useRef(false);
 
-  const openApp = (appId: string) => {
-    const app = config.apps.find(a => a.id === appId);
-    if (app) {
-      trackEvent('app_opened', { appId, appName: app.name });
+  const changeWorkspaceMode = (nextMode: WorkspaceMode) => {
+    setWorkspaceMode(nextMode);
+    setMobileMoreOpen(false);
+    setNavDrawerOpen(false);
+    try {
+      window.localStorage.setItem(WORKSPACE_MODE_KEY, nextMode);
+    } catch {
+      // Mode still changes for this visit when browser storage is unavailable.
     }
+    setActiveWindowId(nextMode === 'agent' ? 'vidverge-agent' : null);
+  };
+
+  const openApp = (appId: string) => {
+    const app = accessibleApps.find(a => a.id === appId);
+    if (!app) {
+      setActiveWindowId(workspaceMode === 'manual' ? null : 'vidverge-agent');
+      return;
+    }
+    if (appId === 'vidverge-agent') {
+      setWorkspaceMode('agent');
+      try { window.localStorage.setItem(WORKSPACE_MODE_KEY, 'agent'); } catch {}
+    }
+    trackEvent('app_opened', { appId, appName: app.name });
     setActiveWindowId(appId);
   };
 
@@ -497,7 +593,7 @@ export default function SpaceDesktop({
     const params = new URLSearchParams(window.location.search);
     const requestedAppId = params.get('app') || (window as any).__DEEP_LINK_APP_ID__ || initialAppId;
     if (!requestedAppId) return false;
-    const matchingApp = config.apps.find(a => a.id.toLowerCase() === String(requestedAppId).toLowerCase());
+    const matchingApp = accessibleApps.find(a => a.id.toLowerCase() === String(requestedAppId).toLowerCase());
     return !!matchingApp && (matchingApp as any).public === true;
   })();
   // Tenant-agent delegation (Product Run standing access / job handoff): the
@@ -528,7 +624,7 @@ export default function SpaceDesktop({
     (forceVisitor ||
       (!sessionId && !isBootstrappingSession && !publicAppBypass && !tenantDelegationBypass));
 
-  // With no active window, show the two-app launcher on every screen size.
+  // With no active window, Manual mode shows the complete studio launcher.
   const isLauncherMode = activeWindowId === null;
 
   // Track space_entered when session becomes available (first entry after email gate)
@@ -557,10 +653,14 @@ export default function SpaceDesktop({
     // configured default landing app (config.desktop.layout.defaultLandingView
     // = 'app') instead of the agent-hero launcher.
     if (!deepLinkId) {
-      // Always land on Vidverge Agent when no deep link is present
+      if (workspaceMode === 'manual') {
+        setActiveWindowId(null);
+        return;
+      }
+      // Agent mode lands on Verger when no deep link is present.
       const landing = (config.desktop?.layout || {}) as any;
       const defaultAppId = landing.defaultLandingAppId || 'vidverge-agent';
-      const landingApp = config.apps.find(app => app.id === defaultAppId) || config.apps[0];
+      const landingApp = accessibleApps.find(app => app.id === defaultAppId) || accessibleApps[0];
       if (landingApp) {
         setActiveWindowId(landingApp.id);
         return;
@@ -568,7 +668,7 @@ export default function SpaceDesktop({
     }
 
     if (deepLinkId) {
-      const matchingApp = config.apps.find(
+      const matchingApp = accessibleApps.find(
         app => app.id.toLowerCase() === deepLinkId || app.name.toLowerCase() === deepLinkId
       );
 
@@ -584,9 +684,17 @@ export default function SpaceDesktop({
 
       if (deepLinkId === 'settings') {
         setActiveWindowId('settings');
+        return;
       }
+
+      if (deepLinkId === 'library') {
+        setActiveWindowId('library');
+        return;
+      }
+
+      setActiveWindowId('vidverge-agent');
     }
-  }, [sessionId, config.apps]);
+  }, [sessionId, config.apps, effectiveRole, workspaceMode]);
 
   // Update URL hash when the active app or utility changes.
   useEffect(() => {
@@ -619,13 +727,13 @@ export default function SpaceDesktop({
       const hash = window.location.hash.slice(1).toLowerCase();
 
       if (!hash) {
-        // No hash returns to the two-app launcher.
-        setActiveWindowId(null);
+        setActiveWindowId(workspaceMode === 'manual' ? null : 'vidverge-agent');
         return;
       }
 
-      // Try to find matching app
-      const matchingApp = config.apps.find(
+      // Try to find a role-accessible app. Owner-only apps never open from a
+      // customer hash, even when someone pastes the address directly.
+      const matchingApp = accessibleApps.find(
         app => app.id.toLowerCase() === hash || app.name.toLowerCase() === hash
       );
 
@@ -645,32 +753,37 @@ export default function SpaceDesktop({
         return;
       }
 
-      // Invalid hash returns to the launcher.
-      setActiveWindowId(null);
+      if (hash === 'library') {
+        setActiveWindowId('library');
+        return;
+      }
+
+      // Invalid hashes return to the current mode's primary surface.
+      setActiveWindowId(workspaceMode === 'manual' ? null : 'vidverge-agent');
     };
 
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [config.apps]);
+  }, [config.apps, effectiveRole, workspaceMode]);
 
   // Listen for app deep-link events from other shell surfaces.
   useEffect(() => {
     const handleOpenApp = (event: CustomEvent) => {
       const { appId } = event.detail || {};
-      if (appId) setActiveWindowId(appId);
+      if (appId) openApp(appId);
     };
 
     window.addEventListener('openApp', handleOpenApp as EventListener);
     return () => window.removeEventListener('openApp', handleOpenApp as EventListener);
-  }, []);
+  }, [config.apps, effectiveRole, workspaceMode]);
 
-  // Mini-apps can return the visitor to the two-app launcher.
+  // Mini-apps return to the current mode's primary surface.
   useEffect(() => {
-    const handleCloseApp = () => setActiveWindowId(null);
+    const handleCloseApp = () => setActiveWindowId(workspaceMode === 'manual' ? null : 'vidverge-agent');
 
     window.addEventListener('closeApp', handleCloseApp as EventListener);
     return () => window.removeEventListener('closeApp', handleCloseApp as EventListener);
-  }, []);
+  }, [workspaceMode]);
 
   // Listen for plans requests from app, chat and Settings surfaces.
   useEffect(() => {
@@ -702,7 +815,7 @@ export default function SpaceDesktop({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         if (activeWindowId === 'files') {
-          setActiveWindowId(null);
+          setActiveWindowId(workspaceMode === 'manual' ? null : 'vidverge-agent');
         } else {
           setActiveWindowId('files');
         }
@@ -711,26 +824,69 @@ export default function SpaceDesktop({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeWindowId]);
+  }, [activeWindowId, workspaceMode]);
 
   // Get current app config and component if viewing an app
-  const isAppWindow = activeWindowId && activeWindowId !== 'files' && activeWindowId !== 'settings';
-  const currentAppConfig = isAppWindow ? config.apps.find(app => app.id === activeWindowId) : null;
+  const isAppWindow = activeWindowId && activeWindowId !== 'files' && activeWindowId !== 'settings' && activeWindowId !== 'library';
+  const currentAppConfig = isAppWindow ? accessibleApps.find(app => app.id === activeWindowId) : null;
   const CurrentApp = isAppWindow && activeWindowId ? apps[activeWindowId] : null;
 
   const runtimeTheme = resolveGenesisRuntimeTheme(config);
   const workspaceName = runtimeTheme.branding.name || 'VidVerge';
-  const sidebarSections = buildSidebarSections(config.apps);
+  // Every role-accessible registered app is a first-class navigation target.
+  // Owner-only entries remain filtered by accessibleApps above.
+  const sidebarApps = accessibleApps;
+  const sidebarSections = buildSidebarSections(sidebarApps);
+  const primaryApps = sidebarSections.find((section) => section.label === 'Studios')?.items || [];
+  const moreApps = [
+    ...primaryApps.slice(4),
+    ...sidebarSections.filter((section) => section.label !== 'Studios').flatMap((section) => section.items),
+  ];
   const sidebarWidth = sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH;
+  const dockItems: ShellNavItem[] = sidebarApps.map((app) => ({
+    id: app.id,
+    label: appNavLabel(app),
+    Icon: app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity,
+  }));
+  const dockUtilityItems: ShellNavItem[] = [
+    { id: 'library', label: 'Library', Icon: Film },
+  ];
+  const dockHomeItem: ShellNavItem = dockItems.find((item) => item.id === 'vidverge-agent') || {
+    id: 'vidverge-agent',
+    label: 'Verger',
+    Icon: Bot,
+  };
+  const selectNavTarget = (id: string) => {
+    if (id === 'library') {
+      setActiveWindowId('library');
+      return;
+    }
+    if (id === 'credits') {
+      setPricingRequest({ trigger: 'nav' });
+      return;
+    }
+    openApp(id);
+  };
+  // The single breadcrumb pattern, used on every route: workspace, then the
+  // open section. Null on the launcher, where the workspace name is the page.
+  const sectionLabel =
+    activeWindowId === 'files'
+      ? 'Memory'
+      : activeWindowId === 'settings'
+        ? 'Settings'
+        : activeWindowId === 'library'
+          ? 'Library'
+        : currentAppConfig
+          ? appNavLabel(currentAppConfig)
+          : null;
   const themeVariables = (runtimeTheme.themeTokens.cssVariables || {}) as Record<string, string>;
   const rootStyle = {
     ...themeVariables,
     ['--space-font-family' as any]:
-      runtimeTheme.themeTokens.typography?.fontFamily ||
-      `"${runtimeTheme.themeTokens.typography?.headingFont || 'Inter'}", system-ui, -apple-system, sans-serif`,
+      runtimeTheme.themeTokens.typography?.fontFamily || '"Manrope", "Segoe UI", sans-serif',
     fontFamily:
       runtimeTheme.themeTokens.typography?.fontFamily ||
-      `"${runtimeTheme.themeTokens.typography?.headingFont || 'Inter'}", system-ui, -apple-system, sans-serif`,
+      '"Manrope", "Segoe UI", sans-serif',
     background:
       runtimeTheme.themeTokens.shell?.pageBackground ||
       `linear-gradient(135deg, var(--space-surface-gradient-from), var(--space-surface-gradient-via), var(--space-surface-gradient-to))`,
@@ -820,58 +976,64 @@ export default function SpaceDesktop({
 
   return (
     <>
-      {/* Google Fonts. Inter is the brand face and is always loaded; the
-          conditional link covers a space configured onto some other font. */}
+      {/* Fonts load once at the shell. `display=swap` keeps first paint usable. */}
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      {runtimeTheme.themeTokens.typography?.headingFont && runtimeTheme.themeTokens.typography.headingFont !== 'Inter' && (
-        <link 
-          href={`https://fonts.googleapis.com/css2?family=${encodeURIComponent(runtimeTheme.themeTokens.typography.headingFont)}:wght@300;400;500;600;700;800&display=swap`} 
-          rel="stylesheet" 
-        />
-      )}
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet" />
 
       {/* Dark ground, dark scrollbars and the light-utility neutraliser that
           finishes the dark conversion inside apps written before it. */}
       <GlobalStyles />
 
-      <div 
-        className="min-h-screen vv-dark"
+      <div
+        className="h-screen overflow-hidden pb-[86px] pt-[60px] vv-dark"
         style={rootStyle}
       >
-        {/* Credits + Plans - always reachable from the shell chrome (mobile uses the dock) */}
-        <div className="hidden md:flex fixed top-4 right-4 items-center gap-2" style={{ zIndex: 60 }}>
-          <CreditBalance />
-          <button
-            onClick={() => setPricingRequest({ trigger: 'nav' })}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold text-[var(--space-text-primary)] transition-all hover:scale-105"
-            style={{
-              // Quiet chrome on the dark ground: a subscriber gets the gold
-              // edge, everyone else a neutral one. The gradient CTA stays the
-              // single loud accent anywhere on screen.
-              background: 'linear-gradient(90deg, var(--space-surface-panel) 0%, var(--space-surface-panel-strong) 100%)',
-              border: isSubscriber ? '1px solid color-mix(in srgb, var(--space-brand-primary-500) 55%, transparent)' : '1px solid var(--space-border-default)',
-              boxShadow: '0 12px 36px rgba(0,0,0,0.38)',
-            }}
-            title={planButtonTitle}
-            data-testid="button-open-plans"
-            data-plan-tier={userTier || 'unknown'}
-          >
-            <Crown className="w-4 h-4" style={{ color: 'var(--space-brand-highlight-500)' }} />
-            {planLabel}
-          </button>
-        </div>
+        {/* The one header and the one dock, mounted once for the whole shell so
+            every state — launcher, agent chat, app open, Settings, Memory —
+            inherits the same chrome and the same navigation order. The root
+            padding above reserves their space; nothing overlaps content. */}
+        <ShellHeader
+          workspaceName={workspaceName}
+          sectionLabel={sectionLabel}
+          jobsSlot={<BackgroundJobsTray variant="compact" />}
+          creditsSlot={<CreditBalance variant="text" />}
+          onHome={() => changeWorkspaceMode('agent')}
+          onSettings={() => setActiveWindowId('settings')}
+          onPlans={() => setPricingRequest({ trigger: 'nav' })}
+          planLabel={planLabel}
+          onCloseSection={activeWindowId && activeWindowId !== 'vidverge-agent' ? () => setActiveWindowId(workspaceMode === 'manual' ? null : 'vidverge-agent') : undefined}
+          onOpenDrawer={() => setNavDrawerOpen(true)}
+          drawerOpen={navDrawerOpen}
+          mode={workspaceMode}
+          onModeChange={changeWorkspaceMode}
+        />
+        <ShellDock
+          workspaceName={workspaceName}
+          items={dockItems}
+          utilityItems={dockUtilityItems}
+          homeItem={dockHomeItem}
+          activeId={activeWindowId}
+          onSelect={selectNavTarget}
+          onHome={() => changeWorkspaceMode('agent')}
+          drawerOpen={navDrawerOpen}
+          onDrawerClose={() => setNavDrawerOpen(false)}
+          mode={workspaceMode}
+          onModeChange={changeWorkspaceMode}
+        />
 
-      {/* Left Sidebar — the product's primary navigation, present in every
-          desktop shell state including the launcher. Collapses to icons. */}
+      {/* RETIRED wide rail. This was the primary navigation before the shared
+          floating dock above replaced it; it is kept but permanently disabled
+          (the `hidden` class below, with no `md:flex`) so a rail and a dock can
+          never both be on screen. ShellDock is the only live nav. Do not
+          re-enable this without removing ShellDock first. */}
       <aside
-        className="hidden md:flex fixed left-0 top-0 bottom-0 z-50 flex-col border-r transition-[width] duration-300 ease-in-out"
+        className="hidden fixed left-0 top-0 bottom-0 z-50 flex-col border-r transition-[width] duration-300 ease-in-out"
         style={{
           width: sidebarWidth,
           background: 'linear-gradient(180deg, color-mix(in srgb, var(--space-surface-card) 96%, transparent), var(--space-surface-bg))',
           borderColor: SIDEBAR_BORDER,
-          boxShadow: '14px 0 44px rgba(0,0,0,0.28)',
+          boxShadow: 'none',
         }}
         aria-label={`${workspaceName} studios`}
       >
@@ -879,7 +1041,7 @@ export default function SpaceDesktop({
         <button
           onClick={() => setActiveWindowId(null)}
           title={`${workspaceName} home`}
-          className={`flex h-[68px] shrink-0 items-center border-b transition-colors hover:bg-[rgba(255,255,255,0.03)] ${
+          className={`flex h-16 shrink-0 items-center border-b transition-colors hover:bg-[var(--vg-hover)] ${
             sidebarCollapsed ? 'justify-center px-0' : 'gap-2 px-4'
           }`}
           style={{ borderColor: SIDEBAR_BORDER }}
@@ -934,7 +1096,7 @@ export default function SpaceDesktop({
                   <SidebarNavItem
                     key={app.id}
                     icon={app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity}
-                    label={app.name}
+                    label={appNavLabel(app)}
                     active={activeWindowId === app.id}
                     collapsed={sidebarCollapsed}
                     onClick={() => openApp(app.id)}
@@ -975,86 +1137,28 @@ export default function SpaceDesktop({
       </aside>
 
       {/* Desktop: Main Content Area */}
-      <div className="hidden md:block h-screen min-h-0 overflow-hidden">
-        {/* Launcher = the VidVerge agent front and center, full height beside the sidebar */}
+      <div className="hidden md:block h-full min-h-0 overflow-hidden">
+        {/* Manual mode launcher — every role-accessible registered app. */}
         {isLauncherMode && (
-          <div
-            className="relative h-screen flex flex-col overflow-hidden pr-8 animate-in fade-in duration-500 transition-[padding] duration-300 ease-in-out"
-            style={{ paddingLeft: sidebarWidth + 32 }}
-          >
-            <LauncherFX />
-            {/* Headline above the hero chat */}
-            <div className="relative text-center pt-7 pb-4 vv-fade-up">
-              {/* The mark is drawn from the brand tokens rather than loaded from
-                  branding.logoUrl: that PNG is still painted in the retired
-                  gold, and `objectFit: cover` at 118x64 was cropping the tips
-                  of the V off. */}
-              <div className="mb-2 flex justify-center">
-                <BrandLogo size={190} />
-              </div>
-              <h1 className="text-3xl font-bold text-[var(--space-text-primary)]" style={{ letterSpacing: '-0.02em' }}>
-                <span className="vv-title-shimmer">What would you like to make today?</span>
-              </h1>
-              <p className="mt-1.5 text-sm text-[var(--space-text-secondary)]">
-                Tell the {workspaceName} agent your idea — or pick a studio from the sidebar on the left.
-              </p>
-            </div>
-
-            {/* Hero agent chat — the dominant element of the main screen */}
-            <div className="relative flex-1 min-h-0 w-full max-w-5xl mx-auto pb-6 vv-fade-up">
-              <div className="h-full rounded-3xl border border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-card)_94%,transparent)] backdrop-blur-xl overflow-hidden shadow-[0_24px_70px_rgba(0,0,0,0.42)]">
-                <HeroAgentChat spaceId={spaceId} />
-              </div>
-            </div>
-          </div>
+          <ManualLauncher
+            apps={sidebarApps}
+            workspaceName={workspaceName}
+            onOpen={openApp}
+            onOpenLibrary={() => setActiveWindowId('library')}
+          />
         )}
 
         {/* Normal window layout */}
         {!isLauncherMode && (
         <>
-        <div
-          className="flex h-full w-full items-stretch gap-px overflow-hidden transition-[padding] duration-300 ease-in-out"
-          style={{ paddingLeft: sidebarWidth }}
-        >
+        <div className="flex h-full w-full items-stretch gap-px overflow-hidden">
           {/* App Window - LEFT side, slides in when selected */}
           {activeWindowId && (
             <div className="min-w-0 h-full flex-1 transition-all duration-500 ease-in-out">
               <div className="w-full h-full flex flex-col bg-[var(--space-surface-card)] overflow-hidden">
-                {/* App Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--space-border-default)] bg-[color-mix(in_srgb,var(--space-surface-panel)_72%,transparent)] backdrop-blur-xl">
-                  <div className="flex items-center gap-2">
-                    {activeWindowId === 'files' && (
-                      <>
-                        <Folder className={`w-4 h-4 ${tw.icon.primary}`} />
-                        <span className="text-sm font-semibold text-[var(--space-text-primary)]">Memory</span>
-                      </>
-                    )}
-                    {activeWindowId === 'settings' && (
-                      <>
-                        <SettingsIcon className={`w-4 h-4 ${tw.icon.neutral}`} />
-                        <span className="text-sm font-semibold text-[var(--space-text-primary)]">Settings</span>
-                      </>
-                    )}
-                    {isAppWindow && currentAppConfig && (
-                      <>
-                        {(() => {
-                          const IconComponent = currentAppConfig.icon && iconMap[currentAppConfig.icon] ? iconMap[currentAppConfig.icon] : Activity;
-                          return <IconComponent className={`w-4 h-4 ${tw.icon.accent}`} />;
-                        })()}
-                        <span className="text-sm font-semibold text-[var(--space-text-primary)]">{currentAppConfig.name}</span>
-                      </>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => {
-                      // When closing window, show empty desktop
-                      setActiveWindowId(null);
-                    }}
-                    className="px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:bg-[var(--space-surface-muted)] hover:text-[var(--space-text-primary)] rounded-lg transition-colors"
-                  >
-                    Close
-                  </button>
-                </div>
+                {/* No per-window header bar: the shell's ShellHeader already
+                    names this section in the breadcrumb and carries Close, so a
+                    second title row here would be a second header. */}
                 {/* App Content — `relative` is load-bearing: apps that fill
                     their frame with `position:absolute; inset:0` need a
                     positioned ancestor here, or they anchor to the viewport
@@ -1071,6 +1175,9 @@ export default function SpaceDesktop({
                   )}
                   {activeWindowId === 'settings' && (
                     <Settings spaceId={spaceId} />
+                  )}
+                  {activeWindowId === 'library' && (
+                    <VideoLibrary />
                   )}
                   {isAppWindow && CurrentApp && currentAppConfig && (
                     <AppErrorBoundary key={currentAppConfig.id} appName={currentAppConfig.name}>
@@ -1089,99 +1196,33 @@ export default function SpaceDesktop({
       </div>
 
       {/* Mobile: Vertical Stack Layout */}
-      <div className="md:hidden fixed inset-0 flex flex-col pb-16 overflow-hidden">
+      <div className="md:hidden fixed inset-x-0 top-[60px] bottom-[86px] flex flex-col overflow-hidden">
         {/* Main content - two-app home or active app */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Mobile home — agent chat hero with a labeled app nav strip above it */}
+          {/* Mobile Manual mode uses the same complete app grid. */}
           {!activeWindowId && isMobile && (
-            <div className="relative h-full flex flex-col overflow-hidden bg-[var(--space-surface-bg)]">
-              <LauncherFX compact />
-              <div className="relative px-5 pt-5 pb-1 text-center vv-fade-up">
-                <div className="mb-1 flex justify-center">
-                  <BrandLogo size={132} />
-                </div>
-                <h1 className="text-xl font-bold text-[var(--space-text-primary)]">
-                  <span className="vv-title-shimmer">What would you like to make today?</span>
-                </h1>
-              </div>
-
-              {/* App nav — every studio, icon + name, horizontally scrollable.
-                  Ordered by the same grouping as the desktop sidebar so the
-                  two navs never disagree about where a studio sits. */}
-              <div className="relative px-3 pt-2 pb-1">
-                <div className="flex gap-2 overflow-x-auto py-1" style={{ scrollbarWidth: 'none' }}>
-                  {sidebarSections.flatMap(section => section.items).map(app => {
-                    const isActive = activeWindowId === app.id;
-                    const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
-                    return (
-                      <button
-                        key={app.id}
-                        onClick={() => openApp(app.id)}
-                        className={`flex items-center gap-1.5 px-3 py-2 rounded-full border text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
-                          isActive
-                            ? 'border-[var(--space-brand-primary)] bg-[var(--space-brand-primary)] text-white'
-                            : 'border-[var(--space-border-default)] bg-[var(--space-surface-panel)] text-[var(--space-text-primary)]'
-                        }`}
-                      >
-                        <IconComponent
-                          className={`w-4 h-4 ${isActive ? 'text-white' : 'text-[var(--space-text-brand)]'}`}
-                        />
-                        {app.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Hero agent chat */}
-              <div className="relative flex-1 min-h-0 px-3 pb-3 pt-1">
-                <div className="h-full rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] overflow-hidden">
-                  <HeroAgentChat spaceId={spaceId} />
-                </div>
-              </div>
-            </div>
+            <ManualLauncher
+              apps={sidebarApps}
+              workspaceName={workspaceName}
+              onOpen={openApp}
+              onOpenLibrary={() => setActiveWindowId('library')}
+            />
           )}
 
           {/* App View */}
-          {activeWindowId && (
+          {activeWindowId && isMobile && (
             <div className="h-full flex flex-col bg-[var(--space-surface-card)]">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--space-border-default)]">
-                <div className="flex items-center gap-2">
-                  {activeWindowId === 'files' && (
-                    <>
-                      <Folder className={`w-4 h-4 ${tw.appIcon.files}`} />
-                      <span className="text-sm font-semibold text-[var(--space-text-primary)]">Memory</span>
-                    </>
-                  )}
-                  {activeWindowId === 'settings' && (
-                    <>
-                      <SettingsIcon className={`w-4 h-4 ${tw.appIcon.settings}`} />
-                      <span className="text-sm font-semibold text-[var(--space-text-primary)]">Settings</span>
-                    </>
-                  )}
-                  {isAppWindow && currentAppConfig && (
-                    <>
-                      {(() => {
-                        const IconComponent = currentAppConfig.icon && iconMap[currentAppConfig.icon] ? iconMap[currentAppConfig.icon] : Activity;
-                        return <IconComponent className={`w-4 h-4 ${tw.appIcon.active}`} />;
-                      })()}
-                      <span className="text-sm font-semibold text-[var(--space-text-primary)]">{currentAppConfig.name}</span>
-                    </>
-                  )}
-                </div>
-                <button
-                  onClick={() => setActiveWindowId(null)}
-                  className="px-3 py-1.5 text-xs font-medium text-[var(--space-text-secondary)] hover:bg-[var(--space-surface-muted)] hover:text-[var(--space-text-primary)] rounded-lg transition-colors"
-                >
-                  Close
-                </button>
-              </div>
+              {/* Same reasoning as the desktop branch: the shell header is the
+                  only header, and it carries this section's name and Close. */}
               <div className="relative flex-1 overflow-y-auto min-h-0 vv-dark">
                 {activeWindowId === 'files' && (
                   <FileBrowser fileAccessLogs={fileAccessLogs} />
                 )}
                 {activeWindowId === 'settings' && (
                   <Settings spaceId={spaceId} />
+                )}
+                {activeWindowId === 'library' && (
+                  <VideoLibrary />
                 )}
                 {isAppWindow && CurrentApp && currentAppConfig && (
                   <AppErrorBoundary key={currentAppConfig.id} appName={currentAppConfig.name}>
@@ -1195,8 +1236,28 @@ export default function SpaceDesktop({
           )}
         </div>
 
+        {mobileMoreOpen && moreApps.length > 0 && (
+          <div className="fixed bottom-20 left-3 right-3 z-[68] max-h-[52vh] overflow-y-auto rounded-2xl border border-[var(--space-border-default)] bg-[var(--space-surface-card)] p-3 shadow-2xl">
+            <div className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--space-text-muted)]">More</div>
+            <div className="grid grid-cols-2 gap-2">
+              {moreApps.map((app) => {
+                const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
+                return (
+                  <button key={app.id} type="button" onClick={() => { setMobileMoreOpen(false); openApp(app.id); }} className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--space-border-default)] bg-[var(--space-surface-panel)] px-3 text-left text-xs font-semibold text-[var(--space-text-primary)]">
+                    <IconComponent className="h-4 w-4 shrink-0 text-[var(--space-text-brand)]" />
+                    <span className="truncate">{appNavLabel(app)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Jobs moved into the shell header. As a floating bottom-right button
+            it sat on top of the composer's Send control on small screens. */}
+
         {/* Mobile Dock - Fixed to bottom */}
-        <div className="fixed bottom-0 left-0 right-0 bg-[var(--space-surface-card)] border-t border-[var(--space-border-default)] px-1 py-2 safe-bottom">
+        <div className="hidden">
           <div className="flex items-center justify-center gap-0.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             {/* Files Icon - Hidden in customer mode (use Cmd+M to access for debugging) */}
             {mode === 'entrepreneur' && (
@@ -1206,8 +1267,8 @@ export default function SpaceDesktop({
                 title="Memory"
                 className={`p-1.5 rounded-xl transition-all ${
                   activeWindowId === 'files'
-                    ? 'bg-[var(--space-brand-primary)] text-white'
-                    : 'bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)]'
+                    ? 'bg-[image:var(--vg-gradient-selected)] text-[var(--vg-accent)]'
+                    : 'bg-[var(--vg-raised)] text-[var(--vg-secondary)]'
                 }`}
               >
                 <Folder className="w-5 h-5" />
@@ -1215,25 +1276,37 @@ export default function SpaceDesktop({
             )}
 
             {/* App Icons */}
-            {sidebarSections.flatMap(section => section.items).map(app => {
+            {primaryApps.slice(0, 4).map(app => {
               const isActive = activeWindowId === app.id;
               const IconComponent = app.icon && iconMap[app.icon] ? iconMap[app.icon] : Activity;
               return (
                 <button
                   key={app.id}
                   onClick={() => openApp(app.id)}
-                  aria-label={app.name}
-                  title={app.name}
+                  aria-label={appNavLabel(app)}
+                  title={appNavLabel(app)}
                   className={`p-1.5 rounded-xl transition-all ${
                     isActive
-                      ? 'bg-[var(--space-brand-primary)] text-white'
-                      : 'bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)]'
+                      ? 'bg-[image:var(--vg-gradient-selected)] text-[var(--vg-accent)]'
+                      : 'bg-[var(--vg-raised)] text-[var(--vg-secondary)]'
                   }`}
                 >
                   <IconComponent className="w-5 h-5" />
                 </button>
               );
             })}
+
+            {moreApps.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setMobileMoreOpen((value) => !value)}
+                aria-label="More apps"
+                aria-expanded={mobileMoreOpen}
+                className={`min-h-11 rounded-xl px-2 text-[11px] font-bold transition-all ${mobileMoreOpen ? 'bg-[var(--space-brand-primary)] text-[var(--space-text-on-primary)]' : 'bg-[var(--space-surface-muted)] text-[var(--space-text-secondary)]'}`}
+              >
+                More
+              </button>
+            )}
 
             {/* Credits */}
             <CreditBalance variant="dock" />
@@ -1244,8 +1317,8 @@ export default function SpaceDesktop({
               aria-label="Plans"
               className={`relative p-1.5 rounded-xl transition-all ${
                 isSubscriber
-                  ? 'bg-[var(--space-brand-primary)] text-white'
-                  : 'bg-[var(--space-surface-accent-soft)] text-[var(--space-text-brand)]'
+                  ? 'bg-[image:var(--vg-gradient-selected)] text-[var(--vg-accent)]'
+                  : 'bg-[var(--vg-accent-soft)] text-[var(--vg-accent)]'
               }`}
               title={planButtonTitle}
               data-testid="button-open-plans-mobile"
@@ -1271,6 +1344,13 @@ export default function SpaceDesktop({
         </div>
       </div>
       </div>
+
+      {/* The navigation surface lives in components/ShellNav.tsx and is
+          mounted at the top of this tree as ShellDock: one floating vertical
+          dock, one fixed order, on every route. The bottom bar that used to be
+          here was the previous single nav — keeping both would have put two
+          navigation surfaces on screen at once. Credits, Jobs and Plans moved
+          into ShellHeader, so nothing it carried was dropped. */}
 
       {pricingRequest && (
         <PricingScreen

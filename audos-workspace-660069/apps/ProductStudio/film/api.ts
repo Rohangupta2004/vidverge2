@@ -29,20 +29,19 @@
  */
 
 import type { GraphicSpec, MockupSpec } from '../../ScriptToVideo/api';
+import {
+  callHook as callWorkspaceHook,
+  getSessionId,
+  spaceId,
+  workspaceTokenNow,
+} from '../../../lib/workspace';
 
 // ---------------------------------------------------------------------------
 // Session / auth plumbing
 // ---------------------------------------------------------------------------
 
-export function sessionId(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__spaceSessionId || '');
-}
-
-export function wsToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
+export const sessionId = getSessionId;
+export const wsToken = workspaceTokenNow;
 
 function wdb(): any {
   const db = typeof window !== 'undefined' ? (window as any).__workspaceDb : null;
@@ -50,10 +49,7 @@ function wdb(): any {
   return db;
 }
 
-export function appId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
-}
+export const appId = spaceId;
 
 // ---------------------------------------------------------------------------
 // Data model
@@ -619,19 +615,7 @@ export async function uploadImageFile(file: File): Promise<string> {
 
 /** POST a registered server function and unwrap the { response, _meta } envelope. */
 export async function callHook(name: string, body: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`/api/hooks/execute/${appId()}/${name}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(wsToken() ? { 'X-Workspace-DB-Token': wsToken() } : {}),
-      ...(sessionId() ? { 'X-Session-Id': sessionId() } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  const raw = await res.json().catch(() => null);
-  const data = raw && typeof raw === 'object' && raw.response !== undefined && raw._meta !== undefined ? raw.response : raw;
-  if (!res.ok) throw new Error(String(data?.error || `The ${name} service answered HTTP ${res.status}.`));
-  return data;
+  return callWorkspaceHook(name, body);
 }
 
 // ---------------------------------------------------------------------------

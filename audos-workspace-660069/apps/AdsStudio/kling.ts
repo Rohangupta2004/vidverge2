@@ -21,11 +21,10 @@
  * own adapter and asks the live catalogue every session instead of trusting
  * either the shared list or this comment.
  *
- * CAPABILITIES ARE READ, NOT ASSUMED. The live catalogue reports
- * `kling-v2-master` with supportedModes ['std'] only — no 'pro' — while
- * v1 / v1-5 / v1-6 report ['std','pro']. Asking for a mode a model does not
- * have is a provider rejection, so the mode is always resolved against what
- * the catalogue actually said.
+ * CAPABILITIES ARE READ, NOT ASSUMED. The modern Kling 2.5/2.6/3.0/3.0-omni
+ * ids all report supportedModes ['std','pro'] per the current Kling API docs.
+ * Asking for a mode a model does not have is a provider rejection, so the
+ * mode is always resolved against what the catalogue actually said.
  */
 
 import { wsToken } from './api';
@@ -35,7 +34,7 @@ export type KlingAspect = '16:9' | '9:16' | '1:1';
 export type KlingMode = 'std' | 'pro';
 
 /** Ads Studio's preferred order: newest first, all Elements-capable. */
-export const KLING_PREFERRED_MODELS = ['kling-v2-master', 'kling-v1-6', 'kling-v1-5'] as const;
+export const KLING_PREFERRED_MODELS = ['kling-3.0-omni', 'kling-3.0', 'kling-2.6', 'kling-2.5-turbo'] as const;
 
 export interface KlingModelCaps {
   id: string;

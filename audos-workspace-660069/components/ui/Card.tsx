@@ -1,5 +1,6 @@
 import React from 'react';
-import { COLORS, RADIUS, SHADOW } from '../theme';
+import { Check } from 'lucide-react';
+import { COLORS, GRADIENT, RADIUS } from '../theme';
 
 /**
  * Dark surface card: amber hairline border, 16px radius, and an amber glow on
@@ -36,7 +37,6 @@ const Card: React.FC<CardProps> = function Card({
   const [hover, setHover] = React.useState(false);
   const interactive = Boolean(onClick) && !disabled;
   const lit = active || (interactive && hover);
-  const glow = tone === 'cyan' ? SHADOW.glowCyan : SHADOW.glow;
 
   return (
     <div
@@ -63,20 +63,25 @@ const Card: React.FC<CardProps> = function Card({
       }}
       style={{
         position: 'relative',
-        background: active ? COLORS.surfaceAlt : COLORS.surface,
-        border: '1px solid ' + (lit ? COLORS.borderHover : COLORS.border),
-        borderRadius: RADIUS.lg,
+        background: active ? GRADIENT.selected : COLORS.surface,
+        border: '1px solid ' + (lit ? COLORS.controlBorder : COLORS.border),
+        borderRadius: RADIUS.card,
         padding,
         color: COLORS.text,
-        boxShadow: lit ? SHADOW.card + ', ' + glow : SHADOW.card,
-        transition: 'border-color 180ms ease, box-shadow 220ms ease, background 180ms ease, transform 180ms ease',
-        transform: interactive && hover ? 'translateY(-1px)' : 'none',
+        boxShadow: 'none',
+        transition: 'border-color 180ms cubic-bezier(.2,0,0,1), background 180ms cubic-bezier(.2,0,0,1)',
+        transform: 'none',
         cursor: interactive ? 'pointer' : undefined,
         opacity: disabled ? 0.5 : 1,
         outline: 'none',
         ...style,
       }}
     >
+      {active ? (
+        <span aria-label="Selected" title="Selected" style={{ position: 'absolute', top: 12, right: 12, display: 'grid', placeItems: 'center', width: 24, height: 24, borderRadius: 6, background: COLORS.accent, color: COLORS.onAccent }}>
+          <Check size={15} strokeWidth={2.4} />
+        </span>
+      ) : null}
       {children}
     </div>
   );

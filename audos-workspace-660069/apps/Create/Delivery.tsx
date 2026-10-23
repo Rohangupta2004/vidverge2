@@ -31,6 +31,8 @@ import {
 import { pingVideoReconciler, regenerateClip } from './studioApi';
 import { startSeries, useFrameChain } from './frameChain';
 import { Card, ErrorNotice, GhostButton, ProgressBar, SeriesBadge, T } from './ui';
+import { watchJobRow } from '../../lib/poll';
+import { WORKSPACE_ID, workspaceTokenNow } from '../../lib/workspace';
 
 type DbClip = {
   id: number;
@@ -150,15 +152,13 @@ function rowsFromResponse<T>(payload: any): T[] {
 }
 
 async function dbQuery<T>(query: string, params: unknown[]): Promise<T[]> {
-  const ws = (window as any).__workspaceDb;
-  if (!ws || !ws.workspaceId || !ws.token) {
-    throw new Error('Live render tracking is unavailable in this session.');
-  }
-  const response = await fetch(`/api/workspaces/${ws.workspaceId}/db/query`, {
+  const token = workspaceTokenNow();
+  if (!token) throw new Error('Live render tracking is unavailable in this session.');
+  const response = await fetch(`/api/workspaces/${WORKSPACE_ID}/db/query`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Workspace-DB-Token': ws.token,
+      'X-Workspace-DB-Token': token,
     },
     body: JSON.stringify({ query, params }),
   });
@@ -510,8 +510,8 @@ export default function Delivery() {
   const [regen, setRegen] = useState<Record<number, RegenUiState>>({});
   const [, tick] = useState(0);
 
-  const refresh = useCallback(async () => {
-    if (!job) return;
+  const refresh = useCallback(async (): Promise<boolean> => {
+    if (!job) return true;
     // Best-effort reconciler ping (self-throttled to ~60s inside the helper):
     // it re-polls any clip the provider has not been seen for 90s and enforces
     // the 15-minute no-output cap, so a dropped webhook never strands a render.
@@ -533,7 +533,7 @@ export default function Delivery() {
         );
       }
       const current = jobs[0];
-      if (!current?.job_id) return;
+      if (!current?.job_id) return false;
       setDbJob(current);
       const sceneRows = await dbQuery<DbClip>(
         'SELECT id, job_id, clip_index, status, video_url, first_frame_url, last_frame_url, generation_payload, fallback_reason, qa_issues, terminated_reason FROM video_clips WHERE job_id = $1 ORDER BY clip_index ASC',
@@ -541,8 +541,10 @@ export default function Delivery() {
       );
       setClips(sceneRows);
       setPollError(null);
+      return TERMINAL_JOB_STATUSES.has(String(current.status || '').toLowerCase());
     } catch (error: any) {
       setPollError((error && error.message) || 'Could not refresh render progress.');
+      return false;
     }
   }, [job]);
 
@@ -551,11 +553,17 @@ export default function Delivery() {
 
   useEffect(() => {
     if (!job) return;
-    void refresh();
-    if (dbTerminal) return;
-    const timer = window.setInterval(() => void refresh(), 2500);
-    return () => window.clearInterval(timer);
-  }, [job, dbTerminal, refresh]);
+    const controller = new AbortController();
+    void watchJobRow(refresh, (done) => done, {
+      interval: 2_500,
+      signal: controller.signal,
+    }).catch((error) => {
+      if (error instanceof Error && error.name !== 'PollAbortedError') {
+        setPollError(error.message || 'Could not refresh render progress.');
+      }
+    });
+    return () => controller.abort();
+  }, [job, refresh]);
 
   const regenActive = Object.values(regen).some(
     (entry) => entry.phase === 'starting' || entry.phase === 'polling',

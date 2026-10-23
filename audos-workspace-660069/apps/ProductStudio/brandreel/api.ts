@@ -22,20 +22,17 @@ import {
   ScrapedVideo, ScriptVariant, StoryboardScene, emptySceneVisual, framesFor, inferSceneVisual,
   normalizeHex, transitionForStyle, usableAccent,
 } from './types';
+import {
+  callHook as callWorkspaceHook,
+  getWorkspaceToken,
+  workspaceTokenNow,
+} from '../../../lib/workspace';
 
 // ---------------------------------------------------------------------------
 // Platform plumbing
 // ---------------------------------------------------------------------------
 
-export function wsToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
-
-function appId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
-}
+export const wsToken = workspaceTokenNow;
 
 export function errorText(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e ?? '');
@@ -53,16 +50,7 @@ export function errorText(e: unknown): string {
 }
 
 export async function callHook(name: string, payload: Record<string, unknown>): Promise<any> {
-  const token = wsToken();
-  const res = await fetch(`/api/hooks/execute/${appId()}/${name}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Workspace-DB-Token': token } : {}) },
-    body: JSON.stringify(payload),
-  });
-  const raw = await res.json().catch(() => null);
-  // Hook responses are wrapped as { response, _meta } unless respondRaw was used.
-  const data = raw && typeof raw === 'object' && raw.response !== undefined && raw._meta !== undefined ? raw.response : raw;
-  if (!res.ok) throw new Error(String(data?.error || `The ${name} service answered HTTP ${res.status}.`));
+  const data = await callWorkspaceHook(name, payload);
   if (data && data.success === false && data.error) throw new Error(String(data.error));
   return data || {};
 }
@@ -82,7 +70,7 @@ export interface ModelAnswer {
 }
 
 async function callAnthropic(system: string, user: string, maxTokens: number, signal?: AbortSignal): Promise<string> {
-  const token = wsToken();
+  const token = await getWorkspaceToken();
   if (!token) throw new Error('This space has no workspace token, so the AI proxy will refuse the call. Reload the page and try again.');
   const res = await fetch('/proxy/anthropic/v1/messages', {
     method: 'POST',
@@ -107,7 +95,7 @@ async function callAnthropic(system: string, user: string, maxTokens: number, si
 }
 
 async function callOpenAI(system: string, user: string, maxTokens: number, signal?: AbortSignal): Promise<string> {
-  const token = wsToken();
+  const token = await getWorkspaceToken();
   if (!token) throw new Error('This space has no workspace token, so the AI proxy will refuse the call. Reload the page and try again.');
   const res = await fetch('/proxy/openai/v1/chat/completions', {
     method: 'POST',

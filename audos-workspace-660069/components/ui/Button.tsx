@@ -1,5 +1,5 @@
 import React from 'react';
-import { COLORS, GRADIENT, RADIUS, SHADOW } from '../theme';
+import { COLORS, GRADIENT, RADIUS } from '../theme';
 
 /**
  * Vidverge button. Four variants, three sizes, optional inline spinner.
@@ -22,9 +22,9 @@ export interface ButtonProps
 }
 
 const SIZES: Record<ButtonSize, { padding: string; font: number; height: number; radius: number }> = {
-  sm: { padding: '0 12px', font: 12.5, height: 32, radius: RADIUS.sm },
-  md: { padding: '0 18px', font: 14, height: 40, radius: RADIUS.md },
-  lg: { padding: '0 26px', font: 15.5, height: 50, radius: RADIUS.md },
+  sm: { padding: '0 12px', font: 14, height: 44, radius: RADIUS.sm },
+  md: { padding: '0 18px', font: 14, height: 44, radius: RADIUS.md },
+  lg: { padding: '0 24px', font: 16, height: 52, radius: RADIUS.md },
 };
 
 export const Spinner: React.FC<{ size?: number; color?: string }> = function Spinner({
@@ -68,32 +68,32 @@ const Button: React.FC<ButtonProps> = function Button({
   let visual: React.CSSProperties;
   if (variant === 'primary') {
     visual = {
-      background: GRADIENT.brand,
-      color: '#ffffff',
-      border: '1px solid rgba(255,209,104,0.55)',
-      boxShadow: hover && !off ? SHADOW.glow : 'none',
+      background: hover && !off ? GRADIENT.actionHover : GRADIENT.action,
+      color: COLORS.onAccent,
+      border: '1px solid transparent',
+      boxShadow: 'none',
       fontWeight: 600,
     };
   } else if (variant === 'secondary') {
     visual = {
-      background: hover && !off ? 'rgba(212,146,10,0.12)' : 'transparent',
-      color: COLORS.primaryGlow,
-      border: '1px solid ' + (hover && !off ? COLORS.borderHover : COLORS.border),
+      background: hover && !off ? COLORS.hover : COLORS.surface,
+      color: COLORS.text,
+      border: '1px solid ' + COLORS.controlBorder,
       boxShadow: 'none',
       fontWeight: 600,
     };
   } else if (variant === 'danger') {
     visual = {
-      background: hover && !off ? 'rgba(239,68,68,0.18)' : 'rgba(239,68,68,0.1)',
-      color: '#fca5a5',
-      border: '1px solid rgba(239,68,68,0.4)',
+      background: COLORS.dangerBg,
+      color: COLORS.danger,
+      border: '1px solid ' + COLORS.danger,
       boxShadow: 'none',
       fontWeight: 600,
     };
   } else {
     visual = {
-      background: hover && !off ? 'rgba(212,146,10,0.08)' : 'transparent',
-      color: hover && !off ? COLORS.text : COLORS.textMuted,
+      background: hover && !off ? COLORS.hover : 'transparent',
+      color: hover && !off ? COLORS.text : COLORS.secondary,
       border: '1px solid transparent',
       boxShadow: 'none',
       fontWeight: 500,
@@ -122,13 +122,13 @@ const Button: React.FC<ButtonProps> = function Button({
         height: dims.height,
         padding: dims.padding,
         fontSize: dims.font,
-        fontFamily: "'Inter', system-ui, sans-serif",
-        letterSpacing: 0.1,
+        fontFamily: "'Manrope', 'Segoe UI', sans-serif",
+        letterSpacing: 0,
         borderRadius: dims.radius,
         cursor: off ? 'not-allowed' : 'pointer',
         opacity: off ? 0.55 : 1,
-        transition: 'background 160ms ease, box-shadow 200ms ease, border-color 160ms ease, transform 160ms ease',
-        transform: hover && !off ? 'translateY(-1px)' : 'none',
+        transition: 'background 120ms cubic-bezier(.2,0,0,1), border-color 120ms cubic-bezier(.2,0,0,1), transform 120ms cubic-bezier(.2,0,0,1)',
+        transform: 'none',
         whiteSpace: 'nowrap',
         ...visual,
         ...style,

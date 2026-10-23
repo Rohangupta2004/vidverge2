@@ -11,25 +11,23 @@
  * leads with its source choice (No Voiceover / ElevenLabs / built-in AI voice)
  * and nothing here can hold Final Assembly behind a voice provider.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle, Captions, Check, Circle, Download, Layers,
-  Mic, Music, RefreshCw, SkipForward, Sparkles, Volume2,
+  Mic, Music, Plus, RefreshCw, SkipForward, Sparkles, Trash2, Type, Volume2,
 } from 'lucide-react';
-import { Film, FilmScene, T, VoiceSourceId } from './api';
+import { db, Film, FilmScene, OnScreenTextItem, T, VoiceSourceId } from './api';
 import { MUSIC_PRESETS, MusicPreset, VoiceOption, listVoices } from './pipeline/finish';
 import { audioReady, audioScenes, isSpokenSource, musicReady, narrationReady, sfxReady } from './pipeline/audio';
 import { openAiVoiceLabel } from './pipeline/voiceSource';
 import { AssemblyProgress, sceneTargetDuration } from './pipeline/orchestrator';
 import AudioCards from './AudioCards';
+import { AudioUiStyles, SelectField } from './audioUi';
 import VergeLoader from '../../components/VergeLoader';
 import VideoErrorCard from '../../components/video/VideoErrorCard';
 import VideoGeneratingState from '../../components/video/VideoGeneratingState';
-
-const fieldStyle = {
-  width: '100%', background: '#18150A', color: T.bone, border: `1px solid ${T.dim}`,
-  borderRadius: 8, padding: '8px 10px', fontSize: 12.5,
-} as const;
+import QuickEditor from './QuickEditor';
+import ProbedVideo from './ClipAudioStatus';
 
 const smallBtn = (accent = false) => ({
   display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -140,65 +138,14 @@ function AudioTimeline({ film, scenes }: { film: Film; scenes: FilmScene[] }) {
 // Final Assembly progress — real step states, never faked
 // ---------------------------------------------------------------------------
 
-function formatAssemblyElapsed(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(seconds / 60);
-  return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
-}
-
-function AssemblyProgressCard({ progress, filmUpdatedAt }: { progress: AssemblyProgress; filmUpdatedAt?: string }) {
-  const timings = useRef<Record<string, { status: string; startedAt?: number; elapsedMs?: number }>>({});
-  const [nowMs, setNowMs] = useState(Date.now());
-  const signature = progress.steps.map((step) => `${step.key}:${step.status}`).join('|');
-  useEffect(() => {
-    const now = Date.now();
-    const reopenedAt = Date.parse(String(filmUpdatedAt || ''));
-    const next = { ...timings.current };
-    progress.steps.forEach((step) => {
-      const previous = next[step.key];
-      if (step.status === 'active' && previous?.status !== 'active') {
-        next[step.key] = { status: step.status, startedAt: previous ? now : (Number.isFinite(reopenedAt) ? reopenedAt : now) };
-      } else if (step.status !== 'active' && previous?.status === 'active' && previous.startedAt) {
-        next[step.key] = { status: step.status, elapsedMs: Math.max(0, now - previous.startedAt) };
-      } else {
-        next[step.key] = { ...previous, status: step.status };
-      }
-    });
-    timings.current = next;
-    setNowMs(now);
-  }, [signature, filmUpdatedAt]);
-  const hasRunning = progress.steps.some((step) => step.status === 'active');
-  useEffect(() => {
-    if (!hasRunning) return;
-    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [hasRunning, signature]);
-  const elapsedFor = (key: string, status: string) => {
-    const timing = timings.current[key];
-    if (status === 'active' && timing?.startedAt) return formatAssemblyElapsed(nowMs - timing.startedAt);
-    if ((status === 'done' || status === 'failed') && timing?.elapsedMs !== undefined) return formatAssemblyElapsed(timing.elapsedMs);
-    return '—';
-  };
-  const statusWord = (status: string) => status === 'active' ? 'running' : status;
-
+function AssemblyProgressCard({ progress }: { progress: AssemblyProgress; filmUpdatedAt?: string }) {
+  const failed = progress.steps.find((step) => step.status === 'failed');
+  const active = progress.steps.find((step) => step.status === 'active');
+  const label = failed?.label || active?.label || (progress.percent >= 100 ? 'Ready to download' : 'Preparing the finished film');
   return (
-    <div style={{ marginTop: 14 }}>
-      <VideoGeneratingState
-        label="Final assembly"
-        detail={progress.steps.find((step) => step.status === 'active')?.label || 'Preparing the finished film'}
-        progress={progress.percent}
-        compact
-      />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
-        {progress.steps.map((s) => (
-          <div key={s.key} className="s2v-row" style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 7, padding: '3px 5px' }}>
-            <StateDot state={s.status === 'done' ? 'done' : s.status === 'active' ? 'active' : s.status === 'failed' ? 'failed' : 'todo'} />
-            <span style={{ color: s.status === 'pending' ? T.dim : s.status === 'failed' ? T.fault : T.muted, fontSize: 11.5, minWidth: 0, flex: 1 }}>{s.label}</span>
-            <span style={{ color: s.status === 'failed' ? T.fault : s.status === 'active' ? T.live : T.dim, fontSize: 9.5, fontFamily: T.mono, textTransform: 'uppercase' }}>{statusWord(s.status)}</span>
-            <span style={{ width: 46, textAlign: 'right', color: T.dim, fontSize: 9.5, fontFamily: T.mono, fontVariantNumeric: 'tabular-nums' }}>{elapsedFor(s.key, s.status)}</span>
-          </div>
-        ))}
-      </div>
+    <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, minHeight: 40, padding: '8px 10px', borderRadius: 9, background: T.raised, border: `1px solid ${failed ? T.fault : T.dim}`, color: failed ? T.fault : T.muted, fontSize: 11.5, fontWeight: 700 }}>
+      {failed ? <AlertTriangle size={13} /> : progress.percent >= 100 ? <Check size={13} color={T.done} /> : <VergeLoader size={28} label={label} />}
+      <span>{label}{progress.running ? ` · ${progress.percent}%` : ''}</span>
     </div>
   );
 }
@@ -248,20 +195,20 @@ function VoiceNarrationPanel(props: {
           ) : null}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
             {voiceSource === 'elevenlabs' ? (
-              <select
+              <SelectField
                 value={vp?.voiceId || ''}
                 disabled={busy}
                 onChange={(e) => {
                   const v = props.voices.find((x) => x.id === e.target.value);
                   if (e.target.value) props.onChangeVoice(e.target.value, v?.name);
                 }}
-                style={{ ...fieldStyle, width: 260 }}
+                wrapStyle={{ width: 260, maxWidth: '100%' }}
                 aria-label="Narration voice"
               >
                 {vp?.voiceId && !props.voices.some((v) => v.id === vp.voiceId) ? <option value={vp.voiceId}>{vp.voiceName || 'Current voice'}</option> : null}
                 {!vp?.voiceId ? <option value="">Choose a voice…</option> : null}
                 {props.voices.map((v) => <option key={v.id} value={v.id}>{v.name}{v.labels?.accent ? ` · ${v.labels.accent}` : ''}</option>)}
-              </select>
+              </SelectField>
             ) : (
               <span style={{ color: T.muted, fontSize: 11.5 }}>
                 Built-in AI voice: <span style={{ color: T.bone }}>{openAiVoiceLabel(props.openaiVoice)}</span> — pick another on the VOICEOVER card above.
@@ -326,15 +273,15 @@ function MusicPanel(props: { film: Film; busy: boolean; onChangeMusic: (preset: 
         </span>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 9, flexWrap: 'wrap' }}>
-        <select
+        <SelectField
           value={(MUSIC_PRESETS as readonly string[]).includes(String(music?.preset)) ? String(music?.preset) : 'cinematic'}
           disabled={props.busy}
           onChange={(e) => props.onChangeMusic(e.target.value as MusicPreset)}
-          style={{ ...fieldStyle, width: 190 }}
+          wrapStyle={{ width: 190, maxWidth: '100%' }}
           aria-label="Music style"
         >
           {MUSIC_PRESETS.map((p) => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
-        </select>
+        </SelectField>
         {music?.status === 'failed' ? <button style={smallBtn(true)} disabled={props.busy} onClick={props.onRetry}><RefreshCw size={12} /> Retry</button> : null}
         {music && music.status !== 'skipped' ? <button style={smallBtn()} disabled={props.busy} onClick={props.onSkip}><SkipForward size={12} /> Continue Without Music</button> : null}
       </div>
@@ -371,6 +318,128 @@ function SfxPanel(props: { film: Film; busy: boolean; onRetry: () => void; onSki
   );
 }
 
+function OnScreenTextPanel(props: { film: Film; scenes: FilmScene[]; busy: boolean; onChanged: () => void }) {
+  const total = props.scenes.reduce((sum, scene) => sum + Math.max(0.25, Number(scene.duration_s) || 0), 0);
+  const [items, setItems] = useState<OnScreenTextItem[]>(() => [...(props.film.plan?.on_screen_text || [])]);
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [message, setMessage] = useState('');
+  useEffect(() => { setItems([...(props.film.plan?.on_screen_text || [])]); setState('idle'); setMessage(''); }, [props.film.id]);
+  const patch = (index: number, next: Partial<OnScreenTextItem>) => {
+    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...next } : item));
+    setState('idle'); setMessage('');
+  };
+  const save = async () => {
+    if (!props.film.plan || props.busy || state === 'saving') return;
+    const normalized = items.map((item) => ({
+      ...item,
+      text: item.text.trim(),
+      start_s: Math.max(0, Math.min(total, Number(item.start_s) || 0)),
+      end_s: Math.max(0, Math.min(total, Number(item.end_s) || 0)),
+    })).filter((item) => item.text && item.end_s > item.start_s);
+    setState('saving'); setMessage('');
+    try {
+      const plan = { ...props.film.plan, on_screen_text: normalized, editor_composition_version: Number(props.film.plan.editor_composition_version || 0) + 1 };
+      await db.updateFilm(props.film.id, { plan, final_video_url: null, final_thumb_url: null, status: 'producing', machine_state: 'AUDIO_READY', stage_note: normalized.length ? 'On-screen text saved. Final Assembly will burn and verify it automatically.' : 'On-screen text removed. Final Assembly will rebuild the clean cut.', error: null });
+      Object.assign(props.film, { plan, final_video_url: null, final_thumb_url: null, status: 'producing', machine_state: 'AUDIO_READY', stage_note: normalized.length ? 'On-screen text saved. Final Assembly will burn and verify it automatically.' : 'On-screen text removed. Final Assembly will rebuild the clean cut.', error: null });
+      setItems(normalized); setState('saved'); setMessage('Saved — automatic Final Assembly will rebuild and verify the text layer.'); props.onChanged();
+    } catch (error: any) {
+      setState('error'); setMessage(String(error?.message || 'The text layer could not be saved.'));
+    }
+  };
+  return (
+    <Section icon={<Type size={15} />} title="On-screen text" hint="burned in post-production — never requested from the video model">
+      {items.length ? <div style={{ display: 'grid', gap: 10 }}>
+        {items.map((item, index) => (
+          <div key={item.id} style={{ display: 'grid', gap: 8, padding: 10, borderRadius: 10, background: T.card, border: `1px solid ${T.line}` }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input aria-label={`On-screen text ${index + 1}`} value={item.text} onChange={(event) => patch(index, { text: event.target.value })} style={{ flex: 1, minWidth: 0, background: T.canvas, color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 8, padding: '8px 10px', fontSize: 12 }} />
+              <button type="button" aria-label={`Remove on-screen text ${index + 1}`} onClick={() => { setItems((current) => current.filter((_, itemIndex) => itemIndex !== index)); setState('idle'); }} style={{ ...smallBtn(), padding: 8 }}><Trash2 size={12} /></button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
+              <label style={{ color: T.dim, fontSize: 10.5 }}>Start (s)<input type="number" min={0} max={total} step="0.1" value={item.start_s} onChange={(event) => patch(index, { start_s: Number(event.target.value) })} style={{ width: '100%', marginTop: 4, background: T.canvas, color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 8, padding: 7 }} /></label>
+              <label style={{ color: T.dim, fontSize: 10.5 }}>End (s)<input type="number" min={0} max={total} step="0.1" value={item.end_s} onChange={(event) => patch(index, { end_s: Number(event.target.value) })} style={{ width: '100%', marginTop: 4, background: T.canvas, color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 8, padding: 7 }} /></label>
+              <label style={{ color: T.dim, fontSize: 10.5 }}>Position<select value={item.position} onChange={(event) => patch(index, { position: event.target.value as OnScreenTextItem['position'] })} style={{ width: '100%', marginTop: 4, background: T.canvas, color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 8, padding: 7 }}><option value="top">Top</option><option value="center">Center</option><option value="bottom">Bottom</option></select></label>
+              <label style={{ color: T.dim, fontSize: 10.5 }}>Style<select value={item.style} onChange={(event) => patch(index, { style: event.target.value as OnScreenTextItem['style'] })} style={{ width: '100%', marginTop: 4, background: T.canvas, color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 8, padding: 7 }}><option value="clean">Clean</option><option value="boxed">Boxed</option><option value="accent">Accent</option></select></label>
+            </div>
+          </div>
+        ))}
+      </div> : <div style={{ color: T.dim, fontSize: 11.5, lineHeight: 1.5 }}>This brief has no required display copy. The final cut will contain no added text unless you add an item.</div>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+        <button type="button" style={smallBtn()} disabled={props.busy} onClick={() => { const firstDuration = Math.max(0.25, Number(props.scenes[0]?.duration_s) || total); setItems((current) => [...current, { id: `text_user_${Date.now()}`, text: '', start_s: 0, end_s: Math.min(total, firstDuration), position: 'bottom', style: 'clean', source: 'user' }]); setState('idle'); }}><Plus size={12} /> Add text</button>
+        <button type="button" style={smallBtn(true)} disabled={props.busy || state === 'saving'} onClick={() => void save()}>{state === 'saving' ? <VergeLoader size={28} tone="ink" label="Saving text" /> : <Check size={12} />} Save text layer</button>
+      </div>
+      {message ? <div role="status" style={{ marginTop: 8, color: state === 'error' ? T.fault : T.done, fontSize: 11.5 }}>{message}</div> : null}
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Quality validation — deterministic media checks plus explicit human gates
+// ---------------------------------------------------------------------------
+
+type FinalQaStatus = 'pass' | 'review' | 'fail' | 'not-applicable';
+interface FinalQaCheck { id: string; label: string; status: FinalQaStatus; evidence: string; human: boolean; action?: 'retry' | 'board' | 'approve'; actionLabel?: string; }
+interface MediaMetadata { duration: number; width: number; height: number; }
+
+function finalQualityChecks(film: Film, scenes: FilmScene[], _captions: boolean, media: MediaMetadata | null, approvals: Record<string, boolean>): FinalQaCheck[] {
+  const completed = scenes.filter((scene) => scene.status === 'completed');
+  const verifiedTimeline = completed.reduce((sum, scene) => sum + (Number(scene.duration_s) || 0), 0);
+  // Assembly is fixed at 30fps. Allow one frame of container rounding per cut,
+  // plus 50ms for media-duration metadata rounding — never a percentage guess.
+  const durationTolerance = (completed.length / 30) + 0.05;
+  const aspect = media && media.height > 0 ? media.width / media.height : 0;
+  const expectedAspect = film.aspect_ratio === '9:16' ? 9 / 16 : film.aspect_ratio === '1:1' ? 1 : 16 / 9;
+  const damaged = completed.filter((scene) => !scene.asset_url || !scene.keyframe_url || scene.validation?.pass === false);
+  const narrationOverruns = (film.audio?.narration || []).filter((entry) => {
+    if (!entry.duration_s || !['elevenlabs', 'openai'].includes(entry.voice_source)) return false;
+    const scene = completed.find((item) => item.scene_key === entry.scene_key);
+    return scene ? entry.duration_s > sceneTargetDuration(scene, entry) + .35 : false;
+  });
+  const policyText = `${film.script || ''} ${film.plan?.story_summary || ''}`;
+  const needsClaimsReview = /\b(?:competitor|versus|vs\.?|guarantee(?:d)?|best|leading|millionaire|revenue|profit|roi|percent|customer(?:s)? say)\b|[$€£]\s?\d|\d+\s?%/i.test(policyText);
+  return [
+    { id: 'output', label: 'Output file', human: false, status: film.final_video_url ? 'pass' : 'fail', evidence: film.final_video_url ? 'Stored final MP4 is present.' : 'No final MP4 is stored.', action: 'retry', actionLabel: 'Retry' },
+    { id: 'duration', label: 'Output duration', human: false, status: !media ? 'review' : Math.abs(media.duration - verifiedTimeline) <= durationTolerance ? 'pass' : 'fail', evidence: media ? `${media.duration.toFixed(2)}s output; verified clips total ${verifiedTimeline.toFixed(2)}s (±${durationTolerance.toFixed(2)}s at 30fps).` : 'Waiting for final MP4 metadata.', action: 'retry', actionLabel: 'Retry' },
+    { id: 'aspect', label: 'Aspect ratio', human: false, status: !media ? 'review' : Math.abs(aspect - expectedAspect) <= .025 ? 'pass' : 'fail', evidence: media ? `${media.width}×${media.height}; expected ${film.aspect_ratio || '16:9'}.` : 'Waiting for encoded dimensions.', action: 'retry', actionLabel: 'Retry' },
+    { id: 'sync-auto', label: 'Narration timing', human: false, status: narrationOverruns.length ? 'fail' : 'pass', evidence: narrationOverruns.length ? `${narrationOverruns.length} narration layer${narrationOverruns.length === 1 ? '' : 's'} exceed the bounded scene extension.` : 'Generated narration fits its scene bounds.', action: 'retry', actionLabel: 'Retry' },
+    (film.plan?.on_screen_text || []).length
+      ? { id: 'text-overlays', label: 'On-screen text', human: false, status: film.finish?.text_overlay_check?.pass ? 'pass' : film.final_video_url ? 'fail' : 'review', evidence: film.finish?.text_overlay_check?.pass ? `${film.finish.text_overlay_check.items.length} required text overlay${film.finish.text_overlay_check.items.length === 1 ? '' : 's'} verified on sampled assembled frames.` : 'Final Assembly must burn and verify every required text item.', action: 'retry', actionLabel: 'Retry' }
+      : { id: 'text-overlays', label: 'On-screen text', human: false, status: 'not-applicable', evidence: 'The brief contains no required display copy.' },
+    { id: 'frames-auto', label: 'Scene asset integrity', human: false, status: damaged.length ? 'fail' : completed.length ? 'pass' : 'review', evidence: damaged.length ? `${damaged.length} completed scene${damaged.length === 1 ? '' : 's'} lack a clip, continuity frame, or passing validation.` : `${completed.length} scene assets include clips, continuity frames, and passing validation.`, action: 'board', actionLabel: 'Open scene' },
+    needsClaimsReview
+      ? { id: 'claims', label: 'Claims need approval', human: true, status: approvals.claims ? 'pass' : 'review', evidence: 'The script contains a comparative, financial, superlative, or customer claim that requires a person.', action: 'approve', actionLabel: 'Approve' }
+      : { id: 'claims', label: 'Claims approval', human: false, status: 'not-applicable', evidence: 'No claim pattern requiring a person was found.' },
+  ];
+}
+
+function FinalQualityPanel(props: { checks: FinalQaCheck[]; error: string; onApproval: (id: string, value: boolean) => void; onAction: (action: 'retry' | 'board') => void }) {
+  const [showAll, setShowAll] = useState(false);
+  const checks = props.checks.filter((check) => check.status !== 'not-applicable');
+  const attention = checks.filter((check) => check.status === 'review' || check.status === 'fail');
+  const shown = showAll ? checks : attention;
+  const ready = attention.length === 0;
+  return (
+    <Section icon={<Check size={15} />} title="Validation">
+      <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, color: ready ? T.done : attention.some((check) => check.status === 'fail') ? T.fault : T.live, fontSize: 13, fontWeight: 800 }}>
+        {ready ? <Check size={14} /> : <AlertTriangle size={14} />}
+        {ready ? 'Ready to download' : `${attention.length} thing${attention.length === 1 ? '' : 's'} need attention`}
+        <button type="button" onClick={() => setShowAll((value) => !value)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: T.muted, padding: 0, fontSize: 10.5, textDecoration: 'underline', cursor: 'pointer' }}>{showAll ? 'Hide passing checks' : 'View all checks'}</button>
+      </div>
+      {shown.length ? <div style={{ display: 'grid', gap: 5, marginTop: 9 }}>
+        {shown.map((check) => (
+          <div key={check.id} style={{ display: 'flex', gap: 8, alignItems: 'center', minHeight: 36, padding: '6px 8px', borderRadius: 8, background: '#18150A', border: `1px solid ${check.status === 'fail' ? T.fault : check.status === 'review' ? T.live : T.dim}` }}>
+            <StateDot state={check.status === 'pass' ? 'done' : check.status === 'fail' ? 'failed' : 'todo'} />
+            <span style={{ minWidth: 0, flex: 1, color: T.muted, fontSize: 10.5 }}><b style={{ color: T.bone }}>{check.label}</b> — {check.evidence}</span>
+            {check.action === 'approve' ? <button type="button" style={smallBtn(true)} onClick={() => props.onApproval(check.id, true)}>Approve</button>
+              : check.action ? <button type="button" style={smallBtn(check.status === 'fail')} onClick={() => props.onAction(check.action as 'retry' | 'board')}>{check.actionLabel || 'Retry'}</button> : null}
+          </div>
+        ))}
+      </div> : null}
+      {props.error ? <div style={{ color: T.fault, fontSize: 10.5, marginTop: 8 }}>{props.error}</div> : null}
+    </Section>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Header block — title, player, meta, and layer-aware error recovery
 // ---------------------------------------------------------------------------
@@ -385,6 +454,7 @@ function FinalHeader(props: {
   onFinalAssembly: (o: { captions: boolean }) => void;
   onRetryLayer: (layer: 'narration' | 'music' | 'sfx') => void;
   onSkipLayer: (layer: 'narration' | 'music' | 'sfx') => void;
+  onVideoMetadata: (value: MediaMetadata) => void;
 }) {
   const { film, busy, canAssemble, captions } = props;
   const assembling = film.status === 'assembling';
@@ -406,7 +476,18 @@ function FinalHeader(props: {
           portrait instead of letterboxed inside a widescreen box. */}
       <div style={{ margin: '16px auto 0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0D0B05', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)', width: '100%', maxWidth: film.aspect_ratio === '9:16' ? 272 : 820, aspectRatio: videoUrl ? (film.aspect_ratio === '9:16' ? '9 / 16' : '16 / 9') : undefined }}>
         {videoUrl ? (
-          <video key={videoUrl} src={videoUrl} controls poster={film.final_thumb_url || undefined} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} />
+          <ProbedVideo
+            key={videoUrl}
+            src={videoUrl}
+            scope="final"
+            modelId={film.video_model}
+            audioEnabled={film.plan?.audio_enabled !== false}
+            containerStyle={{ width: '100%', height: '100%' }}
+            videoProps={{ controls: true, poster: film.final_thumb_url || undefined, style: { width: '100%', height: '100%', objectFit: 'contain', background: '#000' } }}
+            onMetadata={(video) => props.onVideoMetadata({ duration: video.duration, width: video.videoWidth, height: video.videoHeight })}
+            onRetrySilent={() => props.onFinalAssembly({ captions })}
+            dialogueBusy={busy || assembling || !canAssemble}
+          />
         ) : (
           <div style={{ width: '100%', padding: 24 }}>
             {assembling ? (
@@ -438,14 +519,7 @@ function FinalHeader(props: {
             }}
             compact
           />
-          <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
-            {narrFailed ? (<>
-              <button style={smallBtn()} disabled={busy} onClick={() => props.onSkipLayer('narration')}><SkipForward size={12} /> Continue Without Voiceover</button>
-              <button style={smallBtn()} disabled={busy} onClick={() => document.getElementById('s2v-voice-source')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><Mic size={12} /> Change voice source</button>
-            </>) : null}
-            {musicFailed ? <button style={smallBtn()} disabled={busy} onClick={() => props.onSkipLayer('music')}><SkipForward size={12} /> Continue Without Music</button> : null}
-            {sfxFailed ? <button style={smallBtn()} disabled={busy} onClick={() => props.onSkipLayer('sfx')}><SkipForward size={12} /> Continue Without SFX</button> : null}
-          </div>
+
         </div>
       ) : null}
     </>
@@ -488,6 +562,17 @@ export function FinalScreen(props: {
   const audio = film.audio || null;
   const audioGenerating = film.machine_state === 'AUDIO_PLANNING' || film.machine_state === 'AUDIO_GENERATING';
   const [voices, setVoices] = useState<VoiceOption[]>([]);
+  const storedReview = ((film.plan?.background as any)?.quality_review || {}) as { approvals?: Record<string, boolean> };
+  const [qaApprovals, setQaApprovals] = useState<Record<string, boolean>>(storedReview.approvals || {});
+  const [qaError, setQaError] = useState('');
+  const [mediaMetadata, setMediaMetadata] = useState<MediaMetadata | null>(null);
+  const [quickEditOpen, setQuickEditOpen] = useState(false);
+  const [, setEditorRevision] = useState(0);
+
+  useEffect(() => {
+    const saved = ((film.plan?.background as any)?.quality_review || {}) as { approvals?: Record<string, boolean> };
+    setQaApprovals(saved.approvals || {}); setQaError(''); setMediaMetadata(null);
+  }, [film.id, film.final_video_url]);
 
   useEffect(() => {
     let live = true;
@@ -497,10 +582,19 @@ export function FinalScreen(props: {
 
   const canAssemble = ready.length > 0 && !busy && !assembling;
   const showProgress = !!assembly && (assembly.running || assembly.steps.some((s) => s.status === 'failed'));
+  const qaChecks = finalQualityChecks(film, scenes, captions, mediaMetadata, qaApprovals);
+  const setQaApproval = (id: string, value: boolean) => {
+    const next = { ...qaApprovals, [id]: value };
+    setQaApprovals(next); setQaError('');
+    if (!film.plan) { setQaError('This legacy film has no durable plan record for quality approvals.'); return; }
+    const quality_review = { version: 1, approvals: next, updated_at: new Date().toISOString(), media: mediaMetadata };
+    void db.updateFilm(film.id, { plan: { ...film.plan, background: { ...(film.plan.background || {}), quality_review } } }).catch((caught: any) => setQaError(String(caught?.message || 'The quality review could not be saved.')));
+  };
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '22px 24px 36px' }}>
       <div style={{ maxWidth: 780, margin: '0 auto' }}>
+        <AudioUiStyles />
         <FinalHeader
           film={film}
           readyCount={ready.length}
@@ -511,13 +605,23 @@ export function FinalScreen(props: {
           onFinalAssembly={props.onFinalAssembly}
           onRetryLayer={props.onRetryLayer}
           onSkipLayer={props.onSkipLayer}
+          onVideoMetadata={setMediaMetadata}
         />
 
         <div style={{ display: 'flex', gap: 12, marginTop: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           {videoUrl ? (
-            <a className="s2v-lift" href={videoUrl} download target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 9, background: T.raised, color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 10, padding: '11px 20px', fontSize: 13, fontWeight: 650, textDecoration: 'none' }}>
-              <Download size={14} /> Download MP4
-            </a>
+            <>
+              <a className="s2v-lift" href={videoUrl} download target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 9, background: T.raised, color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 10, padding: '11px 20px', fontSize: 13, fontWeight: 650, textDecoration: 'none' }}>
+                <Download size={14} /> Download MP4
+              </a>
+              <button
+                className="s2v-lift"
+                onClick={() => setQuickEditOpen(true)}
+                style={{ display: 'flex', alignItems: 'center', gap: 9, minHeight: 44, background: T.raised, color: T.bone, border: `1px solid ${T.dim}`, borderRadius: 10, padding: '11px 20px', fontSize: 13, fontWeight: 750, cursor: 'pointer' }}
+              >
+                <Layers size={14} /> Quick Edit
+              </button>
+            </>
           ) : null}
           <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
             <input type="checkbox" checked={captions} onChange={(e) => props.onCaptions(e.target.checked)} style={{ accentColor: T.live }} />
@@ -526,9 +630,21 @@ export function FinalScreen(props: {
           </label>
         </div>
         <div style={{ color: T.dim, fontSize: 11, marginTop: 8 }}>
-          The FINAL ASSEMBLY button lives in the always-visible bar below — it reuses the existing clips, so changing the voice, music or SFX never regenerates video and re-assembly is fast.
-          {' '}<button className="s2v-ghost" disabled={busy || assembling || !ready.length} onClick={props.onNativeCut} style={{ background: 'none', border: 'none', color: T.muted, fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>Assemble the plain native-audio cut instead</button>.
+          <button className="s2v-ghost" disabled={busy || assembling || !ready.length} onClick={props.onNativeCut} style={{ background: 'none', border: 'none', color: T.muted, fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>Plain native-audio cut</button>
         </div>
+
+        <OnScreenTextPanel film={film} scenes={scenes} busy={busy || assembling} onChanged={() => { setEditorRevision((value) => value + 1); props.onFinalAssembly({ captions }); }} />
+
+        <FinalQualityPanel
+          checks={qaChecks}
+          error={qaError}
+          onApproval={setQaApproval}
+          onAction={(action) => action === 'board' ? props.onBackToBoard() : props.onFinalAssembly({ captions })}
+        />
+
+        {audio?.voice_used === 'openai' && audio.voice_fallback_reason ? (
+          <div role="status" style={{ color: T.muted, fontSize: 11.5, marginTop: 12 }}>Built-in {openAiVoiceLabel(audio.openai_voice || 'alloy')} voice used because ElevenLabs was unavailable after one retry.</div>
+        ) : null}
 
         <AudioCards
           film={film}
@@ -588,6 +704,7 @@ export function FinalScreen(props: {
           Want to change one moment? Open the scene board, regenerate just that scene — every other clip is cached — then re-run Final Assembly.
         </div>
       </div>
+      {quickEditOpen ? <QuickEditor film={film} onClose={() => setQuickEditOpen(false)} onSaved={() => setEditorRevision((value) => value + 1)} /> : null}
     </div>
   );
 }

@@ -14,6 +14,9 @@
  * anonymous request with 401 before the provider is ever contacted.
  */
 
+import { poll } from '../../lib/poll';
+import { renderToMp4 } from '../../lib/render/remotion';
+import { WORKSPACE_ID, getWorkspaceToken, spaceId } from '../../lib/workspace';
 import { ensureScriptToVideoSeed, seedPromptSuffix } from '../../lib/vidvergeSeed';
 
 export const FPS = 30;
@@ -161,28 +164,19 @@ export function sleep(ms: number): Promise<void> {
 }
 
 export function appId(): string {
-  return String(runtime()?.__APP_ID__ || runtime()?.__SPACE_ID__ || 'workspace-660069');
+  return spaceId();
 }
 
 export function workspaceId(): string {
-  return String(
-    runtime()?.__workspaceDb?.workspaceId ||
-    runtime()?.__WORKSPACE_ID__ ||
-    'f24710e5-7c6d-4db4-92b4-c2c235877575',
-  );
+  return WORKSPACE_ID;
 }
 
 /** Both AI proxies and the render service refuse anonymous calls, so every
  * request waits for the injected workspace token rather than firing without it. */
 export async function waitForToken(timeoutMs = 12000): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  let token = runtime()?.__workspaceDb?.token;
-  while (!token && Date.now() < deadline) {
-    await sleep(200);
-    token = runtime()?.__workspaceDb?.token;
-  }
+  const token = await getWorkspaceToken(timeoutMs);
   if (!token) throw new Error('Your workspace session is still loading — wait a moment and try again.');
-  return String(token);
+  return token;
 }
 
 function apiError(body: any, fallback: string): string {
@@ -498,19 +492,26 @@ export async function generateBackgroundPlate(
     return '';
   }
 
-  for (let attempt = 0; attempt < 72; attempt += 1) {
-    await sleep(5000);
-    const res = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, { headers });
-    const status = await res.json().catch(() => null);
-    const state = String(status?.status || '').toLowerCase();
-    if (state === 'completed' && status?.videoUrl) return String(status.videoUrl);
-    if (state === 'failed') {
-      onNote(`Background video failed (${apiError(status, 'the model gave no reason')}) — falling back to a gradient.`);
+  try {
+    const result = await poll(async () => {
+      const res = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`, { headers });
+      const status = await res.json().catch(() => null);
+      return { status, state: String(status?.status || '').toLowerCase() };
+    }, {
+      interval: 5000,
+      timeout: 72 * 5000,
+      until: (value) => value.state === 'completed' || value.state === 'failed',
+    });
+    if (result.state === 'completed' && result.status?.videoUrl) return String(result.status.videoUrl);
+    onNote(`Background video failed (${apiError(result.status, 'the model gave no reason')}) — falling back to a gradient.`);
+    return '';
+  } catch (e: any) {
+    if (e?.name === 'PollTimeoutError') {
+      onNote('Background video timed out — falling back to a gradient.');
       return '';
     }
+    throw e;
   }
-  onNote('Background video timed out — falling back to a gradient.');
-  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -598,43 +599,15 @@ export async function renderComposition(input: {
   onNote: (line: string) => void;
 }): Promise<string> {
   const token = await waitForToken();
-  const headers = { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token };
-  const submit = await fetch('/api/render/remotion', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      workspaceId: workspaceId(),
-      compositionTsx: input.compositionTsx,
-      props: input.props,
-      durationInFrames: input.durationInFrames,
-      fps: FPS,
-      width: 1920,
-      height: 1080,
-    }),
-  });
-  const submitted = await submit.json().catch(() => null);
-  if (submit.status === 402) {
-    throw new Error('Your workspace wallet needs funds before this video can be rendered.');
-  }
-  const operationId = String(submitted?.operationId || '');
-  if (!submit.ok || submitted?.success === false || !operationId) {
-    throw new Error(apiError(submitted, `The render could not be started (HTTP ${submit.status}).`));
-  }
-
   input.onNote('Compositing…');
-  for (let attempt = 0; attempt < 240; attempt += 1) {
-    await sleep(3000);
-    const res = await fetch(`/api/render/remotion/${encodeURIComponent(operationId)}`, { headers });
-    const status = await res.json().catch(() => null);
-    if (!res.ok || status?.success === false) {
-      throw new Error(apiError(status, `Could not read the render status (HTTP ${res.status}).`));
-    }
-    const state = String(status?.status || '').toLowerCase();
-    const url = status?.videoUrl || status?.video_url || status?.downloadUrl;
-    if ((state === 'complete' || state === 'completed') && url) return String(url);
-    if (state === 'failed' || state === 'error') throw new Error(apiError(status, 'The Remotion render failed.'));
-  }
-  throw new Error('The render is taking longer than expected — retry it from the Rendering step.');
+  const result = await renderToMp4({
+    compositionTsx: input.compositionTsx,
+    props: { ...input.props },
+    durationInFrames: input.durationInFrames,
+    fps: FPS,
+    aspect: '16:9',
+  }, { token });
+  return result.videoUrl;
 }
 
 // ---------------------------------------------------------------------------

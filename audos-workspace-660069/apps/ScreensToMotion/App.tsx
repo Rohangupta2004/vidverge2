@@ -14,6 +14,7 @@
  */
 import { useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { ArrowLeft, Check, Clapperboard, Download, Film, Images, Loader2, Mic, MonitorPlay, Music, RefreshCw, Sparkles, Upload, UserRound, Video, Wand2, X } from 'lucide-react';
+import { getWorkspaceToken, WORKSPACE_ID } from '../../lib/workspace';
 import { ingestFiles, validateBrief, validateFileSet, IngestError, type IngestResult } from './src/analyse/ingest';
 import { analyseAll } from './src/analyse/analyse';
 import { planVideo, type PlanMix } from './src/plan/plan';
@@ -50,24 +51,16 @@ const CSS = `
 @media (prefers-reduced-motion:reduce) { .stm-spin,.stm-rise { animation:none!important } }
 `;
 
-function workspaceToken(): string {
-  const token = (window as any).__workspaceDb?.token;
-  if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
-  return String(token);
-}
-
-function activeWorkspaceId(): string {
-  return String((window as any).__workspaceDb?.workspaceId || (window as any).__WORKSPACE_ID__ || '');
-}
-
 async function uploadMusic(file: File): Promise<string> {
   const form = new FormData();
   form.append('file', file, file.name);
-  form.append('workspaceId', activeWorkspaceId());
+  form.append('workspaceId', WORKSPACE_ID);
   form.append('folder', 'screens-to-motion/music');
+  const token = await getWorkspaceToken();
+  if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
   const response = await fetch('/api/upload/file', {
     method: 'POST',
-    headers: { 'X-Workspace-DB-Token': workspaceToken() },
+    headers: { 'X-Workspace-DB-Token': token },
     body: form,
   });
   const body = await response.json().catch(() => null);
@@ -77,9 +70,11 @@ async function uploadMusic(file: File): Promise<string> {
 
 /** Short spoken script for the HeyGen presenter — written by the fast text model. */
 async function writePresenterScript(brief: string): Promise<string> {
+  const token = await getWorkspaceToken();
+  if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
   const response = await fetch('/proxy/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
+    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
     body: JSON.stringify({
       model: 'gpt-5.6-luna',
       max_completion_tokens: 300,
@@ -270,8 +265,9 @@ export default function App() {
     // Route 1 — byte-for-byte the Phase 1 flow.
     validateFileSet(files);
     const cleanBrief = validateBrief(brief);
-    const token = workspaceToken();
-    const workspaceIdValue = activeWorkspaceId();
+    const token = await getWorkspaceToken();
+    if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
+    const workspaceIdValue = WORKSPACE_ID;
     const total = 5;
 
     setProgress({ step: 1, total, label: 'Ingesting screenshots', detail: 'Stripping EXIF, converting sRGB, recording true pixel sizes, uploading.' });
@@ -306,8 +302,9 @@ export default function App() {
   const generateMix = async () => {
     validateFileSet(files);
     const cleanBrief = validateBrief(brief);
-    const token = workspaceToken();
-    const workspaceIdValue = activeWorkspaceId();
+    const token = await getWorkspaceToken();
+    if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
+    const workspaceIdValue = WORKSPACE_ID;
     const notes: string[] = [];
     const total = 7;
 

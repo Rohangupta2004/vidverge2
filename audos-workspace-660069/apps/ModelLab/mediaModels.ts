@@ -15,7 +15,7 @@
  * endpoint and no integration for either, so they are deliberately absent
  * rather than shown as a button that 404s.
  */
-import { GROUP_A_MODELS } from '../../lib/videoEngines';
+import { GROUP_A_MODELS, groupADurationLadder, groupAMinDurationS } from '../../lib/videoEngines';
 
 export type MediaTab = 'images' | 'videos';
 
@@ -220,7 +220,7 @@ function groupAOptions(model: (typeof GROUP_A_MODELS)[number]): OptionSpec[] {
       key: 'duration',
       label: 'Duration',
       type: 'select',
-      options: [4, 6, 8, 10, 12].filter((d) => d <= model.maxDurationS).map((d) => ({ value: String(d), label: `${d}s` })),
+      options: groupADurationLadder(model).map((d) => ({ value: String(d), label: `${d}s` })),
       defaultValue: String(model.defaultDurationS),
       hint: `Normalised to the nearest length ${model.name} supports.`,
     },
@@ -265,7 +265,7 @@ const GROUP_A_CARDS: VideoModelCard[] = GROUP_A_MODELS.map((m) => ({
   provider: m.provider,
   blurb: m.blurb,
   bestFor: GROUP_A_BEST_FOR[m.id] || m.blurb,
-  durations: `4–${m.maxDurationS}s (default ${m.defaultDurationS}s)`,
+  durations: `${groupAMinDurationS(m)}–${m.maxDurationS}s (default ${m.defaultDurationS}s)`,
   aspectRatios: ['16:9', '9:16', '1:1'],
   costLabel: m.costHint,
   features: groupAFeatures(m),
@@ -274,38 +274,25 @@ const GROUP_A_CARDS: VideoModelCard[] = GROUP_A_MODELS.map((m) => ({
   options: groupAOptions(m),
 }));
 
+const KLING_PER_SECOND: Record<string, { std: number; pro: number }> = {
+  'kling-3.0-omni': { std: 0.084, pro: 0.112 },
+  'kling-3.0': { std: 0.084, pro: 0.112 },
+  'kling-2.6': { std: 0.042, pro: 0.070 },
+  'kling-2.5-turbo': { std: 0.042, pro: 0.070 },
+};
+
 const KLING_CARDS: VideoModelCard[] = [
   {
-    id: 'kling-v2-master',
+    id: 'kling-3.0-omni',
     family: 'kling',
-    name: 'Kling v2 Master',
+    name: 'Kling 3.0 Omni',
     provider: 'Kuaishou Kling',
-    blurb: 'Kling\'s best tier. Text-to-video, image-to-video and multi-image Elements for character consistency.',
-    bestFor: 'The highest-fidelity Kling output, especially human motion.',
+    blurb: 'Kling\'s omni multimodal flagship: prompt, first/last frame and 2-4 reference images in one request, with native audio.',
+    bestFor: 'The strongest character and style consistency Kling offers, from up to 4 reference images.',
     durations: '5s or 10s',
     aspectRatios: ['16:9', '9:16', '1:1'],
-    costLabel: '$0.25 (5s) / $0.50 (10s), std',
-    features: ['Text-to-video', 'Image-to-video', 'Multi-image Elements', 'Camera control', 'Seed'],
-    accent: '#C8920A',
-    availability: 'kling',
-    caveat: 'Standard mode only — v2 Master does not offer pro mode, and the lab hides that control for it.',
-    options: [
-      { key: 'aspectRatio', label: 'Aspect ratio', type: 'select', options: ratioOptions(['16:9', '9:16', '1:1']), defaultValue: '16:9' },
-      { key: 'duration', label: 'Duration', type: 'select', options: [{ value: '5', label: '5s' }, { value: '10', label: '10s' }], defaultValue: '5' },
-      { key: 'seed', label: 'Seed', type: 'number' },
-    ],
-  },
-  {
-    id: 'kling-v1-6',
-    family: 'kling',
-    name: 'Kling v1.6',
-    provider: 'Kuaishou Kling',
-    blurb: 'Balanced Kling generation with std and pro modes, plus multi-image Elements.',
-    bestFor: 'The everyday Kling pick when v2 Master is more than you need.',
-    durations: '5s or 10s',
-    aspectRatios: ['16:9', '9:16', '1:1'],
-    costLabel: '$0.25–$1.00 by mode and length',
-    features: ['Text-to-video', 'Image-to-video', 'Multi-image Elements', 'Camera control', 'Motion brush', 'Seed'],
+    costLabel: '$0.084 / s (std) / $0.112 / s (pro)',
+    features: ['Text-to-video', 'Image-to-video', '2-4 reference images', 'Native audio', 'Camera control', 'Seed'],
     accent: '#C8920A',
     availability: 'kling',
     options: [
@@ -316,16 +303,36 @@ const KLING_CARDS: VideoModelCard[] = [
     ],
   },
   {
-    id: 'kling-v1-5',
+    id: 'kling-3.0',
     family: 'kling',
-    name: 'Kling v1.5',
+    name: 'Kling 3.0',
     provider: 'Kuaishou Kling',
-    blurb: 'The first Kling tier with multi-image Elements. Still the documented default on the proxy.',
-    bestFor: 'Character-consistent Kling clips on a budget.',
+    blurb: 'Kling\'s current flagship: text-to-video and image-to-video with multi-shot prompts and native audio.',
+    bestFor: 'The highest-fidelity Kling output, especially human motion.',
     durations: '5s or 10s',
     aspectRatios: ['16:9', '9:16', '1:1'],
-    costLabel: '$0.25–$1.00 by mode and length',
-    features: ['Text-to-video', 'Image-to-video', 'Multi-image Elements', 'Motion brush', 'Seed'],
+    costLabel: '$0.084 / s (std) / $0.112 / s (pro)',
+    features: ['Text-to-video', 'Image-to-video', 'Multi-shot prompts', 'Native audio', 'Camera control', 'Seed'],
+    accent: '#C8920A',
+    availability: 'kling',
+    options: [
+      { key: 'aspectRatio', label: 'Aspect ratio', type: 'select', options: ratioOptions(['16:9', '9:16', '1:1']), defaultValue: '16:9' },
+      { key: 'duration', label: 'Duration', type: 'select', options: [{ value: '5', label: '5s' }, { value: '10', label: '10s' }], defaultValue: '5' },
+      { key: 'mode', label: 'Mode', type: 'select', options: [{ value: 'std', label: 'Standard' }, { value: 'pro', label: 'Pro' }], defaultValue: 'std' },
+      { key: 'seed', label: 'Seed', type: 'number' },
+    ],
+  },
+  {
+    id: 'kling-2.6',
+    family: 'kling',
+    name: 'Kling 2.6',
+    provider: 'Kuaishou Kling',
+    blurb: 'The current-generation Kling tier - balanced text-to-video and image-to-video with native audio.',
+    bestFor: 'The everyday Kling pick when 3.0 is more than you need.',
+    durations: '5s or 10s',
+    aspectRatios: ['16:9', '9:16', '1:1'],
+    costLabel: '$0.042 / s (std) / $0.070 / s (pro)',
+    features: ['Text-to-video', 'Image-to-video', 'Native audio', 'Camera control', 'Seed'],
     accent: '#B4720A',
     availability: 'kling',
     options: [
@@ -336,15 +343,15 @@ const KLING_CARDS: VideoModelCard[] = [
     ],
   },
   {
-    id: 'kling-v1',
+    id: 'kling-2.5-turbo',
     family: 'kling',
-    name: 'Kling v1',
+    name: 'Kling 2.5 Turbo',
     provider: 'Kuaishou Kling',
-    blurb: 'First-generation Kling. Text-to-video and image-to-video only.',
-    bestFor: 'Cheap Kling comparisons and reproducing older results.',
+    blurb: 'The fast tier of the current Kling API - text-to-video and image-to-video, silent.',
+    bestFor: 'Cheap, quick Kling clips on a budget.',
     durations: '5s or 10s',
     aspectRatios: ['16:9', '9:16', '1:1'],
-    costLabel: '$0.25–$1.00 by mode and length',
+    costLabel: '$0.042 / s (std) / $0.070 / s (pro)',
     features: ['Text-to-video', 'Image-to-video', 'Camera control', 'Seed'],
     accent: '#7A6030',
     availability: 'kling',
@@ -477,8 +484,9 @@ export function estimateCost(card: ImageModelCard | VideoModelCard, options: Rec
   }
   if (card.family === 'kling' && seconds > 0) {
     const pro = options.mode === 'pro';
-    const base = seconds >= 10 ? 0.5 : 0.25;
-    return `≈ $${(base * (pro ? 2 : 1)).toFixed(2)} for ${seconds}s ${pro ? 'pro' : 'std'}`;
+    const rates = KLING_PER_SECOND[card.id];
+    const perSecond = rates ? (pro ? rates.pro : rates.std) : (pro ? 0.070 : 0.042);
+    return `≈ $${(perSecond * seconds).toFixed(2)} for ${seconds}s ${pro ? 'pro' : 'std'}`;
   }
   return card.costLabel;
 }

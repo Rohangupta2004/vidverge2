@@ -53,7 +53,7 @@
  * the same generate-video hook and is followed with the same
  * projectApi.waitForSceneRender poller the other modes use.
  */
-import { extractJson, generateScenePreview, scopedSpaceId, sessionId, workspaceDbToken } from './studioApi';
+import { extractJson, generateScenePreview, sessionId } from './studioApi';
 import {
   clampText,
   getTone,
@@ -69,6 +69,7 @@ import {
   workspaceUuid,
   writeFailureNotice,
 } from '../../lib/reelioStudio';
+import { callHook } from '../../lib/workspace';
 
 // ---------------------------------------------------------------------------
 // Shape of a series
@@ -724,22 +725,16 @@ export async function submitEpisodeClip(input: ClipSubmitInput): Promise<ClipSub
     body.referenceImageUrl = place;
   }
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (sid) headers['X-Session-Id'] = sid;
-  const token = workspaceDbToken();
-  if (token) headers['X-Workspace-DB-Token'] = token;
-
   const start = async (): Promise<ClipSubmitResult> => {
-    const res = await fetch(`/api/hooks/execute/${scopedSpaceId()}/generate-video`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data || !data.success || !data.job_id) {
-      throw new Error(
-        (data && data.error) || `This clip could not be started (HTTP ${res.status}).`,
-      );
+    const data = await callHook<{
+      success?: boolean;
+      job_id?: string;
+      notice?: string;
+      model_used?: string;
+      error?: string;
+    }>('generate-video', body);
+    if (!data || !data.success || !data.job_id) {
+      throw new Error(data?.error || 'This clip could not be started.');
     }
     return {
       success: true,

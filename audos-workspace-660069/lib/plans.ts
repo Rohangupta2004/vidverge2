@@ -66,7 +66,7 @@ export interface ReelioPlan {
  * LOCKED PRICING — a founder decision, not a tuning knob. Do not restate these
  * numbers anywhere else; import the catalog.
  *
- *   Free Trial      $0       30 credits   no credit card
+ *   Free Trial      $0       60 credits   no credit card
  *   Creator         $35/mo   250 credits  rollover
  *   Pro             $70/mo   500 credits  rollover
  *   Pay-as-you-go   $9 min   60 credits per $9, no cap
@@ -80,15 +80,15 @@ export const REELIO_PLANS: ReelioPlan[] = [
     name: 'Free Trial',
     price: '$0',
     cadence: 'no card',
-    credits: 30,
-    quota: '30 credits',
-    creditNote: '30 seconds of finished video, on the house.',
+    credits: 60,
+    quota: '60 credits',
+    creditNote: '60 seconds of finished video, on the house.',
     pitch: 'Run a real idea through the whole pipeline before you pay anything.',
     cta: 'Start free',
     accent: '#2dd4bf',
     badge: 'Start here',
     features: [
-      '30 credits — 30 seconds of finished video',
+      '60 credits — 60 seconds of finished video',
       'No credit card, no countdown',
       'Scripting and chat with the agent stay free',
       'The same pipeline the paid tiers run',
@@ -155,7 +155,7 @@ export const REELIO_PLANS: ReelioPlan[] = [
 ];
 
 /** Credits a brand-new account starts with, no card required. */
-export const FREE_TRIAL_CREDITS = 30;
+export const FREE_TRIAL_CREDITS = 60;
 
 /**
  * Retired. VidVerge used to meter a monthly VIDEO COUNT; the locked credit

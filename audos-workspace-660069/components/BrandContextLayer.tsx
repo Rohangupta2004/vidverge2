@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { ChevronDown, Clipboard, Palette, Sparkles, X } from 'lucide-react';
-import BrandRefBadge, { BRAND_REF_EVENT, brandWorkspaceId, readBrandReference, type BrandReference } from './BrandRefBadge';
+import { getBrandContextIdentity, readActiveBrandContext, useBrandContext } from './brandContextStore';
 
 interface BrandStyle { styleKeywords: string[]; toneSentence: string; }
-const BRAND = {
-  name: 'VidVerge',
-  tagline: 'Turn any idea into a publish-ready video — brief to video in one shot',
-  primaryColor: '#D6AB4A',
-  description: 'An AI video creation suite that turns ideas, scripts, products, and raw footage into polished, publish-ready videos.',
-};
+const BRAND_COLOR = 'var(--space-brand-primary-500, #D6AB4A)';
 const STYLE_EVENT = 'vidverge:brand-style-change';
+
+function brandWorkspaceId(): string {
+  if (typeof window === 'undefined') return 'default';
+  return String((window as any).__workspaceDb?.workspaceId || 'default');
+}
 
 const styleKey = () => `vidverge_brand_style_${brandWorkspaceId()}`;
 const useBrandKey = () => `vidverge_use_brand_${brandWorkspaceId()}`;
@@ -38,31 +38,24 @@ function setUseBrand(value: boolean): void {
   try { window.localStorage.setItem(useBrandKey(), value ? '1' : '0'); } catch { /* optional utility */ }
 }
 
-function useLocalBrandData() {
-  const [reference, setReference] = useState<BrandReference | null>(() => readBrandReference());
+function useLocalBrandStyle() {
   const [style, setStyle] = useState<BrandStyle | null>(() => readStyle());
   useEffect(() => {
-    const syncRef = () => setReference(readBrandReference());
     const syncStyle = () => setStyle(readStyle());
-    window.addEventListener(BRAND_REF_EVENT, syncRef);
     window.addEventListener(STYLE_EVENT, syncStyle);
-    window.addEventListener('storage', syncRef);
     window.addEventListener('storage', syncStyle);
     return () => {
-      window.removeEventListener(BRAND_REF_EVENT, syncRef);
       window.removeEventListener(STYLE_EVENT, syncStyle);
-      window.removeEventListener('storage', syncRef);
       window.removeEventListener('storage', syncStyle);
     };
   }, []);
-  return { reference, style };
+  return style;
 }
 
 function promptPrefix(): string {
   const parts: string[] = [];
-  const reference = readBrandReference();
-  if (reference?.url) parts.push(`Style reference: ${reference.url}. Match the visual tone, pacing, and aesthetic of this reference.`);
   if (readUseBrand()) {
+    parts.push(readActiveBrandContext());
     const style = readStyle();
     if (style?.styleKeywords.length) parts.push(`${style.styleKeywords.join(', ')}. ${style.toneSentence}`.trim());
   }
@@ -120,7 +113,7 @@ function installPromptBridge(): void {
   };
 }
 
-async function extractBrandStyle(): Promise<BrandStyle | null> {
+async function extractBrandStyle(contextText: string): Promise<BrandStyle | null> {
   try {
     const ws = (window as any).__workspaceDb;
     if (!ws?.token) return null;
@@ -135,7 +128,7 @@ async function extractBrandStyle(): Promise<BrandStyle | null> {
         model: 'gpt-6-luna', reasoning_effort: 'none', max_completion_tokens: 200,
         messages: [
           { role: 'system', content: 'Extract 5–8 concise visual style keywords and a one-sentence tone description from this brand profile. Output JSON: { "styleKeywords": string[], "toneSentence": string }' },
-          { role: 'user', content: `Brand: ${BRAND.name}. Tagline: ${BRAND.tagline}. Description: ${BRAND.description}. Primary color: ${BRAND.primaryColor}.` },
+          { role: 'user', content: contextText },
         ],
       }),
     });
@@ -152,6 +145,7 @@ async function extractBrandStyle(): Promise<BrandStyle | null> {
 }
 
 export function UseBrandToggle() {
+  const { text: brandContext } = useBrandContext();
   const [enabled, setEnabled] = useState(() => readUseBrand());
   const [style, setStyleState] = useState<BrandStyle | null>(() => readStyle());
   const [loading, setLoading] = useState(false);
@@ -161,7 +155,7 @@ export function UseBrandToggle() {
     setUseBrand(next);
     if (!next || style) return;
     setLoading(true);
-    const extracted = await extractBrandStyle();
+    const extracted = await extractBrandStyle(brandContext);
     setLoading(false);
     if (!extracted) return;
     saveStyle(extracted);
@@ -195,24 +189,20 @@ export function UseBrandToggle() {
 }
 
 export default function BrandContextLayer() {
-  const { reference, style } = useLocalBrandData();
+  const { text: contextText } = useBrandContext();
+  const identity = useMemo(() => getBrandContextIdentity(contextText), [contextText]);
+  const style = useLocalBrandStyle();
   const [expanded, setExpanded] = useState(() => {
     try { return window.localStorage.getItem(layerKey()) === '1'; } catch { return false; }
   });
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | null>(null);
-  useEffect(() => installPromptBridge(), []);
+  useEffect(() => {
+    installPromptBridge();
+    // Retire the one legacy saved-video key once; no feature reads or writes it.
+    try { window.localStorage.removeItem(`vidverge_brand_ref_${brandWorkspaceId()}`); } catch { /* storage may be unavailable */ }
+  }, []);
   useEffect(() => { try { window.localStorage.setItem(layerKey(), expanded ? '1' : '0'); } catch { /* preference only */ } }, [expanded]);
-
-  const contextText = useMemo(() => [
-    'BRAND CONTEXT — use this as your persistent brand memory for all outputs:', '',
-    `Brand name: ${BRAND.name}`, `Tagline: ${BRAND.tagline}`, `Primary color: ${BRAND.primaryColor}`,
-    `Brand description: ${BRAND.description}`,
-    style?.styleKeywords.length ? `Visual style keywords: ${style.styleKeywords.join(', ')}` : '',
-    style?.toneSentence ? `Tone: ${style.toneSentence}` : '',
-    reference?.url ? `Brand reference video: ${reference.url}` : '', '',
-    'Always apply this brand context to any content, copy, visuals, or scripts you produce for me.',
-  ].filter((line, index, all) => line || all[index - 1] !== '').join('\n'), [reference, style]);
 
   const copy = useCallback(async () => {
     try { await navigator.clipboard.writeText(contextText); }
@@ -227,19 +217,17 @@ export default function BrandContextLayer() {
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
 
   return (
-    <div data-brand-ref-ui className="absolute right-14 top-3 z-[80] font-sans" style={{ maxWidth: 'min(390px, calc(100% - 4.5rem))' }}>
+    <div className="absolute right-14 top-3 z-[80] font-sans" style={{ maxWidth: 'min(390px, calc(100% - 4.5rem))' }}>
       <button type="button" onClick={() => setExpanded((value) => !value)} className="ml-auto flex items-center gap-2 rounded-xl border px-3 py-2 text-left shadow-xl backdrop-blur-xl" style={{ background: 'color-mix(in srgb, var(--space-surface-card, #111318) 90%, transparent)', borderColor: 'var(--space-border-default, rgba(255,255,255,.12))', color: 'var(--space-text-secondary, #d1d5db)' }}>
-        <span className="h-3 w-3 rounded-full shadow-[0_0_12px_currentColor]" style={{ background: BRAND.primaryColor, color: BRAND.primaryColor }} />
-        <span className="min-w-0"><span className="block truncate text-[11px] font-semibold">{BRAND.name}</span>{!expanded ? <span className="block truncate text-[9px] text-[var(--space-text-muted,#9ca3af)]">Brand context</span> : null}</span>
-        {reference ? <span className="rounded-full px-1.5 py-0.5 text-[8px] text-[var(--space-brand-highlight-500,#F3D58B)]">Ref Set</span> : null}
+        <span className="h-3 w-3 rounded-full shadow-[0_0_12px_currentColor]" style={{ background: BRAND_COLOR, color: BRAND_COLOR }} />
+        <span className="min-w-0"><span className="block truncate text-[11px] font-semibold">{identity.name}</span>{!expanded ? <span className="block truncate text-[9px] text-[var(--space-text-muted,#9ca3af)]">Brand context</span> : null}</span>
         <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
       {expanded ? (
         <div className="mt-2 rounded-2xl border p-3.5 shadow-2xl backdrop-blur-xl" style={{ background: 'var(--space-surface-card, #111318)', borderColor: 'var(--space-border-default, rgba(255,255,255,.12))' }}>
           <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl" style={{ background: `color-mix(in srgb, ${BRAND.primaryColor} 18%, transparent)` }}><Palette className="h-4 w-4" style={{ color: BRAND.primaryColor }} /></span>
-            <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-[var(--space-text-primary,#fff)]">{BRAND.name}</p><p className="mt-0.5 line-clamp-2 text-[10px] leading-relaxed text-[var(--space-text-muted,#9ca3af)]">{BRAND.tagline}</p></div>
-            {reference ? (reference.thumbnail ? <img src={reference.thumbnail} alt="" className="h-10 w-10 rounded-lg bg-black object-cover" /> : <video src={reference.url} muted preload="metadata" className="h-10 w-10 rounded-lg bg-black object-cover" />) : null}
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl" style={{ background: `color-mix(in srgb, ${BRAND_COLOR} 18%, transparent)` }}><Palette className="h-4 w-4" style={{ color: BRAND_COLOR }} /></span>
+            <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-[var(--space-text-primary,#fff)]">{identity.name}</p><p className="mt-0.5 line-clamp-2 text-[10px] leading-relaxed text-[var(--space-text-muted,#9ca3af)]">{identity.tagline}</p></div>
           </div>
           {style?.styleKeywords.length ? <div className="mt-3 flex flex-wrap gap-1">{style.styleKeywords.map((keyword) => <span key={keyword} className="rounded-full border px-2 py-0.5 text-[9px] text-[var(--space-text-muted,#9ca3af)]" style={{ borderColor: 'color-mix(in srgb, var(--space-brand-primary-500,#D6AB4A) 25%, transparent)' }}>{keyword}</span>)}</div> : null}
           <button type="button" onClick={copy} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold text-[var(--space-text-secondary,#d1d5db)]" style={{ borderColor: 'var(--space-border-default, rgba(255,255,255,.12))', background: 'var(--space-surface-panel,#171A21)' }}><Clipboard className="h-3.5 w-3.5" /> Copy for AI</button>
@@ -252,7 +240,7 @@ export default function BrandContextLayer() {
 
 export function withBrandContext<P extends object>(Component: ComponentType<P>, sourceApp: string, options: { useBrand?: boolean } = {}): ComponentType<P> {
   function BrandAwareApp(props: P) {
-    return <div data-brand-context-root={sourceApp} className="relative h-full min-h-0 w-full"><Component {...props} /><BrandContextLayer /><BrandRefBadge sourceApp={sourceApp} />{options.useBrand ? <UseBrandToggle /> : null}</div>;
+    return <div className="relative h-full min-h-0 w-full"><Component {...props} /><BrandContextLayer />{options.useBrand ? <UseBrandToggle /> : null}</div>;
   }
   BrandAwareApp.displayName = `BrandAware(${Component.displayName || (Component as any).name || sourceApp})`;
   return BrandAwareApp;

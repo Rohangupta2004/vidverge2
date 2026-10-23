@@ -148,7 +148,7 @@ async function pollVeo(
   operationId: string,
   onNote: (note: string) => void,
   cancelled: () => boolean,
-  capMs = 300000,
+  capMs = 1_800_000,
 ): Promise<string> {
   const path = `/api/veo/status/${encodeURIComponent(operationId)}`;
   const startedAt = Date.now();

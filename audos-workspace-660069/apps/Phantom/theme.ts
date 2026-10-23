@@ -1,3 +1,5 @@
+import { COLORS, FONT } from '../../components/theme';
+
 /**
  * VERGEYE — surface tokens.
  *
@@ -21,24 +23,24 @@
  * that survives the capture.
  */
 
-export const INK = '#0D0B05';
-export const INK_DEEP = '#110E07';
-export const PANEL = '#1C1808';
-export const CARD = '#15120A';
-export const CARD_HI = '#1C1808';
-export const LINE = 'rgba(255,255,255,0.07)';
-export const LINE_HI = 'rgba(255,255,255,0.18)';
-export const TEXT = '#F5E9C8';
-export const TEXT_DIM = '#C8AA6E';
-export const TEXT_MUTED = '#9E8B55';
-export const DANGER = '#f87171';
-export const SUCCESS = '#4ade80';
-export const WARN = '#fbbf24';
+export const INK = COLORS.bg;
+export const INK_DEEP = COLORS.bg;
+export const PANEL = COLORS.raised;
+export const CARD = COLORS.surface;
+export const CARD_HI = COLORS.hover;
+export const LINE = COLORS.border;
+export const LINE_HI = COLORS.controlBorder;
+export const TEXT = COLORS.text;
+export const TEXT_DIM = COLORS.secondary;
+export const TEXT_MUTED = COLORS.muted;
+export const DANGER = COLORS.danger;
+export const SUCCESS = COLORS.success;
+export const WARN = COLORS.warning;
 
-export const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+export const MONO = FONT.mono;
 
 /** The workspace's own brand primary, so a fresh Vergeye matches the shell. */
-export const DEFAULT_ACCENT = '#D4920A';
+export const DEFAULT_ACCENT = COLORS.accent;
 
 export function normalizeHex(value: unknown): string {
   const raw = String(value == null ? '' : value).trim().toLowerCase();
@@ -81,7 +83,7 @@ export function shade(hex: string, amount: number): string {
 /** Black or white text, whichever stays legible on the given accent. */
 export function readableOn(hex: string): string {
   const { r, g, b } = channels(hex);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 150 ? '#111111' : '#ffffff';
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 150 ? COLORS.onAccent : COLORS.text;
 }
 
 export function hostOf(url: unknown): string {
@@ -124,15 +126,15 @@ export const SPIN_CSS = `
 @keyframes vergeye-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @keyframes vergeye-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes vergeye-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.85; } }
-.vergeye-rise { animation: vergeye-rise 0.32s cubic-bezier(0.22,0.9,0.3,1) both; }
-.vergeye-pulse { animation: vergeye-pulse 1.5s ease-in-out infinite; }
-.vergeye-app button, .vergeye-app a { transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, opacity 0.16s ease; }
-.vergeye-app button:active:not(:disabled) { transform: scale(0.975); }
-.vergeye-app input:focus, .vergeye-app textarea:focus { outline: none; }
-.vergeye-scroll { scrollbar-color: #2A2410 transparent; scrollbar-width: thin; }
+.vergeye-rise { animation: vergeye-rise 0.18s cubic-bezier(.2,0,0,1) both; }
+.vergeye-pulse { animation: none; }
+.vergeye-app button, .vergeye-app a { transition: background-color 0.12s cubic-bezier(.2,0,0,1), border-color 0.12s cubic-bezier(.2,0,0,1), opacity 0.12s cubic-bezier(.2,0,0,1); }
+.vergeye-app button:active:not(:disabled) { transform: translateY(1px); }
+.vergeye-app input:focus, .vergeye-app textarea:focus { outline: 2px solid ${COLORS.focus}; outline-offset: 3px; }
+.vergeye-scroll { scrollbar-color: ${COLORS.border} transparent; scrollbar-width: thin; }
 .vergeye-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
-.vergeye-scroll::-webkit-scrollbar-thumb { background: #2A2410; border-radius: 999px; }
-.vergeye-scroll::-webkit-scrollbar-thumb:hover { background: #6E5F38; }
+.vergeye-scroll::-webkit-scrollbar-thumb { background: ${COLORS.border}; border-radius: 6px; }
+.vergeye-scroll::-webkit-scrollbar-thumb:hover { background: ${COLORS.controlBorder}; }
 .vergeye-scroll::-webkit-scrollbar-track { background: transparent; }
 @media (prefers-reduced-motion: reduce) {
   .vergeye-app *, .vergeye-app *::before, .vergeye-app *::after { animation: none !important; transition-duration: 0.01ms !important; }

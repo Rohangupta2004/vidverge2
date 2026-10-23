@@ -21,20 +21,21 @@
  * safe frame with the motion-graphic background bleeding full-frame, so the
  * result is intentional rather than letterboxed.
  */
-import { workspaceUuid } from '../../lib/reelioStudio';
+import { poll, PollTimeoutError } from '../../lib/poll';
+import {
+  finishPortrait,
+  needsPortraitFinish,
+  readRender,
+  submitRender,
+  type Aspect,
+} from '../../lib/render/remotion';
 import { validateAndRepair } from './motionUiDirector';
 import {
   isHttpUrl,
   planDurationInFrames,
-  MOTION_FPS,
   type MotionAsset,
   type MotionPlan,
 } from './motionUiTypes';
-
-const RENDER_WIDTH = 1920;
-const RENDER_HEIGHT = 1080;
-const POLL_MS = 4000;
-const MAX_TICKS = 150; // 10 minutes at 4s.
 
 /**
  * The composition, as source. Everything that varies is a PROP (`plan`,
@@ -334,10 +335,6 @@ export interface MotionRenderResult {
   error?: string;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * Render the whole Motion Plan as ONE composition and poll for the MP4.
  * The plan is validated/repaired first so the renderer never sees bad input.
@@ -349,57 +346,50 @@ export async function renderMotionVideo(input: {
   isAborted?: () => boolean;
   operationId?: string;
 }): Promise<MotionRenderResult> {
-  const uuid = workspaceUuid();
-  if (!uuid) return { success: false, error: 'This session cannot reach the renderer yet. Try again in a moment.' };
-
   const { plan } = validateAndRepair(input.plan, input.assets);
   const durationInFrames = planDurationInFrames(plan);
   const props = { plan, assetUrls: assetUrlMap(input.assets) };
 
+  const aspect = plan.aspectRatio as Aspect;
   let operationId = input.operationId || '';
-  if (!operationId) {
-    try {
-      if (input.onStage) input.onStage('Building the composition…');
-      const res = await fetch('/api/render/remotion', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId: uuid,
-          compositionTsx: MOTION_UI_COMPOSITION,
-          props,
-          durationInFrames,
-          fps: MOTION_FPS,
-          width: RENDER_WIDTH,
-          height: RENDER_HEIGHT,
-        }),
+  try {
+    if (!operationId) {
+      input.onStage?.('Building the composition…');
+      const submitted = await submitRender({
+        compositionTsx: MOTION_UI_COMPOSITION,
+        props,
+        durationInFrames,
+        aspect,
       });
-      const data = await res.json().catch(() => null);
-      operationId = String((data && data.operationId) || '');
-      if (!res.ok || !operationId) {
-        return { success: false, error: (data && data.error) || `The render could not be started (HTTP ${res.status}).` };
-      }
-    } catch (e: any) {
-      return { success: false, error: (e && e.message) || 'Network error starting the render.' };
+      operationId = submitted.operationId;
     }
-  }
 
-  for (let tick = 0; tick < MAX_TICKS; tick++) {
-    if (input.isAborted && input.isAborted()) return { success: false, operationId, error: 'aborted' };
-    try {
-      const res = await fetch(`/api/render/remotion/${encodeURIComponent(operationId)}`);
-      const data = await res.json().catch(() => null);
-      const status = String((data && data.status) || '').toLowerCase();
-      if (status === 'complete' && isHttpUrl(data && data.videoUrl)) {
-        return { success: true, operationId, videoUrl: String(data.videoUrl) };
-      }
-      if (status === 'failed') {
-        return { success: false, operationId, error: (data && data.error) || 'The render failed.' };
-      }
-      if (input.onStage) input.onStage('Rendering your motion video…');
-    } catch {
-      if (input.onStage) input.onStage('Reconnecting to the renderer…');
+    const status = await poll(() => readRender(operationId), {
+      interval: 4_000,
+      timeout: 10 * 60 * 1_000,
+      tolerateErrors: 150,
+      until: (result) => Boolean(input.isAborted?.()) || result.state === 'complete' || result.state === 'failed',
+      onTick: () => input.onStage?.('Rendering your motion video…'),
+    });
+    if (input.isAborted?.()) return { success: false, operationId, error: 'aborted' };
+    if (status.state === 'failed' || !isHttpUrl(status.videoUrl)) {
+      return { success: false, operationId, error: status.error || 'The render failed.' };
     }
-    await sleep(POLL_MS);
+
+    let videoUrl = status.videoUrl;
+    if (needsPortraitFinish(aspect)) {
+      input.onStage?.('Finishing the portrait video…');
+      videoUrl = await finishPortrait(videoUrl, { durationSeconds: durationInFrames / 30 });
+    }
+    return { success: true, operationId, videoUrl };
+  } catch (error) {
+    if (error instanceof PollTimeoutError) {
+      return { success: false, operationId, error: 'The render did not land in time.' };
+    }
+    return {
+      success: false,
+      operationId: operationId || undefined,
+      error: error instanceof Error ? error.message : 'Network error starting the render.',
+    };
   }
-  return { success: false, operationId, error: 'The render did not land in time.' };
 }

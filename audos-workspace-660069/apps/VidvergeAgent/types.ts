@@ -11,7 +11,6 @@ export interface QueueJob {
   projectId: string | number;
   name: string;
   stage: string;
-  progress: number;
   app: string;
   appId: string;
   surface?: 'director';
@@ -19,14 +18,26 @@ export interface QueueJob {
   updatedAt: string;
 }
 
-/** The six studios a brief can be routed to. Mirrors the app registry in config.json. */
+/** Visible studios a brief can be routed to. Navigation-hidden apps remain
+ * registered in config.json but are deliberately absent from this launcher. */
 export const TARGET_APPS: TargetApp[] = [
-  { id: 'sceneforge', name: 'SceneForge', tagline: 'Avatar films + motion graphics' },
-  { id: 'faceless-content', name: 'Faceless Content', tagline: 'Faceless long-form for YouTube' },
+  { id: 'sceneforge', name: 'SceneForge', tagline: 'Presenter, voice and script' },
   { id: 'script-to-video', name: 'Script-to-Video', tagline: 'Your script, shot for shot' },
-  { id: 'saas-verger', name: 'SaaS Verger', tagline: 'One URL, one product video' },
-  { id: 'video-enhancer', name: 'Video Enhancer', tagline: 'Edit and enhance footage' },
-  { id: 'ads-studio', name: 'Ads Studio', tagline: 'Short-form ads and recipes' },
+  { id: 'faceless', name: 'Faceless', tagline: 'Narration-led film, no presenter' },
+  { id: 'video-enhancer', name: 'Video Enhancer', tagline: 'Edit and enhance footage you shot' },
+  { id: 'ads-studio', name: 'Vergeye Ads Studio', tagline: 'Brand research through to an ad' },
 ];
+
+/**
+ * Registered studios Verger does NOT route a brief to yet, and why. Keeping
+ * this explicit stops the list above from quietly growing a target that opens
+ * the studio but drops the brief on the floor.
+ *
+ * - 'cineagent' (Studio): no consumeVidvergeHandoff call, so a routed brief
+ *   would be discarded. Video Enhancer covers the same "edit my footage"
+ *   intent and does accept the handoff.
+ * - 'brand-context' (Brand Kit): a setup surface, not a generation workflow.
+ */
+export const UNROUTED_APP_IDS = ['cineagent', 'brand-context'] as const;
 
 export const IDLE_STATUS = 'Ready to create';

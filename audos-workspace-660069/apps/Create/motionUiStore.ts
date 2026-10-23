@@ -19,8 +19,9 @@ import {
   insertRow,
   uploadImage,
   waitForDbSession,
-  workspaceUuid,
 } from '../../lib/reelioStudio';
+import { poll } from '../../lib/poll';
+import { callHook, WORKSPACE_ID, workspaceTokenNow } from '../../lib/workspace';
 import {
   analyzeAssetVision,
   directMotionPlan,
@@ -31,7 +32,7 @@ import {
 } from './motionUiDirector';
 import { renderMotionVideo } from './motionUiComposition';
 import { DEFAULT_PRESET_ID } from './motionUiPresets';
-import { checkVideoStatus, scopedSpaceId, sessionId, workspaceDbToken } from './studioApi';
+import { checkVideoStatus, sessionId } from './studioApi';
 import { DEFAULT_VIDEO_MODEL, getVideoModel } from './videoTypes';
 import {
   clamp,
@@ -256,16 +257,15 @@ export async function chooseMusic(mood: string): Promise<void> {
     if (state.plan) set({ plan: { ...state.plan, audio: { ...state.plan.audio, musicUrl: undefined, muted: true } } });
     return;
   }
-  const uuid = workspaceUuid();
-  const token = typeof window !== 'undefined' ? (window as any).__workspaceDb?.token : '';
-  if (!uuid || !token) {
+  const token = workspaceTokenNow();
+  if (!token) {
     set({ music: mood, error: 'Music needs a verified session - try again in a moment.' });
     return;
   }
   set({ music: mood, musicBusy: true, error: null });
   try {
     const lengthMs = Math.round(clamp(state.duration || 15, 5, 60) * 1000);
-    const res = await fetch('/api/workspaces/' + uuid + '/audio/music/preset', {
+    const res = await fetch('/api/workspaces/' + WORKSPACE_ID + '/audio/music/preset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
       body: JSON.stringify({ preset: mood, lengthMs }),
@@ -733,10 +733,6 @@ export function setBrandColor(key: 'primary' | 'secondary' | 'accent' | 'backgro
 const GENERATED_LAYER_POLL_MS = 8000;
 const GENERATED_LAYER_MAX_TICKS = 75;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * Generate one optional AI-video/avatar layer through VidVerge's existing
  * generate-video hook and check-video-status path. This keeps provider routing,
@@ -816,40 +812,37 @@ async function generateLayerClip(input: {
     }
   }
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (sid) headers['X-Session-Id'] = sid;
-  const token = workspaceDbToken();
-  if (token) headers['X-Workspace-DB-Token'] = token;
-
   input.onStage(isAvatar ? 'Generating the presenter segment…' : 'Generating a cinematic AI shot…');
   let jobId = '';
   try {
-    const res = await fetch(`/api/hooks/execute/${scopedSpaceId()}/generate-video`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => null);
-    jobId = res.ok && data && data.success && data.job_id ? String(data.job_id) : '';
+    const data = await callHook<any>('generate-video', body);
+    jobId = data && data.success && data.job_id ? String(data.job_id) : '';
     if (!jobId) return '';
   } catch {
     return '';
   }
 
-  for (let tick = 0; tick < GENERATED_LAYER_MAX_TICKS; tick++) {
+  try {
+    const status = await poll(() => checkVideoStatus(jobId), {
+      interval: GENERATED_LAYER_POLL_MS,
+      timeout: GENERATED_LAYER_MAX_TICKS * GENERATED_LAYER_POLL_MS,
+      until: (result) => {
+        const ready = result.success &&
+          (result.stage === 'ready' || result.status === 'completed' || result.status === 'partial');
+        return input.isAborted() || ready || result.stage === 'failed' || result.status === 'failed' || !!result.blocked;
+      },
+      onTick: () => input.onStage(isAvatar ? 'Generating the presenter segment…' : 'Generating a cinematic AI shot…'),
+    });
     if (input.isAborted()) return '';
-    const status = await checkVideoStatus(jobId);
     const ready = status.success &&
       (status.stage === 'ready' || status.status === 'completed' || status.status === 'partial');
     const clip = Array.isArray(status.clip_urls) && status.clip_urls.length > 0
       ? status.clip_urls[0]
       : status.download_url;
-    if (ready && /^https?:\/\//.test(clip || '')) return String(clip);
-    if (status.stage === 'failed' || status.status === 'failed' || status.blocked) return '';
-    input.onStage(isAvatar ? 'Generating the presenter segment…' : 'Generating a cinematic AI shot…');
-    await sleep(GENERATED_LAYER_POLL_MS);
+    return ready && /^https?:\/\//.test(clip || '') ? String(clip) : '';
+  } catch {
+    return '';
   }
-  return '';
 }
 
 /** Generate optional layers one at a time, then repair failures natively. */

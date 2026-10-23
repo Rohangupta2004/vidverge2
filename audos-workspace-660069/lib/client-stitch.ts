@@ -33,6 +33,8 @@
  * fails), while a stream-copy remux is far too quick to need a worker anyway.
  */
 
+import { callHook } from './workspace';
+
 // jsdelivr (not unpkg): the platform's CSP script-src allow-list includes
 // cdn.jsdelivr.net and esm.sh but not unpkg.com — the header is report-only
 // today, but a dynamic import from unpkg would break the day it is enforced.
@@ -480,7 +482,7 @@ export interface AttachAudioParams {
  * throws — the caller falls back to the (video-only) fast cut on failure.
  */
 export async function remuxAndAttachAudio(params: AttachAudioParams): Promise<string> {
-  const { spaceId, workspaceUuid, jobId, clipUrls, sessionId, onStage } = params;
+  const { workspaceUuid, jobId, clipUrls, sessionId, onStage } = params;
 
   const uploadedUrl = await stitchAndUploadClips({
     clipUrls,
@@ -490,17 +492,11 @@ export async function remuxAndAttachAudio(params: AttachAudioParams): Promise<st
   });
 
   onStage?.('attaching');
-  const scoped = spaceId.startsWith('workspace-') ? spaceId : `workspace-${spaceId}`;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (sessionId) headers['X-Session-Id'] = sessionId;
-  const attachRes = await fetch(`/api/hooks/execute/${scoped}/check-video-status`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ job_id: jobId, attach_stitched_url: uploadedUrl }),
+  const attachData = await callHook<any>('check-video-status', {
+    job_id: jobId,
+    attach_stitched_url: uploadedUrl,
+    ...(sessionId ? { session_id: sessionId } : {}),
   });
-  const attachData = await attachRes.json().catch(() => null);
-  if (!attachRes.ok || !attachData?.success) {
-    throw new Error(`attach failed: HTTP ${attachRes.status}`);
-  }
+  if (!attachData?.success) throw new Error('attach failed: the hook did not confirm success');
   return uploadedUrl;
 }

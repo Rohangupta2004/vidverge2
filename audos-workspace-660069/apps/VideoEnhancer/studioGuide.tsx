@@ -27,6 +27,7 @@ import {
   Sliders, Undo2, UploadCloud, X,
 } from 'lucide-react';
 import { HelpTip } from './uiControls';
+import { COLORS, FONT, GRADIENT, RADIUS } from '../../components/theme';
 import type { StudioPreset } from './studioPresets';
 
 // ---------------------------------------------------------------------------
@@ -34,28 +35,28 @@ import type { StudioPreset } from './studioPresets';
 // ---------------------------------------------------------------------------
 
 export const VE = {
-  bg: '#FFFDF4',
-  card: '#FFFFFF',
-  cardSoft: '#FFFAEB',
-  border: 'rgba(180,120,0,0.14)',
-  borderHover: 'rgba(180,120,0,0.36)',
-  accent: '#C8920A',
-  accentHover: '#E8B737',
-  accentSoft: 'rgba(200,146,10,0.12)',
-  accentLine: 'rgba(200,146,10,0.45)',
-  cyan: '#B4720A',
-  cyanBright: '#E0A33A',
-  text: '#1A1000',
-  textSecondary: '#3D2800',
-  textMuted: '#7A6030',
-  good: '#166534',
-  goodSoft: 'rgba(22,101,52,0.12)',
-  bad: '#991B1B',
-  badSoft: 'rgba(153,27,27,0.12)',
-  font: "'Inter', system-ui, -apple-system, sans-serif",
+  bg: COLORS.bg,
+  card: COLORS.surface,
+  cardSoft: COLORS.raised,
+  border: COLORS.border,
+  borderHover: COLORS.controlBorder,
+  accent: COLORS.accent,
+  accentHover: COLORS.accentHover,
+  accentSoft: COLORS.accentSoft,
+  accentLine: COLORS.controlBorder,
+  cyan: COLORS.info,
+  cyanBright: COLORS.info,
+  text: COLORS.text,
+  textSecondary: COLORS.secondary,
+  textMuted: COLORS.muted,
+  good: COLORS.success,
+  goodSoft: COLORS.successBg,
+  bad: COLORS.danger,
+  badSoft: COLORS.dangerBg,
+  font: FONT.body,
   size: 14,
-  radiusCard: 16,
-  radiusBtn: 8,
+  radiusCard: RADIUS.card,
+  radiusBtn: RADIUS.sm,
   tap: 44,
 } as const;
 
@@ -64,10 +65,10 @@ export const tapTarget: CSSProperties = { minHeight: VE.tap, minWidth: VE.tap };
 
 export const vePrimary: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-  background: `linear-gradient(135deg, ${VE.accent} 0%, ${VE.cyan} 100%)`,
-  color: '#FFFFFF', border: 'none', borderRadius: VE.radiusBtn,
-  padding: '0 18px', minHeight: VE.tap, fontSize: VE.size, fontWeight: 700,
-  boxShadow: '0 0 24px rgba(200,146,10,0.25)',
+  background: GRADIENT.action,
+  color: COLORS.onAccent, border: 'none', borderRadius: VE.radiusBtn,
+  padding: '0 18px', minHeight: VE.tap, fontSize: VE.size, fontWeight: 600,
+  boxShadow: 'none',
   cursor: 'pointer', fontFamily: VE.font,
 };
 
@@ -98,7 +99,7 @@ export const GUIDE_CSS = `
   background-size: 100% 2px, 100% 2px, 2px 100%, 2px 100%;
   background-position: 0 0, 0 100%, 0 0, 100% 0;
   background-repeat: no-repeat;
-  animation: ve-march 0.9s linear infinite;
+  animation: none;
 }
 @keyframes ve-march {
   from { background-position: 0 0, 0 100%, 0 0, 100% 0; }
@@ -108,11 +109,11 @@ export const GUIDE_CSS = `
 .ve-scroll-x { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
 .ve-scroll-x::-webkit-scrollbar { display: none; }
 @keyframes ve-rise { from { transform: translateY(14px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-.ve-rise { animation: ve-rise .18s ease-out; }
+.ve-rise { animation: none; }
 @keyframes ve-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .ve-sheet { animation: ve-sheet-up .22s ease-out; }
 @keyframes ve-breathe { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
-.ve-breathe { animation: ve-breathe 1.1s ease-in-out infinite; }
+.ve-breathe { animation: none; }
 .ve-tap { transition: background .15s ease, border-color .15s ease, color .15s ease, transform .12s ease; }
 .ve-tap:active:not(:disabled) { transform: scale(0.98); }
 .ve-tap:disabled { opacity: .5; cursor: default; }
@@ -127,7 +128,7 @@ export const GUIDE_CSS = `
 // ---------------------------------------------------------------------------
 
 /** True on a phone-width viewport. Drives the single-column + drawer layout. */
-export function useIsMobile(breakpoint = 880): boolean {
+export function useIsMobile(breakpoint = 1199): boolean {
   const [mobile, setMobile] = useState(() => (
     typeof window !== 'undefined' && window.innerWidth <= breakpoint
   ));
@@ -172,7 +173,7 @@ export function GuidedEmptyState(props: {
         style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 12, minHeight: 300, padding: '36px 20px', textAlign: 'center', cursor: 'pointer',
-          background: hot ? 'rgba(200,146,10,0.10)' : VE.card,
+          background: hot ? VE.accentSoft : VE.card,
         }}
       >
         <span
@@ -194,8 +195,8 @@ export function GuidedEmptyState(props: {
         {active ? (
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 2,
-            background: VE.accentSoft, border: `1px solid ${VE.accentLine}`, color: '#B4720A',
-            borderRadius: 999, padding: '6px 14px', fontSize: 13, fontWeight: 700,
+            background: VE.accentSoft, border: `1px solid ${VE.accentLine}`, color: VE.accent,
+            borderRadius: 6, padding: '6px 14px', fontSize: 13, fontWeight: 600,
           }}>
             <Check size={14} /> {active.label} style is ready
           </span>
@@ -251,7 +252,7 @@ export function GuidedEmptyState(props: {
           onChange={(e) => props.onBrief(e.target.value)}
           placeholder="e.g. a 30-second promo for my coffee subscription"
           style={{
-            background: VE.cardSoft, border: `1px solid ${VE.border}`, borderRadius: VE.radiusBtn,
+            background: VE.bg, border: `1px solid ${VE.borderHover}`, borderRadius: VE.radiusBtn,
             padding: '0 14px', minHeight: VE.tap, color: VE.text, fontSize: VE.size,
             fontFamily: VE.font, boxSizing: 'border-box', width: '100%',
           }}

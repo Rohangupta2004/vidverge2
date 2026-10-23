@@ -44,9 +44,7 @@ import {
   checkVideoStatus,
   extractJson,
   generateScenePreview,
-  scopedSpaceId,
   sessionId,
-  workspaceDbToken,
 } from './studioApi';
 import { waitForSceneRender } from './projectApi';
 import { clampText, getTone, getVideoModel, type AspectRatio } from './videoTypes';
@@ -55,8 +53,10 @@ import {
   FULL_NEGATIVE_PROMPT,
   PHONE_OK_NEGATIVE_PROMPT,
   waitForDbSession,
-  workspaceUuid,
 } from '../../lib/reelioStudio';
+import { poll, PollTimeoutError } from '../../lib/poll';
+import { readRender, RENDER_FRAME, submitRender } from '../../lib/render/remotion';
+import { callHook, WORKSPACE_ID } from '../../lib/workspace';
 import { buildShotPrompt, referencesFor } from './agenticRouter';
 import {
   CONTINUITY_PASS_SCORE,
@@ -74,10 +74,6 @@ import {
 
 function isHttpUrl(value: unknown): boolean {
   return typeof value === 'string' && /^https?:\/\//.test(value);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export interface ShotRenderResult {
@@ -225,24 +221,14 @@ export async function renderVeoShot(input: VeoShotInput): Promise<ShotRenderResu
     body.referenceImageUrl = ordered[0];
   }
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (sid) headers['X-Session-Id'] = sid;
-  const token = workspaceDbToken();
-  if (token) headers['X-Workspace-DB-Token'] = token;
-
   let jobId = input.shot.jobId;
   if (!jobId) {
     try {
-      const res = await fetch(`/api/hooks/execute/${scopedSpaceId()}/generate-video`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data || !data.success || !data.job_id) {
+      const data = await callHook<any>('generate-video', body);
+      if (!data || !data.success || !data.job_id) {
         return {
           success: false,
-          error: (data && data.error) || `This shot could not be started (HTTP ${res.status}).`,
+          error: (data && data.error) || 'This shot could not be started.',
         };
       }
       jobId = String(data.job_id);
@@ -289,8 +275,7 @@ let heygenProbe: Promise<boolean> | null = null;
 let heygenLook: { avatarId: string; voiceId: string; engine: string } | null = null;
 
 function heygenPath(path: string): string {
-  const uuid = workspaceUuid();
-  return `/api/workspaces/${uuid}/provider-credentials/heygen/proxy/${path.replace(/^\/+/, '')}`;
+  return `/api/workspaces/${WORKSPACE_ID}/provider-credentials/heygen/proxy/${path.replace(/^\/+/, '')}`;
 }
 
 async function heygenFetch(path: string, init?: RequestInit): Promise<any> {
@@ -329,10 +314,6 @@ export async function probeHeyGen(): Promise<boolean> {
   if (heygenVerdict !== null) return heygenVerdict;
   if (heygenProbe) return heygenProbe;
   heygenProbe = (async () => {
-    if (!workspaceUuid()) {
-      heygenVerdict = false;
-      return false;
-    }
     try {
       const data = await heygenFetch('v3/avatars/looks?limit=20');
       const looks: any[] = Array.isArray(data && data.data) ? data.data : [];
@@ -385,11 +366,6 @@ export function heygenLookResolved(): boolean {
 // REMOTION — deterministic UI motion
 // ---------------------------------------------------------------------------
 /** Platform-fixed render geometry. Not a preference — anything else is refused. */
-const REMOTION_FPS = 30;
-const REMOTION_WIDTH = 1920;
-const REMOTION_HEIGHT = 1080;
-const REMOTION_POLL_MS = 2000;
-const REMOTION_MAX_TICKS = 240; // 8 minutes.
 
 /**
  * TRUE when a Remotion shot can be delivered at all. The endpoint renders only
@@ -399,7 +375,7 @@ const REMOTION_MAX_TICKS = 240; // 8 minutes.
  * productions route their UI beats away from Remotion (see the router).
  */
 export function remotionUsable(aspect: AspectRatio): boolean {
-  return aspect === '16:9' && !!workspaceUuid();
+  return aspect === '16:9';
 }
 
 /**
@@ -537,10 +513,6 @@ export async function renderRemotionShot(input: {
   onTick?: (message: string) => void;
   isAborted?: () => boolean;
 }): Promise<ShotRenderResult> {
-  const uuid = workspaceUuid();
-  if (!uuid) {
-    return { success: false, degraded: true, error: 'This session cannot reach the Remotion renderer.' };
-  }
   const toImage = input.toState && isHttpUrl(input.toState.imageUrl) ? input.toState.imageUrl : '';
   const fromImage =
     input.fromState && isHttpUrl(input.fromState.imageUrl) && input.fromState.imageUrl !== toImage
@@ -550,72 +522,56 @@ export async function renderRemotionShot(input: {
     return { success: false, degraded: true, error: 'There is no product screen for this shot to animate.' };
   }
 
-  const durationInFrames = Math.max(30, Math.round(input.shot.seconds * REMOTION_FPS));
+  const durationInFrames = Math.max(30, Math.round(input.shot.seconds * RENDER_FRAME.fps));
   const camera = (input.motion[0] && input.motion[0].camera) || 'push_in';
 
   let operationId = input.shot.operationId || '';
-  if (!operationId) {
-    try {
-      const res = await fetch('/api/render/remotion', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId: uuid,
-          compositionTsx: UI_MOTION_COMPOSITION,
-          props: {
-            fromImage: fromImage || undefined,
-            toImage: toImage || fromImage,
-            elements: input.motion.slice(0, 4),
-            camera,
-            accent: input.accentHex,
-            background: input.backgroundHex,
-            transitionMs: 900,
-            transitionDelayMs: 500,
-          },
-          durationInFrames,
-          fps: REMOTION_FPS,
-          width: REMOTION_WIDTH,
-          height: REMOTION_HEIGHT,
-        }),
+  try {
+    if (!operationId) {
+      const submitted = await submitRender({
+        compositionTsx: UI_MOTION_COMPOSITION,
+        props: {
+          fromImage: fromImage || undefined,
+          toImage: toImage || fromImage,
+          elements: input.motion.slice(0, 4),
+          camera,
+          accent: input.accentHex,
+          background: input.backgroundHex,
+          transitionMs: 900,
+          transitionDelayMs: 500,
+        },
+        durationInFrames,
+        aspect: '16:9',
       });
-      const data = await res.json().catch(() => null);
-      operationId = String((data && data.operationId) || '');
-      if (!res.ok || !operationId) {
-        return {
-          success: false,
-          degraded: true,
-          error: (data && data.error) || `The UI render could not be started (HTTP ${res.status}).`,
-        };
-      }
-    } catch (e: any) {
-      return { success: false, degraded: true, error: (e && e.message) || 'Network error starting the UI render.' };
+      operationId = submitted.operationId;
     }
-  }
-
-  for (let tick = 0; tick < REMOTION_MAX_TICKS; tick++) {
-    if (input.isAborted && input.isAborted()) return { success: false, error: 'aborted' };
-    try {
-      const res = await fetch(`/api/render/remotion/${encodeURIComponent(operationId)}`);
-      const data = await res.json().catch(() => null);
-      const status = String((data && data.status) || '').toLowerCase();
-      if (status === 'complete' && isHttpUrl(data && data.videoUrl)) {
-        return { success: true, operationId, clipUrl: String(data.videoUrl) };
-      }
-      if (status === 'failed') {
-        return {
-          success: false,
-          degraded: true,
-          operationId,
-          error: (data && data.error) || 'The UI render failed.',
-        };
-      }
-      if (input.onTick) input.onTick('Animating your product screens…');
-    } catch {
-      if (input.onTick) input.onTick('Reconnecting to the UI renderer…');
+    const status = await poll(() => readRender(operationId), {
+      interval: 2_000,
+      timeout: 8 * 60 * 1_000,
+      tolerateErrors: 240,
+      until: (result) => Boolean(input.isAborted?.()) || result.state === 'complete' || result.state === 'failed',
+      onTick: () => input.onTick?.('Animating your product screens…'),
+    });
+    if (input.isAborted?.()) return { success: false, error: 'aborted' };
+    if (status.state === 'complete' && isHttpUrl(status.videoUrl)) {
+      return { success: true, operationId, clipUrl: status.videoUrl };
     }
-    await sleep(REMOTION_POLL_MS);
+    return {
+      success: false,
+      degraded: true,
+      operationId,
+      error: status.error || 'The UI render failed.',
+    };
+  } catch (error) {
+    return {
+      success: false,
+      degraded: true,
+      operationId: operationId || undefined,
+      error: error instanceof PollTimeoutError
+        ? 'The UI render did not land in time.'
+        : error instanceof Error ? error.message : 'Network error starting the UI render.',
+    };
   }
-  return { success: false, degraded: true, operationId, error: 'The UI render did not land in time.' };
 }
 
 // ---------------------------------------------------------------------------
@@ -642,7 +598,7 @@ async function extractFrames(clipUrl: string, timestamps: number[]): Promise<{ t
       body: JSON.stringify({
         videoUrl: clipUrl,
         timestamps: timestamps.slice(0, 20),
-        workspaceId: workspaceUuid() || undefined,
+        workspaceId: WORKSPACE_ID,
       }),
     });
     const data = await res.json().catch(() => null);

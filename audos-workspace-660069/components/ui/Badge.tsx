@@ -18,12 +18,12 @@ export interface BadgeProps {
 }
 
 const TONES: Record<BadgeVariant, { fg: string; bg: string; border: string }> = {
-  brand: { fg: COLORS.primaryGlow, bg: 'rgba(212,146,10,0.14)', border: 'rgba(212,146,10,0.35)' },
-  cyan: { fg: COLORS.accentGlow, bg: 'rgba(6,182,212,0.14)', border: 'rgba(6,182,212,0.35)' },
-  green: { fg: '#6ee7b7', bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.35)' },
-  red: { fg: '#fca5a5', bg: 'rgba(239,68,68,0.14)', border: 'rgba(239,68,68,0.35)' },
-  amber: { fg: COLORS.accentGlow, bg: 'rgba(240,180,41,0.14)', border: 'rgba(240,180,41,0.35)' },
-  muted: { fg: COLORS.textMuted, bg: 'rgba(187,168,153,0.1)', border: 'rgba(187,168,153,0.22)' },
+  brand: { fg: COLORS.accent, bg: COLORS.accentSoft, border: COLORS.accentPressed },
+  cyan: { fg: COLORS.info, bg: COLORS.infoBg, border: COLORS.info },
+  green: { fg: COLORS.success, bg: COLORS.successBg, border: COLORS.success },
+  red: { fg: COLORS.danger, bg: COLORS.dangerBg, border: COLORS.danger },
+  amber: { fg: COLORS.warning, bg: COLORS.warningBg, border: COLORS.warning },
+  muted: { fg: COLORS.secondary, bg: COLORS.raised, border: COLORS.border },
 };
 
 const Badge: React.FC<BadgeProps> = function Badge({
@@ -45,11 +45,10 @@ const Badge: React.FC<BadgeProps> = function Badge({
         alignItems: 'center',
         gap: 6,
         padding: '3px 10px',
-        borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 600,
-        letterSpacing: 0.4,
-        textTransform: 'uppercase',
+        borderRadius: 6,
+        fontSize: 12,
+        fontWeight: 500,
+        letterSpacing: 0,
         color: tone.fg,
         background: tone.bg,
         border: '1px solid ' + tone.border,
@@ -66,7 +65,7 @@ const Badge: React.FC<BadgeProps> = function Badge({
             height: 6,
             borderRadius: '50%',
             background: tone.fg,
-            boxShadow: '0 0 8px ' + tone.fg,
+            boxShadow: 'none',
             animation: pulse ? 'pulse 1.4s ease-in-out infinite' : undefined,
             flex: '0 0 auto',
           }}

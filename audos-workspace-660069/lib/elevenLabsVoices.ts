@@ -19,6 +19,16 @@
  * union is de-duplicated by voice id. Nothing in this file slices the list.
  */
 
+import {
+  NARRATION_MODEL,
+  NARRATION_MODEL_FAST,
+  elevenVoiceSettings,
+  isElevenModelRejection,
+  narrationModelForChars,
+  nextNarrationModel,
+  type ElevenModelId,
+} from './elevenLabsModels';
+
 export interface Voice {
   id: string;
   name: string;
@@ -28,6 +38,7 @@ export interface Voice {
   gender?: string;
   age?: string;
   language?: string;
+  useCase?: string;
   description?: string;
   /** ElevenLabs' own sample. Cloned voices have none — see sampleFor(). */
   previewUrl?: string;
@@ -90,6 +101,9 @@ function toVoice(raw: any): Voice | null {
     gender: labels.gender ? String(labels.gender) : undefined,
     age: labels.age ? String(labels.age) : undefined,
     language: labels.language ? String(labels.language) : undefined,
+    useCase: labels.use_case || labels.useCase || labels.usecase
+      ? String(labels.use_case || labels.useCase || labels.usecase)
+      : undefined,
     description: [labels.description, raw?.description].filter(Boolean).join(' ') || undefined,
     previewUrl: raw?.previewUrl || raw?.preview_url ? String(raw.previewUrl || raw.preview_url) : undefined,
   };
@@ -151,6 +165,7 @@ export function voiceTags(voice: Voice): string[] {
     voice.gender,
     voice.age,
     voice.language,
+    voice.useCase,
   ].filter(Boolean) as string[];
 }
 
@@ -186,24 +201,46 @@ export async function speak(options: {
   script: string;
   voiceId: string;
   voiceSettings?: VoiceSettings;
+  /** Finished narration defaults to the quality ladder; previews explicitly use the fast option. */
+  modelId?: ElevenModelId;
 }): Promise<SpokenAudio> {
   const script = String(options.script || '').trim();
   if (!script) throw new Error('There is nothing to say yet — write the line first.');
 
-  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId())}/audio/voiceover`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      script: script.slice(0, MAX_SCRIPT_CHARS),
-      voiceId: options.voiceId || FALLBACK_VOICE_ID,
-      voiceSettings: options.voiceSettings || DEFAULT_VOICE_SETTINGS,
-    }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.audioUrl) {
-    throw new Error(describeError(data, response.status, 'The voiceover could not be generated.'));
+  const requested = options.modelId || NARRATION_MODEL;
+  let model = requested === NARRATION_MODEL_FAST
+    ? requested
+    : narrationModelForChars(script.length, requested);
+  for (;;) {
+    const source = options.voiceSettings || DEFAULT_VOICE_SETTINGS;
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId())}/audio/voiceover`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        script: script.slice(0, MAX_SCRIPT_CHARS),
+        voiceId: options.voiceId || FALLBACK_VOICE_ID,
+        modelId: model,
+        voiceSettings: elevenVoiceSettings(model, {
+          stability: Number(source.stability ?? DEFAULT_VOICE_SETTINGS.stability),
+          similarity: Number(source.similarity_boost ?? DEFAULT_VOICE_SETTINGS.similarity_boost),
+        }),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data?.audioUrl) {
+      return { audioUrl: String(data.audioUrl), durationMs: Number(data.estimatedDurationMs) || 0 };
+    }
+    const failure = {
+      status: response.status,
+      code: String(data?.code || ''),
+      message: describeError(data, response.status, 'The voiceover could not be generated.'),
+    };
+    const next = requested !== NARRATION_MODEL_FAST && isElevenModelRejection(failure)
+      ? nextNarrationModel(model)
+      : null;
+    if (!next) throw new Error(failure.message);
+    model = narrationModelForChars(script.length, next);
   }
-  return { audioUrl: String(data.audioUrl), durationMs: Number(data.estimatedDurationMs) || 0 };
 }
 
 export interface SpokenSegment extends SpokenAudio {
@@ -260,7 +297,7 @@ export async function sampleFor(voice: Voice): Promise<string> {
   if (voice.previewUrl) return voice.previewUrl;
   const cached = sampleCache.get(voice.id);
   if (cached) return cached;
-  const { audioUrl } = await speak({ script: SAMPLE_LINE, voiceId: voice.id });
+  const { audioUrl } = await speak({ script: SAMPLE_LINE, voiceId: voice.id, modelId: NARRATION_MODEL_FAST });
   sampleCache.set(voice.id, audioUrl);
   return audioUrl;
 }

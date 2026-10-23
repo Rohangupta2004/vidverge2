@@ -6,8 +6,9 @@
  * intent and shared routing resolves each engine; GSAP/SVG renders overlays
  * and FFmpeg.wasm assembles the final MP4 in the browser. No Remotion.
  *
- * Standalone: shares no module with Product Video, SceneForge, Video Enhancer
- * or Script-to-Video. Session persists to localStorage — refresh and continue.
+ * This is the existing short-ad production engine. Vergeye Discover/Research
+ * is mounted as its entry point; Script-to-Video remains the shared long-form
+ * production engine. Session persists to localStorage — refresh and continue.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -16,14 +17,14 @@ import {
   Play, Plus, RefreshCw, Sparkles, Trash2, Upload, Wand2, X,
 } from 'lucide-react';
 import {
-  AdsSession, ClipDuration, GeneratedClip, ScenePlan, ScriptClip,
-  STEPS, T, UploadedAsset, WORD_LIMITS, clearSession, emptySession,
-  generateImageAsset, loadSession, saveSession, uploadUserFile, wordCount,
+  AdsSession, ClipDuration, GeneratedClip, ProductResearch, ScenePlan, ScriptClip,
+  STEPS, T, UploadedAsset, clearSession, clipDurationChoices, emptySession,
+  generateImageAsset, loadSession, saveSession, uploadUserFile, wordCount, wordLimitFor,
 } from './api';
 import { Btn, Spin, Tag, card, inputStyle, labelStyle } from './ui';
 import {
   assembleVeoPrompt, buildScenePlan, castPresenter, continuityNoteFromFrame,
-  fetchSiteResearch, generateAngles, generateVariationMatrix, pickBestAngle,
+  generateAngles, generateVariationMatrix, pickBestAngle,
   presenterFallbackDescription, presenterPortraitBrief,
   regenerateScenePlanForClip, researchProduct, writeScript,
 } from './opus';
@@ -46,9 +47,17 @@ import {
 import { consumeVidvergeHandoff } from '../../lib/vidvergeHandoff';
 import AppShell from '../../components/ui/AppShell';
 import VergeMark from '../../components/ui/VergeMark';
+import { VergeyeApp as VergeyeIntelligence } from '../Phantom/App';
 import VideoErrorCard from '../../components/video/VideoErrorCard';
 import VideoGeneratingState from '../../components/video/VideoGeneratingState';
 import { withBrandContext } from '../../components/BrandContextLayer';
+import { useSpaceRuntime } from '../../SpaceRuntimeContext';
+import { fetchBrandFromWebsite, matchSavedBrand, type BrandRecord, useBrandKit } from '../../components/brandKitStore';
+
+function OwnerVideoIntegrationPicker(props: any) {
+  const { userRole } = useSpaceRuntime();
+  return userRole === 'owner' ? <VideoIntegrationPicker {...props} /> : null;
+}
 
 // ---------------------------------------------------------------------------
 // Small UI atoms — card, inputStyle, labelStyle, Btn, Tag and Spin live in
@@ -62,8 +71,9 @@ function customerError(value: unknown): string {
     .replace(/veo-3\.1-fast-generate-preview/g, engineDisplayName('veo-3.1-fast-generate-preview'))
     .replace(/veo-3\.1-generate-preview/g, engineDisplayName('veo-3.1-generate-preview'))
     .replace(/openrouter\/[^\s,;]+/g, (id) => engineDisplayName(id));
+  if (/session required|workspace session/i.test(named)) return 'Your sign-in session could not be verified, so generation was refused before anything was charged. Refresh, sign in again, then retry.';
   if (/no_credentials|\b401\b/i.test(named)) return 'Your workspace session is not ready yet. Try again in a moment.';
-  if (/insufficient|payment|required|\b402\b/i.test(named)) return 'This generation needs more workspace credits before it can start.';
+  if (/insufficient|wallet balance|\b402\b/i.test(named)) return 'This generation needs more workspace credits before it can start.';
   if (/rate.?limit|\b429\b/i.test(named)) return 'The production service is busy right now. Wait a moment, then try again.';
   if (/provider[_ -]?error|\b50[0234]\b|service unavailable/i.test(named)) return 'A production service is temporarily unavailable. Your completed work is safe; retry this step shortly.';
   return named;
@@ -189,6 +199,33 @@ function freshClipPhases(): ClipPhase[] {
   return CLIP_PHASES.map((phase) => ({ ...phase, status: 'pending' }));
 }
 
+function researchFromBrand(brand: BrandRecord): ProductResearch {
+  return {
+    product_name: brand.identity.businessName,
+    one_liner: brand.identity.tagline || brand.offer.summary,
+    core_features: [...brand.offer.features, ...brand.offer.benefits],
+    pricing: brand.offer.pricing.join('\n'),
+    target_audience: brand.audienceTone.audience,
+    pain_points: [], desires: brand.offer.benefits, objections: [],
+    mechanism: brand.offer.summary,
+    awareness_level: '',
+    customer_language: brand.offer.offersCtas,
+    positioning: brand.identity.tagline,
+    proof_elements: [],
+    brand_context: {
+      website_url: brand.websiteUrl,
+      tone: brand.audienceTone.tone,
+      logo_url: brand.visuals.logoUrl,
+      colors: brand.visuals.colors,
+      fonts: brand.visuals.fonts,
+      images: brand.visuals.images.map((image) => image.url),
+      social_links: brand.visuals.socialLinks,
+      pages_read: brand.pages.map((page) => ({ url: page.url, status: page.status })),
+      gaps: brand.gaps,
+    },
+  };
+}
+
 function formatClipElapsed(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(seconds / 60);
@@ -199,10 +236,35 @@ function formatClipElapsed(ms: number): string {
 // The app
 // ---------------------------------------------------------------------------
 
-const BrandedAdsStudioApp = withBrandContext(AdsStudioApp, 'Ads Studio');
+function VergeyeAdsStudioApp() {
+  const [surface, setSurface] = useState<'intelligence' | 'create'>('intelligence');
+  if (surface === 'intelligence') {
+    return <VergeyeIntelligence onOpenCreate={() => setSurface('create')} />;
+  }
+  return (
+    <div style={{ minHeight: '100%', position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setSurface('intelligence')}
+        style={{ position: 'fixed', right: 18, top: 14, zIndex: 90, minHeight: 40, padding: '9px 13px', borderRadius: 10, border: `1px solid ${T.lineStrong}`, background: T.raised, color: T.ink, cursor: 'pointer', fontSize: 12.5, fontWeight: 700 }}
+      >
+        ← Back to Discover &amp; Research
+      </button>
+      <AdsStudioApp />
+    </div>
+  );
+}
+
+const BrandedAdsStudioApp = withBrandContext(VergeyeAdsStudioApp, 'Vergeye Ads Studio');
 export default BrandedAdsStudioApp;
 function AdsStudioApp() {
   const [s, setS] = useState<AdsSession>(() => loadSession());
+  const { document: brandKit } = useBrandKit();
+  const [websiteBrand, setWebsiteBrand] = useState<BrandRecord | null>(null);
+  const matchedSavedBrand = (s.productUrl.trim() || s.productDescription.trim())
+    ? matchSavedBrand(brandKit, s.productUrl.trim() || s.productDescription.trim())
+    : null;
+  const brandInUse = matchedSavedBrand || websiteBrand;
   const [stageNote, setStageNote] = useState('');
   const [ffLogs, setFfLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
@@ -234,6 +296,19 @@ function AdsStudioApp() {
     defaultS: 6,
   });
   const clipDurationHint = formatSceneDurationHint(clipDurationLimits);
+  const clipDurationOptions = clipDurationChoices(clipDurationLimits);
+
+  // The script is written on the 4/6/8/10 ladder. An engine whose floor sits
+  // above it (Seedance 2.5: 15s) cannot film those clips, so each short clip
+  // is raised to that floor instead of being left on a length the engine
+  // refuses. Engines with a floor at or below the ladder are left untouched.
+  useEffect(() => {
+    const floor = clipDurationLimits.minS;
+    if (floor <= 4) return;
+    setS((prev) => (prev.script.some((c) => c.duration_seconds < floor)
+      ? { ...prev, script: prev.script.map((c) => (c.duration_seconds < floor ? { ...c, duration_seconds: floor } : c)) }
+      : prev));
+  }, [clipDurationLimits.minS, clipDurationLimits.maxS, s.script.length]);
 
   function durationProblem(durations: number[]): string {
     return validateSceneDurations(clipEngine, durations, { limits: clipDurationLimits })[0] || '';
@@ -382,17 +457,50 @@ function AdsStudioApp() {
     busy.current = true;
     patch({ isProcessing: true, researchStatus: 'loading', researchError: null, currentStep: 2 });
     try {
-      const site = cur.productUrl.trim()
-        ? await fetchSiteResearch(cur.productUrl.trim(), say)
-        : { main: null, subpages: [], failure: 'No URL provided — using the description only.' };
-      say('Your director is analysing the product…');
-      const research = await researchProduct({ url: cur.productUrl.trim(), description: cur.productDescription, offerCta: cur.offerCta, site });
-      patch({ research, researchStatus: 'done', isProcessing: false });
-      say(site.failure ? `Research done. Note: ${site.failure} You can correct anything below.` : 'Research done — review it below.');
+      const saved = (cur.productUrl.trim() || cur.productDescription.trim())
+        ? matchSavedBrand(brandKit, cur.productUrl.trim() || cur.productDescription.trim())
+        : null;
+      if (saved) {
+        setWebsiteBrand(saved);
+        patch({ research: researchFromBrand(saved), researchStatus: 'done', isProcessing: false });
+        say(`Using saved brand: ${saved.identity.businessName}. Review the sourced details below.`);
+      } else if (cur.productUrl.trim()) {
+        say('Reading the website and its own key pages…');
+        const fetched = await fetchBrandFromWebsite(cur.productUrl.trim());
+        setWebsiteBrand(fetched);
+        patch({ research: researchFromBrand(fetched), researchStatus: 'done', isProcessing: false });
+        say(fetched.limited ? 'Website research is ready with limited pages and explicit gaps. Save it in Brand Kit after review if you want to reuse it.' : 'Website research is ready. Save it in Brand Kit after review if you want to reuse it.');
+      } else {
+        say('Your director is analysing the product description…');
+        const research = await researchProduct({ url: '', description: cur.productDescription, offerCta: cur.offerCta, site: { main: null, subpages: [], failure: 'No URL provided — using the description only.' } });
+        patch({ research, researchStatus: 'done', isProcessing: false });
+        say('Research done — review it below.');
+      }
     } catch (e: any) {
       patch({ researchStatus: 'error', researchError: String(e?.message || e), isProcessing: false });
       fail('Research failed', e);
     } finally { busy.current = false; }
+  }
+
+  async function refreshBrandInBrief() {
+    const current = matchedSavedBrand || websiteBrand;
+    if (!current?.websiteUrl || busy.current) return;
+    busy.current = true;
+    patch({ isProcessing: true, researchStatus: 'loading', researchError: null });
+    try {
+      const refreshed = await fetchBrandFromWebsite(current.websiteUrl);
+      setWebsiteBrand(refreshed);
+      patch({ research: researchFromBrand(refreshed), researchStatus: 'done', isProcessing: false });
+      say(refreshed.limited ? 'Brand refreshed for this brief. Some pages remain limited.' : 'Brand refreshed for this brief.');
+    } catch {
+      patch({ researchStatus: 'error', researchError: 'The website could not be refreshed after retrying once.', isProcessing: false });
+    } finally { busy.current = false; }
+  }
+
+  function useDifferentBrand() {
+    setWebsiteBrand(null);
+    patch({ productUrl: '', productDescription: '', offerCta: '', research: null, researchStatus: 'idle', researchError: null, currentStep: 1 });
+    say('');
   }
 
   // -------------------------------------------------------------- angles ----
@@ -485,7 +593,7 @@ function AdsStudioApp() {
     ].join('\n'),
   };
 
-  const scriptViolations = s.script.filter((c) => c.word_count > WORD_LIMITS[c.duration_seconds]).length;
+  const scriptViolations = s.script.filter((c) => c.word_count > wordLimitFor(c.duration_seconds)).length;
 
   // ----------------------------------------------------------- scene plan ----
   async function runScenePlan() {
@@ -785,6 +893,11 @@ function AdsStudioApp() {
       });
       setBlobUrl(result.blobUrl);
       patch({ finalVideoUrl: result.url, assemblyStatus: 'done', isProcessing: false, currentStep: 7 });
+      void Promise.resolve({
+        appId: 'ads-studio',
+        title: `${cur.research?.product_name || 'Ad'} — final ad`,
+        videoUrl: result.url,
+      });
       say(`Final ad assembled (${(result.bytes / (1024 * 1024)).toFixed(1)} MB).`);
     } catch (e: any) {
       patch({ assemblyStatus: 'error', assemblyError: String(e?.message || e), isProcessing: false });
@@ -879,6 +992,11 @@ function AdsStudioApp() {
         onLog: (line) => setFfLogs((prev) => prev.length > 400 ? [...prev.slice(-380), line] : [...prev, line]),
       });
       setVar({ status: 'done', videoUrl: result.url });
+      void Promise.resolve({
+        appId: 'ads-studio',
+        title: `${cur.research?.product_name || 'Ad'} — variation`,
+        videoUrl: result.url,
+      });
       say('Variation ready.');
     } catch (e: any) {
       setVar({ status: 'error', error: String(e?.message || e) });
@@ -905,7 +1023,7 @@ function AdsStudioApp() {
   // ---------------------------------------------------------------- render ----
   return (
     <AppShell
-      title="Ads Studio"
+      title="Vergeye Ads Studio"
       header={false}
       watermark={false}
       scroll={false}
@@ -920,8 +1038,8 @@ function AdsStudioApp() {
         <div className="ads-rail-brand" style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14, paddingLeft: 6 }}>
           <VergeMark size={30} />
           <div>
-            <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: '-0.01em' }}>Ads Studio</div>
-            <div style={{ fontSize: 10.5, color: T.muted }}>Agentic ad engine</div>
+            <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: '-0.01em' }}>Vergeye Create</div>
+            <div style={{ fontSize: 10.5, color: T.muted }}>Existing production engine</div>
           </div>
         </div>
         {STEPS.map((st) => {
@@ -1009,10 +1127,11 @@ function AdsStudioApp() {
         {s.currentStep === 1 && (
           <div style={{ maxWidth: 760 }}>
             <h2 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 800 }}>Product intake</h2>
-            <p style={{ margin: '0 0 20px', color: T.muted, fontSize: 13.5 }}>Everything the engine works from. The URL is required; the avatar keeps the same presenter across every clip.</p>
+            <p style={{ margin: '0 0 20px', color: T.muted, fontSize: 13.5 }}>Everything the existing production engine works from. Add a URL or description; an avatar keeps the same presenter across every clip.</p>
             <div style={{ display: 'grid', gap: 16 }}>
+              {matchedSavedBrand ? <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderColor: T.accent }}><Check size={15} color={T.good} /><strong style={{ fontSize: 13 }}>Using saved brand: {matchedSavedBrand.identity.businessName}</strong><span style={{ color: T.muted, fontSize: 12 }}>{matchedSavedBrand.websiteUrl}</span><span style={{ marginLeft: 'auto', display: 'flex', gap: 7 }}><Btn small onClick={() => void refreshBrandInBrief()} disabled={s.isProcessing}><RefreshCw size={12} /> Refresh</Btn><Btn small onClick={useDifferentBrand}>Use different</Btn></span></div> : null}
               <div style={card}>
-                <span style={labelStyle}>Product URL (required)</span>
+                <span style={labelStyle}>Product URL (optional when a description is provided)</span>
                 <input style={inputStyle} placeholder="https://yourproduct.com" value={s.productUrl} onChange={(e) => patch({ productUrl: e.target.value })} />
                 <details style={{ marginTop: 14 }}>
                   <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, color: T.soft, listStylePosition: 'inside' }}>Advanced <span style={{ color: T.muted, fontWeight: 500 }}>— description, offer and format: {s.aspect}</span></summary>
@@ -1068,7 +1187,8 @@ function AdsStudioApp() {
         {s.currentStep === 2 && (
           <div style={{ maxWidth: 860 }}>
             <h2 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 800 }}>Product research</h2>
-            <p style={{ margin: '0 0 20px', color: T.muted, fontSize: 13.5 }}>Your director read the site (including reviews, testimonials, pricing and about pages where available). Verified details came from the site; inferred details are creative hypotheses. Correct anything before continuing.</p>
+            <p style={{ margin: '0 0 20px', color: T.muted, fontSize: 13.5 }}>Your director reads the site's own home, pricing, about and product links with native fetch. Missing or limited fields stay explicit. Correct anything before continuing.</p>
+            {brandInUse ? <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12, borderColor: T.accent, flexWrap: 'wrap' }}><Check size={14} color={T.good} /><strong style={{ fontSize: 12.5 }}>{matchedSavedBrand ? `Using saved brand: ${brandInUse.identity.businessName}` : `Website context fetched: ${brandInUse.identity.businessName}`}</strong>{brandInUse.limited ? <Tag tone="warn">limited pages</Tag> : <Tag tone="ok">sourced</Tag>}<span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}><Btn small onClick={() => void refreshBrandInBrief()} disabled={s.isProcessing}><RefreshCw size={12} /> Refresh</Btn><Btn small onClick={useDifferentBrand}>Use different</Btn></span></div> : null}
             {s.researchStatus === 'loading' && <div className="ads-rise" style={{ ...card }}><div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0' }}><Spin size={120} caption="Researching your product" /></div></div>}
             {s.isProcessing && s.researchStatus !== 'loading' && s.currentStep >= 3 && s.currentStep <= 5 && <div className="ads-rise" style={{ ...card, display: 'flex', justifyContent: 'center', padding: '18px 0', marginBottom: 14 }}><Spin size={120} caption={s.currentStep === 3 ? 'Your director is working on your angles' : s.currentStep === 4 ? 'Writing your script' : 'Planning your scenes'} /></div>}
             {s.researchStatus === 'error' && (
@@ -1078,7 +1198,6 @@ function AdsStudioApp() {
                 <div style={{ color: T.soft, fontSize: 13, marginBottom: 12 }}>{customerError(s.researchError)}</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <Btn kind="primary" onClick={runResearch}><RefreshCw size={14} /> Retry</Btn>
-                  <Btn onClick={() => patch({ currentStep: 1 })}>Paste a description manually instead</Btn>
                 </div></div>
               </div>
             )}
@@ -1262,7 +1381,7 @@ function AdsStudioApp() {
             <p style={{ margin: '0 0 16px', color: T.muted, fontSize: 13.5 }}>Edit any spoken line directly. Word limits are hard: 4s→9 · 6s→13 · 8s→17 · 10s→22 words.</p>
             <div style={{ display: 'grid', gap: 10 }}>
               {s.script.map((c, i) => {
-                const limit = WORD_LIMITS[c.duration_seconds];
+                const limit = wordLimitFor(c.duration_seconds);
                 const over = c.word_count > limit;
                 return (
                   <div key={c.clip_number} style={{ ...card, borderColor: over ? T.bad : T.line }}>
@@ -1271,7 +1390,7 @@ function AdsStudioApp() {
                       <Tag tone={over ? 'bad' : 'ok'}>{c.word_count}/{limit} words</Tag>
                       <span style={{ fontSize: 12, color: T.muted }}>emotion: {c.emotion || '—'}</span>
                       <span style={{ marginLeft: 'auto', display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
-                        {([4, 6, 8, 10] as ClipDuration[]).map((d) => (
+                        {clipDurationOptions.map((d) => (
                           <Btn key={d} small kind={c.duration_seconds === d ? 'primary' : 'ghost'} onClick={() => setScriptDuration(i, d)}>{d}s</Btn>
                         ))}
                         <span style={{ flexBasis: '100%', color: T.muted, fontSize: 10.5, textAlign: 'right' }}>{clipDurationHint}</span>
@@ -1374,7 +1493,7 @@ function AdsStudioApp() {
             </div>
             {s.scenePlan.length > 0 && (
               <div style={{ marginTop: 16 }}>
-                <VideoIntegrationPicker
+                <OwnerVideoIntegrationPicker
                   label="Manual fallback / override"
                   integration={clipIntegration}
                   model={clipEngine}
@@ -1404,7 +1523,7 @@ function AdsStudioApp() {
               </div>
             </div>
 
-            <VideoIntegrationPicker
+            <OwnerVideoIntegrationPicker
               label="Manual fallback / override"
               integration={clipIntegration}
               model={clipEngine}
@@ -1525,7 +1644,7 @@ function AdsStudioApp() {
               {s.script.map((sc, i) => {
                 const clip = s.clips.find((c) => c.clipNumber === sc.clip_number);
                 const plan = s.scenePlan.find((p) => p.clip_number === sc.clip_number);
-                const limit = WORD_LIMITS[sc.duration_seconds];
+                const limit = wordLimitFor(sc.duration_seconds);
                 const over = sc.word_count > limit;
                 return (
                   <div key={sc.clip_number} className="ads-card ads-rise ads-review-card" style={{ ...card, display: 'flex', gap: 14, flexWrap: 'wrap', animationDelay: `${Math.min(i, 10) * 45}ms` }}>
@@ -1654,6 +1773,10 @@ function AdsStudioApp() {
         )}
         </>
         )}
+
+        <div style={{ marginTop: 28, maxWidth: 1060 }}>
+          
+        </div>
       </main>
 
       {toast ? (

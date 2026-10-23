@@ -21,6 +21,7 @@
 
 import { Aspect } from '../api';
 import { APP_IDS, OMNI_FLASH_MODEL } from '../../../lib/appIds';
+import { poll } from '../../../lib/poll';
 import { generationHeaders, postGeneration } from '../../../lib/videoEngineClient';
 
 const VEO_MODEL = OMNI_FLASH_MODEL;
@@ -106,16 +107,25 @@ export async function checkVeo(operationId: string): Promise<VeoStatus> {
  * regenerate just this scene.
  */
 export async function pollVeo(operationId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number } = {}): Promise<string> {
-  const deadline = Date.now() + (opts.timeoutMs || 8 * 60 * 1000);
-  let misses = 0;
-  while (Date.now() < deadline) {
-    const st = await checkVeo(operationId);
-    if (st.status === 'completed' && st.videoUrl) return st.videoUrl;
-    if (st.status === 'failed') throw new Error(st.error || 'The render failed.');
-    if (st.error) { misses += 1; if (misses >= 6) throw new Error(`The video service stopped answering: ${st.error}`); }
-    else misses = 0;
-    if (opts.onProgress && typeof st.progress === 'number') opts.onProgress(st.progress);
-    await new Promise((r) => setTimeout(r, 5000));
+  const timeout = opts.timeoutMs || 8 * 60 * 1000;
+  try {
+    const result = await poll(async () => {
+      const status = await checkVeo(operationId);
+      if (status.status === 'processing' && status.error) throw new Error(`The video service stopped answering: ${status.error}`);
+      return status;
+    }, {
+      interval: 5000,
+      timeout,
+      tolerateErrors: 6,
+      until: (status) => status.status === 'completed' || status.status === 'failed',
+      onTick: (status) => {
+        if (opts.onProgress && typeof status.progress === 'number') opts.onProgress(status.progress);
+      },
+    });
+    if (result.status === 'completed' && result.videoUrl) return result.videoUrl;
+    throw new Error(result.error || 'The render failed.');
+  } catch (e: any) {
+    if (e?.name === 'PollTimeoutError') throw new Error('The render took too long (8 minutes). Regenerate the scene to retry.');
+    throw e;
   }
-  throw new Error('The render took too long (8 minutes). Regenerate the scene to retry.');
 }

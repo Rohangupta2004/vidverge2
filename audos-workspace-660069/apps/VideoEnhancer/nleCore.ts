@@ -8,34 +8,13 @@
  *   veh-render           — the whole edit → platform Remotion render → MP4
  */
 import { LB, LB_TRACKS } from '../../components/LightBeam';
+import { callHook, spaceId, workspaceTokenNow, WORKSPACE_ID } from '../../lib/workspace';
 
-export { LB, LB_TRACKS };
+export { LB, LB_TRACKS, callHook };
 
-export function nleAppId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
-}
-
-export function nleToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
-
-/** POST a server hook and unwrap the { response, _meta } envelope. */
-export async function callHook(name: string, payload: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`/api/hooks/execute/${nleAppId()}/${name}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(nleToken() ? { 'X-Workspace-DB-Token': nleToken() } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-  const raw = await res.json().catch(() => null);
-  const data = raw && typeof raw === 'object' && raw.response !== undefined && raw._meta !== undefined ? raw.response : raw;
-  if (!res.ok) throw new Error(String(data?.error || `The ${name} service answered HTTP ${res.status}.`));
-  return data || {};
-}
+/** Backward-compatible aliases for editor modules that consume NLE identity. */
+export const nleAppId = spaceId;
+export const nleToken = workspaceTokenNow;
 
 // ---------------------------------------------------------------------------
 // Timeline model
@@ -129,11 +108,11 @@ export const STYLE_TRANSFERS = [
 
 /** Workspace-cached ElevenLabs beds (pv_music_tracks — durable GCS URLs). */
 export const MUSIC_BEDS = [
-  { id: 'inspiring', label: 'Inspiring', url: 'https://storage.googleapis.com/audos-images/workspaces/f24710e5-7c6d-4db4-92b4-c2c235877575/audio/background-music-1790352381300.mp3' },
-  { id: 'cinematic-dark', label: 'Cinematic Dark', url: 'https://storage.googleapis.com/audos-images/workspaces/f24710e5-7c6d-4db4-92b4-c2c235877575/audio/background-music-1790352397219.mp3' },
-  { id: 'energetic', label: 'Energetic', url: 'https://storage.googleapis.com/audos-images/workspaces/f24710e5-7c6d-4db4-92b4-c2c235877575/audio/background-music-1790352412992.mp3' },
-  { id: 'calm', label: 'Calm', url: 'https://storage.googleapis.com/audos-images/workspaces/f24710e5-7c6d-4db4-92b4-c2c235877575/audio/background-music-1790352426863.mp3' },
-  { id: 'luxury', label: 'Luxury', url: 'https://storage.googleapis.com/audos-images/workspaces/f24710e5-7c6d-4db4-92b4-c2c235877575/audio/background-music-1790352446075.mp3' },
+  { id: 'inspiring', label: 'Inspiring', url: `https://storage.googleapis.com/audos-images/workspaces/${WORKSPACE_ID}/audio/background-music-1790352381300.mp3` },
+  { id: 'cinematic-dark', label: 'Cinematic Dark', url: `https://storage.googleapis.com/audos-images/workspaces/${WORKSPACE_ID}/audio/background-music-1790352397219.mp3` },
+  { id: 'energetic', label: 'Energetic', url: `https://storage.googleapis.com/audos-images/workspaces/${WORKSPACE_ID}/audio/background-music-1790352412992.mp3` },
+  { id: 'calm', label: 'Calm', url: `https://storage.googleapis.com/audos-images/workspaces/${WORKSPACE_ID}/audio/background-music-1790352426863.mp3` },
+  { id: 'luxury', label: 'Luxury', url: `https://storage.googleapis.com/audos-images/workspaces/${WORKSPACE_ID}/audio/background-music-1790352446075.mp3` },
 ] as const;
 export type MusicBedId = (typeof MUSIC_BEDS)[number]['id'] | 'none';
 

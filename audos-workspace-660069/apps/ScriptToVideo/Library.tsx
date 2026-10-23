@@ -5,13 +5,58 @@
  */
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Archive, ArchiveRestore, Clapperboard, MoreVertical, Play, Plus, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { Archive, ArchiveRestore, Clapperboard, MoreVertical, Play, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { Film, T } from './api';
 import VergeLoader from '../../components/VergeLoader';
 
 export interface LegacyFilm { id: number; title: string; final_url: string | null; created_at: string }
 
 const ACTIVE = ['planning', 'producing', 'assembling'];
+
+/**
+ * DEDUPLICATION (bug D3).
+ *
+ * A film could appear twice in this list. An interrupted create, a recovery
+ * sweep that re-seeded a row, or a create whose insert reply was misread all
+ * leave a second row with the same title and the same shape, and the Library
+ * showed both — so the customer could not tell which one was their film.
+ *
+ * One row per film now. Rows are folded on their identity (the title and the
+ * aspect they were made at, which is what a duplicate shares), and the row
+ * kept is the one that actually got furthest: a finished film beats a running
+ * one, a running one beats a draft, and a tie goes to the newest. Nothing is
+ * deleted — the other rows are still there, just not shown twice.
+ */
+function filmIdentity(f: Film): string {
+  const title = String(f.title || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  // A film with no title yet is only ever itself: folding untitled drafts
+  // together would hide real work.
+  if (!title) return `id:${f.id}`;
+  return `${title}|${String(f.aspect_ratio || '16:9')}`;
+}
+
+/** How far a row got, so the best one survives the fold. */
+function filmRank(f: Film): number {
+  if (f.final_video_url) return 3;
+  if (ACTIVE.includes(String(f.status))) return 2;
+  if (Array.isArray(f.plan?.scenes) && f.plan!.scenes.length) return 1;
+  return 0;
+}
+
+function dedupeFilms(films: Film[]): Film[] {
+  const best = new Map<string, Film>();
+  for (const f of films) {
+    const key = filmIdentity(f);
+    const held = best.get(key);
+    if (!held) { best.set(key, f); continue; }
+    const better = filmRank(f) > filmRank(held)
+      || (filmRank(f) === filmRank(held) && Date.parse(String(f.created_at || '')) > Date.parse(String(held.created_at || '')));
+    if (better) best.set(key, f);
+  }
+  // The incoming order is already newest-first; keep it.
+  const kept = new Set(Array.from(best.values()).map((f) => f.id));
+  return films.filter((f) => kept.has(f.id));
+}
 
 const menuItemStyle: CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left',
@@ -41,18 +86,17 @@ export default function Library(props: {
   onOpen: (f: Film) => void;
   onOpenLegacy: (l: LegacyFilm) => void;
   onQuickCreate: (text: string) => void;
-  onOpenStudio: () => void;
   onArchive: (f: Film, archived: boolean) => void;
   onDelete: (f: Film) => void;
 }) {
-  const { loading, onNew, onOpen, onOpenLegacy, onQuickCreate, onOpenStudio, onArchive, onDelete } = props;
+  const { loading, onNew, onOpen, onOpenLegacy, onQuickCreate, onArchive, onDelete } = props;
   const [showArchived, setShowArchived] = useState(false);
   const [menuId, setMenuId] = useState<number | null>(null);
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const films = Array.isArray(props.films) ? props.films : [];
   const legacy = Array.isArray(props.legacy) ? props.legacy : [];
-  const activeFilms = films.filter((f) => !f.is_archived);
-  const archivedFilms = films.filter((f) => f.is_archived);
+  const activeFilms = dedupeFilms(films.filter((f) => !f.is_archived));
+  const archivedFilms = dedupeFilms(films.filter((f) => f.is_archived));
   const source = showArchived ? archivedFilms : activeFilms;
   const ordered = [...source.filter((f) => ACTIVE.includes(String(f.status))), ...source.filter((f) => !ACTIVE.includes(String(f.status)))];
   const empty = !loading && !films.length && !legacy.length;
@@ -83,13 +127,6 @@ export default function Library(props: {
             {starters.map((s) => (
               <button key={s} className="s2v-ghost" onClick={() => onQuickCreate(s)} style={{ background: 'transparent', border: `1px solid ${T.dim}`, color: T.muted, borderRadius: 999, padding: '7px 14px', fontSize: 12, cursor: 'pointer' }}>{s}</button>
             ))}
-          </div>
-          <div style={{ color: T.dim, fontSize: 12, marginTop: 22, lineHeight: 1.6 }}>
-            Just want one clip rather than a whole film?{' '}
-            <button className="s2v-ghost" onClick={onOpenStudio} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', color: T.live, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
-              <Wand2 size={12} /> Open Agent Studio
-            </button>{' '}
-            — one prompt, any Runway model, a downloadable video in minutes.
           </div>
         </div>
       </div>
@@ -141,8 +178,22 @@ export default function Library(props: {
           return (
             <div key={f.id} className="s2v-row" style={{ display: 'flex', alignItems: 'center', gap: 16, width: '100%', borderBottom: `1px solid ${T.raised}`, padding: '14px 10px', position: 'relative' }}>
               <button onClick={() => onOpen(f)} style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 1, minWidth: 0, textAlign: 'left', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}>
+                {/* A finished film shows a real frame. The stored thumbnail is
+                    preferred; without one the master's own first second is the
+                    poster, which is why a finished row is never a blank tile. */}
                 <div style={{ width: 104, height: 58, background: T.raised, borderRadius: 6, overflow: 'hidden', flexShrink: 0, border: '1px solid rgba(180,120,0,0.14)' }}>
-                  {f.final_thumb_url ? <img src={f.final_thumb_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null}
+                  {f.final_thumb_url ? (
+                    <img src={f.final_thumb_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : f.final_video_url ? (
+                    <video
+                      src={`${String(f.final_video_url)}#t=0.5`}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      tabIndex={-1}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+                    />
+                  ) : null}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: T.bone, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.title || 'Untitled film'}</div>

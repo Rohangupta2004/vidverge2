@@ -1,147 +1,147 @@
 {
   "workspaceId": "f24710e5-7c6d-4db4-92b4-c2c235877575",
   "configId": 660069,
-  "name": "VidVerge",
-  "tagline": "Turn any idea into a publish-ready video \u2014 brief to video in one shot",
-  "logoUrl": "https://storage.googleapis.com/audos-images/attachments/general/c0902809-6dc4-4e0c-b04e-1f60e01b31e6.png",
-  "iconUrl": "https://storage.googleapis.com/audos-images/attachments/general/c0902809-6dc4-4e0c-b04e-1f60e01b31e6.png",
+  "seo": {
+    "title": "Vidverge — AI Video Generator | Brief to Video in One Shot",
+    "description": "Drop a URL, script, idea or raw footage and let Verger plan the path to a publish-ready video.",
+    "imageUrl": "https://storage.googleapis.com/audos-images/generated-images/image-1791994146120-6y0ebr.png"
+  },
+  "name": "Vidverge",
+  "tagline": "Turn any idea into a publish-ready video — brief to video in one shot",
+  "logoUrl": "https://storage.googleapis.com/audos-images/chat-attachments/8a9adad1-ad34-40e6-823c-8195cdcf7d6c.png",
+  "iconUrl": "https://storage.googleapis.com/audos-images/chat-attachments/8a9adad1-ad34-40e6-823c-8195cdcf7d6c.png",
   "logoOnDarkUrl": "https://storage.googleapis.com/audos-images/attachments/general/c0902809-6dc4-4e0c-b04e-1f60e01b31e6.png",
   "colors": {
-    "primary": "#D6AB4A",
-    "highlight": "#F3D58B",
-    "contrast": "#08090B",
-    "secondary": "#B8892F",
-    "accent": "#FFE8AB",
+    "primary": "#F2B544",
+    "highlight": "#FFD16F",
+    "contrast": "#1B1308",
+    "secondary": "#B7BBC4",
+    "accent": "#F2B544",
     "primaryScale": {
-      "50": "#FFF9E8",
-      "100": "#F7E9BE",
-      "200": "#EED38A",
-      "500": "#D6AB4A",
-      "600": "#B8892F",
-      "700": "#90671F",
-      "900": "#3B2A12"
+      "50": "#342716",
+      "100": "#342716",
+      "200": "#94501A",
+      "500": "#F2B544",
+      "600": "#D69529",
+      "700": "#B96F1C",
+      "900": "#7A4318"
     },
     "highlightScale": {
-      "50": "#FFFCF5",
-      "100": "#FBF2D9",
-      "200": "#F5E3B3",
-      "500": "#F3D58B",
-      "600": "#D6AB4A",
-      "700": "#B8892F",
-      "900": "#3B2A12"
+      "50": "#342716",
+      "100": "#342716",
+      "200": "#94501A",
+      "500": "#FFD16F",
+      "600": "#F2B544",
+      "700": "#D69529",
+      "900": "#94501A"
     },
     "surfaces": {
-      "page": "#08090B",
-      "pageAlt": "#0B0D10",
-      "gradientFrom": "#08090B",
-      "gradientVia": "#0B0D10",
-      "gradientTo": "#111318",
-      "card": "#111318",
-      "cardHover": "#171A21",
-      "panel": "#171A21",
-      "panelStrong": "#1D212A",
-      "muted": "#0E1014",
-      "accentSoft": "#201A10",
-      "border": "rgba(255,255,255,0.07)",
-      "borderStrong": "rgba(243,213,139,0.24)"
+      "page": "#0D0E10",
+      "pageAlt": "#17191D",
+      "gradientFrom": "#0D0E10",
+      "gradientVia": "#17191D",
+      "gradientTo": "#0D0E10",
+      "card": "#17191D",
+      "cardHover": "#2A2E35",
+      "panel": "#17191D",
+      "panelStrong": "#21242A",
+      "muted": "#21242A",
+      "accentSoft": "#342716",
+      "border": "#393E47",
+      "borderStrong": "#747D8B"
     },
     "text": {
-      "primary": "#F6F3EB",
-      "secondary": "#B8B2A7",
-      "brand": "#F3D58B",
-      "accent": "#FFE8AB",
-      "muted": "#77736B",
-      "onPrimary": "#08090B",
-      "onHighlight": "#08090B",
-      "onContrast": "#F6F3EB"
+      "primary": "#F6F2E9",
+      "secondary": "#B7BBC4",
+      "brand": "#F2B544",
+      "accent": "#F2B544",
+      "muted": "#929AA7",
+      "onPrimary": "#1B1308",
+      "onHighlight": "#1B1308",
+      "onContrast": "#F2B544"
     },
     "semantic": {
-      "success": "#4ade80",
-      "warning": "#F3D58B",
-      "danger": "#f87171"
+      "success": "#79D5A5",
+      "warning": "#F1C778",
+      "danger": "#FF9A9A"
     },
     "shell": {
-      "buttonText": "#08090B",
-      "accentButtonText": "#08090B",
-      "dockText": "#F6F3EB",
-      "icon": "#F3D58B",
-      "shadow": "rgba(0,0,0,0.5)",
-      "shadowStrong": "rgba(0,0,0,0.7)"
+      "buttonText": "#1B1308",
+      "accentButtonText": "#1B1308",
+      "dockText": "#1B1308",
+      "icon": "#F2B544",
+      "shadow": "#0D0E10",
+      "shadowStrong": "#0D0E10"
     }
   },
   "palette": {
-    "primary": "#D6AB4A",
-    "highlight": "#F3D58B",
-    "contrast": "#08090B",
-    "secondary": "#B8892F",
-    "accent": "#FFE8AB",
+    "primary": "#F2B544",
+    "highlight": "#FFD16F",
+    "contrast": "#1B1308",
+    "secondary": "#B7BBC4",
+    "accent": "#F2B544",
     "primaryScale": {
-      "50": "#FFF9E8",
-      "100": "#F7E9BE",
-      "200": "#EED38A",
-      "500": "#D6AB4A",
-      "600": "#B8892F",
-      "700": "#90671F",
-      "900": "#3B2A12"
+      "50": "#342716",
+      "100": "#342716",
+      "200": "#94501A",
+      "500": "#F2B544",
+      "600": "#D69529",
+      "700": "#B96F1C",
+      "900": "#7A4318"
     },
     "highlightScale": {
-      "50": "#FFFCF5",
-      "100": "#FBF2D9",
-      "200": "#F5E3B3",
-      "500": "#F3D58B",
-      "600": "#D6AB4A",
-      "700": "#B8892F",
-      "900": "#3B2A12"
+      "50": "#342716",
+      "100": "#342716",
+      "200": "#94501A",
+      "500": "#FFD16F",
+      "600": "#F2B544",
+      "700": "#D69529",
+      "900": "#94501A"
     },
     "surfaces": {
-      "page": "#08090B",
-      "pageAlt": "#0B0D10",
-      "gradientFrom": "#08090B",
-      "gradientVia": "#0B0D10",
-      "gradientTo": "#111318",
-      "card": "#111318",
-      "cardHover": "#171A21",
-      "panel": "#171A21",
-      "panelStrong": "#1D212A",
-      "muted": "#0E1014",
-      "accentSoft": "#201A10",
-      "border": "rgba(255,255,255,0.07)",
-      "borderStrong": "rgba(243,213,139,0.24)"
+      "page": "#0D0E10",
+      "pageAlt": "#17191D",
+      "gradientFrom": "#0D0E10",
+      "gradientVia": "#17191D",
+      "gradientTo": "#0D0E10",
+      "card": "#17191D",
+      "cardHover": "#2A2E35",
+      "panel": "#17191D",
+      "panelStrong": "#21242A",
+      "muted": "#21242A",
+      "accentSoft": "#342716",
+      "border": "#393E47",
+      "borderStrong": "#747D8B"
     },
     "text": {
-      "primary": "#F6F3EB",
-      "secondary": "#B8B2A7",
-      "brand": "#F3D58B",
-      "accent": "#FFE8AB",
-      "muted": "#77736B",
-      "onPrimary": "#08090B",
-      "onHighlight": "#08090B",
-      "onContrast": "#F6F3EB"
+      "primary": "#F6F2E9",
+      "secondary": "#B7BBC4",
+      "brand": "#F2B544",
+      "accent": "#F2B544",
+      "muted": "#929AA7",
+      "onPrimary": "#1B1308",
+      "onHighlight": "#1B1308",
+      "onContrast": "#F2B544"
     },
     "semantic": {
-      "success": "#4ade80",
-      "warning": "#F3D58B",
-      "danger": "#f87171"
+      "success": "#79D5A5",
+      "warning": "#F1C778",
+      "danger": "#FF9A9A"
     },
     "shell": {
-      "buttonText": "#08090B",
-      "accentButtonText": "#08090B",
-      "dockText": "#F6F3EB",
-      "icon": "#F3D58B",
-      "shadow": "rgba(0,0,0,0.5)",
-      "shadowStrong": "rgba(0,0,0,0.7)"
+      "buttonText": "#1B1308",
+      "accentButtonText": "#1B1308",
+      "dockText": "#1B1308",
+      "icon": "#F2B544",
+      "shadow": "#0D0E10",
+      "shadowStrong": "#0D0E10"
     }
   },
   "typography": {
-    "font": "Inter",
+    "font": "Manrope",
     "category": "sans-serif",
-    "weights": [
-      400,
-      500,
-      600,
-      700
-    ],
-    "headingFont": "Inter",
-    "bodyFont": "Inter"
+    "weights": [400, 500, 600, 700],
+    "headingFont": "Space Grotesk",
+    "bodyFont": "Manrope"
   }
 }

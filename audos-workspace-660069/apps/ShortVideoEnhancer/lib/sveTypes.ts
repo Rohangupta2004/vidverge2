@@ -1,3 +1,5 @@
+import { WORKSPACE_ID } from '../../../lib/workspace';
+
 /**
  * Short Video Enhancer — Phase 2 edit document.
  *
@@ -10,7 +12,7 @@
  * removes it from the exported file; there is no destructive step.
  */
 
-export const SVE_WS_ID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
+export const SVE_WS_ID = WORKSPACE_ID;
 
 /** Native design canvas. The export is always a true 1080x1920 portrait. */
 export const DESIGN_W = 1080;

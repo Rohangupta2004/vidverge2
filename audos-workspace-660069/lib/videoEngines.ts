@@ -14,20 +14,22 @@
  *  D — image companions                POST /api/veo/generate/image
  *                                      POST /api/generate/image
  *
- * KLING IS LIVE (verified 14 Oct 2026 — the founder's credit pack is active,
- * superseding the 9 Oct note that said KLING_API_KEY was missing: a real
- * submit now reaches Kling's API and bills/refunds correctly). Two facts:
- *  1. kling-v2-master is DISCONTINUED upstream — a live submit answers 502
- *     wrapping "Kling API error (404, code 1203): The model 'kling-v2-master'
- *     has been discontinued". Never offer it as runnable.
- *  2. Kling's own API docs (kling.ai/document-api, read 14 Oct 2026) now use
- *     model-scoped endpoints with a NEW roster — kling-2.5-turbo, kling-2.6,
- *     kling-3.0 and kling-3.0-omni — alongside the legacy kling-v1* ids.
- *     GET /api/generate/kling/models is still a STATIC list (it still names
- *     v2-master), so it is NOT a liveness oracle — only a submit tells the
- *     truth. The platform proxy docs also say an id the proxy does not
- *     recognise falls back to its default with a modelFallback note, so any
- *     result surface must print the model that actually rendered.
+ * KLING IS LIVE, and its current roster is OFFERED NORMALLY — kling-3.0-omni,
+ * kling-3.0, kling-2.6 and kling-2.5-turbo are ordinary selectable engines,
+ * not greyed-out previews.
+ *  1. kling-v2-master and the legacy kling-v1* ids are GONE from this file.
+ *     Kling shut them down, so there is nothing to grey out: an id nobody
+ *     serves does not belong in a picker. RETIRED_KLING_IDS keeps them
+ *     RECOGNISABLE, so a stale saved selection gets a readable message instead
+ *     of being routed to the Google video proxy, which never heard of it.
+ *  2. GET /api/generate/kling/models is a STATIC list, so it is not a liveness
+ *     oracle — only a submit tells the truth. Liveness belongs to the
+ *     owner-only Health screen in the Video Provider Lab, which calls the live
+ *     endpoints when you open it; this file states no probe verdicts.
+ *  3. A retired Kling id is answered by SUBSTITUTING the operation default and
+ *     disclosing it in modelFallback (an id the proxy has never heard of is a
+ *     400 before billing), so EVERY surface that shows a clip must print the
+ *     model that actually rendered — see describeRanModel() below.
  *
  * Higgsfield video models live in HIGGSFIELD_VIDEO_MODELS below (native
  * /api/generate/higgsfield/* proxy). Live sweep 13 Oct 2026: Hailuo 02 and
@@ -70,10 +72,11 @@
  * None of that was re-probed: a sweep spends the wallet, and a catalog that
  * names its own retirements does not need a paid confirmation to be believed.
  *
- * See ENGINE_HEALTH near the bottom of this file for the per-model outcome of
- * that sweep — which ids actually produced a clip, and which ones the proxy
- * refused.
+ * ENGINE_HEALTH near the bottom of this file no longer carries sweep verdicts —
+ * open the Video Provider Lab's Health screen for live per-model status.
  */
+
+export const VIDEO_CAPABILITY_REGISTRY_VERSION = '2026-10-21.phase3';
 
 export type EngineGroup = 'group-a' | 'runway-video' | 'runway-recipe' | 'kling' | 'higgsfield';
 
@@ -109,7 +112,16 @@ export interface GroupAModel {
   /** '4k' resolution actually honored. See FOUR_K_MODELS. */
   supports4k: boolean;
   supportsAudio: boolean;
+  /** True when audio can be requested per generation rather than always on. */
+  audioOptional?: boolean;
+  /** Resolutions the app proxy accepts for this exact model. */
+  resolutions?: Array<'480p' | '720p' | '1080p' | '4k'>;
+  /** Existing-video edit input (`videoData`). */
+  supportsVideoInput?: boolean;
   supportsNegativePrompt: boolean;
+  /** Shortest clip this model accepts. Absent means the proxy's own floor
+   * (GROUP_A_PROXY_MIN_S) — only models with a stricter floor name one. */
+  minDurationS?: number;
   /** Longest clip known-safe on this model (the proxy normalizes 4–25). */
   maxDurationS: number;
   defaultDurationS: number;
@@ -161,9 +173,10 @@ export const OMNI_MODEL_ID = 'gemini-omni-1.1-flash';
 export const GROUP_A_MODELS: GroupAModel[] = [
   gA({
     id: OMNI_MODEL_ID, name: 'Gemini Omni 1.1 Flash', provider: 'Google', tier: 'Character',
-    blurb: 'Character and product consistency engine — send the same reference images with every scene (up to ten) and the same face, product or mascot carries across every cut. References combine with a seed frame, and a locked last frame interpolates the motion between two stills. Output caps at 720p.',
+    blurb: 'Character and product consistency engine — send the same reference images with every scene (up to ten) and the same face, product or mascot carries across every cut. References combine with a seed frame, a locked last frame interpolates motion, and videoData edits an existing clip. Output caps at 720p.',
     supportsReferenceImages: true, maxReferenceImages: 10, refsExclusiveWithSeed: false,
-    supportsLastFrame: true, supports4k: false, supportsAudio: true,
+    supportsLastFrame: true, supports4k: false, supportsAudio: true, audioOptional: true,
+    resolutions: ['720p'], supportsVideoInput: true,
     maxDurationS: 8, defaultDurationS: 8,
     costHint: '≈ $0.40 / clip',
   }),
@@ -202,6 +215,15 @@ export const GROUP_A_MODELS: GroupAModel[] = [
     costHint: 'lowest cost / clip',
   }),
   gA({
+    id: 'openrouter/bytedance/seedance-2.5', name: 'Seedance 2.5', provider: 'ByteDance · OpenRouter', tier: 'Cinematic',
+    blurb: 'Premium ByteDance video via OpenRouter: every whole second from 4 to 30, optional audio, 480p/720p, first/last frames OR up to three asset references. Strong for fewer long generation blocks.',
+    supportsReferenceImages: true, maxReferenceImages: 3, refsExclusiveWithSeed: true,
+    supportsLastFrame: true, supports4k: false, supportsAudio: true, audioOptional: true,
+    resolutions: ['480p', '720p'], supportsVideoInput: false, supportsNegativePrompt: false,
+    minDurationS: 4, maxDurationS: 30, defaultDurationS: 30,
+    costHint: 'usage-priced by OpenRouter; confirm the estimate before rendering',
+  }),
+  gA({
     id: 'openrouter/google/veo-3.1', name: 'Veo 3.1 (OpenRouter)', provider: 'Google · OpenRouter', tier: 'Cinematic',
     blurb: 'Veo 3.1 routed through OpenRouter. Seed image only on this path — no ingredients.',
     supportsReferenceImages: false, refsExclusiveWithSeed: false, supportsLastFrame: false,
@@ -226,6 +248,40 @@ export const GROUP_A_MODELS: GroupAModel[] = [
 
 export function groupAModel(id: string | null | undefined): GroupAModel | null {
   return GROUP_A_MODELS.find((m) => m.id === String(id || '')) || null;
+}
+
+/** The window /api/veo/generate/video accepts for a model that names no limits
+ * of its own (the proxy then normalizes to the nearest real length). */
+export const GROUP_A_PROXY_MIN_S = 4;
+export const GROUP_A_PROXY_MAX_S = 25;
+
+/** Shortest legal clip for a Group A model. */
+export function groupAMinDurationS(model: Pick<GroupAModel, 'minDurationS'> | null | undefined): number {
+  return model?.minDurationS ?? GROUP_A_PROXY_MIN_S;
+}
+
+/**
+ * The duration a Group A submit actually carries. A model's own floor and
+ * ceiling are authoritative; otherwise the proxy's generic 4–25s window is
+ * used. Seedance 2.5 is therefore exactly 4–30s.
+ */
+export function clampGroupADuration(modelId: string | null | undefined, seconds: number): number {
+  const model = groupAModel(modelId);
+  const min = groupAMinDurationS(model);
+  const max = model?.maxDurationS ?? GROUP_A_PROXY_MAX_S;
+  return Math.max(min, Math.min(max, Math.round(seconds)));
+}
+
+/** Whole-second options for a duration picker, derived from the model entry:
+ * the familiar 4–12s ladder trimmed to the legal range, or — for a model whose
+ * floor sits above that ladder — steps of five from the floor up to the
+ * model's maximum. */
+export function groupADurationLadder(model: Pick<GroupAModel, 'minDurationS' | 'maxDurationS'>): number[] {
+  const min = groupAMinDurationS(model);
+  const max = model.maxDurationS;
+  const offered = [min, 4, 6, 8, 10, 12, 15, 20, 25, max]
+    .filter((d) => d >= min && d <= max);
+  return Array.from(new Set(offered)).sort((a, b) => a - b);
 }
 
 /**
@@ -259,8 +315,9 @@ export function resolveEngineId(id: string | null | undefined): string {
  * them server-side with a 400). Returns a human-readable violation or null.
  *   1. Veo 3.1 / 3.1 Fast: referenceImages XOR (imageData / lastFrameImage)
  *   2. Veo 3.1 / 3.1 Fast: imageData + lastFrameImage = first/last-frame flow (valid)
- *   3. Omni Flash: referenceImages + imageData OK; lastFrameImage never
- *   4. OpenRouter-hosted models: imageData only
+ *   3. Omni Flash: referenceImages + imageData OK; lastFrameImage never combines with refs
+ *   4. Seedance 2.5: first (+ optional last) frames OR 1–3 asset references
+ *   5. Other OpenRouter-hosted models: imageData only
  */
 export function validateGroupAInputs(modelId: string, inputs: {
   prompt?: string;
@@ -284,6 +341,7 @@ export function validateGroupAInputs(modelId: string, inputs: {
     return `${m.name} accepts at most ${m.maxReferenceImages} reference image${m.maxReferenceImages === 1 ? '' : 's'}.`;
   }
   if (last && !m.supportsLastFrame) return `${m.name} does not support a last-frame image.`;
+  if (modelId === 'openrouter/bytedance/seedance-2.5' && last && !seed) return 'Seedance 2.5 requires imageData when lastFrameImage is supplied.';
   if (refs > 0 && m.refsExclusiveWithSeed && (seed || last)) {
     return `${m.name}: reference images are mutually exclusive with the seed image and last frame — pick one workflow.`;
   }
@@ -845,8 +903,8 @@ export function clampRunwayDuration(seconds: number | null | undefined, modelId?
 }
 
 // ---------------------------------------------------------------------------
-// GROUP C — Kling (LIVE since 14 Oct 2026 via credit pack; v2-master
-// discontinued upstream; new 2.5/2.6/3.0 roster unverified through the proxy)
+// GROUP C — Kling. Live, and the 2.5 / 2.6 / 3.0 roster is offered normally.
+// v2-master and the whole v1 generation were shut down by Kling: not listed.
 // ---------------------------------------------------------------------------
 
 export interface KlingModel {
@@ -855,62 +913,69 @@ export interface KlingModel {
   name: string;
   tier: EngineTier;
   blurb: string;
-  /** When true a general picker greys the model out (unverified through the
-   *  platform proxy, or discontinued). The Video Provider Lab deliberately
-   *  ignores this flag so the founder can test every id. */
+  /** When true a general picker greys the model out. NO MODEL IN THE CURRENT
+   *  ROSTER SETS IT: the live Kling models are selectable, and an id Kling has
+   *  shut down is removed from the list rather than greyed. Kept for a genuine
+   *  future preview. The Video Provider Lab ignores it either way, so the
+   *  founder can always test every id. */
   comingSoon?: boolean;
-  /** Kling retired this id upstream — a submit is a guaranteed 502. */
+  /** Reserved for an id Kling retires while it is still worth listing. */
   discontinued?: boolean;
-  /** std/pro quality modes (legacy model_name roster only — the 2.5+ ids take no mode). */
+  /** std = 720p, pro = 1080p. Every current model accepts both. */
   modes?: Array<'std' | 'pro'>;
   /** Clip lengths offered through the platform proxy (its contract is "5" | "10"). */
   durations?: number[];
-  /** The model renders native audio upstream (the proxy exposes no audio field yet). */
+  /**
+   * Whether the PLATFORM PROXY renders audio with the clip.
+   *
+   * False on every current model, and that is the proxy's limit rather than
+   * Kling's: upstream Omni does native audio, 4K and 3–15s clips, and the
+   * proxy exposes none of it — it REJECTS an unsupported field before billing
+   * rather than ignoring it. A wider upstream capability is not proxy support,
+   * and claiming it here is how a render gets refused.
+   */
   audio?: boolean;
 }
 
+/** Shown next to a Kling entry that really is a preview (comingSoon). Nothing
+ * in the current roster is one, so today this only answers a stale selection. */
 export const KLING_COMING_SOON_MESSAGE =
-  'Kling is LIVE on this platform as of 14 Oct 2026 (credit pack active), but this model is not yet verified '
-  + 'end to end through the proxy, so general pickers keep it greyed until a Video Provider Lab run proves it. '
-  + 'Note: kling-v2-master is permanently discontinued upstream (502 wrapping Kling API error 404, code 1203); '
-  + "Kling's current ids are kling-2.5-turbo, kling-2.6, kling-3.0 and kling-3.0-omni.";
+  'This Kling model is not offered. The live Kling roster is Kling 3.0 Omni, Kling 3.0, Kling 2.6 '
+  + 'and Kling 2.5 Turbo — pick one of those.';
 
-// The roster mixes the two Kling API generations. The NEW ids (kling-2.5-turbo
-// and later) come from Kling's own API docs, read live 14 Oct 2026 at
-// kling.ai/document-api (model-scoped endpoints such as
-// /text-to-video/kling-2.5-turbo); the kling-v1* ids are the legacy
-// model_name roster the platform proxy's static catalogue lists. The key is
-// LIVE (credit pack, 14 Oct 2026), but every entry stays comingSoon — greyed
-// in general pickers — until a Video Provider Lab run proves that id end to
-// end, because the proxy may substitute its default for ids it does not
-// recognise. kling-v2-master is discontinued upstream: permanently dead, not
-// pending.
+// THE LIVE KLING ROSTER. These four ids are Kling's current model-scoped API
+// (text-to-video / image-to-video per model) and they are offered like any
+// other engine — no comingSoon flag, no grey-out. Kling shut down v2-master
+// and the entire v1 generation, so those ids are not listed here at all;
+// RETIRED_KLING_IDS below keeps them recognisable for stale selections.
+//
+// Nothing here is a probe verdict — these are the documented contracts. For
+// "is this endpoint answering right now?", open the Video Provider Lab's
+// owner-only Health screen.
 export const KLING_MODELS: KlingModel[] = [
-  { group: 'kling', id: 'kling-3.0-omni', name: 'Kling 3.0 Omni', tier: 'Cinematic', comingSoon: true,
-    durations: [5, 10], audio: true,
-    blurb: "Kling's omni multi-modal flagship (14 Oct 2026 API docs): prompt, first/last frame, reference images and source-video inputs; native audio; up to 4K and 3–15s upstream. Untested through the platform proxy — prove it in the Video Provider Lab." },
-  { group: 'kling', id: 'kling-3.0', name: 'Kling 3.0', tier: 'Cinematic', comingSoon: true,
-    durations: [5, 10], audio: true,
-    blurb: 'Current Kling flagship: text-to-video and image-to-video with native audio, multi-shot prompts, up to 4K and 3–15s upstream. Untested through the platform proxy.' },
-  { group: 'kling', id: 'kling-2.6', name: 'Kling 2.6', tier: 'Standard', comingSoon: true,
-    durations: [5, 10], audio: true,
-    blurb: 'Kling 2.6 text-to-video and image-to-video with native audio ("native"/"off"), 720p/1080p, 5s/10s. Untested through the platform proxy.' },
-  { group: 'kling', id: 'kling-2.5-turbo', name: 'Kling 2.5 Turbo', tier: 'Fast', comingSoon: true,
-    durations: [5, 10],
-    blurb: 'Fast tier of the current Kling API: text-to-video and image-to-video, 720p/1080p, 5s/10s, silent. Untested through the platform proxy.' },
-  { group: 'kling', id: 'kling-v2-master', name: 'Kling v2 Master', tier: 'Cinematic', comingSoon: true, discontinued: true,
-    modes: ['std'], durations: [5, 10],
-    blurb: 'DISCONTINUED upstream: a live 14 Oct 2026 submit answered 502 wrapping Kling API error (404, code 1203) "has been discontinued". Use Kling 2.6 or 3.0 instead.' },
-  { group: 'kling', id: 'kling-v1-6', name: 'Kling v1.6', tier: 'Standard', comingSoon: true,
-    modes: ['std', 'pro'], durations: [5, 10],
-    blurb: 'Legacy roster — balanced Kling generation, text-to-video and image-to-video, std/pro modes. May be retired upstream like v2-master; verify in the lab.' },
-  { group: 'kling', id: 'kling-v1-5', name: 'Kling v1.5', tier: 'Standard', comingSoon: true,
-    modes: ['std', 'pro'], durations: [5, 10],
-    blurb: 'Legacy roster — the proxy default tier; text-to-video, image-to-video and Elements, std/pro modes.' },
-  { group: 'kling', id: 'kling-v1', name: 'Kling v1', tier: 'Lite', comingSoon: true,
-    modes: ['std', 'pro'], durations: [5, 10],
-    blurb: 'Legacy roster — first-generation Kling, std/pro modes.' },
+  { group: 'kling', id: 'kling-3.0-omni', name: 'Kling 3.0 Omni', tier: 'Cinematic',
+    modes: ['std', 'pro'], durations: [5, 10], audio: false,
+    blurb: "Kling's omni flagship, and the reference-image engine: a prompt, a first/last frame, and 2–4 reference images addressed as @image_1…@image_4. It takes NO negative-prompt field — negatives go inline in the prompt." },
+  { group: 'kling', id: 'kling-3.0', name: 'Kling 3.0', tier: 'Cinematic',
+    modes: ['std', 'pro'], durations: [5, 10], audio: false,
+    blurb: 'Kling flagship: text-to-video, a first frame, or first+last frame interpolation.' },
+  { group: 'kling', id: 'kling-2.6', name: 'Kling 2.6', tier: 'Standard',
+    modes: ['std', 'pro'], durations: [5, 10], audio: false,
+    blurb: 'Kling 2.6: text-to-video, first frame and first+last frame. 720p (std) or 1080p (pro).' },
+  { group: 'kling', id: 'kling-2.5-turbo', name: 'Kling 2.5 Turbo', tier: 'Fast',
+    modes: ['std', 'pro'], durations: [5, 10], audio: false,
+    blurb: 'The fast tier: text-to-video and a first frame; first+last frame in pro. 720p or 1080p.' },
 ];
+
+/**
+ * Kling ids this catalog used to list and no longer does — Kling shut them
+ * down. They are kept ONLY so a stale selection (a saved film row, a stored
+ * picker preference, a half-finished draft) is still RECOGNISED as a Kling
+ * request and answered with klingUnsupportedMessage(), instead of failing
+ * isKlingModel() and being routed to /api/veo/generate/video, which would
+ * answer 400 for an id it has never heard of.
+ */
+const RETIRED_KLING_IDS = ['kling-v2-master', 'kling-v1-6', 'kling-v1-5', 'kling-v1'];
 
 export interface HiggsfieldVideoModel {
   group: 'higgsfield';
@@ -940,8 +1005,47 @@ export const HIGGSFIELD_VIDEO_MODELS: HiggsfieldVideoModel[] = [
   },
 ];
 
+export function klingModel(id: string | null | undefined): KlingModel | null {
+  return KLING_MODELS.find((m) => m.id === String(id || '')) || null;
+}
+
+/** True for an id Kling has shut down — recognised, never offered. */
+export function isRetiredKlingModel(id: string | null | undefined): boolean {
+  return RETIRED_KLING_IDS.indexOf(String(id || '')) >= 0;
+}
+
+/** True for any Kling-native id, current or retired. Callers use this to send
+ * a generation to /api/generate/kling/* rather than the Google video proxy. */
 export function isKlingModel(id: string | null | undefined): boolean {
-  return KLING_MODELS.some((m) => m.id === id);
+  return !!klingModel(id) || isRetiredKlingModel(id);
+}
+
+/** True only for an id Kling still serves. */
+export function isKlingModelAvailable(id: string | null | undefined): boolean {
+  const m = klingModel(id);
+  return !!m && !m.comingSoon && !m.discontinued;
+}
+
+/** What a surface says when a stale selection names a dead Kling id. It always
+ * names a model that works. */
+export function klingUnsupportedMessage(id: string | null | undefined): string {
+  const wanted = String(id || '');
+  if (isRetiredKlingModel(wanted)) {
+    return `Kling “${wanted}” was shut down by Kling and no longer generates anything. `
+      + 'Kling 3.0 Omni replaces it and is the default.';
+  }
+  return 'That Kling model is not available — pick Kling 3.0 Omni, Kling 3.0, Kling 2.6 or Kling 2.5 Turbo.';
+}
+
+/** One capability line for a Kling entry, for a picker's helper text. */
+export function klingCapabilityNote(id: string | null | undefined): string {
+  const m = klingModel(id);
+  if (!m) return klingUnsupportedMessage(id);
+  return [
+    m.blurb,
+    m.durations?.length ? `${m.durations.join('s / ')}s per clip` : null,
+    m.audio ? 'native audio' : 'silent',
+  ].filter(Boolean).join(' · ');
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,6 +1211,7 @@ export type EngineQualityTier = 'ultra' | 'cinema' | 'fast' | 'standard';
 const QUALITY_TIER_BY_ID: Record<string, EngineQualityTier> = {
   'gemini-omni-1.1-flash': 'cinema',
   'openrouter/bytedance/seedance-2.0-fast': 'fast',
+  'openrouter/bytedance/seedance-2.5': 'ultra',
   'openrouter/google/veo-3.1': 'ultra',
   'openrouter/google/veo-3.1-fast': 'cinema',
   'openrouter/google/veo-3.1-lite': 'standard',
@@ -1125,6 +1230,7 @@ export interface VideoEngine {
   family: EngineFamily;
   supportsRef: boolean;
   supports4k: boolean;
+  minDurationS: number;
   maxDurationS: number;
   defaultDurationS: number;
 }
@@ -1144,6 +1250,7 @@ export const VIDEO_ENGINES: VideoEngine[] = GROUP_A_MODELS
     family: engineFamilyOf(m.id),
     supportsRef: m.supportsReferenceImages,
     supports4k: m.supports4k,
+    minDurationS: groupAMinDurationS(m),
     maxDurationS: m.maxDurationS,
     defaultDurationS: m.defaultDurationS,
   }));
@@ -1188,38 +1295,50 @@ export function fallbackEngineFor(id: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// ENGINE HEALTH — the 9 Oct 2026 end-to-end sweep, as data.
+// ENGINE NOTES (historically "ENGINE_HEALTH").
 //
-// One minimal paid generation per model (shortest duration, 720p, audio off),
-// polled to a terminal state. Selectors use this to warn before a customer
-// picks a model the platform is currently refusing, instead of letting them
-// discover it at submit time. It is a SNAPSHOT, not a gate: nothing is hidden
-// or blocked on it, and a model marked 'broken' is still selectable because
-// these outages have flipped both ways before.
+// This map used to hold the verdict of a one-off paid sweep, and the whole
+// product read it as current truth: a model that failed a single submit on a
+// single day was labelled "Unavailable" in every picker and dropped out of
+// PREFERRED_WORKING_ENGINES permanently. Provider outages flip both ways, so a
+// frozen verdict hides models that work — which is exactly how the Kling 2.x
+// and 3.x roster ended up greyed out while it was live.
+//
+// SO THE VERDICTS ARE GONE. Every row here is 'working' and carries only a
+// durable capability note. Nothing in this file declares a model broken.
+//
+// LIVE STATUS COMES FROM THE HEALTH SCREEN: the owner-only Health section of
+// the Video Provider Lab calls /api/voices and the model-test endpoints when
+// you open it and reports ok/error plus latency per model. (Phase 2 moves the
+// same probe behind a server hook so other surfaces can read it without the
+// lab being open.) The 'broken' / 'rejected' / 'unconfigured' values stay in
+// the type for that screen to report at runtime.
 // ---------------------------------------------------------------------------
 
 export type EngineHealth = 'working' | 'broken' | 'rejected' | 'unconfigured';
 
-export const ENGINE_HEALTH_CHECKED_AT = '2026-10-09';
+/** Empty on purpose: this file records no probe date any more. The Health
+ * screen timestamps its own run. */
+export const ENGINE_HEALTH_CHECKED_AT = '';
 
 export const ENGINE_HEALTH: Record<string, { health: EngineHealth; note: string }> = {
-  'gemini-omni-1.1-flash': { health: 'working', note: 'The platform default for /api/veo/generate/video. The 9 Oct 2026 sweep reached it through its older ids and got finished clips back; the integration catalog names it the id to use in new code.' },
-  'gemini-omni-flash-preview': { health: 'working', note: 'Accepted, but served by gemini-omni-1.1-flash — it is the same model under an older name.' },
-  'veo-3.1-generate-preview': { health: 'working', note: 'Accepted, but retired: the platform serves it on gemini-omni-1.1-flash, so it is not a separate engine and it does not render 4K.' },
-  'veo-3.1-fast-generate-preview': { health: 'working', note: 'Accepted, but retired: the platform serves it on gemini-omni-1.1-flash, so it is not a separate engine and it does not render 4K.' },
-  'openrouter/bytedance/seedance-2.0-fast': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
-  'openrouter/google/veo-3.1': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
-  'openrouter/google/veo-3.1-fast': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
-  'openrouter/google/veo-3.1-lite': { health: 'working', note: 'Verified 9 Oct 2026 — returned a finished clip.' },
-  'minimax-hailuo-02': { health: 'working', note: 'Re-verified live 13 Oct 2026 — returned a finished clip. Duration must be 6 or 10 seconds.' },
-  'dop-turbo': { health: 'working', note: 'Re-verified live 13 Oct 2026 — returned a finished clip from a source image (public URL; inline data: images are refused upstream today).' },
-  'dop-standard': { health: 'working', note: 'Re-verified live 13 Oct 2026 — rendered from a source image (public URL; inline data: images are refused upstream today).' },
-  'dop-lite': { health: 'working', note: 'Re-verified live 13 Oct 2026 — rendered from a source image (public URL; inline data: images are refused upstream today).' },
-  // Kling: the key went LIVE 14 Oct 2026 (credit pack). Only kling-v2-master
-  // has a live post-key observation; the other Kling ids (legacy v1* and the
-  // new 2.5/2.6/3.0 roster) carry no health row until the Video Provider Lab
-  // proves them in the browser, where the workspace credential exists.
-  'kling-v2-master': { health: 'rejected', note: 'Discontinued upstream — a live 14 Oct 2026 submit answered 502 wrapping Kling API error (404, code 1203) "The model has been discontinued". The static /models catalogue still lists it; do not trust that.' },
+  'gemini-omni-1.1-flash': { health: 'working', note: 'The platform default for /api/veo/generate/video, and the id to use in new code.' },
+  'gemini-omni-flash-preview': { health: 'working', note: 'Accepted, but served by gemini-omni-1.1-flash — the same model under an older name.' },
+  'veo-3.1-generate-preview': { health: 'working', note: 'Accepted, but retired: served on gemini-omni-1.1-flash, so it is not a separate engine and it does not render 4K.' },
+  'veo-3.1-fast-generate-preview': { health: 'working', note: 'Accepted, but retired: served on gemini-omni-1.1-flash, so it is not a separate engine and it does not render 4K.' },
+  'openrouter/bytedance/seedance-2.0-fast': { health: 'working', note: 'The cheapest, fastest B-roll path. Seed image only — reference images and last frame answer 400 on OpenRouter models.' },
+  'openrouter/bytedance/seedance-2.5': { health: 'working', note: 'Live exact id via OpenRouter: integer 4–30s, 480p/720p, optional audio, first/last frames OR up to three asset references. Authenticated app calls work; scheduled server submits still need platform workspace authorization.' },
+  'openrouter/google/veo-3.1': { health: 'working', note: 'Real Veo 3.1. Seed image only on this path — no reference images.' },
+  'openrouter/google/veo-3.1-fast': { health: 'working', note: 'Faster, cheaper Veo 3.1. Seed image only.' },
+  'openrouter/google/veo-3.1-lite': { health: 'working', note: 'The lowest-cost Veo path. Seed image only.' },
+  'minimax-hailuo-02': { health: 'working', note: 'Higgsfield text-to-video. Duration must be 6 or 10 seconds.' },
+  'dop-turbo': { health: 'working', note: 'Higgsfield image-to-video. Source images must be public URLs — inline data: images are refused upstream.' },
+  'dop-standard': { health: 'working', note: 'Higgsfield image-to-video. Source images must be public URLs — inline data: images are refused upstream.' },
+  'dop-lite': { health: 'working', note: 'Higgsfield image-to-video, fastest tier. Source images must be public URLs.' },
+  'kling-3.0-omni': { health: 'working', note: 'Kling omni flagship: 2–4 reference images, first/last frame, 5s or 10s. No negativePrompt field — negatives go inline in the prompt. Silent through the platform proxy.' },
+  'kling-3.0': { health: 'working', note: 'Kling flagship text-to-video / image-to-video, 5s or 10s, silent through the proxy.' },
+  'kling-2.6': { health: 'working', note: 'Kling 2.6, 5s or 10s, silent through the proxy.' },
+  'kling-2.5-turbo': { health: 'working', note: 'Kling fast tier, 5s or 10s, silent.' },
 };
 
 export function engineHealth(id: string | null | undefined): { health: EngineHealth; note: string } | null {
@@ -1261,6 +1380,7 @@ export function engineAvailabilityBadge(
  * Anything the sweep caught failing is excluded outright.
  */
 export const PREFERRED_WORKING_ENGINES: string[] = [
+  'openrouter/bytedance/seedance-2.5',
   'openrouter/google/veo-3.1',
   OMNI_MODEL_ID,
   'openrouter/google/veo-3.1-fast',
@@ -1291,11 +1411,84 @@ export function qualityTierColor(tier: EngineQualityTier): { bg: string; fg: str
 }
 
 // ---------------------------------------------------------------------------
+// WHICH MODEL ACTUALLY RAN
+//
+// Every video proxy here accepts an id it does not recognise and silently
+// serves its own default instead, answering with the real model (and often a
+// modelFallback note) in the payload. A result card that prints the REQUESTED
+// model in that case tells the customer something untrue — and it hides the
+// one fact that explains why the clip looks wrong. So every surface that shows
+// a generated clip reads these helpers instead of writing its own label.
+// ---------------------------------------------------------------------------
+
+/** The friendly name of any id in this catalog, whichever group it is in. */
+export function engineNameFor(id: string | null | undefined): string {
+  const wanted = String(id || '');
+  if (!wanted) return 'an unknown model';
+  return groupAModel(wanted)?.name
+    || runwayVideoModel(wanted)?.name
+    || runwayModel(wanted)?.label
+    || klingModel(wanted)?.name
+    || HIGGSFIELD_VIDEO_MODELS.find((m) => m.id === wanted)?.name
+    || runwayRecipe(wanted)?.name
+    || wanted;
+}
+
+export interface RanModel {
+  /** The id that really rendered the clip. */
+  id: string;
+  /** "Rendered on Gemini Omni 1.1 Flash" — always shown on a result card. */
+  label: string;
+  /** Set ONLY when the clip came back from a different model than requested. */
+  warning: string | null;
+}
+
+/**
+ * What a result card prints under a finished clip.
+ *
+ * `actualId` is whatever the generation response named (`model`, `modelUsed`,
+ * `modelFallback.served`…). Pass it through even when it matches: the point is
+ * that the card always states which model ran, so a silent substitution is
+ * visible the first time it happens rather than after a wasted afternoon.
+ *
+ * A retired alias resolving to the model it has always resolved to is NOT a
+ * substitution, so both sides are resolved before they are compared.
+ */
+export function describeRanModel(
+  requestedId: string | null | undefined,
+  actualId?: string | null,
+): RanModel {
+  const requested = String(requestedId || '');
+  const actual = String(actualId || '') || requested;
+  const ranName = engineNameFor(actual);
+  const label = `Rendered on ${ranName}`;
+  if (!requested || !actual || resolveEngineId(requested) === resolveEngineId(actual)) {
+    return { id: actual, label, warning: null };
+  }
+  return {
+    id: actual,
+    label,
+    warning: `You asked for ${engineNameFor(requested)}, but this clip was rendered on ${ranName}. `
+      + 'The provider substituted the model — re-run the shot if you need the one you picked.',
+  };
+}
+
+/** The model id a generation response says actually ran, from any of the
+ * spellings the proxies use. Null when the response named none. */
+export function ranModelIdFrom(payload: unknown): string | null {
+  const raw = (payload || {}) as Record<string, any>;
+  const candidate = raw.modelUsed ?? raw.model_used ?? raw.actualModel
+    ?? raw.modelFallback?.served ?? raw.modelFallback?.model ?? raw.model;
+  const id = typeof candidate === 'string' ? candidate.trim() : '';
+  return id || null;
+}
+
+// ---------------------------------------------------------------------------
 // SCENE DURATION LIMITS AND SCENE PLANNING (added 13 Oct 2026).
 //
 // THE PROBLEM THIS SOLVES. Every generation model here has a hard per-clip
-// ceiling — 8s on Omni Flash and the Veo 3.1 family, 10s on Seedance and the
-// Runway video models — but a script's natural scene is whatever length the
+// ceiling — 8s on Omni Flash and the Veo 3.1 family, 10s on Seedance 2.0,
+// 30s on Seedance 2.5, and 10s on Runway — but a script's natural scene is whatever length the
 // script says. Asking for a 14-second scene does not produce a 14-second clip:
 // it produces a provider rejection, or worse, a clip that silently drops the
 // end of the dialogue. And an agent left to choose freely picks a scene count
@@ -1340,10 +1533,12 @@ export function sceneDurationLimits(modelId: string | null | undefined): SceneDu
   const groupA = groupAModel(modelId);
   if (groupA) {
     return {
-      minS: 2,
+      minS: groupA.minDurationS ?? 2,
       maxS: groupA.maxDurationS,
       defaultS: groupA.defaultDurationS,
-      source: `${groupA.name} generates clips up to ${groupA.maxDurationS}s.`,
+      source: groupA.minDurationS !== undefined
+        ? `${groupA.name} accepts clips from ${groupA.minDurationS}s to ${groupA.maxDurationS}s.`
+        : `${groupA.name} generates clips up to ${groupA.maxDurationS}s.`,
     };
   }
   const runwayVideo = runwayVideoModel(modelId as any);
@@ -1662,11 +1857,11 @@ export function splitSegmentForModel(
 //  · RUNWAY: live. The free quote answers 200 with a real price, so routes stay
 //    ON by default; pass runwayEnabled:false only after a submit answered 503
 //    this session. The paid submit needs a browser X-Workspace-DB-Token.
-//  · KLING: LIVE as of 14 Oct 2026 (credit pack active). kling-v2-master is
-//    discontinued upstream (502 wrapping Kling 404 code 1203). Kling's own
-//    docs now list kling-2.5-turbo / 2.6 / 3.0 / 3.0-omni; none are verified
-//    through the platform proxy yet, and GET /api/generate/kling/models is
-//    still a static list — never gate Kling on that catalogue call.
+//  · KLING: live, and offered normally. The roster is kling-3.0-omni /
+//    kling-3.0 / kling-2.6 / kling-2.5-turbo. v2-master and the v1 generation
+//    were shut down by Kling and are not catalogued at all. GET
+//    /api/generate/kling/models is a static list — never gate Kling on it; the
+//    Health screen is the live check.
 //  · HIGGSFIELD: verified WORKING (Hailuo 02 text-to-video and all three DoP
 //    image-to-video models returned clips). It is excluded from VIDEO_ENGINES
 //    because that list is Group-A-only — reach it through
@@ -1693,10 +1888,10 @@ export interface EngineAvailability {
    * undefined counts as TRUE. Pass false only after a submit answered 503
    * this session. */
   runwayEnabled?: boolean;
-  /** True only after a Kling submit worked this session. The key is LIVE as of
-   * 14 Oct 2026 (credit pack), but kling-v2-master is discontinued upstream and
-   * no other Kling id is proven through the proxy yet, so undefined still
-   * counts as FALSE. The /models catalogue is static — never gate on it. */
+  /** Kling is live and its current roster is offered normally, so undefined
+   * counts as TRUE — the same convention runwayEnabled uses. Pass false only
+   * after a Kling submit failed this session. The /models catalogue is static,
+   * so never gate on it; the Health screen is the live check. */
   klingEnabled?: boolean;
   /** OpenRouter submits were re-verified working on 9 Oct 2026 (Seedance 2.0
    * Fast and all three OpenRouter Veo ids each returned a real operation and a

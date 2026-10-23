@@ -15,12 +15,9 @@
  * the server never advances without a real last frame and ending-state data.
  */
 
-export interface CapturedFrame { t: number; url: string }
+import { spaceId } from './workspace';
 
-function appId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
-}
+export interface CapturedFrame { t: number; url: string }
 
 /** Attempt every HTTPS clip; browser CORS enforcement decides whether it is paintable. */
 export function canCaptureFrames(videoUrl: unknown): boolean {
@@ -32,7 +29,7 @@ async function uploadFrame(dataUrl: string, fileName: string): Promise<string> {
   try {
     res = await fetch('/api/upload/image', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-App-Id': appId() },
+      headers: { 'Content-Type': 'application/json', 'X-App-Id': spaceId() },
       body: JSON.stringify({ imageData: dataUrl, fileName }),
     });
   } catch (error: any) {

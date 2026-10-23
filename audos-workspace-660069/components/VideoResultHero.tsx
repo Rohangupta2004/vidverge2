@@ -16,7 +16,8 @@
  *     render usually finishes while the visitor is looking at something else.
  */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { CheckCircle2, Download, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Cpu, Download, Loader2 } from 'lucide-react';
+import { describeRanModel } from '../lib/videoEngines';
 
 const FONT = "'Inter', 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
@@ -53,6 +54,67 @@ const HERO_CSS = `
  * calc(100vh - 8rem) minus its own header) without scrolling.
  */
 export const HERO_PLAYER_MAX_HEIGHT = 'min(640px, 52vh)';
+
+/**
+ * The model line every result card carries.
+ *
+ * The video proxies accept an id they do not recognise and quietly render on
+ * their own default instead, so a card that only shows the model the customer
+ * PICKED can be stating the opposite of what happened. This prints what
+ * actually ran, and says so loudly when the two differ.
+ */
+export function RanModelLine({
+  requestedModelId,
+  ranModelId,
+  style,
+}: {
+  requestedModelId?: string | null;
+  ranModelId?: string | null;
+  style?: CSSProperties;
+}) {
+  if (!requestedModelId && !ranModelId) return null;
+  const ran = describeRanModel(requestedModelId, ranModelId);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, ...style }}>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          alignSelf: 'flex-start',
+          gap: 6,
+          padding: '3px 9px',
+          borderRadius: 999,
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--space-text-secondary, #a1a1aa)',
+          border: '1px solid var(--space-border-default, rgba(255,255,255,0.1))',
+        }}
+        data-testid="text-ran-model"
+      >
+        <Cpu size={12} /> {ran.label}
+      </span>
+      {ran.warning ? (
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 7,
+            padding: '7px 10px',
+            borderRadius: 10,
+            fontSize: 11.5,
+            lineHeight: 1.5,
+            color: 'var(--space-semantic-warning-500, #fbbf24)',
+            border: '1px solid color-mix(in srgb, var(--space-semantic-warning-500, #fbbf24) 40%, transparent)',
+            background: 'color-mix(in srgb, var(--space-semantic-warning-500, #fbbf24) 12%, transparent)',
+          }}
+          data-testid="text-model-fallback-warning"
+        >
+          <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> {ran.warning}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 export function videoFileName(title?: string): string {
   const slug = (title || '')
@@ -163,6 +225,8 @@ export default function VideoResultHero({
   note,
   downloadLabel,
   actions,
+  requestedModelId,
+  ranModelId,
   stickyActions = false,
   surface = 'var(--space-surface-card, #0a0a0c)',
   autoPlay = true,
@@ -182,6 +246,11 @@ export default function VideoResultHero({
   downloadLabel?: string;
   /** Secondary actions, rendered under the download button. */
   actions?: ReactNode;
+  /** The engine the customer picked for this render. */
+  requestedModelId?: string | null;
+  /** The engine the provider says actually rendered it. Passing both makes a
+   * silent model substitution visible on the card instead of invisible. */
+  ranModelId?: string | null;
   /** Pin the download button to the bottom of a scrolling screen. */
   stickyActions?: boolean;
   /** Background the sticky action bar fades into. */
@@ -287,6 +356,8 @@ export default function VideoResultHero({
           data-testid={playerTestId}
         />
       </div>
+
+      <RanModelLine requestedModelId={requestedModelId} ranModelId={ranModelId} style={{ marginTop: 10 }} />
 
       {note ? (
         <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.55, color: 'var(--space-text-muted, #71717c)' }}>

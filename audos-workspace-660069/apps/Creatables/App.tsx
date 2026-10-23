@@ -34,7 +34,7 @@ import {
 import {
   FOUR_K_MODELS, GROUP_A_MODELS, GroupAModel, KLING_COMING_SOON_MESSAGE, KLING_MODELS,
   IMAGE_MODELS, PROMPT_BUDGET, RUNWAY_DISABLED_MESSAGE, RUNWAY_RATIOS, RUNWAY_RECIPES,
-  RUNWAY_VIDEO_MODELS, RunwayVideoModel, capPromptText, groupAModel, isKlingModel,
+  RUNWAY_VIDEO_MODELS, RunwayVideoModel, capPromptText, groupAMinDurationS, groupAModel, isKlingModel,
   recommendEngine, routeShotIntent, runwayRecipe, runwayVideoModel, tierColor, validateGroupAInputs,
 } from '../../lib/videoEngines';
 import {
@@ -487,6 +487,17 @@ export default function App() {
   const isVeoEngine = /veo/i.test(activeEngineId);
   const videoExtensionOn = Boolean(gA && isVeoEngine && videoExtension);
 
+  // The slider's legal range comes from the selected model entry. Switching
+  // engines can strand the value outside it (8s carried onto a 15s-minimum
+  // model, 39s carried onto an 8s-maximum one), so it lands on the model's
+  // own default instead.
+  const durationMinS = gA ? groupAMinDurationS(gA) : 4;
+  const durationMaxS = gA ? Math.max(8, gA.maxDurationS) : 8;
+  useEffect(() => {
+    if (!gA) return;
+    if (duration < durationMinS || duration > durationMaxS) setDuration(gA.defaultDurationS);
+  }, [gA?.id, durationMinS, durationMaxS, duration]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Runway settings depend on mode: image-to-video unlocks the extra ratios.
   const rwRatios = useMemo(() => {
     if (!rw) return RUNWAY_RATIOS;
@@ -790,7 +801,7 @@ export default function App() {
                     </div>
                     <div>
                       <span style={label}>Duration: {duration}s (normalized to the model's supported lengths)</span>
-                      <input type="range" min={4} max={Math.max(8, gA.maxDurationS)} value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={{ width: 200, accentColor: T.accent }} />
+                      <input type="range" min={durationMinS} max={durationMaxS} value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={{ width: 200, accentColor: T.accent }} />
                     </div>
                     <div>
                       <span style={label}>Resolution{gA.supports4k ? ' (4K available)' : ''}</span>

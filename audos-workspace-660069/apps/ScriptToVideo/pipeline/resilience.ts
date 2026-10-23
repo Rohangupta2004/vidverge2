@@ -16,7 +16,7 @@
  * would not help and would waste a round trip.
  */
 import { askOpus } from './opus';
-import { VIDEO_MODELS } from './videoModelService';
+import { VIDEO_MODEL } from './videoModelService';
 import type { VideoModelConfig } from './videoModelService';
 
 /** Failures no amount of rewording can fix. Checked FIRST. */
@@ -60,7 +60,7 @@ export async function rephraseVideoPrompt(prompt: string, refusal: string): Prom
     '',
     'Rewrite it now, keeping every single element.',
   ].join('\n');
-  const rewritten = String(await askOpus({ system: REPHRASE_SYSTEM, user, maxTokens: 1200, effort: 'low' }))
+  const rewritten = String(await askOpus({ system: REPHRASE_SYSTEM, user, maxTokens: 16000, effort: 'xhigh' }))
     .replace(/^```[a-z]*\s*/i, '')
     .replace(/```$/, '')
     .replace(/^["'“]|["'”]$/g, '')
@@ -75,10 +75,9 @@ export async function rephraseVideoPrompt(prompt: string, refusal: string): Prom
  * preference order. An image-to-video-only model is never offered to a scene
  * that has no seed frame — it could not render it at all.
  */
-export function fallbackChain(current: VideoModelConfig, opts: { hasSeedFrame: boolean }): VideoModelConfig[] {
-  const order = ['runway-gen4.5', 'omni-flash', 'kling-v2-master', 'seedance-2.0'];
-  return order
-    .map((id) => VIDEO_MODELS.find((model) => model.id === id))
-    .filter((model): model is VideoModelConfig => Boolean(model) && model!.id !== current.id)
-    .filter((model) => opts.hasSeedFrame || !model.imageToVideoOnly);
+export function fallbackChain(current: VideoModelConfig, opts: { hasSeedFrame: boolean; durationS: number }): VideoModelConfig[] {
+  // Required paid fallback policy: Kling fails → Gemini Omni Flash with a
+  // logged switch. If Omni fails, stop and ask before Seedance 2.5. Retired
+  // Kling ids and unrelated Runway models must never be entered silently.
+  return current.provider === 'kling' && Number(opts.durationS || 0) <= VIDEO_MODEL.safeMaxDuration ? [VIDEO_MODEL] : [];
 }

@@ -29,10 +29,12 @@
  * reason a paying customer cannot make their video.
  */
 
-import { RUNWAY_DISABLED_MESSAGE, capPromptText, validateGroupAInputs } from './videoEngines';
+import { RUNWAY_DISABLED_MESSAGE, capPromptText, clampGroupADuration, validateGroupAInputs } from './videoEngines';
 import { chargeCredits, newChargeKey, refundCredits } from './credits';
 import { isRegisteredAppId } from './appIds';
 import type { AppId } from './appIds';
+import { WORKSPACE_ID, workspaceTokenNow } from './workspace';
+import { poll, PollTimeoutError } from './poll';
 
 export class EngineError extends Error {
   code: string;
@@ -115,13 +117,6 @@ export function isPublicHttpsUrl(url: string): boolean {
   } catch { return false; }
 }
 
-function wsToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 // ---------------------------------------------------------------------------
 // NETWORK TIMEOUTS — a hung connection must never outlive the polling deadline
 // ---------------------------------------------------------------------------
@@ -188,7 +183,7 @@ export async function postGeneration(
   body: Record<string, unknown>,
   appId?: AppId,
 ): Promise<{ res: Response; data: any }> {
-  const token = wsToken();
+  const token = workspaceTokenNow();
   const named = isRegisteredAppId(appId) ? appId : null;
   const base: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -199,7 +194,7 @@ export async function postGeneration(
     method: 'POST',
     headers: withIdentity && named ? { ...base, 'X-App-Id': named } : base,
     body: JSON.stringify(withIdentity && named ? { ...body, appId: named } : body),
-    signal: AbortSignal.timeout(120_000), // 2-min safety net for synchronous generation calls
+    signal: timeoutSignal(GENERATION_TIMEOUT_MS),
   });
 
   let res = await send(Boolean(named));
@@ -225,7 +220,7 @@ function rejectsAppIdentity(res: Response, data: any): boolean {
 
 /** Poll and status reads are GETs, but still name the app they belong to. */
 export function generationHeaders(appId?: AppId): Record<string, string> {
-  const token = wsToken();
+  const token = workspaceTokenNow();
   return {
     ...(isRegisteredAppId(appId) ? { 'X-App-Id': appId } : {}),
     ...(token ? { 'X-Workspace-DB-Token': token } : {}),
@@ -294,7 +289,7 @@ export async function submitGroupA(params: GroupASubmitParams): Promise<GroupAKi
     // The default safety level false-positives on seeded reference frames.
     safetyFilterLevel: 'block_only_high',
   };
-  if (params.duration) body.duration = Math.max(4, Math.min(25, Math.round(params.duration)));
+  if (params.duration) body.duration = clampGroupADuration(params.model, params.duration);
   if (params.negativePrompt) body.negativePrompt = capPromptText(params.negativePrompt, 10000);
   if (params.resolution) body.resolution = params.resolution;
   if (params.imageData) body.imageData = params.imageData;
@@ -371,23 +366,37 @@ export async function checkGroupA(operationId: string, appId?: AppId): Promise<G
 
 /** Poll a Group A operation every 5s to completion → the clip URL. */
 export async function pollGroupA(operationId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number; isCancelled?: () => boolean; creditKey?: string; appId?: AppId } = {}): Promise<string> {
-  const deadline = Date.now() + (opts.timeoutMs || 10 * 60 * 1000);
   let misses = 0;
-  while (Date.now() < deadline) {
-    if (opts.isCancelled?.()) throw new EngineError('This generation was cancelled.', { code: 'cancelled' });
-    const st = await checkGroupA(operationId, opts.appId);
-    if (st.status === 'completed' && st.videoUrl) return st.videoUrl;
-    if (st.status === 'failed') {
-      // No usable video came back, so the credits go back too.
-      if (opts.creditKey) void refundCredits(opts.creditKey, 'The render failed at the provider');
-      throw new EngineError(st.error || 'The render failed.', { code: 'render_failed' });
-    }
-    if (st.error) { misses += 1; if (misses >= 6) throw new EngineError(`The video service stopped answering: ${st.error}`, { code: 'poll_lost', retryable: true }); }
-    else misses = 0;
-    if (opts.onProgress && typeof st.progress === 'number') opts.onProgress(st.progress);
-    await sleep(5000);
+  let st: GroupAStatus;
+  try {
+    st = await poll(
+      async () => {
+        if (opts.isCancelled?.()) return { status: 'failed', error: '__cancelled__' } as GroupAStatus;
+        const next = await checkGroupA(operationId, opts.appId);
+        if (next.error && next.status === 'processing') {
+          misses += 1;
+          if (misses >= 6) throw new EngineError(`The video service stopped answering: ${next.error}`, { code: 'poll_lost', retryable: true });
+        } else misses = 0;
+        return next;
+      },
+      {
+        interval: 5000,
+        timeout: opts.timeoutMs || 10 * 60 * 1000,
+        tolerateErrors: 1,
+        until: (value) => value.status === 'completed' || value.status === 'failed',
+        onTick: (value) => { if (typeof value.progress === 'number') opts.onProgress?.(value.progress); },
+      },
+    );
+  } catch (error) {
+    if (error instanceof PollTimeoutError) throw new EngineError('The render took too long. Start it again to retry.', { code: 'timeout' });
+    throw error;
   }
-  throw new EngineError('The render took too long. Start it again to retry.', { code: 'timeout' });
+  if (st.error === '__cancelled__') throw new EngineError('This generation was cancelled.', { code: 'cancelled' });
+  if (st.status === 'failed') {
+    if (opts.creditKey) void refundCredits(opts.creditKey, 'The render failed at the provider');
+    throw new EngineError(st.error || 'The render failed.', { code: 'render_failed' });
+  }
+  return String(st.videoUrl);
 }
 
 export interface GroupAResilientOptions {
@@ -496,7 +505,7 @@ export async function checkRunwayAvailability(): Promise<{ available: boolean; r
 function runwayHeaders(): Record<string, string> {
   return {
     'Content-Type': 'application/json',
-    'X-Workspace-DB-Token': wsToken(),
+    'X-Workspace-DB-Token': workspaceTokenNow(),
     // Fresh UUID per submit — reusing one with different input answers 409.
     'Idempotency-Key': (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   };
@@ -586,7 +595,7 @@ function collectMediaUrls(data: any): string[] {
 
 export async function checkRunway(taskId: string): Promise<RunwayResult> {
   const res = await fetch(`/api/generate/runway/status/${encodeURIComponent(taskId)}`, {
-    headers: { 'X-Workspace-DB-Token': wsToken() },
+    headers: { 'X-Workspace-DB-Token': workspaceTokenNow() },
     signal: timeoutSignal(STATUS_TIMEOUT_MS),
   });
   const data = await res.json().catch(() => null);
@@ -601,34 +610,32 @@ export async function checkRunway(taskId: string): Promise<RunwayResult> {
  *  'failed'/'cancelled' → credits are auto-refunded; tell the user.
  */
 export async function pollRunway(taskId: string, opts: { onStatus?: (s: string) => void; timeoutMs?: number; isCancelled?: () => boolean; creditKey?: string } = {}): Promise<RunwayResult> {
-  const deadline = Date.now() + (opts.timeoutMs || 15 * 60 * 1000);
-  let misses = 0;
-  while (Date.now() < deadline) {
-    if (opts.isCancelled?.()) throw new EngineError('Polling stopped. The task keeps running server-side.', { code: 'cancelled' });
-    let result: RunwayResult;
-    try {
-      result = await checkRunway(taskId);
-      misses = 0;
-    } catch (e) {
-      misses += 1;
-      if (misses >= 6) throw e;
-      await sleep(5000);
-      continue;
-    }
-    opts.onStatus?.(result.status);
-    if (result.status === 'succeeded') return result;
-    if (result.status === 'failed' || result.status === 'cancelled') {
-      // No usable video came back, so the credits go back too.
-      if (opts.creditKey) void refundCredits(opts.creditKey, `Runway ended ${result.status}`);
-      const reason = String(result.raw?.error?.message || result.raw?.error || 'no successful output');
-      throw new EngineError(`Runway task ended ${result.status}: ${reason}. Your credits were automatically refunded.`, { code: `runway_${result.status}` });
-    }
-    if (result.status === 'uncertain') {
-      throw new EngineError('The Runway task outcome is uncertain — do NOT resubmit; check back on this task shortly.', { code: 'runway_uncertain' });
-    }
-    await sleep(5000);
+  let result: RunwayResult;
+  try {
+    result = await poll(
+      async () => opts.isCancelled?.()
+        ? { status: '__cancelled__', mediaUrls: [], raw: null }
+        : checkRunway(taskId),
+      {
+        interval: 5000,
+        timeout: opts.timeoutMs || 15 * 60 * 1000,
+        tolerateErrors: 6,
+        until: (value) => ['succeeded', 'failed', 'cancelled', 'uncertain', '__cancelled__'].includes(value.status),
+        onTick: (value) => { if (value.status !== '__cancelled__') opts.onStatus?.(value.status); },
+      },
+    ) as RunwayResult;
+  } catch (error) {
+    if (error instanceof PollTimeoutError) throw new EngineError('The Runway task is taking unusually long. It may still finish — check back on this task; do not resubmit.', { code: 'timeout' });
+    throw error;
   }
-  throw new EngineError('The Runway task is taking unusually long. It may still finish — check back on this task; do not resubmit.', { code: 'timeout' });
+  if (result.status === '__cancelled__') throw new EngineError('Polling stopped. The task keeps running server-side.', { code: 'cancelled' });
+  if (result.status === 'failed' || result.status === 'cancelled') {
+    if (opts.creditKey) void refundCredits(opts.creditKey, `Runway ended ${result.status}`);
+    const reason = String(result.raw?.error?.message || result.raw?.error || 'no successful output');
+    throw new EngineError(`Runway task ended ${result.status}: ${reason}. Your credits were automatically refunded.`, { code: `runway_${result.status}` });
+  }
+  if (result.status === 'uncertain') throw new EngineError('The Runway task outcome is uncertain — do NOT resubmit; check back on this task shortly.', { code: 'runway_uncertain' });
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +645,7 @@ export async function pollRunway(taskId: string, opts: { onStatus?: (s: string) 
 function klingHeaders(): Record<string, string> {
   return {
     'Content-Type': 'application/json',
-    'X-Workspace-DB-Token': wsToken(),
+    'X-Workspace-DB-Token': workspaceTokenNow(),
   };
 }
 
@@ -693,30 +700,33 @@ export async function checkKling(taskId: string): Promise<{ status: string; vide
 }
 
 export async function pollKling(taskId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number; isCancelled?: () => boolean } = {}): Promise<string> {
-  const deadline = Date.now() + (opts.timeoutMs || 15 * 60 * 1000);
   let tick = 0;
-  let misses = 0;
-  while (Date.now() < deadline) {
-    if (opts.isCancelled?.()) throw new EngineError('This generation was cancelled.', { code: 'cancelled' });
-    let st: { status: string; videoUrl?: string; error?: string };
-    try {
-      st = await checkKling(taskId);
-      misses = 0;
-    } catch (e) {
-      // A dropped or timed-out status read is not a dead render — tolerate a
-      // few before giving up, like the other pollers in this file.
-      misses += 1;
-      if (misses >= 6) throw e;
-      await sleep(5000);
-      continue;
-    }
-    if (st.status === 'completed' && st.videoUrl) return st.videoUrl;
-    if (st.status === 'failed') throw new EngineError(st.error || 'Kling render failed.', { code: 'render_failed' });
-    tick += 1;
-    if (opts.onProgress) opts.onProgress(Math.min(95, tick * 8));
-    await sleep(5000);
+  let st: { status: string; videoUrl?: string; error?: string };
+  try {
+    st = await poll(
+      async () => opts.isCancelled?.()
+        ? { status: '__cancelled__' }
+        : checkKling(taskId),
+      {
+        interval: 5000,
+        timeout: opts.timeoutMs || 15 * 60 * 1000,
+        tolerateErrors: 6,
+        until: (value) => ['completed', 'failed', '__cancelled__'].includes(value.status),
+        onTick: (value) => {
+          if (!['completed', 'failed', '__cancelled__'].includes(value.status)) {
+            tick += 1;
+            opts.onProgress?.(Math.min(95, tick * 8));
+          }
+        },
+      },
+    );
+  } catch (error) {
+    if (error instanceof PollTimeoutError) throw new EngineError('Kling is taking longer than expected — check back on this task or retry.', { code: 'timeout' });
+    throw error;
   }
-  throw new EngineError('Kling is taking longer than expected — check back on this task or retry.', { code: 'timeout' });
+  if (st.status === '__cancelled__') throw new EngineError('This generation was cancelled.', { code: 'cancelled' });
+  if (st.status === 'failed') throw new EngineError(st.error || 'Kling render failed.', { code: 'render_failed' });
+  return String(st.videoUrl);
 }
 
 // ---------------------------------------------------------------------------
@@ -726,7 +736,7 @@ export async function pollKling(taskId: string, opts: { onProgress?: (p: number)
 function higgsfieldHeaders(): Record<string, string> {
   return {
     'Content-Type': 'application/json',
-    'X-Workspace-DB-Token': wsToken(),
+    'X-Workspace-DB-Token': workspaceTokenNow(),
   };
 }
 
@@ -750,10 +760,7 @@ export async function submitHiggsfieldVideo(params: {
   // Wallet attribution: the Higgsfield proxy resolves the billable workspace
   // from x-app-id / workspaceId, not from X-Workspace-DB-Token — without one
   // the kickoff answers 400 "A billable workspace could not be resolved".
-  const higgsWorkspaceId = typeof window === 'undefined'
-    ? ''
-    : String((window as any).__workspaceDb?.workspaceId || (window as any).__WORKSPACE_ID__ || '');
-  if (higgsWorkspaceId) body.workspaceId = higgsWorkspaceId;
+  body.workspaceId = WORKSPACE_ID;
   if (params.aspectRatio) body.aspectRatio = params.aspectRatio;
   if (params.durationSeconds) {
     const seconds = Math.max(1, Math.min(15, Math.round(params.durationSeconds)));
@@ -819,27 +826,31 @@ export async function checkHiggsfield(requestId: string): Promise<{ status: stri
 }
 
 export async function pollHiggsfield(requestId: string, opts: { onProgress?: (p: number) => void; timeoutMs?: number; isCancelled?: () => boolean } = {}): Promise<string> {
-  const deadline = Date.now() + (opts.timeoutMs || 15 * 60 * 1000);
   let tick = 0;
-  let misses = 0;
-  while (Date.now() < deadline) {
-    if (opts.isCancelled?.()) throw new EngineError('This generation was cancelled.', { code: 'cancelled' });
-    let st: { status: string; videoUrl?: string; error?: string };
-    try {
-      st = await checkHiggsfield(requestId);
-      misses = 0;
-    } catch (e) {
-      // Same tolerance as pollKling: a few dropped reads are not a dead render.
-      misses += 1;
-      if (misses >= 6) throw e;
-      await sleep(5000);
-      continue;
-    }
-    if (st.status === 'completed' && st.videoUrl) return st.videoUrl;
-    if (st.status === 'failed') throw new EngineError(st.error || 'Higgsfield render failed.', { code: 'render_failed' });
-    tick += 1;
-    if (opts.onProgress) opts.onProgress(Math.min(95, tick * 7));
-    await sleep(5000);
+  let st: { status: string; videoUrl?: string; error?: string };
+  try {
+    st = await poll(
+      async () => opts.isCancelled?.()
+        ? { status: '__cancelled__' }
+        : checkHiggsfield(requestId),
+      {
+        interval: 5000,
+        timeout: opts.timeoutMs || 15 * 60 * 1000,
+        tolerateErrors: 6,
+        until: (value) => ['completed', 'failed', '__cancelled__'].includes(value.status),
+        onTick: (value) => {
+          if (!['completed', 'failed', '__cancelled__'].includes(value.status)) {
+            tick += 1;
+            opts.onProgress?.(Math.min(95, tick * 7));
+          }
+        },
+      },
+    );
+  } catch (error) {
+    if (error instanceof PollTimeoutError) throw new EngineError('Higgsfield is taking longer than expected — check back on this task or retry.', { code: 'timeout' });
+    throw error;
   }
-  throw new EngineError('Higgsfield is taking longer than expected — check back on this task or retry.', { code: 'timeout' });
+  if (st.status === '__cancelled__') throw new EngineError('This generation was cancelled.', { code: 'cancelled' });
+  if (st.status === 'failed') throw new EngineError(st.error || 'Higgsfield render failed.', { code: 'render_failed' });
+  return String(st.videoUrl);
 }

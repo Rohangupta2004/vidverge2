@@ -15,9 +15,7 @@
  * trimmed to the scene duration so the voice stays in sync.
  */
 
-import { wsToken } from '../api';
-
-const WORKSPACE_ID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
+import { WORKSPACE_ID, getWorkspaceToken } from '../../../lib/workspace';
 
 /** Reduce a raw script segment to the words a narrator would actually speak:
  * markdown chrome, blockquote markers, stage labels ("VO:", "Scene 3 — …")
@@ -38,7 +36,7 @@ export function narrationText(segment: string): string {
 export async function generateSceneNarration(segment: string, voiceId?: string): Promise<string | null> {
   const text = narrationText(segment);
   if (text.length < 3) return null;
-  const token = wsToken();
+  const token = await getWorkspaceToken();
   if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
   const res = await fetch(`/api/workspaces/${WORKSPACE_ID}/audio/voiceover`, {
     method: 'POST',

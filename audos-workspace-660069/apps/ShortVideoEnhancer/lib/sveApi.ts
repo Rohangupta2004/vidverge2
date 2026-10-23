@@ -21,8 +21,14 @@
  *      is not an error message.
  */
 
-import { SVE_WS_ID, type CaptionWord, type EditDoc, type VisionRead, hydrateDoc } from './sveTypes';
+import { type CaptionWord, type EditDoc, type VisionRead, hydrateDoc } from './sveTypes';
 import { SVE_PHASE2_COMPOSITION } from './sveComposition';
+import {
+  WORKSPACE_ID,
+  callHook as callWorkspaceHook,
+  spaceId,
+  workspaceTokenNow,
+} from '../../../lib/workspace';
 
 export const PROJECT_TABLE = 'svenhancer_projects';
 export const ASSET_TABLE = 'svenhancer_assets';
@@ -37,14 +43,7 @@ function wdb(): any {
   return (window as any).__workspaceDb || null;
 }
 
-export function workspaceToken(): string {
-  return String(wdb()?.token || '');
-}
-
-function appId(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || '');
-}
+export const workspaceToken = workspaceTokenNow;
 
 function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -68,10 +67,10 @@ async function uploadBuffered(file: File, folder: string): Promise<UploadResult>
   const token = requireToken('Uploading your video');
   const form = new FormData();
   form.append('file', file, file.name);
-  form.append('workspaceId', SVE_WS_ID);
+  form.append('workspaceId', WORKSPACE_ID);
   form.append('folder', folder);
   const headers: Record<string, string> = { 'X-Workspace-DB-Token': token };
-  const id = appId();
+  const id = spaceId();
   if (id) headers['X-App-Id'] = id;
   const res = await fetch('/api/upload/file', { method: 'POST', headers, body: form });
   const data = await res.json().catch(() => null);
@@ -133,7 +132,7 @@ async function postTimestamped(blob: Blob, filename: string): Promise<Transcript
   const token = requireToken('Caption generation');
   const form = new FormData();
   form.append('audio', blob, filename);
-  const res = await fetch('/api/workspaces/' + SVE_WS_ID + '/audio/transcribe-timestamped', {
+  const res = await fetch('/api/workspaces/' + WORKSPACE_ID + '/audio/transcribe-timestamped', {
     method: 'POST',
     headers: { 'X-Workspace-DB-Token': token },
     body: form,
@@ -259,7 +258,7 @@ export async function readFramesWithVision(contactSheetBase64: string): Promise<
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const token = workspaceToken();
     if (token) headers['X-Workspace-DB-Token'] = token;
-    const id = appId();
+    const id = spaceId();
     if (id) headers['X-App-Id'] = id;
     const res = await fetch('/api/generate/vision', {
       method: 'POST',
@@ -381,7 +380,7 @@ export async function generateMusic(prompt: string, durationS: number): Promise<
   const clean = String(prompt || '').trim();
   if (clean.length < 10) throw new Error('The music prompt needs at least 10 characters — describe the genre, tempo and mood.');
   const lengthMs = Math.max(3000, Math.min(600000, Math.round((Number(durationS) || 30) * 1000)));
-  const res = await fetch('/api/workspaces/' + SVE_WS_ID + '/audio/music/custom', {
+  const res = await fetch('/api/workspaces/' + WORKSPACE_ID + '/audio/music/custom', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
     body: JSON.stringify({ prompt: clean, lengthMs, instrumental: true }),
@@ -433,7 +432,7 @@ export async function searchPexelsVideos(query: string, perPage = 8): Promise<Pe
   if (!token) return { clips: [], verdict: 'unknown', note: 'Your workspace session is still loading.' };
 
   try {
-    const res = await fetch('/api/workspaces/' + SVE_WS_ID + '/secrets/proxy', {
+    const res = await fetch('/api/workspaces/' + WORKSPACE_ID + '/secrets/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
       body: JSON.stringify({
@@ -507,17 +506,7 @@ async function executeHook<T>(name: string, body: Record<string, unknown>, timeo
   const controller = new AbortController();
   const giveUp = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch('/api/hooks/execute/' + SVE_WS_ID + '/' + name, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, wt: workspaceToken() }),
-      signal: controller.signal,
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      throw new Error(String((data && (data.error || data.message)) || 'the ' + name + ' service answered HTTP ' + res.status));
-    }
-    return (data || {}) as T;
+    return await callWorkspaceHook<T>(name, body, { signal: controller.signal });
   } finally {
     window.clearTimeout(giveUp);
   }

@@ -28,7 +28,7 @@
 
 import {
   AudioMusicPlan, AudioNarrationEntry, AudioSfxItem, Film, FilmAudio,
-  FilmScene, SceneNarration, VoiceSourceId, db, fingerprint, wsToken,
+  FilmScene, SceneNarration, VoiceSourceId, db, fingerprint,
 } from '../api';
 import { PlannedFilmAudio, planFilmAudio, tightenNarrationLine } from './opus';
 import { probeAudioDuration } from './sceneVoice';
@@ -37,18 +37,20 @@ import {
   DEFAULT_OPENAI_VOICE, loadOpenAiVoicePref, loadVoiceSourcePref,
   openAiVoiceLabel, recordOpenAiLine,
 } from './voiceSource';
+import {
+  ElevenModelId, NARRATION_MODEL, elevenModelLabel, elevenVoiceSettings,
+  isElevenModelRejection, narrationModelForChars, nextNarrationModel,
+} from '../../../lib/elevenLabsModels';
+import { WORKSPACE_ID, getWorkspaceToken } from '../../../lib/workspace';
 
-const WORKSPACE_ID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
-
-/** Narration-quality settings are sent on every ElevenLabs take, including a
- * tightened re-record. The platform's voiceover contract owns the TTS model;
- * these are the supported controls for a steady, voice-faithful narration. */
-const NARRATION_VOICE_SETTINGS = {
-  stability: 0.6,
-  similarity_boost: 0.85,
-  style: 0.4,
-  use_speaker_boost: true,
-} as const;
+/**
+ * THE TTS MODEL IS EXPLICIT NOW. Narration records on ElevenLabs v4, falling
+ * back to v3 and then the legacy turbo model. The settings travel WITH the
+ * model (see lib/elevenLabsModels.ts): each model rejects the others' fields
+ * with a 400 before anything is billed, so there is no single shared settings
+ * object any more.
+ */
+let narrationModel: ElevenModelId = NARRATION_MODEL;
 
 /** How far a narration line may overrun its clip before we rewrite it. The
  * overrun that remains after a rewrite is absorbed at assembly by holding the
@@ -69,8 +71,8 @@ export class AudioLayerError extends Error {
   }
 }
 
-function audioHeaders(): Record<string, string> {
-  const token = wsToken();
+async function audioHeaders(): Promise<Record<string, string>> {
+  const token = await getWorkspaceToken();
   if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
   return { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token };
 }
@@ -89,7 +91,7 @@ class AudioRequestError extends Error {
 }
 
 async function audioPost(path: string, body: unknown): Promise<any> {
-  const res = await fetch(path, { method: 'POST', headers: audioHeaders(), body: JSON.stringify(body) });
+  const res = await fetch(path, { method: 'POST', headers: await audioHeaders(), body: JSON.stringify(body) });
   const data = await res.json().catch(() => null);
   if (!res.ok || data?.success === false) {
     throw new AudioRequestError(
@@ -100,6 +102,43 @@ async function audioPost(path: string, body: unknown): Promise<any> {
     );
   }
   return data;
+}
+
+/**
+ * POST one voiceover request on the current narration model, walking down the
+ * model ladder when the platform refuses THAT MODEL rather than the request.
+ *
+ * The model that works is remembered for the rest of the film, so a long
+ * narration does not re-walk (and re-spend on) the ladder for every batch.
+ * Anything that is not a model rejection — a wallet, auth, rate-limit or
+ * provider error — is rethrown untouched: it would mean the same thing on
+ * every model.
+ */
+async function postVoiceover(
+  path: string,
+  body: Record<string, unknown>,
+  longestChars: number,
+  onNote?: (note: string) => void,
+): Promise<any> {
+  for (;;) {
+    // A line too long for the current model starts on one that holds it,
+    // rather than failing a paid request to discover the limit.
+    const model = narrationModelForChars(longestChars, narrationModel);
+    try {
+      return await audioPost(path, {
+        ...body,
+        modelId: model,
+        voiceSettings: elevenVoiceSettings(model),
+      });
+    } catch (e) {
+      const refusedTheModel = e instanceof AudioRequestError
+        && isElevenModelRejection({ status: e.status, code: e.code, message: e.message });
+      const next = refusedTheModel ? nextNarrationModel(model) : null;
+      if (!next) throw e;
+      narrationModel = next;
+      onNote?.(`${elevenModelLabel(model)} could not record this narration — recording on ${elevenModelLabel(next)} instead.`);
+    }
+  }
 }
 
 /** ElevenLabs accepts at most 100 segments / 20,000 characters per voiceover
@@ -165,7 +204,10 @@ export function isSpokenSource(source: string | undefined): boolean {
  * it, so the two never drift apart. */
 export function resolveVoiceSource(film: Film, override?: VoiceSourceId | null): VoiceSourceId {
   if (override) return override;
-  return loadVoiceSourcePref() || film.audio?.voice_source || 'none';
+  if (film.audio?.voice_source) return film.audio.voice_source;
+  // The saved Brief choice outranks stale browser preferences. Narration ON
+  // starts with the managed premium voice; Narration OFF stays off.
+  return film.plan?.narration_enabled === true ? 'elevenlabs' : 'none';
 }
 
 /** Is the film's audio plan current for these scenes AND for the voice source
@@ -253,6 +295,17 @@ export async function ensureAudioPlan(
   const fp = audioFingerprint(scenes);
   const source = resolveVoiceSource(film, opts.voiceSource);
   const openaiVoice = opts.openaiVoice || film.audio?.openai_voice || loadOpenAiVoicePref();
+  if (film.plan?.audio_enabled === false) {
+    const planned = silentAudioPlan(done, false);
+    return {
+      version: 1,
+      voice_plan: planned.voice_plan,
+      narration: planned.narration.map((n) => ({ ...n, planned_source: 'none', status: 'ready' as const })),
+      music: { required: false, preset: 'cinematic', status: 'skipped' },
+      sfx: [], sfx_status: 'none', voice_source: 'none', openai_voice: openaiVoice,
+      planned_fingerprint: fp, planned_at: new Date().toISOString(),
+    };
+  }
 
   if (film.audio && film.audio.planned_fingerprint === fp && !opts.forceReplan) {
     const sourceChanged = source !== (film.audio.voice_source || 'elevenlabs')
@@ -282,9 +335,16 @@ export async function ensureAudioPlan(
   // Voice continuity: an explicit choice or the previous plan's voice wins.
   const keepVoice = opts.voiceId || film.audio?.voice_plan?.voiceId || '';
   if (keepVoice) {
-    planned.voice_plan.voiceId = keepVoice;
     const known = voices.find((v) => v.id === keepVoice);
-    planned.voice_plan.voiceName = known?.name || opts.voiceName || film.audio?.voice_plan?.voiceName || planned.voice_plan.voiceName;
+    if (known || !voices.length) {
+      planned.voice_plan.voiceId = keepVoice;
+      planned.voice_plan.voiceName = known?.name || opts.voiceName || film.audio?.voice_plan?.voiceName || planned.voice_plan.voiceName;
+    } else {
+      const replacement = voices[0];
+      planned.voice_plan.voiceId = replacement.id;
+      planned.voice_plan.voiceName = replacement.name;
+      onNote?.(`${opts.voiceName || film.audio?.voice_plan?.voiceName || 'The saved ElevenLabs voice'} is no longer in the managed catalog — using ${replacement.name}.`);
+    }
   }
 
   const prior = film.audio;
@@ -344,7 +404,7 @@ export async function ensureAudioPlan(
 /** The plan a film falls back to when no voiceover is wanted and the sound
  * director could not be reached: nothing spoken, a default music bed, no SFX.
  * Music and SFX stay individually retryable and skippable from the UI. */
-function silentAudioPlan(scenes: FilmScene[]): PlannedFilmAudio {
+function silentAudioPlan(scenes: FilmScene[], audioEnabled = true): PlannedFilmAudio {
   return {
     voice_plan: {
       tone: 'neutral', energy: 'steady', pace: 'natural', emotion: 'grounded',
@@ -355,7 +415,7 @@ function silentAudioPlan(scenes: FilmScene[]): PlannedFilmAudio {
       text: '',
       voice_source: (s.dialogue && String((s.dialogue as any).line || '').trim() ? 'video_native' : 'none') as 'video_native' | 'none',
     })),
-    music: { required: true, preset: 'cinematic', volume: 0.22 },
+    music: { required: audioEnabled, preset: 'cinematic', volume: 0.22 },
     sfx: [],
   };
 }
@@ -462,11 +522,11 @@ async function reRecordLine(
     });
     return { audioUrl: take.audioUrl, duration_s: take.durationS || undefined };
   }
-  const single = await audioPost(`/api/workspaces/${WORKSPACE_ID}/audio/voiceover`, {
-    script: text,
-    voiceId: entry.voiceId || fallbackVoiceId,
-    voiceSettings: NARRATION_VOICE_SETTINGS,
-  });
+  const single = await postVoiceover(
+    `/api/workspaces/${WORKSPACE_ID}/audio/voiceover`,
+    { script: text, voiceId: entry.voiceId || fallbackVoiceId },
+    text.length,
+  );
   if (!single?.audioUrl) return null;
   const audioUrl = String(single.audioUrl);
   const measured = await probeAudioDuration(audioUrl);
@@ -474,6 +534,54 @@ async function reRecordLine(
     audioUrl,
     duration_s: measured || Math.max(0.2, (Number(single.estimatedDurationMs) || 0) / 1000) || undefined,
   };
+}
+
+/** Explicit, per-scene fallback for dialogue rendered by a silent video
+ * model. It uses the approved character's stored voice_id and does nothing
+ * until the creator presses the scene button, so credits are never spent
+ * silently. The returned take is mixed only for this scene at assembly. */
+export async function generateCharacterDialogueFallback(
+  film: Film,
+  scene: FilmScene,
+  onNote?: (note: string) => void,
+): Promise<SceneNarration> {
+  const dialogue = scene.dialogue;
+  const line = String(dialogue?.line || '').trim();
+  if (dialogue?.kind !== 'character' || !line) throw new AudioLayerError('narration', 'This scene has no character dialogue to record.');
+  const speakerTokens = String(dialogue.speaker || '')
+    .toLowerCase()
+    .split(/\s*(?:\/|,|&|\band\b)\s*/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const characters = Array.isArray(film.plan?.characters) ? film.plan!.characters! : [];
+  const matchedCharacters = characters.filter((item) => {
+    const id = String(item.id || '').toLowerCase();
+    const name = String(item.name || '').toLowerCase();
+    return speakerTokens.includes(id) || speakerTokens.includes(name);
+  });
+  if (matchedCharacters.length > 1) {
+    throw new AudioLayerError('narration', 'This block combines more than one speaking character. Split it into one dialogue block per character before adding a voice fallback, so each stored voice ID stays attached to the right line.');
+  }
+  const character = matchedCharacters[0] || (characters.length === 1 ? characters[0] : null);
+  const voiceId = String(character?.voice?.voice_id || '').trim();
+  if (!character || !voiceId) {
+    throw new AudioLayerError('narration', `Add an ElevenLabs Voice ID to ${character?.name || dialogue.speaker || 'this character'} in Cast approval, then try this line again.`);
+  }
+  onNote?.(`Recording only Scene ${scene.idx + 1} with ${character.name}'s stored voice…`);
+  try {
+    const take = await reRecordLine({
+      scene_key: scene.scene_key,
+      text: line,
+      voice_source: 'elevenlabs',
+      planned_source: 'elevenlabs',
+      voiceId,
+      status: 'pending',
+    }, line, voiceId);
+    if (!take?.audioUrl) throw new Error('ElevenLabs returned no audio file for this line.');
+    return { text: line, voiceId, audioUrl: take.audioUrl, duration_s: take.duration_s || 0 };
+  } catch (error: any) {
+    throw new AudioLayerError('narration', `This character line could not be generated: ${String(error?.message || error)}`);
+  }
 }
 
 /** Record every missing narration line on the film's chosen engine — ElevenLabs
@@ -498,7 +606,7 @@ export async function generateNarrationAudio(
     && (needsTake(n) || n.voiceId !== builtInVoice));
 
   if (pending.length) {
-    onNote?.(`ElevenLabs is recording ${pending.length} narration line${pending.length === 1 ? '' : 's'} (${audio.voice_plan?.voiceName || 'default voice'})…`);
+    onNote?.(`${elevenModelLabel(narrationModel)} is recording ${pending.length} narration line${pending.length === 1 ? '' : 's'} (${audio.voice_plan?.voiceName || 'default voice'})…`);
     const applySegment = (n: AudioNarrationEntry, seg: any) => {
       const url = String(seg?.audioUrl || '');
       if (!url) { n.status = 'failed'; n.error = 'ElevenLabs returned no audio file for this line.'; return; }
@@ -510,30 +618,57 @@ export async function generateNarrationAudio(
       n.error = undefined;
     };
     const batches = narrationBatches(pending);
-    let recorded = 0;
     try {
       let b = 0;
       for (const batch of batches) {
         b += 1;
         if (batches.length > 1) onNote?.(`Recording narration batch ${b} of ${batches.length} (${batch.length} line${batch.length === 1 ? '' : 's'})…`);
-        const res = await audioPost(`/api/workspaces/${WORKSPACE_ID}/audio/voiceover/segments`, {
-          segments: batch.map((n) => ({ text: n.text })),
-          voiceId,
-          voiceSettings: NARRATION_VOICE_SETTINGS,
-          fps: 30,
-        });
+        const requestBatch = () => postVoiceover(
+          `/api/workspaces/${WORKSPACE_ID}/audio/voiceover/segments`,
+          { segments: batch.map((n) => ({ text: n.text })), voiceId, fps: 30 },
+          batch.reduce((longest, n) => Math.max(longest, String(n.text || '').length), 0),
+          onNote,
+        );
+        let res: any;
+        try {
+          res = await requestBatch();
+        } catch (firstError: any) {
+          onNote?.(`ElevenLabs could not record this batch — retrying once (${String(firstError?.message || firstError).slice(0, 100)}).`);
+          res = await requestBatch();
+        }
         const segs: any[] = Array.isArray(res?.segments) ? res.segments : [];
         if (segs.length !== batch.length) throw new Error('ElevenLabs returned an incomplete set of narration segments.');
         batch.forEach((n, i) => applySegment(n, segs[i]));
-        recorded += batch.length;
       }
     } catch (e: any) {
-      // Lines recorded by earlier batches keep their audio; a retry records only the rest.
-      pending.slice(recorded).forEach((n) => { n.status = 'failed'; n.error = String(e?.message || e).slice(0, 200); });
-      throw new AudioLayerError('narration', `Narration generation failed: ${String(e?.message || e)}`);
+      // The managed voice was tried once and retried once. Keep the film moving
+      // on the platform speech proxy, and re-record every narration line there
+      // so one film never changes narrator halfway through.
+      const reason = String(e?.message || e).slice(0, 160);
+      onNote?.(`ElevenLabs was unavailable after one retry — using the built-in ${openAiVoiceLabel(builtInVoice)} voice instead.`);
+      let fallbackFailure: any = null;
+      for (const n of pending) {
+        try {
+          const take = await recordOpenAiLine({ text: n.text, voice: builtInVoice, label: `narration-${n.scene_key}` });
+          n.voice_source = 'openai';
+          n.voiceId = builtInVoice;
+          n.audioUrl = take.audioUrl;
+          n.duration_s = take.durationS || undefined;
+          n.status = 'ready';
+          n.error = undefined;
+        } catch (fallbackError: any) {
+          n.status = 'failed';
+          n.error = 'Neither managed narration voice was available.';
+          fallbackFailure = fallbackFailure || fallbackError;
+        }
+      }
+      audio.voice_used = fallbackFailure ? undefined : 'openai';
+      audio.voice_fallback_reason = fallbackFailure ? undefined : `ElevenLabs failed after one retry: ${reason}`;
+      if (fallbackFailure) throw new AudioLayerError('narration', 'Narration could not be generated on ElevenLabs or the built-in AI voice.');
     }
     const failed = pending.filter((n) => n.status === 'failed');
     if (failed.length) throw new AudioLayerError('narration', `${failed.length} narration line${failed.length === 1 ? '' : 's'} came back without audio.`);
+    if (!audio.voice_used) audio.voice_used = 'elevenlabs';
   }
 
   // BUILT-IN AI VOICE — the platform speech proxy, one line per request. A
@@ -559,6 +694,8 @@ export async function generateNarrationAudio(
     if (firstFailure) {
       throw new AudioLayerError('narration', `The built-in voice could not record every line: ${String(firstFailure?.message || firstFailure)}`);
     }
+    audio.voice_used = 'openai';
+    if (audio.voice_source === 'openai') audio.voice_fallback_reason = undefined;
   }
 
   // TIMING — the voice drives the cut, but never by unnatural speed-up.
@@ -594,9 +731,14 @@ export async function persistSceneNarration(audio: FilmAudio, scenes: FilmScene[
   for (const n of audio.narration) {
     const scene = scenes.find((s) => s.scene_key === n.scene_key);
     if (!scene) continue;
-    const value: SceneNarration | null = (isSpokenSource(n.voice_source) && n.status === 'ready' && n.audioUrl)
-      ? { text: n.text, voiceId: n.voiceId || '', audioUrl: n.audioUrl, duration_s: n.duration_s || 0 }
+    const savedDialogueFallback = n.voice_source === 'video_native'
+      && scene.dialogue?.kind === 'character'
+      && !!scene.narration?.audioUrl
+      ? scene.narration
       : null;
+    const value: SceneNarration | null = savedDialogueFallback || ((isSpokenSource(n.voice_source) && n.status === 'ready' && n.audioUrl)
+      ? { text: n.text, voiceId: n.voiceId || '', audioUrl: n.audioUrl, duration_s: n.duration_s || 0 }
+      : null);
     if (JSON.stringify(scene.narration || null) === JSON.stringify(value)) continue;
     scene.narration = value;
     try { await db.updateScene(scene.id, { narration: value }); } catch { /* film.audio remains the source of truth */ }
@@ -631,14 +773,24 @@ async function postMusicWithFallback(
   body: Record<string, unknown>,
   onNote?: (note: string) => void,
 ): Promise<any> {
+  const onProvider = async (provider: MusicProvider) => {
+    const request = () => audioPost(path, { ...body, provider });
+    try {
+      return await request();
+    } catch (firstError) {
+      if (!isMusicProviderFailure(firstError)) throw firstError;
+      onNote?.(`${provider === 'elevenlabs' ? 'ElevenLabs' : 'Google Gemini'} music did not answer — retrying once…`);
+      return await request();
+    }
+  };
   try {
-    const data = await audioPost(path, { ...body, provider: 'elevenlabs' });
+    const data = await onProvider('elevenlabs');
     return { ...data, provider: (data?.provider || 'elevenlabs') as MusicProvider };
   } catch (elevenError) {
     if (!isMusicProviderFailure(elevenError)) throw elevenError;
-    onNote?.('ElevenLabs music is unavailable — retrying the same composition with Google Gemini (Lyria)…');
+    onNote?.('ElevenLabs music is unavailable after one retry — using Google Gemini (Lyria)…');
     try {
-      const data = await audioPost(path, { ...body, provider: 'gemini' });
+      const data = await onProvider('gemini');
       return { ...data, provider: (data?.provider || 'gemini') as MusicProvider };
     } catch (geminiError) {
       if (isMusicProviderFailure(geminiError)) throw new MusicProvidersUnavailableError();
@@ -724,11 +876,18 @@ export async function generateSfxAudio(
   let failures = 0;
   for (const f of pending) {
     try {
-      const data = await audioPost(`/api/workspaces/${WORKSPACE_ID}/audio/music/custom`, {
+      const requestEffect = () => audioPost(`/api/workspaces/${WORKSPACE_ID}/audio/music/custom`, {
         prompt: `Sound effect only: ${f.prompt}. One single isolated sound effect with silence around it — no music, no melody, no rhythm, no drums, no voice.`,
         lengthMs: 3000,
         instrumental: true,
       });
+      let data: any;
+      try {
+        data = await requestEffect();
+      } catch (firstError) {
+        onNote?.(`One sound effect did not answer — retrying it once…`);
+        data = await requestEffect();
+      }
       if (!data?.audioUrl) throw new Error('No audio file returned.');
       f.audioUrl = String(data.audioUrl);
       f.duration_s = Math.max(0.2, (Number(data.durationMs) || 3000) / 1000);

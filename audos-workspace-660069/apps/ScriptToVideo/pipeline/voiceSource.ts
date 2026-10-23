@@ -18,7 +18,8 @@
  * customer picks a voice.
  */
 
-import { uploadBlob, wsToken } from '../api';
+import { getWorkspaceToken } from '../../../lib/workspace';
+import { uploadBlob } from '../api';
 import type { VoiceSourceId } from '../api';
 import { probeAudioDuration } from './sceneVoice';
 
@@ -32,7 +33,7 @@ export interface VoiceSourceOption {
 
 export const VOICE_SOURCES: readonly VoiceSourceOption[] = [
   { id: 'none', label: 'No Voiceover', blurb: 'Skip narration — the film keeps the clips’ own sound.' },
-  { id: 'elevenlabs', label: 'ElevenLabs', blurb: 'One premium ElevenLabs voice for the whole film.' },
+  { id: 'elevenlabs', label: 'Premium voice', blurb: 'Choose one expressive catalog voice for the whole film.' },
   { id: 'openai', label: 'Built-in AI Voice', blurb: 'The platform’s own text-to-speech. No connection needed.' },
 ] as const;
 
@@ -169,7 +170,7 @@ export async function recordOpenAiLine(params: {
 }): Promise<{ audioUrl: string; durationS: number }> {
   const text = String(params.text || '').trim();
   if (!text) throw new Error('That line has no words to speak.');
-  const token = wsToken();
+  const token = await getWorkspaceToken();
   if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
   const voice = isOpenAiVoice(String(params.voice || '')) ? String(params.voice) : DEFAULT_OPENAI_VOICE;
 

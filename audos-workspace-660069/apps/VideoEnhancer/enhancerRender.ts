@@ -9,28 +9,18 @@
  * caption treatment — concept MOTION GRAPHICS at each caption moment (animated
  * SVG from captionGraphics.MOTION_GRAPHICS_LIB) instead of burned-in text.
  */
-import { workspaceToken, WORKSPACE_UUID } from './enhancerCore';
+import { submitRender } from '../../lib/render/remotion';
 import { MOTION_GRAPHICS_LIB } from './captionGraphics';
 
 export async function submitRenderV2(props: Record<string, unknown>, durationInFrames: number, width: number, height: number): Promise<string> {
-  const res = await fetch('/api/render/remotion', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
-    body: JSON.stringify({
-      workspaceId: WORKSPACE_UUID,
-      compositionTsx: ENHANCER_COMPOSITION_V2,
-      props,
-      durationInFrames,
-      fps: 30,
-      width,
-      height,
-    }),
+  const aspect = height > width ? '9:16' : width === height ? '1:1' : '16:9';
+  const submitted = await submitRender({
+    compositionTsx: ENHANCER_COMPOSITION_V2,
+    props,
+    durationInFrames,
+    aspect,
   });
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.operationId) {
-    throw new Error((data?.error as string) || ('Render submission failed (HTTP ' + res.status + ').'));
-  }
-  return String(data.operationId);
+  return submitted.operationId;
 }
 
 /**

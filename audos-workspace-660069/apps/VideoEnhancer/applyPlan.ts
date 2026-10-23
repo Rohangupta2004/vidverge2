@@ -41,6 +41,7 @@
  * prediction exactly, captions landed at their remapped windows, inserts
  * spliced at the right point, and SFX peaks registered at the cue times.
  */
+import { PollTimeoutError, poll } from '../../lib/poll';
 import { submitBroll, checkBroll } from './enhancerCore';
 import {
   renderCaptionComposition, renderGraphicComposition,
@@ -125,7 +126,6 @@ export interface ApplyResult {
 
 function round3(n: number): number { return Math.round(n * 1000) / 1000; }
 function msg(e: unknown): string { return e instanceof Error ? e.message : String(e); }
-function sleep(ms: number): Promise<void> { return new Promise((r) => { setTimeout(r, ms); }); }
 
 // ---------------------------------------------------------------------------
 // Pure timeline math (exported for direct testing)
@@ -570,19 +570,28 @@ async function generateInsertClip(
   onNote?: (note: string) => void,
 ): Promise<Uint8Array> {
   const operationId = await submitBroll(prompt.slice(0, 900), aspect, durationSec);
-  const startedAt = Date.now();
-  for (;;) {
-    await sleep(VEO_POLL_MS);
-    const st = await checkBroll(operationId);
-    if (st.status === 'completed' && st.videoUrl) {
-      const res = await fetch(st.videoUrl);
-      if (!res.ok) throw new Error('could not download the generated clip (HTTP ' + res.status + ')');
-      return new Uint8Array(await res.arrayBuffer());
-    }
-    if (st.status === 'failed') throw new Error(st.errorMessage || 'the video provider reported a failure');
-    if (Date.now() - startedAt > VEO_TIMEOUT_MS) throw new Error('timed out waiting for the generated clip');
-    onNote?.(st.progress ? st.progress + '%' : 'generating…');
+  let st;
+  try {
+    st = await poll(
+      () => checkBroll(operationId),
+      {
+        interval: VEO_POLL_MS,
+        timeout: VEO_TIMEOUT_MS,
+        tolerateErrors: 1,
+        until: (status) => status.status === 'failed' || (status.status === 'completed' && Boolean(status.videoUrl)),
+        onTick: (status) => {
+          if (status.status === 'processing') onNote?.(status.progress ? status.progress + '%' : 'generating…');
+        },
+      },
+    );
+  } catch (error) {
+    if (error instanceof PollTimeoutError) throw new Error('timed out waiting for the generated clip');
+    throw error;
   }
+  if (st.status === 'failed') throw new Error(st.errorMessage || 'the video provider reported a failure');
+  const res = await fetch(String(st.videoUrl));
+  if (!res.ok) throw new Error('could not download the generated clip (HTTP ' + res.status + ')');
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 // ---------------------------------------------------------------------------

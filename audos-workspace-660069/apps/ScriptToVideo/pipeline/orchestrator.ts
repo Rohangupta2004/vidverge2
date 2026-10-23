@@ -18,8 +18,8 @@
  *   stranded at EXTRACTING_FINAL_FRAME is recovered from the clip that already
  *   rendered rather than re-rendered.
  * - After every clip: read the REAL duration from media metadata, extract and
- *   validate the final frame with FFmpeg, then let Opus decide whether the
- *   NEXT scene continues from that frame or opens independently.
+ *   validate the final frame with FFmpeg, then require the NEXT scene to use
+ *   that frame first unless the creator explicitly records a no-frame choice.
  * - A failed scene never loses completed scenes and never restarts the film:
  *   retry / regenerate-prompt / character-reference-fallback / skip act on
  *   that one scene only.
@@ -28,8 +28,8 @@
  */
 
 import {
-  Aspect, AtReference, Film, FilmCharacter, FilmScene, MAX_OPERATION_ID_CHARS,
-  MachineState, ParsedScene, PlanScene, ReferenceAsset, ReferenceType,
+  Aspect, AtReference, Film, FilmAudio, FilmCharacter, FilmCharacterProfile, FilmScene, MAX_OPERATION_ID_CHARS,
+  MachineState, OnScreenTextItem, ParsedScene, PlanScene, ReferenceAsset, ReferenceType,
   SceneDialogue, VideoClipSpec, db, generateBackdropImage, newSceneKey,
   resolveAtMentions, sceneFingerprint,
 } from '../api';
@@ -37,16 +37,16 @@ import {
   buildManualScenePrompt, manualSceneNegative, manualSceneSegment, parseManualScript,
 } from '../manualScript';
 import {
-  characterPortraitBrief, extractStyleFingerprint, extractVisualAttributes,
+  analyzeScriptCast, askOpusJson, characterPortraitBrief, extractStyleFingerprint, extractVisualAttributes,
   prepareScenePrompt, segmentScript, validateScene,
 } from './opus';
 import { VideoModelService, capText, resolveDuration, resolveVideoModel } from './videoModelService';
 import type { VideoModelConfig } from './videoModelService';
 import { fallbackChain, isBadRequest, rephraseVideoPrompt } from './resilience';
-import { extractFinalFrame, probeVideoDuration } from './frames';
+import { extractFinalFrame, probeVideoDuration, validateFrameUrl } from './frames';
 import { extractFrame as canvasExtractFrame } from './capture';
-import { assembleFilm } from './assemble';
-import { FinishSettings, buildCaptions, prepareFinish } from './finish';
+import { assembleFilm, interruptAssembly } from './assemble';
+import { FinishSettings, buildCaptions, listVoices, prepareFinish } from './finish';
 import {
   AudioLayer, AudioLayerError, MAX_SCENE_EXTENSION_S, audioPlanCurrent,
   audioReady, audioScenes, ensureAudioPlan, generateMusicAudio,
@@ -55,7 +55,11 @@ import {
   skipNarrationLayer, skipSfxLayer, withMusicPreset, withVoiceSource,
 } from './audio';
 import type { VoiceSourceId } from './voiceSource';
-import { DEFAULT_MAX_SCENES, validateSceneDurations } from '../../../lib/videoEngines';
+import {
+  S2V_CAPABILITY_REGISTRY_VERSION, S2V_VIDEO_CAPABILITIES,
+  buildLongFormSections,
+} from '../v2Contracts';
+import type { AudioPolicy, ControlMode, EntryType, ExecutionMode, VideoStyleId } from '../v2Contracts';
 
 export interface RunHooks {
   onFilm?: (patch: Partial<Film>) => void;
@@ -148,13 +152,186 @@ export function activeScene(scenes: FilmScene[]): FilmScene | null {
   return orderedScenes(scenes).find((s) => !DONE.has(String(s.status))) || null;
 }
 
-/** The nearest COMPLETED earlier scene — the continuity source. */
+/** The nearest COMPLETED earlier scene — retained for legacy lookups. */
 export function previousCompletedScene(scenes: FilmScene[], beforeIdx: number): FilmScene | null {
   return orderedScenes(scenes).filter((s) => s.idx < beforeIdx && s.status === 'completed' && s.asset_url).pop() || null;
 }
 
+/** Continuity is never allowed to jump over a failed or unfinished scene. */
+export function immediatePreviousScene(scenes: FilmScene[], beforeIdx: number): FilmScene | null {
+  return orderedScenes(scenes).find((s) => s.idx === beforeIdx - 1) || null;
+}
+
+function frameExtractionOf(scene: FilmScene | null | undefined): NonNullable<VideoClipSpec['background']>['frame_extraction'] | undefined {
+  return ((scene?.spec || {}) as VideoClipSpec).background?.frame_extraction;
+}
+
+function onScreenCharacterReferences(film: Film, scene: FilmScene): ReferenceAsset[] {
+  const spec = (scene.spec || {}) as VideoClipSpec;
+  const ids = Array.isArray(spec.characters) ? spec.characters.map((id) => String(id)) : [];
+  if (!ids.length) return [];
+  const cast = Array.isArray(film.character_refs) ? film.character_refs : [];
+  const seen = new Set<string>();
+  const out: ReferenceAsset[] = [];
+  for (const id of ids) {
+    const character = cast.find((item) => String(item.id) === id && isHttpUrl(item.url));
+    if (!character || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ role: 'reference', url: String(character.url), type: 'character', label: character.name || id, characterId: id, priority: 500, critical: true });
+  }
+  return out;
+}
+
+function supportingSceneReferences(film: Film): ReferenceAsset[] {
+  const out: ReferenceAsset[] = [];
+  if (isHttpUrl(film.product_screenshot_url)) out.push({ role: 'reference', url: String(film.product_screenshot_url), type: 'product', label: 'Product', priority: 400 });
+  for (const ref of Array.isArray(film.at_references) ? film.at_references : []) {
+    if (!isHttpUrl(ref?.url) || ref.type === 'character') continue;
+    const type = ref.type === 'location' ? 'environment' : 'style';
+    out.push({ role: 'reference', url: ref.url, type, label: `@${ref.name}`, priority: type === 'environment' ? 200 : 100 });
+  }
+  return out;
+}
+
+function sceneCharacterPromptNote(film: Film, scene: FilmScene): string {
+  const ids = Array.isArray(((scene.spec || {}) as VideoClipSpec).characters)
+    ? (((scene.spec || {}) as VideoClipSpec).characters || []).map(String)
+    : [];
+  const cast = Array.isArray(film.character_refs) ? film.character_refs : [];
+  const lines = ids.map((id) => cast.find((item) => String(item.id) === id)).filter(Boolean).map((character) =>
+    `${character!.name}: ${[character!.appearance, character!.wardrobe ? `wardrobe ${character!.wardrobe}` : ''].filter(Boolean).join('; ')}`,
+  );
+  return lines.length ? `ON-SCREEN CHARACTERS — keep each visible in the frame position stated by this scene: ${lines.join(' | ')}` : '';
+}
+
 export function allScenesDone(scenes: FilmScene[]): boolean {
   return scenes.length > 0 && scenes.every((s) => DONE.has(String(s.status)));
+}
+
+/** Pack adjacent director beats into the chosen model's legal generation
+ * blocks. Script text is concatenated verbatim and each visual beat gets an
+ * explicit time range inside the block. A 60-second Seedance 2.5 plan therefore
+ * becomes 30+30 (subject to the source plan's measured total), not six browser-
+ * dependent 10-second jobs. The final remainder is rebalanced, never padded or
+ * discarded. */
+function packPlannedBlocks(source: any[], model: VideoModelConfig, targetDuration?: number | null): any[] {
+  const max = Math.max(1, Number(model.safeMaxDuration) || 8);
+  const min = Math.max(1, Number(model.minDuration) || 1);
+  let input = Array.isArray(source) ? source.map((beat) => ({ ...beat })) : [];
+  const wanted = Math.max(0, Math.round(Number(targetDuration) || 0));
+  const groups: any[][] = [];
+  if (wanted && input.length) {
+    const desiredBlocks = Math.max(1, Math.ceil(wanted / max));
+    // A terse script can produce fewer director beats than the chosen runtime
+    // needs. Split the longest source segment at a word boundary until every
+    // legal block has real, non-duplicated script coverage.
+    while (input.length < desiredBlocks) {
+      let longest = -1;
+      for (let i = 0; i < input.length; i += 1) {
+        if (longest < 0 || String(input[i].script_segment || '').length > String(input[longest].script_segment || '').length) longest = i;
+      }
+      const beat = input[longest];
+      const words = String(beat?.script_segment || '').trim().split(/\s+/).filter(Boolean);
+      if (!beat || words.length < 2) break;
+      const split = Math.max(1, Math.floor(words.length / 2));
+      const seconds = Math.max(2, Number(beat.duration_s) || 2);
+      const dialogueWords = beat.dialogue?.line ? String(beat.dialogue.line).trim().split(/\s+/).filter(Boolean) : [];
+      const dialogueCut = dialogueWords.length > 1 ? Math.max(1, Math.min(dialogueWords.length - 1, Math.round(dialogueWords.length * (split / words.length)))) : dialogueWords.length;
+      const firstDialogue = dialogueWords.length ? { ...beat.dialogue, line: dialogueWords.slice(0, dialogueCut).join(' ') } : beat.dialogue;
+      const secondDialogue = dialogueWords.length > 1 ? { ...beat.dialogue, line: dialogueWords.slice(dialogueCut).join(' ') } : null;
+      const first = { ...beat, script_segment: words.slice(0, split).join(' '), duration_s: Math.max(1, Math.floor(seconds / 2)), summary: `${String(beat.summary || 'Beat')} — part 1`, dialogue: firstDialogue };
+      const second = { ...beat, script_segment: words.slice(split).join(' '), duration_s: Math.max(1, Math.ceil(seconds / 2)), summary: `${String(beat.summary || 'Beat')} — part 2`, dialogue: secondDialogue };
+      input.splice(longest, 1, first, second);
+    }
+    const blockCount = Math.max(1, Math.min(input.length, desiredBlocks));
+    let cursor = 0;
+    for (let block = 0; block < blockCount; block += 1) {
+      const remainingBlocks = blockCount - block;
+      const remainingBeats = input.length - cursor;
+      const take = remainingBlocks === 1
+        ? remainingBeats
+        : Math.max(1, Math.min(remainingBeats - (remainingBlocks - 1), Math.round(input.length / blockCount)));
+      groups.push(input.slice(cursor, cursor + take).map((beat) => ({ ...beat })));
+      cursor += take;
+    }
+    const blockDurations: number[] = [];
+    let remaining = wanted;
+    for (let index = 0; index < blockCount; index += 1) {
+      const duration = Math.min(max, remaining);
+      blockDurations.push(duration);
+      remaining -= duration;
+    }
+    // Legal remainder handling: borrow only enough from the preceding full
+    // block to bring the final block up to the provider floor. For the current
+    // choices this yields Seedance 45s = 30+15 and Kling 15s = 10+5.
+    if (blockDurations.length > 1 && blockDurations[blockDurations.length - 1] < min) {
+      const need = min - blockDurations[blockDurations.length - 1];
+      blockDurations[blockDurations.length - 2] -= need;
+      blockDurations[blockDurations.length - 1] += need;
+    }
+    groups.forEach((beats, index) => {
+      const blockDuration = blockDurations[index];
+      const weight = beats.reduce((n, beat) => n + Math.max(1, Number(beat?.duration_s) || 1), 0) || 1;
+      let allocated = 0;
+      beats.forEach((beat, beatIndex) => {
+        const seconds = beatIndex === beats.length - 1
+          ? Math.max(1, blockDuration - allocated)
+          : Math.max(1, Math.round(blockDuration * (Math.max(1, Number(beat?.duration_s) || 1) / weight)));
+        beat.duration_s = seconds; allocated += seconds;
+      });
+    });
+  } else {
+    let current: any[] = [];
+    let currentS = 0;
+    for (const beat of input) {
+      const seconds = Math.max(1, Number(beat?.duration_s) || min);
+      if (current.length && currentS + seconds > max) {
+        groups.push(current); current = []; currentS = 0;
+      }
+      current.push({ ...beat, duration_s: seconds }); currentS += seconds;
+    }
+    if (current.length) groups.push(current);
+  }
+  if (groups.length > 1) {
+    const last = groups[groups.length - 1];
+    const lastS = last.reduce((n, beat) => n + Number(beat.duration_s || 0), 0);
+    const prev = groups[groups.length - 2];
+    const prevS = prev.reduce((n, beat) => n + Number(beat.duration_s || 0), 0);
+    if (lastS < min && prevS + lastS <= max) groups.splice(groups.length - 2, 2, [...prev, ...last]);
+  }
+  return groups.map((beats) => {
+    const duration = beats.reduce((n, beat) => n + Number(beat.duration_s || 0), 0);
+    let cursor = 0;
+    const timedBeats = beats.map((beat) => {
+      const start = cursor; cursor += Number(beat.duration_s || 0);
+      return {
+        start_s: start,
+        end_s: cursor,
+        action: String(beat.visual_goal || beat.summary || '').trim(),
+        dialogue: beat.dialogue?.line ? String(beat.dialogue.line) : undefined,
+        audio: beat.dialogue?.kind === 'narrator' ? 'narration' : beat.dialogue?.line ? 'native dialogue' : 'native ambience/effects',
+      };
+    });
+    const dialogueLines = beats.map((beat) => beat.dialogue).filter(Boolean);
+    return {
+      ...beats[0],
+      duration_s: duration,
+      script_segment: beats.map((beat) => String(beat.script_segment || '')).join('\n').trim(),
+      summary: beats.map((beat) => String(beat.summary || '')).filter(Boolean).join(' → '),
+      visual_goal: timedBeats.map((beat) => `[${beat.start_s.toFixed(0)}–${beat.end_s.toFixed(0)}s] ${beat.action}`).join('\n'),
+      timed_beats: timedBeats,
+      characters: Array.from(new Set(beats.flatMap((beat) => Array.isArray(beat.characters) ? beat.characters : []))),
+      dialogue: dialogueLines.length === 1 ? dialogueLines[0] : dialogueLines.length ? {
+        kind: dialogueLines.every((line: any) => line.kind === 'narrator') ? 'narrator' : 'character',
+        line: dialogueLines.map((line: any) => String(line.line || '')).filter(Boolean).join(' '),
+        speaker: dialogueLines.map((line: any) => String(line.speaker || '')).filter(Boolean).join(' / '),
+        delivery: 'Follow each timed line exactly; never pad, paraphrase or drop dialogue.',
+        language: dialogueLines[0].language || 'English',
+        accent: dialogueLines[0].accent,
+      } : null,
+      duration_notes: beats.flatMap((beat) => Array.isArray(beat.duration_notes) ? beat.duration_notes : []),
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -162,29 +339,10 @@ export function allScenesDone(scenes: FilmScene[]): boolean {
 // ---------------------------------------------------------------------------
 
 /** True when this film's scenes were parsed from a script the customer pasted
- * rather than segmented by the director model. A manual film never calls the
- * director: not to segment, not to write a prompt, not to review a clip. */
+ * rather than segmented by the director model. Manual mode does not rewrite
+ * the script, but every rendered clip still receives the required vision check. */
 export function isManualFilm(film: Film): boolean {
   return film.plan?.input_mode === 'manual';
-}
-
-/** The uploaded character reference, when it is a durable URL the generation
- * proxies can actually fetch. */
-function characterRefUrl(film: Film): string {
-  const url = String(film.character_ref_url || '').trim();
-  return /^https:\/\//.test(url) ? url : '';
-}
-
-/** What the character reference image shows, in words. A provider that
- * carries only ONE image reference gets this appended to the prompt instead
- * of the picture, so identity still travels with every clip. */
-function characterReferenceNote(film: Film, characterId?: string | null): string {
-  const roster = Array.isArray(film.plan?.characters) ? film.plan!.characters! : [];
-  const match = (characterId ? roster.find((c) => c.id === characterId) : null) || roster[0] || null;
-  const appearance = String(match?.appearance || '').trim();
-  return appearance
-    ? `Character continuity (matching the supplied character reference image): ${capText(appearance, 220)} — identical face, hair, build and wardrobe in this clip.`
-    : 'Character continuity: the same person as the supplied character reference image — identical face, hair, build, wardrobe and colors in every clip.';
 }
 
 /** Append a note to a prompt without the proxy's hard character cap cutting
@@ -193,55 +351,6 @@ function appendPromptNote(prompt: string, note: string, maxChars: number): strin
   const body = String(prompt || '').trim();
   if (!note) return body;
   return `${capText(body, Math.max(160, maxChars - note.length - 1))}\n${note}`;
-}
-
-/**
- * DUAL REFERENCE — the n+1 method, active in EVERY generation mode and on
- * every provider whenever the film carries a character reference image.
- *
- * Scene N+1 is staged from two images at once: the character reference (WHO
- * the person is) and scene N's extracted final frame (WHERE the shot left
- * off). A provider that takes a seed frame AND reference images (Omni Flash,
- * Kling) receives both simultaneously. A provider that takes only one image
- * (Runway) keeps the final frame — continuity is the half a prompt cannot
- * replace — and the character reference travels as a description appended to
- * the prompt text instead.
- *
- * Scene 1 has no previous frame, so the character reference IS the reference
- * frame. An independent mid-film scene is treated the same way: borrowing the
- * previous frame there would contaminate it visually, which is a bug.
- *
- * With no character reference uploaded this is a no-op, so a film without one
- * behaves exactly as it did before.
- */
-function applyDualReference(params: {
-  film: Film;
-  assets: ReferenceAsset[];
-  prompt: string;
-  referenceType: ReferenceType;
-  characterId?: string | null;
-  modelId?: string | null;
-}): { assets: ReferenceAsset[]; prompt: string; referenceType: ReferenceType } {
-  const charRef = characterRefUrl(params.film);
-  if (!charRef) return { assets: params.assets, prompt: params.prompt, referenceType: params.referenceType };
-  const model = resolveVideoModel(params.modelId || params.film.video_model);
-  const assets = params.assets.filter((a) => a.url !== charRef);
-  if (!assets.some((a) => a.role === 'first_frame')) {
-    assets.unshift({ role: 'first_frame', url: charRef });
-    return { assets, prompt: params.prompt, referenceType: 'character_reference' };
-  }
-  // A model whose single image slot IS the seed frame (Seedance) has no room
-  // left once a continuation frame is riding in it — identity travels in
-  // words for those clips, exactly as it does on Runway.
-  if (model.maxReferenceImages > 0 && model.seedFrame !== 'character_ref_only') {
-    assets.push({ role: 'reference', url: charRef });
-    return { assets, prompt: params.prompt, referenceType: params.referenceType };
-  }
-  return {
-    assets,
-    prompt: appendPromptNote(params.prompt, characterReferenceNote(params.film, params.characterId), model.promptMaxChars),
-    referenceType: params.referenceType,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -266,40 +375,11 @@ async function resolveFilmAtReferences(script: string): Promise<AtReference[]> {
   }
 }
 
-/** Attach the film's @name references to a scene's request as reference
- * images, up to whatever the chosen model actually carries. The character
- * reference already in `assets` keeps its claim on that budget — on Seedance
- * (one image) that means the character wins and the stored references travel
- * as the written note below instead. */
-function withAtReferences(film: Film, assets: ReferenceAsset[], modelId?: string | null): ReferenceAsset[] {
-  const stored = Array.isArray(film.at_references) ? film.at_references : [];
-  if (!stored.length) return assets;
-  const model = resolveVideoModel(modelId || film.video_model);
-  // Seedance has ONE image slot and it is the seed frame, so a stored
-  // reference travels as a picture there only while that slot is free (an
-  // opening scene with no character reference) — never as a thumbnail the
-  // request would not actually carry.
-  const singleSeedSlot = model.seedFrame === 'character_ref_only';
-  const out = [...assets];
-  for (const ref of stored) {
-    const url = String(ref?.url || '');
-    if (!/^https:\/\//.test(url) || out.some((a) => a.url === url)) continue;
-    if (singleSeedSlot) {
-      if (out.some((a) => a.role === 'first_frame')) break;
-      out.unshift({ role: 'first_frame', url });
-      break;
-    }
-    if (out.filter((a) => a.role === 'reference').length >= model.maxReferenceImages) break;
-    out.push({ role: 'reference', url });
-  }
-  return out;
-}
-
 /** The stored references' appearance notes in words, so a model carrying
  * fewer pictures than the script summoned still gets their identity. */
 function appendAtReferenceNote(film: Film, prompt: string, modelId?: string | null): string {
   const described = (Array.isArray(film.at_references) ? film.at_references : [])
-    .filter((r) => String(r?.description || '').trim());
+    .filter((r) => r?.type !== 'character' && String(r?.description || '').trim());
   if (!described.length) return prompt;
   const note = `Stored references (match them exactly): ${described.map((r) => `${r.name} — ${capText(String(r.description), 1000)}`).join('; ')}`;
   return appendPromptNote(prompt, capText(note, 5000), resolveVideoModel(modelId || film.video_model).promptMaxChars);
@@ -328,6 +408,58 @@ function finishScenePrompt(film: Film, scene: FilmScene, prompt: string): string
   return applyStyleLock(film, scene, appendAtReferenceNote(film, prompt, modelId));
 }
 
+function sceneStarts(scenes: PlanScene[]): number[] {
+  let cursor = 0;
+  return scenes.map((scene) => { const start = cursor; cursor += Math.max(0.25, Number(scene.duration_s) || 0); return start; });
+}
+
+function plannedTextTimeline(items: Array<{ text: string; scene_numbers: number[]; start_s: number; end_s: number; position: OnScreenTextItem['position']; style: OnScreenTextItem['style'] }>, scenes: PlanScene[]): OnScreenTextItem[] {
+  const starts = sceneStarts(scenes);
+  return items.map((item, index) => {
+    const indexes = item.scene_numbers.map((number) => Math.min(scenes.length - 1, Math.max(0, number - 1))).sort((a, b) => a - b);
+    const first = indexes[0] ?? 0;
+    const last = indexes[indexes.length - 1] ?? first;
+    const windowStart = starts[first] || 0;
+    const windowEnd = (starts[last] || 0) + Math.max(0.25, Number(scenes[last]?.duration_s) || 0);
+    const start = Math.min(windowEnd - 0.25, windowStart + Math.max(0, Number(item.start_s) || 0));
+    const end = Math.min(windowEnd, windowStart + Math.max(Number(item.end_s) || 0, Number(item.start_s) + 0.25));
+    return {
+      id: `text_${index + 1}_${newSceneKey()}`,
+      text: item.text,
+      scene_keys: indexes.map((sceneIndex) => scenes[sceneIndex]?.scene_key).filter(Boolean) as string[],
+      start_s: start,
+      end_s: Math.max(start + 0.25, end),
+      position: item.position,
+      style: item.style,
+      source: 'brief' as const,
+    };
+  }).filter((item) => item.text && item.end_s > item.start_s);
+}
+
+function manualTextTimeline(parsed: ParsedScene[], scenes: PlanScene[]): OnScreenTextItem[] {
+  const starts = sceneStarts(scenes);
+  const items: OnScreenTextItem[] = [];
+  parsed.forEach((source, index) => {
+    const scene = scenes[index];
+    if (!scene) return;
+    (source.onScreenText || []).forEach((text, textIndex) => items.push({
+      id: `text_${index + 1}_${textIndex + 1}_${newSceneKey()}`,
+      text,
+      scene_keys: [scene.scene_key],
+      start_s: starts[index] || 0,
+      end_s: (starts[index] || 0) + Math.max(0.25, Number(scene.duration_s) || 0),
+      position: 'bottom',
+      style: 'clean',
+      source: 'manual',
+    }));
+  });
+  return items;
+}
+
+function sceneTextItems(film: Film, scene: FilmScene): OnScreenTextItem[] {
+  return (film.plan?.on_screen_text || []).filter((item) => (item.scene_keys || []).includes(scene.scene_key));
+}
+
 // ---------------------------------------------------------------------------
 // Stage 1 — script received → analyzed → segmented → first scene prepared
 // ---------------------------------------------------------------------------
@@ -343,7 +475,22 @@ export async function createAndSegmentFilm(params: {
   videoModel?: string | null;
   /** Style Lock (default ON): freeze the look after scene 1. */
   styleLock?: boolean | null;
+  targetDuration?: number | null;
+  audioEnabled?: boolean;
+  narrationEnabled?: boolean;
+  charactersSpeak?: boolean;
+  entryType?: EntryType;
+  controlMode?: ControlMode;
+  executionMode?: ExecutionMode;
+  videoStyle?: VideoStyleId;
+  customVisualDirection?: string;
+  audioPolicy?: AudioPolicy;
+  maxAuthorizedCredits?: number | null;
+  storyboardRequested?: boolean;
 }, hooks: RunHooks = {}): Promise<{ film: Film; scenes: FilmScene[] }> {
+  const requestedDuration = Math.round(Number(params.targetDuration) || 0);
+  if (requestedDuration > 1800) throw new Error('The maximum assembled project duration is 30:00.');
+  if (requestedDuration && requestedDuration < 2) throw new Error('Choose at least a 2-second project duration.');
   // Anything the script summoned with @name is resolved BEFORE the row is
   // written, so every scene of this film carries the same references.
   const atReferences = await resolveFilmAtReferences(params.script);
@@ -364,16 +511,40 @@ export async function createAndSegmentFilm(params: {
   try {
     if (atReferences.length) say(hooks, `${atReferences.length} stored reference${atReferences.length === 1 ? '' : 's'} resolved from your script (${atReferences.map((r) => `@${r.name}`).join(', ')}) — they travel with every scene.`);
     await setState(film, hooks, 'ANALYZING_SCRIPT', 'The director is reading the entire script and mapping the story…');
+    const castVoices = await listVoices().catch(() => []);
     const plan = await segmentScript({
       script: params.script,
       aspect: params.aspect,
       note: params.note,
       referenceImageUrl: params.referenceImageUrl,
+      audioEnabled: params.audioEnabled !== false,
+      narrationEnabled: params.narrationEnabled === true,
+      charactersSpeak: params.charactersSpeak === true,
+      voices: castVoices,
+      targetDuration: requestedDuration || null,
+      videoModel: params.videoModel,
+      videoStyle: params.customVisualDirection || params.videoStyle,
+      audioPolicy: params.audioPolicy,
+      maxAuthorizedCredits: params.maxAuthorizedCredits,
     });
-    await setState(film, hooks, 'SEGMENTING_SCRIPT', `Story understood — breaking it into ${plan.scenes.length} sequential clips…`);
+    await setState(film, hooks, 'SEGMENTING_SCRIPT', `Written by ${plan.writer_model}. Story understood — checking and packing ${plan.scenes.length} sequential clips…`);
     plan.notes.forEach((note) => say(hooks, `Planning guardrail: ${note}`));
 
-    const planScenes = plan.scenes.map((s, i) => ({
+    // One model-selection state drives planner, UI and server. The creative
+    // planner may recommend shot intents, but it cannot silently override the
+    // film's approved primary model scene by scene.
+    const primaryModel = resolveVideoModel(params.videoModel);
+    const primaryReason = primaryModel.id === 'seedance-2.5'
+      ? 'Seedance 2.5 is the approved primary model: 4–30 whole seconds per block, optional audio, and first/last frames or up to three asset references.'
+      : primaryModel.id === 'kling-3.0-omni'
+        ? 'Kling Omni 3.0 is the approved primary model: 5s or 10s blocks with up to four recurring-subject references.'
+        : `${primaryModel.label} is the approved primary model for this film.`;
+    const packedScenes = packPlannedBlocks(plan.scenes, primaryModel, requestedDuration || null);
+    const packedDuration = packedScenes.reduce((sum, scene) => sum + Number(scene.duration_s || 0), 0);
+    if (requestedDuration && Math.abs(packedDuration - requestedDuration) > 1) {
+      throw new Error(`The accepted script supports ${packedDuration}s of non-duplicated model blocks, not the requested ${requestedDuration}s. Choose one: use ${packedDuration}s, allow the writer to expand the script, or add more source material. Nothing was submitted or billed.`);
+    }
+    const planScenes = packedScenes.map((s, i) => ({
       scene_key: newSceneKey(),
       idx: i,
       type: 'video_clip' as const,
@@ -386,16 +557,28 @@ export async function createAndSegmentFilm(params: {
         characters: s.characters,
         shot_intent: s.shot_intent,
         workflow_kind: s.workflow_kind,
-        engine_id: s.engine_id,
-        engine_reason: s.engine_reason,
-        duration_notes: s.duration_notes,
+        engine_id: primaryModel.id,
+        engine_reason: primaryReason,
+        // The approved film model owns duration. Shot-intent routing notes were
+        // calculated before that choice and can incorrectly claim an 8s model
+        // on a legal 30s Seedance block, so they never travel into the plan.
+        duration_notes: [],
         duration_s: s.duration_s,
+        timed_beats: Array.isArray(s.timed_beats) ? s.timed_beats : [],
+        model_assignment: { model_id: primaryModel.apiModel, operation: 'generate', locked: params.controlMode === 'manual', reason: primaryReason },
+        prompt_version: 1,
+        background: {
+          idempotency_key: `stv:film:${film.id}:scene:${i}`,
+          status: 'queued', retries: 0, max_retries: 3,
+          credits_estimated: s.duration_s,
+        },
       } as VideoClipSpec,
       dialogue: s.dialogue || null,
       summary: s.summary,
       visual_goal: s.visual_goal,
       characters: s.characters,
     }));
+    const onScreenText = plannedTextTimeline(plan.on_screen_text || [], planScenes);
     for (const s of planScenes) {
       await db.insertScene({
         film_id: film.id,
@@ -410,7 +593,9 @@ export async function createAndSegmentFilm(params: {
         dialogue: s.dialogue || null,
       });
     }
-    const characterRefs: FilmCharacter[] = plan.characters.map((c) => ({ ...c, url: null }));
+    const characterRefs = await generateInitialCharacterSheets(
+      film, plan.characters, plan.visual_style, params.characterRefUrl || null, atReferences, hooks,
+    );
     await patchFilm(film, hooks, {
       title: plan.title,
       status: 'plan_ready',
@@ -422,16 +607,57 @@ export async function createAndSegmentFilm(params: {
         visual_style: plan.visual_style,
         characters: plan.characters,
         scenes: planScenes,
-        assumptions: plan.notes,
+        on_screen_text: onScreenText,
+        assumptions: [...plan.notes, ...(params.note ? [params.note] : [])],
         input_mode: 'ai',
+        requested_duration_s: requestedDuration || null,
+        contract_version: 2,
+        entry_type: params.entryType || 'idea',
+        control_mode: params.controlMode || 'agentic',
+        execution_mode: params.executionMode || 'review',
+        video_style: params.videoStyle || 'cinematic-live-action',
+        custom_visual_direction: params.customVisualDirection || '',
+        target_duration_sec: requestedDuration || planScenes.reduce((sum, scene) => sum + scene.duration_s, 0),
+        audio_policy: params.audioPolicy || 'native-dialogue-effects',
+        max_authorized_credits: Number(params.maxAuthorizedCredits) || planScenes.reduce((sum, scene) => sum + scene.duration_s, 0),
+        master_script_version: 1,
+        scene_plan_version: 1,
+        model_registry_snapshot: { version: S2V_CAPABILITY_REGISTRY_VERSION, captured_at: new Date().toISOString(), capabilities: S2V_VIDEO_CAPABILITIES },
+        project_asset_ids: [],
+        storyboard_only_asset_ids: [],
+        storyboard_requested: params.storyboardRequested === true,
+        writer_model: plan.writer_model,
+        clip_ids: planScenes.map((scene) => scene.scene_key),
+        sections: buildLongFormSections(requestedDuration || planScenes.reduce((sum, scene) => sum + scene.duration_s, 0), planScenes.map((scene) => scene.duration_s)),
+        continuity_manifest: {
+          version: 1,
+          cast: Object.fromEntries(plan.characters.map((character) => [character.id, { name: character.name, appearance: character.appearance, wardrobe: character.wardrobe, voice: character.voice }])),
+          style: { direction: params.customVisualDirection || plan.visual_style, lock: params.styleLock !== false },
+          locations: {}, products: {}, handoffs: [],
+        },
+        orchestration: {
+          state: params.executionMode === 'automatic' ? 'auto_authorized' : 'awaiting_approval',
+          intent: 'plan', checkpoint: 'storyboard_ready', manual_locks: {}, paused: false, cancel_requested: false,
+          completed_count: 0, total_count: planScenes.length,
+          credits_estimated: planScenes.reduce((sum, scene) => sum + scene.duration_s, 0), credits_reserved: 0, credits_actual: 0, billed_so_far: 0,
+          updated_at: new Date().toISOString(),
+        },
+        editor_composition_version: 0,
+        export_records: [],
+        audio_enabled: params.audioEnabled !== false,
+        narration_enabled: params.audioEnabled !== false && params.narrationEnabled === true,
+        characters_speak: params.audioEnabled !== false && params.charactersSpeak === true,
+        cast_reviewed: false,
       },
       character_refs: characterRefs,
-      stage_note: `${plan.scenes.length} clips planned. Preparing scene 1…`,
+      stage_note: characterRefs.length
+        ? characterRefs.some((character) => !character.url)
+          ? `${planScenes.length} legal ${primaryModel.label} block${planScenes.length === 1 ? '' : 's'} planned. ${characterRefs.filter((character) => !character.url).length} cast sheet image${characterRefs.filter((character) => !character.url).length === 1 ? '' : 's'} still need attention before Start.`
+          : `${planScenes.length} legal ${primaryModel.label} block${planScenes.length === 1 ? '' : 's'} planned. Review and approve ${characterRefs.length} cast sheet${characterRefs.length === 1 ? '' : 's'} before Start.`
+        : `${planScenes.length} legal ${primaryModel.label} block${planScenes.length === 1 ? '' : 's'} planned. No clear characters were found — add one if the film needs a recurring identity, or confirm the character-free plan.`,
     });
 
     const scenes = await db.listScenes(film.id);
-    // Prepare ONLY the first scene's prompt — one clip at a time, always.
-    await prepareScene(film, scenes, scenes[0], hooks);
     const fresh = await db.getFilm(film.id);
     return { film: fresh || film, scenes };
   } catch (e: any) {
@@ -444,24 +670,48 @@ export async function createAndSegmentFilm(params: {
 // Character reference — generated ONCE per character, reused forever
 // ---------------------------------------------------------------------------
 
-async function ensureCharacterRef(film: Film, characterId: string | null, hooks: RunHooks): Promise<FilmCharacter | null> {
-  const refs = Array.isArray(film.character_refs) ? film.character_refs : [];
-  const character = characterId
-    ? refs.find((c) => c.id === characterId) || refs[0] || null
-    : refs[0] || null;
-  if (!character) return null;
-  if (character.url) return character;
-  try {
-    say(hooks, `Locking ${character.name}'s reference image…`);
-    const url = await generateBackdropImage(characterPortraitBrief(character, String(film.plan?.visual_style || '')), '1:1');
-    const updated = refs.map((c) => (c.id === character.id ? { ...c, url } : c));
-    await patchFilm(film, hooks, { character_refs: updated });
-    await db.addAsset({ film_id: film.id, kind: 'character', name: `${character.name} reference`, description: character.appearance.slice(0, 200), url });
-    return { ...character, url };
-  } catch (e: any) {
-    say(hooks, `The character reference image could not be generated (${String(e?.message || e).slice(0, 90)}) — the prompt's locked appearance description carries the continuity instead.`);
-    return character; // url stays null; the text appearance still locks identity
+function castSlug(value: string): string {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Generate every proposed sheet before plan approval. Existing @name library
+ * references and a creator-uploaded cast image are reused first; only the
+ * remaining sheets spend image-generation credits. Nothing is auto-approved. */
+async function generateInitialCharacterSheets(
+  film: Film,
+  profiles: FilmCharacterProfile[],
+  visualStyle: string,
+  uploadedUrl: string | null,
+  atReferences: AtReference[],
+  hooks: RunHooks,
+): Promise<FilmCharacter[]> {
+  const output: FilmCharacter[] = [];
+  for (let index = 0; index < profiles.length; index += 1) {
+    const profile = profiles[index];
+    const matched = atReferences.find((ref) => castSlug(ref.name) === castSlug(profile.name) || castSlug(ref.name) === castSlug(profile.id));
+    const uploaded = index === 0 && isHttpUrl(uploadedUrl) ? String(uploadedUrl) : '';
+    let url = uploaded || String(matched?.url || '');
+    let source: FilmCharacter['source'] = uploaded ? 'uploaded' : matched ? 'library' : 'generated';
+    let imageError = '';
+    if (!url) {
+      try {
+        say(hooks, `Generating ${profile.name}'s character sheet…`);
+        url = await generateBackdropImage(characterPortraitBrief(profile, visualStyle), '1:1', 'draft');
+      } catch (error: any) {
+        source = 'generated';
+        imageError = String(error?.message || error).slice(0, 240);
+        say(hooks, `${profile.name}'s fast draft could not be generated (${imageError.slice(0, 100)}). Retry the sheet, upload one, reuse one, or remove this cast member.`);
+      }
+    }
+    const sheet: FilmCharacter = { ...profile, url: url || null, approved: false, source, ...(imageError ? { image_error: imageError } : {}), ...(url && source === 'generated' ? { image_model: 'gemini-3.1-flash-image' } : {}) };
+    output.push(sheet);
+    if (url) await db.addAsset({ film_id: film.id, kind: 'character', name: `${profile.name} character sheet`, description: profile.appearance.slice(0, 200), url });
   }
+  return output;
+}
+
+function isHttpUrl(value: unknown): boolean {
+  return /^https:\/\//i.test(String(value || '').trim());
 }
 
 // ---------------------------------------------------------------------------
@@ -499,50 +749,39 @@ export async function prepareScene(
 
     if (prev && scene.idx > 0) await setState(film, hooks, 'PREPARE_NEXT_SCENE', `Scene ${scene.idx + 1}: ${prepared.continuation ? `continuing from scene ${prev.idx + 1}'s final frame` : 'independent scene'} — writing the prompt…`);
 
-    // Resolve reference assets by the decided priority. A non-continuation
-    // scene NEVER receives the previous frame — visual contamination is a bug.
-    const assets: ReferenceAsset[] = [];
-    let referenceType = prepared.reference_type;
-    let continuation = prepared.continuation;
-    if (continuation && prev?.keyframe_url) {
-      assets.push({ role: 'first_frame', url: prev.keyframe_url });
-      if (prepared.needs_character) {
-        const character = await ensureCharacterRef(film, prepared.needs_character, hooks);
-        if (character?.url) assets.push({ role: 'reference', url: character.url });
-      }
-    } else if (referenceType === 'character_reference') {
-      const character = await ensureCharacterRef(film, prepared.needs_character, hooks);
-      if (character?.url) assets.push({ role: 'reference', url: character.url });
-      else referenceType = 'none';
-    } else if (referenceType === 'scene_reference' && film.product_screenshot_url) {
-      assets.push({ role: 'reference', url: film.product_screenshot_url });
-    } else if (referenceType === 'scene_reference') {
-      referenceType = 'none';
-    }
-    // The previous scene's keyframe can legitimately be missing: extraction
-    // failed, timed out, or the scene was recovered without one. A scene must
-    // never claim previous_final_frame with no seed attached — fall back to the
-    // locked character reference, and to no reference at all when there is none.
-    if (referenceType === 'previous_final_frame' && !assets.some((a) => a.role === 'first_frame')) {
-      continuation = false;
-      const character = await ensureCharacterRef(film, prepared.needs_character, hooks);
-      if (character?.url) {
-        assets.push({ role: 'reference', url: character.url });
-        referenceType = 'character_reference';
-      } else {
-        referenceType = 'none';
-      }
-    }
-
-    // DUAL REFERENCE (n+1): the uploaded character reference rides along with
-    // the previous scene's final frame, or stands in as the reference frame
-    // when this clip has no frame to continue from.
+    // Mandatory n→n+1 chain. The creative director still writes the scene,
+    // but it cannot demote continuity or substitute a character sheet into the
+    // first-frame slot. Only the explicit user override recorded on the prior
+    // card permits a later scene to proceed without that frame.
     const existingSpec = (scene.spec || {}) as VideoClipSpec;
-    const sceneModelId = existingSpec.engine_id || film.video_model;
-    const dual = applyDualReference({
-      film, assets, prompt: prepared.prompt, referenceType,
-      characterId: prepared.needs_character, modelId: sceneModelId,
-    });
+    const assets: ReferenceAsset[] = [];
+    let continuation = false;
+    let referenceType: ReferenceType = 'none';
+    const immediate = scene.idx > 0 ? immediatePreviousScene(scenes, scene.idx) : null;
+    if (scene.idx > 0) {
+      const extraction = frameExtractionOf(immediate);
+      if (!immediate || (immediate.status !== 'completed' && !(immediate.status === 'skipped' && extraction?.status === 'continued_without'))) {
+        throw new Error(`Scene ${scene.idx + 1} is waiting for Scene ${scene.idx}'s validated last frame.`);
+      }
+      if (isHttpUrl(immediate.keyframe_url)) {
+        assets.push({
+          role: 'first_frame', url: String(immediate.keyframe_url), type: 'continuity-frame', label: `Scene ${immediate.idx + 1} last frame`,
+          sourceSceneId: immediate.id, sourceSceneIndex: immediate.idx, method: extraction?.method, atSecond: extraction?.at_second,
+          priority: 600, critical: true,
+        });
+        continuation = true;
+        referenceType = 'previous_final_frame';
+      } else if (extraction?.status !== 'continued_without') {
+        throw new Error(`Scene ${scene.idx + 1} is waiting for Scene ${scene.idx}'s last frame. Retry frame extraction or explicitly continue without continuity on that scene card.`);
+      }
+    }
+    const candidateRefs = [...onScreenCharacterReferences(film, scene), ...supportingSceneReferences(film)];
+    for (const ref of candidateRefs) if (!assets.some((asset) => asset.url === ref.url)) assets.push(ref);
+    if (scene.idx === 0 && assets.length) referenceType = assets[0].type === 'character' ? 'character_reference' : 'scene_reference';
+    const characterNote = sceneCharacterPromptNote(film, scene);
+    const prompt = characterNote
+      ? appendPromptNote(prepared.prompt, characterNote, resolveVideoModel(existingSpec.engine_id || film.video_model).promptMaxChars)
+      : prepared.prompt;
 
     const spec: VideoClipSpec = {
       ...existingSpec,
@@ -552,10 +791,10 @@ export async function prepareScene(
     await patchScene(scene, hooks, {
       status: 'ready',
       error: null,
-      prompt: finishScenePrompt(film, scene, dual.prompt),
+      prompt: finishScenePrompt(film, scene, prompt),
       continuation,
-      reference_type: dual.referenceType,
-      reference_assets: withAtReferences(film, dual.assets, sceneModelId),
+      reference_type: referenceType,
+      reference_assets: assets,
       spec,
       clip_fingerprint: sceneFingerprint({ type: scene.type, spec }, (film.aspect_ratio || '16:9') as Aspect),
     });
@@ -596,28 +835,39 @@ async function prepareManualScene(
     const manual = spec.manual;
     if (!manual) throw new Error(`Scene ${scene.idx + 1} carries no parsed script data — re-create this film from the pasted script.`);
 
-    const continuation = !opts.forceIndependent && !!prev?.keyframe_url;
+    const immediate = scene.idx > 0 ? immediatePreviousScene(scenes, scene.idx) : null;
+    const extraction = frameExtractionOf(immediate);
+    const continuation = scene.idx > 0 && !!immediate?.keyframe_url;
     const assets: ReferenceAsset[] = [];
-    if (continuation && prev?.keyframe_url) assets.push({ role: 'first_frame', url: prev.keyframe_url });
+    if (scene.idx > 0 && (!immediate || (immediate.status !== 'completed' && !(immediate.status === 'skipped' && extraction?.status === 'continued_without')))) throw new Error(`Scene ${scene.idx + 1} is waiting for Scene ${scene.idx}'s validated last frame.`);
+    if (continuation && immediate?.keyframe_url) assets.push({ role: 'first_frame', url: immediate.keyframe_url, type: 'continuity-frame', label: `Scene ${immediate.idx + 1} last frame`, sourceSceneId: immediate.id, sourceSceneIndex: immediate.idx, method: extraction?.method, atSecond: extraction?.at_second, priority: 600, critical: true });
+    else if (scene.idx > 0 && extraction?.status !== 'continued_without') throw new Error(`Scene ${scene.idx + 1} is waiting for Scene ${scene.idx}'s last frame. Retry frame extraction or explicitly continue without continuity.`);
+    for (const ref of [...onScreenCharacterReferences(film, scene), ...supportingSceneReferences(film)]) if (!assets.some((asset) => asset.url === ref.url)) assets.push(ref);
 
     const model = resolveVideoModel(film.video_model);
-    const dual = applyDualReference({
-      film,
-      assets,
-      prompt: buildManualScenePrompt({
-        scene: manual,
-        globalStyle: String(film.plan?.global_style || ''),
-        continuity: continuation,
-        revisionNote: opts.revisionNote,
-        maxChars: model.promptMaxChars,
+    const audioEnabled = film.plan?.audio_enabled !== false;
+    const narrationEnabled = audioEnabled && film.plan?.narration_enabled === true;
+    const charactersSpeak = audioEnabled && film.plan?.characters_speak === true;
+    const promptScene: ParsedScene = {
+      ...manual,
+      dialogue: manual.dialogue.filter((entry) => {
+        const narrator = /^(narrator|voice[ -]?over|vo)$/i.test(entry.speaker.trim());
+        return narrator ? narrationEnabled : charactersSpeak;
       }),
-      referenceType: continuation ? 'previous_final_frame' : 'none',
-      modelId: model.apiModel,
+    };
+    const basePrompt = buildManualScenePrompt({
+      scene: promptScene,
+      globalStyle: String(film.plan?.global_style || ''),
+      continuity: continuation,
+      revisionNote: opts.revisionNote,
+      maxChars: model.promptMaxChars,
     });
+    const characterNote = sceneCharacterPromptNote(film, scene);
+    const finalPrompt = characterNote ? appendPromptNote(basePrompt, characterNote, model.promptMaxChars) : basePrompt;
 
     const nextSpec: VideoClipSpec = {
       ...spec,
-      negative: manualSceneNegative(manual),
+      negative: manualSceneNegative(promptScene),
       reasoning: continuation
         ? `Manual Script Mode — continuing from scene ${(prev?.idx ?? 0) + 1}'s final frame.`
         : 'Manual Script Mode — staged exactly as written in your script.',
@@ -625,10 +875,10 @@ async function prepareManualScene(
     await patchScene(scene, hooks, {
       status: 'ready',
       error: null,
-      prompt: finishScenePrompt(film, scene, dual.prompt),
+      prompt: finishScenePrompt(film, scene, finalPrompt),
       continuation,
-      reference_type: dual.referenceType,
-      reference_assets: withAtReferences(film, dual.assets, model.apiModel),
+      reference_type: continuation ? 'previous_final_frame' : assets.length ? (assets[0].type === 'character' ? 'character_reference' : 'scene_reference') : 'none',
+      reference_assets: assets,
       spec: nextSpec,
       clip_fingerprint: sceneFingerprint({ type: scene.type, spec: nextSpec }, (film.aspect_ratio || '16:9') as Aspect),
     });
@@ -644,12 +894,17 @@ async function prepareManualScene(
 
 /** A manual scene's on-camera line, as the audio stage reads it: a scene that
  * speaks keeps the clip's own generated voice and is never narrated over. */
-function manualSceneDialogue(scene: ParsedScene): SceneDialogue | null {
-  const spoken = scene.dialogue.filter((entry) => entry.line.trim());
+function manualSceneDialogue(scene: ParsedScene, options: { audioEnabled: boolean; narrationEnabled: boolean; charactersSpeak: boolean }): SceneDialogue | null {
+  if (!options.audioEnabled) return null;
+  const spoken = scene.dialogue.filter((entry) => entry.line.trim()).filter((entry) => {
+    const narrator = /^(narrator|voice[ -]?over|vo)$/i.test(entry.speaker.trim());
+    return narrator ? options.narrationEnabled : options.charactersSpeak;
+  });
   if (!spoken.length) return null;
   return {
+    kind: /^(narrator|voice[ -]?over|vo)$/i.test(spoken[0].speaker.trim()) ? 'narrator' : 'character',
     line: spoken.map((entry) => entry.line.trim()).join(' '),
-    speaker: spoken[0].speaker || 'the speaker',
+    speaker: spoken[0].speaker || 'the speaker', 
     delivery: 'natural, exactly as written in the script',
     language: 'English',
   };
@@ -673,7 +928,21 @@ export async function createManualScriptFilm(params: {
   videoModel?: string | null;
   /** Style Lock (default ON): freeze the look after scene 1. */
   styleLock?: boolean | null;
+  targetDuration?: number | null;
+  audioEnabled?: boolean;
+  narrationEnabled?: boolean;
+  charactersSpeak?: boolean;
+  entryType?: EntryType;
+  controlMode?: ControlMode;
+  executionMode?: ExecutionMode;
+  videoStyle?: VideoStyleId;
+  customVisualDirection?: string;
+  audioPolicy?: AudioPolicy;
+  maxAuthorizedCredits?: number | null;
+  storyboardRequested?: boolean;
 }, hooks: RunHooks = {}): Promise<{ film: Film; scenes: FilmScene[] }> {
+  const requestedDuration = Math.round(Number(params.targetDuration) || 0);
+  if (requestedDuration > 1800) throw new Error('The maximum assembled project duration is 30:00.');
   const parsed = parseManualScript(params.script);
   if (!parsed.scenes.length) {
     throw new Error('No scenes were found in that script. Every scene must open with a line like "Scene 1 — Title | 8 sec".');
@@ -682,6 +951,9 @@ export async function createManualScriptFilm(params: {
   // overall style block and reaches every clip that way.
   const globalStyle = [parsed.globalStyle, String(params.note || '').trim()].filter(Boolean).join(' ');
   const model = resolveVideoModel(params.videoModel);
+  say(hooks, 'Reading the full script to propose the cast without changing your wording…');
+  const castVoices = await listVoices().catch(() => []);
+  const proposedCast = await analyzeScriptCast(params.script, castVoices);
   // The @name mentions are read from the pasted script exactly as they are in
   // AI Mode — the parser leaves them in the visual text.
   const atReferences = await resolveFilmAtReferences(params.script);
@@ -710,12 +982,20 @@ export async function createManualScriptFilm(params: {
       // onto a fixed 4/6/8/10 ladder.
       const duration = resolveDuration(parsedScene.durationSec, model);
       const segment = manualSceneSegment(parsedScene);
-      const dialogue = manualSceneDialogue(parsedScene);
+      const dialogue = manualSceneDialogue(parsedScene, {
+        audioEnabled: params.audioEnabled !== false,
+        narrationEnabled: params.narrationEnabled === true,
+        charactersSpeak: params.charactersSpeak === true,
+      });
       const sceneKey = newSceneKey();
       const spec: VideoClipSpec = {
         summary: parsedScene.title,
         visual_goal: parsedScene.visual,
         duration_s: duration,
+        timed_beats: [{ start_s: 0, end_s: duration, action: parsedScene.visual, camera: parsedScene.camera, dialogue: dialogue?.line, audio: dialogue ? (dialogue.kind === 'narrator' ? 'narration' : 'native dialogue') : 'native ambience/effects' }],
+        model_assignment: { model_id: model.apiModel, operation: 'generate', locked: true, reason: 'Creator locked this model in Manual mode.' },
+        prompt_version: 1,
+        background: { idempotency_key: `stv:film:${film.id}:scene:${idx}`, status: 'queued', retries: 0, max_retries: 3, credits_estimated: duration },
         manual: parsedScene,
       };
       planScenes.push({
@@ -743,6 +1023,10 @@ export async function createManualScriptFilm(params: {
         dialogue,
       });
     }
+    const onScreenText = manualTextTimeline(parsed.scenes, planScenes);
+    const characterRefs = await generateInitialCharacterSheets(
+      film, proposedCast, globalStyle, params.characterRefUrl || null, atReferences, hooks,
+    );
     await patchFilm(film, hooks, {
       status: 'plan_ready',
       plan: {
@@ -751,18 +1035,38 @@ export async function createManualScriptFilm(params: {
         visual_style: globalStyle,
         story_summary: parsed.scenes.map((s) => `${s.index}. ${s.title}`).join(' · ').slice(0, 1200),
         world: '',
-        characters: [],
+        characters: proposedCast,
         scenes: planScenes,
+        on_screen_text: onScreenText,
+        assumptions: params.note ? [String(params.note)] : [],
         input_mode: 'manual',
         global_style: globalStyle,
+        requested_duration_s: requestedDuration || parsed.scenes.reduce((n, scene) => n + scene.durationSec, 0),
+        contract_version: 2,
+        entry_type: params.entryType || 'script', control_mode: 'manual', execution_mode: params.executionMode || 'review',
+        video_style: params.videoStyle || 'custom', custom_visual_direction: params.customVisualDirection || globalStyle,
+        target_duration_sec: requestedDuration || planScenes.reduce((sum, scene) => sum + scene.duration_s, 0),
+        audio_policy: params.audioPolicy || 'native-dialogue-effects',
+        max_authorized_credits: Number(params.maxAuthorizedCredits) || planScenes.reduce((sum, scene) => sum + scene.duration_s, 0),
+        master_script_version: 1, scene_plan_version: 1,
+        model_registry_snapshot: { version: S2V_CAPABILITY_REGISTRY_VERSION, captured_at: new Date().toISOString(), capabilities: S2V_VIDEO_CAPABILITIES },
+        project_asset_ids: [], storyboard_only_asset_ids: [], storyboard_requested: params.storyboardRequested === true, writer_model: 'GPT Sol', clip_ids: planScenes.map((scene) => scene.scene_key),
+        sections: buildLongFormSections(requestedDuration || planScenes.reduce((sum, scene) => sum + scene.duration_s, 0), planScenes.map((scene) => scene.duration_s)),
+        continuity_manifest: { version: 1, cast: Object.fromEntries(proposedCast.map((character) => [character.id, { name: character.name, appearance: character.appearance, wardrobe: character.wardrobe, voice: character.voice }])), style: { direction: params.customVisualDirection || globalStyle, lock: params.styleLock !== false }, locations: {}, products: {}, handoffs: [] },
+        orchestration: { state: params.executionMode === 'automatic' ? 'auto_authorized' : 'awaiting_approval', intent: 'plan', checkpoint: 'storyboard_ready', manual_locks: { script: true, model: true, prompts: true }, paused: false, cancel_requested: false, completed_count: 0, total_count: planScenes.length, credits_estimated: planScenes.reduce((sum, scene) => sum + scene.duration_s, 0), credits_reserved: 0, credits_actual: 0, billed_so_far: 0, updated_at: new Date().toISOString() },
+        editor_composition_version: 0, export_records: [],
+        audio_enabled: params.audioEnabled !== false,
+        narration_enabled: params.audioEnabled !== false && params.narrationEnabled === true,
+        characters_speak: params.audioEnabled !== false && params.charactersSpeak === true,
+        cast_reviewed: false,
       },
-      character_refs: [],
-      stage_note: `${parsed.scenes.length} scenes read from your script. Preparing scene 1…`,
+      character_refs: characterRefs,
+      stage_note: characterRefs.length
+        ? `${parsed.scenes.length} scenes read from your script. Review and approve ${characterRefs.length} proposed cast sheet${characterRefs.length === 1 ? '' : 's'} before Start.`
+        : `${parsed.scenes.length} scenes read from your script. No clear characters were found — add one if needed, or confirm this character-free plan.`,
     });
 
     const scenes = await db.listScenes(film.id);
-    // One prompt at a time, exactly as in AI Mode — only the author differs.
-    await prepareScene(film, scenes, scenes[0], hooks);
     const fresh = await db.getFilm(film.id);
     return { film: fresh || film, scenes };
   } catch (e: any) {
@@ -800,22 +1104,54 @@ export async function generateScene(
 
   await patchFilm(film, hooks, { status: 'producing', error: null });
   await setState(film, hooks, 'GENERATING_VIDEO', `Scene ${scene.idx + 1}: generating the clip…`);
-  await patchScene(scene, hooks, { status: 'generating', error: null });
-  const creditKey = `stv:film:${film.id}:scene:${scene.id}`;
+  const beforeSpec = (scene.spec || {}) as VideoClipSpec;
+  const beforeBackground = { ...(beforeSpec.background || {}), status: 'submitted' as const, provider_status: 'submitting', retries: Number(beforeSpec.background?.retries || 0) };
+  await patchScene(scene, hooks, { status: 'generating', error: null, spec: { ...beforeSpec, background: beforeBackground } });
+  const creditKey = String(beforeBackground.idempotency_key || `stv:film:${film.id}:scene:${scene.id}`);
   try {
     const spec = (scene.spec || {}) as VideoClipSpec;
     const aspect = (film.aspect_ratio || '16:9') as Aspect;
     const durationS = Number(scene.duration_s) || 6;
-    const hasSeedFrame = (scene.reference_assets || []).some((asset) => asset?.role === 'first_frame');
     // AI plans carry a per-shot routed engine. Manual and legacy scenes fall
     // back to the film-level choice so existing projects keep working.
     const chosenModel = resolveVideoModel(spec.engine_id || film.video_model);
-    const durationProblems = validateSceneDurations(chosenModel.apiModel, [durationS], {
-      expectedTotalS: durationS,
-      maxScenes: DEFAULT_MAX_SCENES,
-    });
-    if (durationProblems.length) {
-      throw new Error(`Scene ${scene.idx + 1} cannot be submitted: ${durationProblems.join(' ')}`);
+    let requestAssets = scene.idx === 0
+      ? (scene.reference_assets || []).filter((asset) => asset && !asset.storyboardOnly && asset.type !== 'storyboard')
+      : (scene.reference_assets || []).filter((asset) => asset && asset.type !== 'continuity-frame' && asset.role !== 'first_frame');
+    if (scene.idx > 0) {
+      const previous = immediatePreviousScene(scenes, scene.idx);
+      const extraction = frameExtractionOf(previous);
+      if (!previous || (previous.status !== 'completed' && !(previous.status === 'skipped' && extraction?.status === 'continued_without'))) throw new Error(`Scene ${scene.idx + 1} is waiting for Scene ${scene.idx} to finish and validate its last frame.`);
+      if (isHttpUrl(previous.keyframe_url)) {
+        const check = await validateFrameUrl(String(previous.keyframe_url), aspect);
+        if (!check.ok) {
+          const previousSpec = (previous.spec || {}) as VideoClipSpec;
+          await patchScene(previous, hooks, {
+            status: 'needs_action', keyframe_url: null,
+            error: `The saved continuity frame is no longer valid: ${check.reason || 'validation failed'}`,
+            spec: { ...previousSpec, background: { ...(previousSpec.background || {}), frame_extraction: { status: 'failed', error: check.reason || 'The saved frame failed validation.' } } },
+          });
+          throw new Error(`Scene ${scene.idx + 1} was not submitted. Retry frame extraction on Scene ${scene.idx}, or explicitly continue without continuity.`);
+        }
+        requestAssets = [{
+          role: 'first_frame', url: String(previous.keyframe_url), type: 'continuity-frame', label: `Scene ${previous.idx + 1} last frame`,
+          sourceSceneId: previous.id, sourceSceneIndex: previous.idx, method: extraction?.method, atSecond: extraction?.at_second,
+          priority: 600, critical: true,
+        }, ...requestAssets];
+      } else if (extraction?.status !== 'continued_without') {
+        throw new Error(`Scene ${scene.idx + 1} was not submitted. It is waiting for Scene ${scene.idx}'s validated last frame.`);
+      }
+      await patchScene(scene, hooks, { reference_assets: requestAssets, continuation: requestAssets[0]?.type === 'continuity-frame', reference_type: requestAssets[0]?.type === 'continuity-frame' ? 'previous_final_frame' : 'none' });
+    }
+    const hasSeedFrame = requestAssets.some((asset) => asset?.role === 'first_frame');
+    const modelMin = Math.max(1, Number(chosenModel.minDuration) || 1);
+    const modelMax = Math.max(modelMin, Number(chosenModel.safeMaxDuration) || modelMin);
+    const discreteOk = !chosenModel.discreteDurations || chosenModel.supportedDurations.includes(Math.round(durationS));
+    if (durationS < modelMin || durationS > modelMax || !discreteOk) {
+      const legal = chosenModel.discreteDurations
+        ? chosenModel.supportedDurations.join('s or ') + 's'
+        : `${modelMin}–${modelMax}s`;
+      throw new Error(`Scene ${scene.idx + 1} cannot be submitted: ${chosenModel.label} accepts ${legal}; this block is ${Math.round(durationS)}s.`);
     }
 
     // 400 LADDER (see ./resilience): original prompt → rephrased prompt →
@@ -823,7 +1159,7 @@ export async function generateScene(
     // negative prompt and creditKey are IDENTICAL on every attempt, so the
     // shot never changes and the scene is never billed twice.
     const attempts: { prompt: string; model: VideoModelConfig }[] = [{ prompt: preparedPrompt, model: chosenModel }];
-    let job: { jobId: string; model: string } | null = null;
+    let job: Awaited<ReturnType<typeof VideoModelService.createVideo>> | null = null;
     /** The config the job actually went out on — the provider fallback may
      * have moved it — so the poll loop uses THAT model's interval and
      * timeout rather than Omni Flash's. */
@@ -838,11 +1174,26 @@ export async function generateScene(
           negative: spec.negative,
           aspect,
           durationS,
-          referenceAssets: scene.reference_assets,
+          referenceAssets: requestAssets,
           model: attempt.model,
           creditKey,
+          generateAudio: film.plan?.audio_enabled !== false,
+          onRequestBuilt: async (evidence) => {
+            const normalizedEvidence = scene.idx > 0 && evidence.frame_chain.status === 'first_scene'
+              ? { ...evidence, frame_chain: { source_scene_id: immediatePreviousScene(scenes, scene.idx)?.id, source_scene_index: scene.idx - 1, status: 'continued_without' as const } }
+              : evidence;
+            const currentSpec = (scene.spec || spec) as VideoClipSpec;
+            await patchScene(scene, hooks, {
+              spec: {
+                ...currentSpec,
+                request_evidence: normalizedEvidence,
+                excluded_optional_references: normalizedEvidence.dropped.map((asset) => ({ asset_id: asset.assetId, url: asset.url, type: asset.type, label: asset.label, reason: asset.dropReason })),
+              },
+            });
+          },
         });
         jobModel = attempt.model;
+        if (job.warning) say(hooks, `Scene ${scene.idx + 1}: ${job.warning}`);
         // The board shows the prompt that actually rendered.
         if (step > 0 && attempt.prompt !== preparedPrompt) await patchScene(scene, hooks, { prompt: attempt.prompt });
       } catch (e: any) {
@@ -853,7 +1204,7 @@ export async function generateScene(
           rephrased = await rephraseVideoPrompt(preparedPrompt, String(e?.message || e));
           if (rephrased && rephrased !== preparedPrompt) attempts.push({ prompt: rephrased, model: attempt.model });
         } else if (step === 1) {
-          const next = fallbackChain(attempt.model, { hasSeedFrame })[0];
+          const next = fallbackChain(attempt.model, { hasSeedFrame, durationS })[0];
           if (next) {
             say(hooks, `Scene ${scene.idx + 1}: switching provider to ${next.label}…`);
             attempts.push({ prompt: attempt.prompt, model: next });
@@ -866,7 +1217,17 @@ export async function generateScene(
     // 2.0, a few Runway/OpenRouter models) answer with ids long enough that
     // the data API refused the value ("value too long") and failed the whole
     // scene write — losing the id of a render already paid for.
-    await patchScene(scene, hooks, { veo_operation_id: job.jobId.slice(0, MAX_OPERATION_ID_CHARS) });
+    await patchScene(scene, hooks, {
+      veo_operation_id: job.jobId.slice(0, MAX_OPERATION_ID_CHARS),
+      spec: {
+        ...spec,
+        excluded_optional_references: job.requestEvidence.dropped.map((asset) => ({ asset_id: asset.assetId, url: asset.url, type: asset.type, label: asset.label, reason: asset.dropReason })),
+        request_evidence: scene.idx > 0 && job.requestEvidence.frame_chain.status === 'first_scene'
+          ? { ...job.requestEvidence, frame_chain: { source_scene_id: immediatePreviousScene(scenes, scene.idx)?.id, source_scene_index: scene.idx - 1, status: 'continued_without' as const } }
+          : job.requestEvidence,
+        background: { ...(spec.background || {}), status: 'processing', provider_status: 'processing', provider_job_id: job.jobId.slice(0, MAX_OPERATION_ID_CHARS) },
+      },
+    });
     const videoUrl = await VideoModelService.getVideoResult(job.jobId, {
       onProgress: (p) => say(hooks, `Scene ${scene.idx + 1}: rendering… ${Math.round(p)}%`),
       creditKey,
@@ -876,8 +1237,16 @@ export async function generateScene(
     await patchScene(scene, hooks, { asset_url: videoUrl, veo_operation_id: null });
     await finalizeScene(film, scenes, scene, hooks, videoUrl, { prepareNext: opts.prepareNext });
   } catch (e: any) {
-    await patchScene(scene, hooks, { status: 'failed', error: String(e?.message || e), veo_operation_id: null });
-    await setState(film, hooks, 'PROMPT_READY', `Scene ${scene.idx + 1} failed — completed scenes are untouched. Retry, regenerate the prompt, fall back to the character reference, or skip it.`);
+    const failedSpec = (scene.spec || {}) as VideoClipSpec;
+    const message = String(e?.message || e);
+    const continuityBlocked = /was not submitted|is waiting for Scene .*last frame|waiting for Scene .*finish and validate/i.test(message);
+    await patchScene(scene, hooks, {
+      status: continuityBlocked ? 'ready' : 'failed', error: message, veo_operation_id: null,
+      spec: { ...failedSpec, background: { ...(failedSpec.background || {}), status: continuityBlocked ? 'needs_action' : 'failed', provider_status: continuityBlocked ? 'waiting_for_frame' : 'failed', retries: Number(failedSpec.background?.retries || 0) } },
+    });
+    await setState(film, hooks, continuityBlocked ? 'FRAME_READY' : 'PROMPT_READY', continuityBlocked
+      ? `Scene ${scene.idx + 1} was not submitted. Resolve the prior scene's continuity frame first.`
+      : `Scene ${scene.idx + 1} failed — completed scenes are untouched. Retry, regenerate the prompt, or skip it.`);
     throw e;
   }
 }
@@ -886,9 +1255,8 @@ export async function generateScene(
  * → scene completed → next scene's reference decided and prompt prepared.
  *
  * Every step is bounded. By the time this runs the clip has rendered and is
- * stored, so no step here may strand the film at EXTRACTING_FINAL_FRAME: one
- * that blows its budget or throws degrades instead (no keyframe, no
- * attributes, accepted on trust) and the scene still completes. */
+ * stored. If every extractor fails, the clip is preserved in needs_action and
+ * no dependent scene is submitted until Retry frame or an explicit override. */
 async function finalizeScene(
   film: Film,
   scenes: FilmScene[],
@@ -903,22 +1271,52 @@ async function finalizeScene(
 
   let realDuration = 0;
   try { realDuration = await withTimeout(probeVideoDuration(videoUrl), PROBE_TIMEOUT_MS, 'Reading the clip duration'); } catch { realDuration = 0; }
+  const extractingSpec = (scene.spec || {}) as VideoClipSpec;
+  await patchScene(scene, hooks, {
+    spec: { ...extractingSpec, background: { ...(extractingSpec.background || {}), frame_extraction: { status: 'extracting' } } },
+  });
   let finalFrameUrl: string | null = null;
-  let frameNote = '';
+  let extractedFrame: Awaited<ReturnType<typeof extractFinalFrame>> | null = null;
+  let frameError = '';
+  const progressLabel: Record<string, string> = {
+    'loading-ffmpeg': 'loading FFmpeg.wasm',
+    'decoding-video': 'decoding the clip near its real end',
+    'validating-frame': 'validating decode, aspect ratio and pixels',
+    'uploading-frame': 'uploading the durable PNG',
+    'canvas-fallback': 'trying the browser canvas fallback',
+  };
   try {
-    const frame = await withTimeout(extractFinalFrame(videoUrl, aspect), frameBudget, 'Final frame extraction');
-    finalFrameUrl = frame.url;
+    extractedFrame = await withTimeout(extractFinalFrame(videoUrl, aspect, (stage) => {
+      const progressNote = `Scene ${scene.idx + 1}: ${progressLabel[stage] || stage}…`;
+      say(hooks, progressNote);
+      try { hooks.onFilm?.({ stage_note: progressNote }); } catch { /* live progress only */ }
+    }), frameBudget, 'Final frame extraction');
+    finalFrameUrl = extractedFrame.url;
   } catch (e: any) {
-    frameNote = `The final frame could not be extracted (${String(e?.message || e).slice(0, 140)}) — scene ${scene.idx + 1} is kept and the next scene opens without a keyframe.`;
+    frameError = String(e?.message || e).slice(0, 500);
   }
   let firstFrameUrl: string | null = null;
   try { firstFrameUrl = await withTimeout(canvasExtractFrame(videoUrl, 0.15), PROBE_TIMEOUT_MS, 'Thumbnail capture'); } catch { /* thumbnail only */ }
 
-  await setState(film, hooks, 'FRAME_READY', frameNote || `Scene ${scene.idx + 1}: final frame captured and validated.`);
+  if (!finalFrameUrl || !extractedFrame) {
+    const failedSpec = (scene.spec || {}) as VideoClipSpec;
+    await patchScene(scene, hooks, {
+      status: 'needs_action',
+      error: `Continuity frame extraction failed: ${frameError || 'no validated frame was produced'}`,
+      asset_url: videoUrl,
+      first_frame_url: firstFrameUrl,
+      keyframe_url: null,
+      validation: { pass: false, issues: frameError || 'No validated continuity frame was produced.', method: 'frame_extraction' },
+      spec: { ...failedSpec, background: { ...(failedSpec.background || {}), frame_extraction: { status: 'failed', error: frameError || 'No validated continuity frame was produced.' } } },
+    });
+    await setState(film, hooks, 'FRAME_READY', `Scene ${scene.idx + 1}'s clip is safe, but its final frame could not be validated. Retry frame extraction, or explicitly continue without continuity.`);
+    return;
+  }
 
-  // A manual film has no director, so neither the end-state read nor the
-  // review runs on it. The frame itself is still extracted — it is half of
-  // the next clip's dual reference.
+  await setState(film, hooks, 'FRAME_READY', `Scene ${scene.idx + 1}: final frame captured, validated and uploaded.`);
+
+  // Manual mode skips creative end-state rewriting, but it still runs the
+  // required post-clip visibility check before a frame can pass forward.
   const manual = isManualFilm(film);
   let attrs: any = null;
   if (finalFrameUrl && !manual) {
@@ -926,14 +1324,56 @@ async function finalizeScene(
     try { attrs = await withTimeout(extractVisualAttributes(finalFrameUrl), DIRECTOR_TIMEOUT_MS, 'Reading the end state'); } catch { attrs = null; }
   }
   const frames = [firstFrameUrl, finalFrameUrl].filter(Boolean) as string[];
-  let verdict: { pass: boolean; issues: string; method: string } = manual
-    ? { pass: true, issues: 'Manual Script Mode — your pasted script is the director, so no AI review runs on this clip.', method: 'manual' }
-    : { pass: true, issues: 'No frame could be captured for review — accepted on trust.', method: 'trust' };
-  if (frames.length && !manual) {
-    try { verdict = await withTimeout(validateScene(scene, frames), DIRECTOR_TIMEOUT_MS, 'The director’s review'); }
-    catch { verdict = { pass: true, issues: 'The review could not be completed in time — accepted on trust.', method: 'trust' }; }
+  const expectedIds = Array.isArray(((scene.spec || {}) as VideoClipSpec).characters) ? (((scene.spec || {}) as VideoClipSpec).characters || []).map(String) : [];
+  const expectedCharacters = (Array.isArray(film.character_refs) ? film.character_refs : [])
+    .filter((character) => expectedIds.includes(String(character.id)))
+    .map((character) => ({ id: String(character.id), name: character.name, appearance: character.appearance, wardrobe: character.wardrobe }));
+  let verdict: { pass: boolean; issues: string; method: string } = {
+    pass: false,
+    issues: 'No decoded frame was available for the required post-clip character visibility check.',
+    method: 'vision_unavailable',
+  };
+  if (frames.length) {
+    try { verdict = await withTimeout(validateScene(scene, frames, expectedCharacters, sceneTextItems(film, scene)), DIRECTOR_TIMEOUT_MS, 'The post-clip character visibility check'); }
+    catch { verdict = { pass: false, issues: 'The post-clip character visibility check could not complete, so this frame cannot be passed forward.', method: 'vision_unavailable' }; }
   }
 
+  const completedSpec = (scene.spec || {}) as VideoClipSpec;
+  const repairReason = !videoUrl
+    ? 'the rendered clip URL is missing'
+    : verdict.pass === false
+      ? String(verdict.issues || 'the automatic scene check failed')
+      : '';
+  if (repairReason) {
+    const repairAttempts = Number(completedSpec.background?.repair_attempts || 0);
+    const creditCost = Number(completedSpec.background?.credits_estimated || scene.duration_s || 0);
+    if (repairAttempts < 1) {
+      const repairSpec: VideoClipSpec = {
+        ...completedSpec,
+        background: { ...(completedSpec.background || {}), repair_attempts: repairAttempts + 1, status: 'retrying', provider_status: 'repairing' },
+      };
+      await patchScene(scene, hooks, { status: 'ready', validation: verdict, error: `Automatic check: ${repairReason}.`, spec: repairSpec });
+      say(hooks, `Scene ${scene.idx + 1} did not pass its automatic check (${repairReason}) — repairing it once${creditCost > 0 ? ` (up to ${creditCost} video credits)` : ''}.`);
+      try {
+        await regenerateScenePrompt(film, scenes, scene, hooks, `Automatic check failed: ${repairReason}. Correct this exact defect; preserve the approved story, cast, timing and style.`);
+        const preparedRepairSpec = (scene.spec || {}) as VideoClipSpec;
+        await patchScene(scene, hooks, {
+          spec: { ...preparedRepairSpec, background: { ...(preparedRepairSpec.background || {}), repair_attempts: repairAttempts + 1 } },
+        });
+        await generateScene(film, scenes, scene, hooks, { prepareNext: opts.prepareNext });
+      } catch (repairError: any) {
+        await patchScene(scene, hooks, { status: 'failed', error: `Automatic repair did not pass: ${String(repairError?.message || repairError).slice(0, 180)}` });
+      }
+      return;
+    }
+    await patchScene(scene, hooks, {
+      status: 'failed', validation: verdict,
+      error: `Automatic repair was already used; this scene still needs attention: ${repairReason}.`,
+      spec: { ...completedSpec, background: { ...(completedSpec.background || {}), status: 'needs_action', provider_status: 'failed' } },
+    });
+    await setState(film, hooks, 'PROMPT_READY', `Scene ${scene.idx + 1} still needs attention after one automatic repair. Retry it once from the scene card.`);
+    return;
+  }
   await patchScene(scene, hooks, {
     status: 'completed',
     error: null,
@@ -942,7 +1382,19 @@ async function finalizeScene(
     visual_attributes: attrs,
     validation: verdict,
     duration_s: realDuration || scene.duration_s,
+    spec: { ...completedSpec, background: { ...(completedSpec.background || {}), status: 'succeeded', provider_status: 'completed', actual_duration_s: realDuration || Number(scene.duration_s) || undefined, credits_actual: Number(completedSpec.background?.credits_estimated || scene.duration_s || 0), frame_extraction: { status: 'ready', method: extractedFrame.method, at_second: extractedFrame.atSecond, url: extractedFrame.url } } },
   });
+  if (film.plan?.orchestration) {
+    const flow = film.plan.orchestration;
+    const actualCredits = Number(completedSpec.background?.credits_estimated || scene.duration_s || 0);
+    const handoff = finalFrameUrl ? { from_clip_id: scene.scene_key, frame_url: finalFrameUrl, attributes: attrs || {}, created_at: new Date().toISOString() } : null;
+    const plan = {
+      ...film.plan,
+      continuity_manifest: film.plan.continuity_manifest ? { ...film.plan.continuity_manifest, handoffs: handoff ? [...film.plan.continuity_manifest.handoffs, handoff] : film.plan.continuity_manifest.handoffs } : film.plan.continuity_manifest,
+      orchestration: { ...flow, state: 'generating' as const, checkpoint: `clip_${scene.idx + 1}_completed`, completed_count: Math.min(flow.total_count, Number(flow.completed_count || 0) + 1), credits_actual: Number(flow.credits_actual || 0) + actualCredits, billed_so_far: Number(flow.billed_so_far || 0) + actualCredits, updated_at: new Date().toISOString() },
+    };
+    await patchFilm(film, hooks, { plan });
+  }
   if (finalFrameUrl) {
     await db.addAsset({ film_id: film.id, kind: 'keyframe', name: `Scene ${scene.idx + 1} final frame`, description: `Continuity reference — ${String(scene.script_segment).slice(0, 120)}`, url: finalFrameUrl });
   }
@@ -971,10 +1423,7 @@ async function finalizeScene(
   const next = orderedScenes(scenes).find((s) => s.idx > scene.idx && !DONE.has(String(s.status)) && s.status !== 'generating');
   if (next && opts.prepareNext !== false) {
     try {
-      // No keyframe means there is nothing to continue FROM, so the next scene
-      // is prepared as an independent shot rather than one that claims a seed
-      // frame it will never receive.
-      await prepareScene(film, scenes, next, hooks, finalFrameUrl ? {} : { forceIndependent: true });
+      await prepareScene(film, scenes, next, hooks);
     } catch (e: any) {
       say(hooks, `Scene ${next.idx + 1} could not be prepared (${String(e?.message || e).slice(0, 140)}) — scene ${scene.idx + 1} is safely completed; retry the preparation from the board.`);
     }
@@ -1023,18 +1472,50 @@ export async function regenerateScenePrompt(film: Film, scenes: FilmScene[], sce
   await prepareScene(film, scenes, scene, hooks, { revisionNote: note });
 }
 
-/** [Use Character Reference] — abandon the previous-frame path for this scene
- * and stage it on the locked character reference instead. */
-export async function useCharacterReferenceFallback(film: Film, scenes: FilmScene[], scene: FilmScene, hooks: RunHooks): Promise<void> {
-  await prepareScene(film, scenes, scene, hooks, { forceIndependent: true, revisionNote: scene.error ? `Previous failure: ${scene.error}` : null });
+/** Retry only the extraction/validation/upload stage from the already-paid
+ * clip. No provider generation is submitted and no video credit is spent. */
+export async function retryFinalFrame(
+  film: Film,
+  scenes: FilmScene[],
+  scene: FilmScene,
+  hooks: RunHooks,
+): Promise<void> {
+  if (!isHttpUrl(scene.asset_url)) throw new Error('This scene has no durable clip to extract a frame from. Retry the video instead.');
+  await finalizeScene(film, scenes, scene, hooks, String(scene.asset_url), { frameTimeoutMs: FRAME_EXTRACTION_TIMEOUT_MS });
+}
+
+/** The sole escape hatch for a failed chain. The choice is persisted on the
+ * source scene before the following scene can be prepared or submitted. */
+export async function continueWithoutContinuityFrame(
+  film: Film,
+  scenes: FilmScene[],
+  scene: FilmScene,
+  hooks: RunHooks,
+): Promise<void> {
+  if (!isHttpUrl(scene.asset_url)) throw new Error('There is no completed clip to keep. Retry the video instead.');
+  const spec = (scene.spec || {}) as VideoClipSpec;
+  const choiceAt = new Date().toISOString();
+  await patchScene(scene, hooks, {
+    status: 'completed', error: null, keyframe_url: null,
+    validation: { ...(scene.validation || {}), pass: true, issues: 'Creator explicitly continued without a continuity frame after extraction failed.', method: 'explicit_continue_without_continuity' },
+    spec: { ...spec, background: { ...(spec.background || {}), frame_extraction: { status: 'continued_without', error: spec.background?.frame_extraction?.error, choice_recorded_at: choiceAt } } },
+  });
+  const next = orderedScenes(scenes).find((candidate) => candidate.idx === scene.idx + 1) || null;
+  if (next && !DONE.has(String(next.status))) {
+    if (film.plan?.background?.enabled) {
+      await patchFilm(film, hooks, { stage_note: 'Continue-without-continuity recorded. The durable worker will prepare the next block without a frame.' });
+      return;
+    }
+    await prepareScene(film, scenes, next, hooks, { forceIndependent: true });
+  } else if (allScenesDone(scenes)) {
+    await setState(film, hooks, 'ALL_SCENES_COMPLETED', 'All video scenes are complete — prepare the audio and run Final Assembly.');
+  }
 }
 
 /** RECOVERY — the film is stranded at EXTRACTING_FINAL_FRAME: the browser that
  * was extracting the frame went away, or the decode wedged. The clip itself
  * already rendered and is stored, so recovery NEVER re-renders (and never
- * re-bills): it re-runs the frame stage from the stored clip on a short
- * budget, and when that fails too the scene completes without a keyframe and
- * the next scene opens with reference_type 'none'. */
+ * re-bills). A second extraction failure becomes an explicit user decision. */
 export async function recoverStalledFrameExtraction(film: Film, scenes: FilmScene[], hooks: RunHooks): Promise<void> {
   const stalled = stalledFrameScene(scenes);
   if (!stalled) {
@@ -1049,30 +1530,25 @@ export async function recoverStalledFrameExtraction(film: Film, scenes: FilmScen
   } catch (e: any) {
     say(hooks, `Scene ${stalled.idx + 1}: the retry could not finish (${String(e?.message || e).slice(0, 120)}) — keeping the clip and moving on without a keyframe.`);
   }
-  // Last resort: the clip is good, only its keyframe is missing. Complete the
-  // scene and open the next one independently so the film keeps moving.
+  const spec = (stalled.spec || {}) as VideoClipSpec;
+  const reason = 'The final frame could not be extracted after the automatic retry.';
   await patchScene(stalled, hooks, {
-    status: 'completed',
-    error: null,
+    status: 'needs_action',
+    error: reason,
     keyframe_url: null,
-    validation: { pass: true, issues: 'The final frame could not be extracted — the clip is kept and continuity falls back to the character reference.', method: 'trust' },
-    duration_s: stalled.duration_s,
+    validation: { pass: false, issues: reason, method: 'frame_extraction' },
+    spec: { ...spec, background: { ...(spec.background || {}), frame_extraction: { status: 'failed', error: reason } } },
   });
-  const next = orderedScenes(scenes).find((s) => s.idx > stalled.idx && !DONE.has(String(s.status)) && s.status !== 'generating');
-  if (next) {
-    try {
-      await prepareScene(film, scenes, next, hooks, { forceIndependent: true });
-    } catch (err: any) {
-      say(hooks, `Scene ${next.idx + 1} could not be prepared (${String(err?.message || err).slice(0, 140)}) — scene ${stalled.idx + 1} is safely completed; retry the preparation from the board.`);
-    }
-  } else if (allScenesDone(scenes)) {
-    await setState(film, hooks, 'ALL_SCENES_COMPLETED', 'All video scenes are complete — prepare the audio and run Final Assembly.');
-  }
+  await setState(film, hooks, 'FRAME_READY', `Scene ${stalled.idx + 1}'s clip is safe. Retry frame extraction or explicitly continue without continuity; no later scene was submitted.`);
 }
 
 /** [Skip Scene] — exclude this scene and move on; nothing else changes. */
 export async function skipScene(film: Film, scenes: FilmScene[], scene: FilmScene, hooks: RunHooks): Promise<void> {
-  await patchScene(scene, hooks, { status: 'skipped', error: null });
+  const spec = (scene.spec || {}) as VideoClipSpec;
+  await patchScene(scene, hooks, {
+    status: 'skipped', error: null,
+    spec: { ...spec, background: { ...(spec.background || {}), frame_extraction: { status: 'continued_without', error: 'Scene skipped by creator.', choice_recorded_at: new Date().toISOString() } } },
+  });
   const next = orderedScenes(scenes).find((s) => s.idx > scene.idx && !DONE.has(String(s.status)));
   if (next && next.status === 'waiting') {
     await prepareScene(film, scenes, next, hooks);
@@ -1087,31 +1563,29 @@ export async function skipScene(film: Film, scenes: FilmScene[], scene: FilmScen
 // ---------------------------------------------------------------------------
 
 export async function autoProduce(film: Film, scenes: FilmScene[], hooks: RunHooks, shouldContinue: () => boolean): Promise<void> {
-  // PARTIAL FAILURE IS NOT A STOP. A scene that exhausted the 400 ladder stays
-  // 'failed' and fully recoverable from the board, but it no longer blocks the
-  // scenes after it: one refused clip must never cost the rest of the film.
-  const stalled = new Set<number>();
+  // Continuity is mandatory: scene N+1 cannot be prepared or submitted until
+  // scene N has completed and its final frame has been validated. A provider
+  // failure therefore pauses this signed-in loop at that scene. Retrying it
+  // re-enters here, and finalizeScene prepares the dependent scene from the
+  // newly validated frame before the loop continues automatically.
   for (;;) {
     if (!shouldContinue()) { say(hooks, 'Auto-generate paused.'); return; }
-    const next = orderedScenes(scenes).find((s) => !DONE.has(String(s.status)) && !stalled.has(s.id)) || null;
+    const next = orderedScenes(scenes).find((s) => !DONE.has(String(s.status))) || null;
     if (!next) {
       if (allScenesDone(scenes)) await setState(film, hooks, 'ALL_SCENES_COMPLETED', 'All video scenes are complete — prepare the audio and run Final Assembly.');
-      else if (stalled.size) say(hooks, `${stalled.size} scene${stalled.size === 1 ? '' : 's'} failed and ${stalled.size === 1 ? 'was' : 'were'} left for you — every other scene finished. Retry them from the board.`);
       return;
     }
-    if (next.status === 'failed') {
-      stalled.add(next.id);
-      say(hooks, `Scene ${next.idx + 1} failed — continuing with the remaining scenes. Retry, reprompt, fall back to the character reference, or skip it from the board.`);
-      continue;
+    if (next.status === 'failed' || next.status === 'needs_action') {
+      say(hooks, `Scene ${next.idx + 1} needs action. Later scenes are still waiting for its validated last frame; Retry, repair the frame, or skip this scene to continue.`);
+      return;
     }
     if (next.status === 'generating') return; // already in flight elsewhere
     if (next.status === 'waiting') {
       try {
         await prepareScene(film, scenes, next, hooks);
       } catch {
-        stalled.add(next.id);
-        say(hooks, `Scene ${next.idx + 1} could not be prepared — continuing with the remaining scenes.`);
-        continue;
+        say(hooks, `Scene ${next.idx + 1} could not be prepared. Later scenes remain queued until this scene is resolved.`);
+        return;
       }
     }
     if (!shouldContinue()) { say(hooks, 'Auto-generate paused.'); return; }
@@ -1119,8 +1593,8 @@ export async function autoProduce(film: Film, scenes: FilmScene[], hooks: RunHoo
       try {
         await generateScene(film, scenes, next, hooks);
       } catch {
-        stalled.add(next.id);
-        say(hooks, `Scene ${next.idx + 1} failed — continuing with the remaining scenes. The error is kept on its card.`);
+        say(hooks, `Scene ${next.idx + 1} failed. Later scenes remain queued until you retry, reprompt, or skip it.`);
+        return;
       }
     }
   }
@@ -1153,30 +1627,34 @@ export async function generateAllReadyScenes(
   if (!ready.length) throw new Error('No scene has a prepared prompt waiting — prepare a scene first.');
 
   await patchFilm(film, hooks, { status: 'producing', error: null });
-  await setState(film, hooks, 'GENERATING_VIDEO', `Generating ${ready.length} prepared scene${ready.length === 1 ? '' : 's'} at once…`);
-  const results = await Promise.allSettled(
-    ready.map((scene) => generateScene(film, scenes, scene, hooks, { allowConcurrent: true, prepareNext: false })),
-  );
-
+  await setState(film, hooks, 'GENERATING_VIDEO', `Generating ${ready.length} prepared scene${ready.length === 1 ? '' : 's'} in continuity order…`);
   const failed: FilmScene[] = [];
-  for (let i = 0; i < results.length; i += 1) {
-    const result = results[i];
-    if (result.status !== 'rejected') continue;
-    const scene = ready[i];
-    failed.push(scene);
-    const reason = String((result.reason as any)?.message || result.reason);
-    // generateScene marks its own render failures; a throw from before the
-    // render started would otherwise leave the scene mid-flight.
-    if (scene.status !== 'failed') await patchScene(scene, hooks, { status: 'failed', error: reason });
+  let rendered = 0;
+  for (const scene of ready) {
+    try {
+      // Deliberately sequential: if an earlier scene is regenerated, the next
+      // scene must wait and consume that NEW validated last frame, never the
+      // previous version or a frame that has not landed yet.
+      await generateScene(film, scenes, scene, hooks, { prepareNext: false });
+      if (scene.status === 'completed') rendered += 1;
+      else if (scene.status === 'needs_action') break;
+    } catch (error: any) {
+      failed.push(scene);
+      const reason = String(error?.message || error);
+      if (scene.status !== 'failed') await patchScene(scene, hooks, { status: 'failed', error: reason });
+      break;
+    }
   }
 
-  const rendered = results.length - failed.length;
+  const attempted = rendered + failed.length;
   await setState(
     film, hooks,
     allScenesDone(scenes) ? 'ALL_SCENES_COMPLETED' : 'PROMPT_READY',
     failed.length
-      ? `${rendered} of ${results.length} scenes rendered — scene${failed.length === 1 ? '' : 's'} ${failed.map((s) => s.idx + 1).join(', ')} failed and can be retried on their own.`
-      : `All ${rendered} prepared scene${rendered === 1 ? '' : 's'} rendered.`,
+      ? `${rendered} of ${attempted} attempted scenes rendered — scene${failed.length === 1 ? '' : 's'} ${failed.map((s) => s.idx + 1).join(', ')} failed; later scenes were not submitted.`
+      : rendered === ready.length
+        ? `All ${rendered} prepared scene${rendered === 1 ? '' : 's'} rendered in continuity order.`
+        : `${rendered} scene${rendered === 1 ? '' : 's'} rendered; the next scene is waiting for a frame decision.`, 
   );
 }
 
@@ -1220,7 +1698,8 @@ export async function assembleReadyFilm(
   const ordered = orderedScenes(scenes);
   const done = ordered.filter((s) => s.status === 'completed' && s.asset_url);
   if (!done.length) throw new Error('No completed scenes to assemble yet.');
-  const finishing = !!finishSettings && (finishSettings.narration || finishSettings.music || finishSettings.captions);
+  const textOverlays = (film.plan?.on_screen_text || []).filter((item) => item.text && item.end_s > item.start_s);
+  const finishing = textOverlays.length > 0 || (!!finishSettings && (finishSettings.narration || finishSettings.music || finishSettings.captions));
   await patchFilm(film, hooks, {
     status: 'assembling',
     machine_state: 'FFMPEG_ASSEMBLY',
@@ -1228,22 +1707,34 @@ export async function assembleReadyFilm(
     error: null,
   });
   try {
-    const prepared = finishing
-      ? await prepareFinish(film, done, finishSettings!, (note) => {
+    const prepared = finishSettings && (finishSettings.narration || finishSettings.music || finishSettings.captions)
+      ? await prepareFinish(film, done, finishSettings, (note) => {
           say(hooks, note);
           try { hooks.onFilm?.({ stage_note: note }); } catch { /* UI only */ }
         })
       : null;
     if (prepared) await patchFilm(film, hooks, { finish: prepared.state });
 
+    const audioRequired = film.plan?.audio_enabled !== false;
     const result = await assembleFilm(
-      // AI video clips keep their native generated audio; only legacy captured
-      // scenes (pre-rebuild films) ever carry a per-scene narration track.
-      done.map((s) => ({
-        sceneKey: s.scene_key,
-        url: String(s.asset_url),
-        narrationUrl: s.type === 'video_clip' || s.type === 'veo_cinematic' ? null : s.narration_url || null,
-      })),
+      done.map((s) => {
+        // AI clips normally keep native sound. A creator-approved character
+        // fallback is the one exception: its stored per-scene ElevenLabs take
+        // replaces the silent model's dialogue while every other scene stays
+        // untouched.
+        const dialogueFallback = s.dialogue?.kind === 'character' && s.narration?.audioUrl
+          ? String(s.narration.audioUrl)
+          : null;
+        return {
+          sceneKey: s.scene_key,
+          url: String(s.asset_url),
+          narrationUrl: dialogueFallback || (s.type === 'video_clip' || s.type === 'veo_cinematic' ? null : s.narration_url || null),
+          nativeVolume: dialogueFallback ? 0.16 : undefined,
+          durationS: Number(s.duration_s) || undefined,
+          targetDurationS: dialogueFallback ? sceneTargetDuration(s, { voice_source: 'elevenlabs', duration_s: s.narration?.duration_s }) : undefined,
+          strictAudio: dialogueFallback ? true : undefined,
+        };
+      }),
       (film.aspect_ratio || '16:9') as Aspect,
       (note) => say(hooks, note),
       prepared ? {
@@ -1251,28 +1742,39 @@ export async function assembleReadyFilm(
         narrationUrls: prepared.narrationUrls,
         musicUrl: prepared.musicUrl,
         captionsSrt: prepared.captionsSrt,
-      } : undefined,
+        textOverlays,
+        requireAudibleAudio: audioRequired,
+      } : {
+        durationS: done.reduce((sum, scene) => sum + (Number(scene.duration_s) || 0), 0),
+        textOverlays,
+        requireAudibleAudio: audioRequired,
+      },
     );
     let durationS = 0; let thumb = '';
     try { durationS = await probeVideoDuration(result.url); } catch { /* cosmetic */ }
     try { thumb = await canvasExtractFrame(result.url, 0.3); } catch { /* cosmetic */ }
+    const textOverlayCheck = await verifyAssembledText(result.url, textOverlays);
+    if (!textOverlayCheck.pass) throw new Error(`Final on-screen text validation failed. ${textOverlayCheck.items.filter((item) => !item.pass).map((item) => `“${item.text}”: ${item.issue}`).join(' ')}`);
     const finishedLayers = finishSettings ? [
       finishSettings.narration ? 'narration' : '',
       finishSettings.music ? 'ducked music' : '',
       finishSettings.captions ? 'burned-in captions' : '',
-    ].filter(Boolean).join(', ') : '';
+      textOverlays.length ? `${textOverlays.length} verified text overlay${textOverlays.length === 1 ? '' : 's'}` : '',
+    ].filter(Boolean).join(', ') : textOverlays.length ? `${textOverlays.length} verified text overlay${textOverlays.length === 1 ? '' : 's'}` : '';
     await patchFilm(film, hooks, {
       status: 'ready',
       machine_state: 'FINAL_VIDEO',
       stage_note: finishing
-        ? `Finished with ${finishedLayers}; native clip sound is preserved.`
-        : result.via === 'ffmpeg_wasm' ? 'Assembled in your browser with FFmpeg.' : 'Assembled with the platform joiner (FFmpeg fallback).',
+        ? `Finished with ${finishedLayers}; native clip sound is preserved${typeof result.audioMeanDb === 'number' ? ` and measured ${result.audioMeanDb.toFixed(1)} dB mean` : ''}.`
+        : result.via === 'ffmpeg_wasm'
+          ? `Assembled in your browser with FFmpeg${typeof result.audioMeanDb === 'number' ? ` · audio verified ${result.audioMeanDb.toFixed(1)} dB mean` : ''}.`
+          : 'Assembled with the platform joiner (FFmpeg fallback).',
       final_video_url: result.url,
       final_thumb_url: thumb || null,
       duration_s: durationS || result.durationS || null,
       finish: prepared
-        ? { ...prepared.state, completed_at: new Date().toISOString() }
-        : film.finish ? { ...film.finish, completed_at: undefined } : null,
+        ? { ...prepared.state, text_overlay_check: textOverlayCheck, completed_at: new Date().toISOString() }
+        : { ...(film.finish || { settings: { narration: false, music: false, musicPreset: 'cinematic', captions: false }, source_fingerprint: '' }), text_overlay_check: textOverlayCheck, completed_at: new Date().toISOString() },
       error: null,
     });
   } catch (e: any) {
@@ -1303,12 +1805,41 @@ export async function finishReadyFilm(
 // reused as-is, which is why re-assembly is fast.
 // ---------------------------------------------------------------------------
 
+function silentAudioState(scenes: FilmScene[]): FilmAudio {
+  return {
+    version: 1,
+    voice_plan: null,
+    narration: orderedScenes(scenes).map((scene) => ({ scene_key: scene.scene_key, text: '', voice_source: 'none', planned_source: 'none', status: 'ready' })),
+    music: { required: false, preset: 'silent', status: 'skipped' },
+    sfx: [],
+    sfx_status: 'skipped',
+    voice_source: 'none',
+    planned_fingerprint: `silent:${orderedScenes(scenes).map((scene) => `${scene.scene_key}:${scene.duration_s}`).join('|')}`,
+    planned_at: new Date().toISOString(),
+  };
+}
+
+async function ensureSilentAudio(film: Film, scenes: FilmScene[], hooks: RunHooks): Promise<void> {
+  if (film.plan?.audio_policy !== 'fully-silent' && film.plan?.audio_enabled !== false) return;
+  const audio = silentAudioState(scenes);
+  await patchFilm(film, hooks, { audio, machine_state: 'AUDIO_READY', stage_note: 'Fully silent selected — no speech, music or effects were generated.' });
+}
+
 export type AssemblyStepKey = 'scenes' | 'narration' | 'music' | 'sfx' | 'mix' | 'render' | 'validate';
 export type AssemblyStepStatus = 'pending' | 'active' | 'done' | 'failed';
 export interface AssemblyProgress {
   steps: { key: AssemblyStepKey; label: string; status: AssemblyStepStatus }[];
   percent: number;
   running: boolean;
+}
+
+const finishStopRequested = new Set<number>();
+
+/** Stop after the active network layer, or immediately while FFmpeg is active.
+ * All durable inputs remain saved, so Retry resumes without regenerating clips. */
+export function stopFinalAssembly(filmId: number): void {
+  finishStopRequested.add(filmId);
+  interruptAssembly();
 }
 
 const ASSEMBLY_STEPS: { key: AssemblyStepKey; label: string }[] = [
@@ -1393,8 +1924,8 @@ async function generateAudioLayers(film: Film, scenes: FilmScene[], hooks: RunHo
   await patchFilm(film, hooks, {
     machine_state: 'AUDIO_READY',
     stage_note: audio.music?.skip_reason === 'providers_unavailable'
-      ? 'Music providers are unavailable — continuing without music. Run Final Assembly.'
-      : 'Narration, music and SFX are ready — run Final Assembly.',
+      ? 'Music providers are unavailable — continuing without music, and ready for Final Assembly.'
+      : 'Narration, music and SFX are ready for Final Assembly.',
     error: null,
   });
 }
@@ -1468,7 +1999,7 @@ export async function changeVoiceSource(
       machine_state: 'AUDIO_READY',
       stage_note: source === 'none'
         ? 'No voiceover — run Final Assembly whenever you are ready.'
-        : 'Narration, music and SFX are ready — run Final Assembly.',
+        : 'Narration, music and SFX are ready for Final Assembly.',
     });
   } else {
     await patchFilm(film, hooks, {
@@ -1541,8 +2072,8 @@ export async function runAudioLayerStep(film: Film, scenes: FilmScene[], hooks: 
       await patchFilm(film, hooks, {
         machine_state: 'AUDIO_READY',
         stage_note: audio.music?.skip_reason === 'providers_unavailable'
-          ? 'Music providers are unavailable — continuing without music. Run Final Assembly.'
-          : 'Narration, music and SFX are ready — run Final Assembly.',
+          ? 'Music providers are unavailable — continuing without music, and ready for Final Assembly.'
+          : 'Narration, music and SFX are ready for Final Assembly.',
       });
     } else {
       await patchFilm(film, hooks, {
@@ -1591,16 +2122,42 @@ export async function regenerateSfx(film: Film, scenes: FilmScene[], hooks: RunH
  * Ready layers are reused; video is never regenerated. */
 export async function autoPostProduce(film: Film, scenes: FilmScene[], hooks: RunHooks): Promise<void> {
   if (!allScenesDone(scenes)) return;
+  if (film.plan?.audio_policy === 'fully-silent' || film.plan?.audio_enabled === false) {
+    await ensureSilentAudio(film, scenes, hooks);
+    return;
+  }
   if (audioPlanCurrent(film, scenes) && audioReady(film.audio)) {
     await patchFilm(film, hooks, {
       machine_state: 'AUDIO_READY',
       stage_note: film.audio?.music?.skip_reason === 'providers_unavailable'
-        ? 'Music providers are unavailable — continuing without music. Run Final Assembly.'
-        : 'Narration, music and SFX are ready — run Final Assembly.',
+        ? 'Music providers are unavailable — continuing without music, and ready for Final Assembly.'
+        : 'Narration, music and SFX are ready for Final Assembly.',
     });
     return;
   }
   await prepareFilmAudioStage(film, scenes, hooks);
+}
+
+async function verifyAssembledText(videoUrl: string, overlays: OnScreenTextItem[]): Promise<NonNullable<NonNullable<Film['finish']>['text_overlay_check']>> {
+  const items: NonNullable<NonNullable<Film['finish']>['text_overlay_check']>['items'] = [];
+  for (const overlay of overlays) {
+    const at = overlay.start_s + Math.max(0.1, (overlay.end_s - overlay.start_s) / 2);
+    let frameUrl = '';
+    try {
+      frameUrl = await canvasExtractFrame(videoUrl, at);
+      const verdict = await askOpusJson<{ pass: boolean; issue?: string }>({
+        system: 'You verify one deterministic post-production text overlay in a finished video frame. Reply only with JSON: {"pass":boolean,"issue":string}. PASS only when the exact requested text is visibly present and legible. Ignore all other creative choices.',
+        user: `REQUIRED EXACT TEXT: ${JSON.stringify(overlay.text)}\nEXPECTED POSITION: ${overlay.position}\nDoes this assembled-output frame visibly contain that exact text?`,
+        images: [frameUrl],
+        maxTokens: 512,
+        effort: 'low',
+      });
+      items.push({ id: overlay.id, text: overlay.text, at_s: at, frame_url: frameUrl, pass: verdict.pass === true, issue: verdict.pass === true ? undefined : String(verdict.issue || 'The exact text was not legible in the sampled assembled frame.') });
+    } catch (error: any) {
+      items.push({ id: overlay.id, text: overlay.text, at_s: at, frame_url: frameUrl || undefined, pass: false, issue: `Final text check unavailable: ${String(error?.message || error).slice(0, 160)}` });
+    }
+  }
+  return { pass: items.every((item) => item.pass), checked_at: new Date().toISOString(), items };
 }
 
 /** FINAL ASSEMBLY — one click: existing video scenes + the chosen voiceover
@@ -1616,6 +2173,7 @@ export async function runFinalAssembly(
 ): Promise<void> {
   const done = orderedScenes(scenes).filter((s) => s.status === 'completed' && s.asset_url);
   if (!done.length) throw new Error('No completed scenes to assemble yet.');
+  finishStopRequested.delete(film.id);
 
   const progress: AssemblyProgress = { steps: ASSEMBLY_STEPS.map((s) => ({ ...s, status: 'pending' as AssemblyStepStatus })), percent: 0, running: true };
   const report = (key: AssemblyStepKey, status: AssemblyStepStatus, percent?: number) => {
@@ -1631,11 +2189,15 @@ export async function runFinalAssembly(
     // regenerated here — Final Assembly only reads existing clips.
     report('scenes', 'done', 6);
 
-    if (!audioPlanCurrent(film, scenes) || !audioReady(film.audio)) {
+    if (film.plan?.audio_policy === 'fully-silent' || film.plan?.audio_enabled === false) {
+      report('narration', 'active', 8);
+      await ensureSilentAudio(film, scenes, hooks);
+    } else if (!audioPlanCurrent(film, scenes) || !audioReady(film.audio)) {
       report('narration', 'active', 8);
       await prepareFilmAudioStage(film, scenes, hooks);
     }
     const audio = film.audio!;
+    if (finishStopRequested.has(film.id)) throw new Error('finish_paused');
     report('narration', narrationReady(audio) ? 'done' : 'failed', 18);
     report('music', musicReady(audio) ? 'done' : 'failed', 24);
     report('sfx', sfxReady(audio) ? 'done' : 'failed', 28);
@@ -1647,28 +2209,34 @@ export async function runFinalAssembly(
     const inputs = done.map((s) => {
       const entry = narrationByKey.get(s.scene_key) || null;
       const narrated = !!entry && isSpokenSource(entry.voice_source) && entry.status === 'ready' && !!entry.audioUrl;
+      const dialogueFallback = s.dialogue?.kind === 'character' && s.narration?.audioUrl ? s.narration : null;
+      const spokenUrl = dialogueFallback?.audioUrl || (narrated ? String(entry!.audioUrl) : null);
+      const timingEntry = dialogueFallback
+        ? { voice_source: 'elevenlabs', duration_s: dialogueFallback.duration_s }
+        : entry;
       const sfx = audio.sfx
         .filter((f) => f.scene_key === s.scene_key && f.status === 'ready' && f.audioUrl && audio.sfx_status === 'ready')
         .map((f) => ({ url: String(f.audioUrl), atS: Number(f.at_s) || 0, volume: Number(f.volume) || 0.25, durationS: Number(f.duration_s) || undefined }));
       return {
         sceneKey: s.scene_key,
         url: String(s.asset_url),
-        narrationUrl: narrated ? String(entry!.audioUrl) : null,
+        narrationUrl: spokenUrl,
         // ONE authoritative voice per scene: narrated scenes keep native sound
         // as low ambience; dialogue/no-word scenes keep their native audio.
-        nativeVolume: narrated ? 0.16 : 1,
+        nativeVolume: film.plan?.audio_enabled === false ? 0 : spokenUrl ? 0.16 : 1,
         durationS: Number(s.duration_s) || undefined,
-        targetDurationS: sceneTargetDuration(s, entry),
+        targetDurationS: sceneTargetDuration(s, timingEntry),
         sfx,
         strictAudio: true,
       };
     });
     const totalTarget = inputs.reduce((n, c) => n + (c.targetDurationS || c.durationS || 6), 0);
     const captionsSrt = opts.captions ? buildCaptions(done).srt : undefined;
+    const textOverlays = (film.plan?.on_screen_text || []).filter((item) => item.text && item.end_s > item.start_s);
     const musicUrl = audio.music && audio.music.status === 'ready' && audio.music.audioUrl ? audio.music.audioUrl : undefined;
 
     let rendering = false;
-    const result = await assembleFilm(
+    const assembleOnce = () => assembleFilm(
       inputs,
       (film.aspect_ratio || '16:9') as Aspect,
       (note, fraction) => {
@@ -1677,8 +2245,16 @@ export async function runFinalAssembly(
         if (fraction >= 0.89 && !rendering) { report('mix', 'done'); rendering = true; }
         report(rendering ? 'render' : 'mix', 'active', pct);
       },
-      { durationS: totalTarget, musicUrl, musicVolume: audio.music?.volume, captionsSrt },
+      { durationS: totalTarget, musicUrl, musicVolume: audio.music?.volume, captionsSrt, textOverlays, requireAudibleAudio: film.plan?.audio_enabled !== false },
     );
+    let result;
+    try {
+      result = await assembleOnce();
+    } catch (firstAssemblyError: any) {
+      if (finishStopRequested.has(film.id)) throw new Error('finish_paused');
+      say(hooks, `Final Assembly hit a problem — retrying once (${String(firstAssemblyError?.message || firstAssemblyError).slice(0, 120)}).`);
+      result = await assembleOnce();
+    }
     report('mix', 'done');
     report('render', 'done', 92);
     report('validate', 'active', 94);
@@ -1686,25 +2262,43 @@ export async function runFinalAssembly(
     let durationS = 0; let thumb = '';
     try { durationS = await probeVideoDuration(result.url); } catch { /* cosmetic */ }
     try { thumb = await canvasExtractFrame(result.url, 0.3); } catch { /* cosmetic */ }
+    const textOverlayCheck = await verifyAssembledText(result.url, textOverlays);
+    if (!textOverlayCheck.pass) {
+      const failed = textOverlayCheck.items.filter((item) => !item.pass).map((item) => `“${item.text}”: ${item.issue}`).join(' ');
+      throw new Error(`Final on-screen text validation failed. ${failed}`);
+    }
     progress.running = false;
     report('validate', 'done', 100);
 
-    const narrationLabel = audio.voice_source === 'openai'
-      ? `built-in AI narration (${audio.openai_voice || 'alloy'})`
+    const usedBuiltInVoice = audio.voice_used === 'openai' || audio.narration.some((entry) => entry.voice_source === 'openai' && entry.status === 'ready');
+    const narrationLabel = usedBuiltInVoice
+      ? `built-in AI narration (${audio.openai_voice || 'alloy'}${audio.voice_fallback_reason ? ', ElevenLabs unavailable after one retry' : ''})`
       : `ElevenLabs narration (${audio.voice_plan?.voiceName || 'one voice'})`;
     const layerSummary = [
+      typeof result.audioMeanDb === 'number' ? `audio verified ${result.audioMeanDb.toFixed(1)} dB mean` : film.plan?.audio_enabled === false ? 'audio off' : '',
       inputs.some((c) => c.narrationUrl) ? narrationLabel : '',
       musicUrl ? `${audio.music?.preset || ''} music, ducked under speech`.trim() : '',
       inputs.some((c) => c.sfx.length) ? 'SFX' : '',
       captionsSrt ? 'captions' : '',
+      textOverlays.length ? `${textOverlays.length} on-screen text overlay${textOverlays.length === 1 ? '' : 's'} verified` : '',
     ].filter(Boolean).join(' · ');
+    const measuredDuration = durationS || result.durationS || null;
+    const exportId = `assembly_${Date.now().toString(36)}`;
+    const finalPlan = film.plan ? {
+      ...film.plan,
+      assembled_media_id: result.url,
+      orchestration: film.plan.orchestration ? { ...film.plan.orchestration, state: 'ready' as const, intent: 'export' as const, checkpoint: 'verified_final_media', completed_count: film.plan.orchestration.total_count, updated_at: new Date().toISOString() } : film.plan.orchestration,
+      export_records: [...(film.plan.export_records || []), { id: exportId, status: 'complete' as const, url: result.url, created_at: new Date().toISOString(), completed_at: new Date().toISOString(), settings: { captions: Boolean(captionsSrt), audio_policy: film.plan.audio_policy || 'legacy', measured_duration_s: measuredDuration, via: result.via } }],
+    } : film.plan;
     await patchFilm(film, hooks, {
       status: 'ready',
       machine_state: 'FINAL_VIDEO',
       stage_note: layerSummary ? `Final video ready — ${layerSummary}.` : 'Final video ready.',
       final_video_url: result.url,
       final_thumb_url: thumb || null,
-      duration_s: durationS || result.durationS || null,
+      duration_s: measuredDuration,
+      plan: finalPlan,
+      finish: { ...(film.finish || { settings: { narration: false, music: false, musicPreset: 'cinematic', captions: Boolean(captionsSrt) }, source_fingerprint: '' }), text_overlay_check: textOverlayCheck, completed_at: new Date().toISOString() },
       error: null,
     });
   } catch (e: any) {
@@ -1716,16 +2310,23 @@ export async function runFinalAssembly(
     if (failStep) failStep.status = 'failed';
     progress.steps.forEach((s) => { if (s.status === 'active') s.status = s === failStep ? 'failed' : 'pending'; });
     try { hooks.onAssembly?.({ ...progress, steps: progress.steps.map((x) => ({ ...x })) }); } catch { /* UI only */ }
+    const paused = finishStopRequested.has(film.id) || String(e?.message || e) === 'finish_paused';
+    const publicError = paused
+      ? 'Finishing is paused. Press Retry to continue from the saved scenes and audio.'
+      : layer === 'narration'
+      ? 'Narration could not be prepared after one retry. The scenes are safe.'
+      : layer === 'music'
+        ? 'Music could not be prepared after one retry. The scenes are safe.'
+        : layer === 'sfx'
+          ? 'Sound effects could not be prepared after one retry. The scenes are safe.'
+          : 'Final Assembly could not finish after one retry. The scenes and prepared audio are safe.';
     await patchFilm(film, hooks, {
       status: film.final_video_url ? 'ready' : 'producing',
       machine_state: audioReady(film.audio) ? 'AUDIO_READY' : 'ALL_SCENES_COMPLETED',
-      stage_note: layer === 'narration' ? 'Narration generation failed.'
-        : layer === 'music' ? 'Music preparation failed.'
-        : layer === 'sfx' ? 'SFX preparation failed.'
-        : 'Final Assembly failed — completed scenes and audio are untouched.',
-      error: String(e?.message || e),
+      stage_note: publicError,
+      error: publicError,
     });
-    throw e;
+    throw new Error(publicError);
   }
 }
 
@@ -1767,6 +2368,116 @@ export async function resumeFilm(film: Film, scenes: FilmScene[], hooks: RunHook
   if (head && head.status === 'waiting') {
     await prepareScene(film, scenes, head, hooks);
   } else if (allScenesDone(scenes) && !film.final_video_url) {
-    await setState(film, hooks, 'ALL_SCENES_COMPLETED', 'All video scenes are complete — prepare the audio and run Final Assembly.');
+    await setState(film, hooks, 'ALL_SCENES_COMPLETED', 'All video scenes are complete — preparing the audio for Final Assembly.');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AUTO-ASSEMBLE (bug D1)
+//
+// Final Assembly used to wait for a button press, and nothing else in this
+// pipeline does. A film left to run on its own therefore stopped dead at
+// "Narration, music and SFX are ready" — everything paid for, nothing
+// delivered — and stayed there until somebody came back and clicked.
+//
+// So the last step is the same kind of step as the others now: when every
+// scene is finished and every audio layer is ready, assembly starts by itself.
+// Reviewing the cut before it is assembled stays available as an OPT-IN (the
+// review toggle in App.tsx), because some films genuinely want a look first —
+// but it is a choice, not the default.
+// ---------------------------------------------------------------------------
+
+/**
+ * Is this film's next step Final Assembly, with nothing left to wait for?
+ *
+ * Deliberately conservative: a film already assembling, already finished, or
+ * still missing a scene or an audio layer answers false, so a caller polling
+ * this on a timer can never start a second assembly or jump the queue.
+ */
+export function readyToAutoAssemble(film: Film | null | undefined, scenes: FilmScene[]): boolean {
+  if (!film) return false;
+  if (film.status === 'ready' || film.final_video_url) return false;
+  if (film.status === 'assembling' || film.machine_state === 'FFMPEG_ASSEMBLY') return false;
+  if (!allScenesDone(scenes)) return false;
+  return audioReady(film.audio);
+}
+
+// ---------------------------------------------------------------------------
+// SCENE WATCHDOG (bug D2)
+//
+// A scene whose render stopped answering used to sit on "generating the
+// clip…" indefinitely: nothing measured how long it had been there, so an
+// automated film never finished and the board offered no way out.
+//
+// The budget is measured from the SCENE ROW's own updated_at, not from when a
+// tab happened to open the film, so a render abandoned an hour ago is stalled
+// the moment the board loads rather than getting a fresh fifteen minutes.
+// ---------------------------------------------------------------------------
+
+/** No progress for this long means the job is gone, not slow. */
+export const SCENE_STALL_MS = 15 * 60 * 1000;
+
+/** Milliseconds since this scene row last changed. Falls back to the film's
+ * own timestamp for a row written before scenes carried one. */
+export function msSinceSceneUpdate(scene: FilmScene, film?: Film | null): number {
+  const sceneAt = Date.parse(String(scene.updated_at || ''));
+  const filmAt = Date.parse(String(film?.updated_at || ''));
+  const at = Number.isFinite(sceneAt) ? sceneAt : filmAt;
+  return Number.isFinite(at) ? Math.max(0, Date.now() - at) : 0;
+}
+
+/** True for a scene mid-render that has shown no progress for the stall
+ * budget. Only 'generating' counts — every other status is either finished or
+ * deliberately waiting on a person. */
+export function isSceneStalled(scene: FilmScene, sinceMs: number): boolean {
+  if (String(scene.status) !== 'generating') return false;
+  return sinceMs >= SCENE_STALL_MS;
+}
+
+/** The first stalled scene on the board, or null. */
+export function stalledScene(film: Film | null | undefined, scenes: FilmScene[]): FilmScene | null {
+  for (const scene of orderedScenes(scenes)) {
+    if (isSceneStalled(scene, msSinceSceneUpdate(scene, film))) return scene;
+  }
+  return null;
+}
+
+/**
+ * Retry ONE stalled scene, exactly once.
+ *
+ * A second failure is where it stops: the scene is marked `failed` with a
+ * sentence a person can act on, which is what puts the board's retry control
+ * in front of them. Leaving a card spinning is the single outcome this
+ * function exists to prevent, so even an unexpected error ends in a failed
+ * scene rather than a quiet return.
+ */
+export async function recoverStalledScene(
+  film: Film,
+  scenes: FilmScene[],
+  scene: FilmScene,
+  hooks: RunHooks,
+): Promise<void> {
+  const minutes = Math.round(SCENE_STALL_MS / 60000);
+  say(hooks, `Scene ${scene.idx + 1} has shown no progress for ${minutes} minutes — retrying it once.`);
+  // The dead job id has to go first, or the retry adopts the render that
+  // stopped answering instead of starting a new one.
+  await patchScene(scene, hooks, { status: 'ready', error: null, veo_operation_id: null });
+  try {
+    await retryScene(film, scenes, scene, hooks);
+  } catch (e: any) {
+    await patchScene(scene, hooks, {
+      status: 'failed',
+      error: `This scene stopped responding for ${minutes} minutes and the retry did not work either `
+        + `(${String(e?.message || e).slice(0, 160)}). Retry it from this step, or skip it — every `
+        + 'other scene in the film is untouched.',
+    });
+    return;
+  }
+  if (String(scene.status) === 'generating') {
+    await patchScene(scene, hooks, {
+      status: 'failed',
+      error: `This scene stopped responding for ${minutes} minutes and the retry did not finish either. `
+        + 'Retry it from this step, or skip it — every other scene in the film is untouched.',
+    });
   }
 }

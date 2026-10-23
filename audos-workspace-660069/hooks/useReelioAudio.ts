@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getWorkspaceToken, WORKSPACE_ID } from '../lib/workspace';
 
 const MUSIC_SELECTION_KEY = 'reelio_ambient_music_track_v2';
 const MUSIC_URL_KEY_PREFIX = 'reelio_ambient_music_url_v2';
-const DEFAULT_WORKSPACE_ID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
 const MUSIC_VOLUME = 0.12;
 
 export type AmbientMusicTrackId =
@@ -86,22 +86,6 @@ function cacheTrackUrl(trackId: AmbientMusicTrackId, url: string): void {
   }
 }
 
-function workspaceId(fallback: string): string {
-  if (typeof window === 'undefined') return DEFAULT_WORKSPACE_ID;
-  const runtime = window as any;
-  const candidate = String(
-    runtime.__WORKSPACE_ID__ || runtime.__workspaceDb?.workspaceId || fallback || '',
-  );
-  return /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(candidate)
-    ? candidate
-    : DEFAULT_WORKSPACE_ID;
-}
-
-function workspaceToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
-
 export interface ReelioAudioController {
   selectedTrackId: AmbientMusicTrackId;
   isMusicPlaying: boolean;
@@ -112,7 +96,7 @@ export interface ReelioAudioController {
   toggleMusic: () => void;
 }
 
-export function useReelioAudio(spaceId: string): ReelioAudioController {
+export function useReelioAudio(_spaceId: string): ReelioAudioController {
   const [selectedTrackId, setSelectedTrackId] = useState<AmbientMusicTrackId>(readSelection);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [isMusicLoading, setIsMusicLoading] = useState(false);
@@ -133,10 +117,10 @@ export function useReelioAudio(spaceId: string): ReelioAudioController {
     try {
       let url = cachedTrackUrl(track.id);
       if (!url) {
-        const token = workspaceToken();
+        const token = await getWorkspaceToken();
         if (!token) throw new Error('Music is still getting ready. Try again in a moment.');
         const response = await fetch(
-          `/api/workspaces/${workspaceId(spaceId)}/audio/music/custom`,
+          `/api/workspaces/${WORKSPACE_ID}/audio/music/custom`,
           {
             method: 'POST',
             headers: {
@@ -180,7 +164,7 @@ export function useReelioAudio(spaceId: string): ReelioAudioController {
     } finally {
       if (requestId === requestRef.current) setIsMusicLoading(false);
     }
-  }, [spaceId]);
+  }, []);
 
   const selectTrack = useCallback((trackId: AmbientMusicTrackId) => {
     const continuePlaying = playingIntentRef.current;

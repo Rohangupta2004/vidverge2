@@ -1,193 +1,29 @@
-/*
- * Vidverge premium obsidian global stylesheet.
- *
- * The space compiler bundles TSX, not CSS, so this file is the readable
- * reference copy of the rules. The rules that actually ship are injected at
- * runtime by components/ui/GlobalStyles.tsx, which keeps them identical and
- * guarantees they load with the app rather than depending on a CSS pipeline.
- * The light-utility neutraliser is generated from lists there; the shape it
- * produces is shown at the bottom of this file.
- *
- * TWO SCOPES, ON PURPOSE:
- * `.vv-app-shell` carries the box-sizing / margin reset and stays opt-in — a
- * bare universal reset would also strip margins from the OS shell (dock,
- * agent chat, settings) rendered around every app.
- * `.vv-dark` carries colour only, so Desktop.tsx can put it on the shell root
- * and the app content frame and have every app inherit the dark palette
- * without a layout reset being applied to it retroactively.
+/* Vidverge Design System v3.0 reference stylesheet.
+ * Runtime injection lives in components/ui/GlobalStyles.tsx; all values come
+ * from components/theme.ts and are exposed as --vg-* variables.
  */
-
-.vv-app-shell,
-.vv-app-shell * {
-  box-sizing: border-box;
-}
-
-.vv-app-shell h1,
-.vv-app-shell h2,
-.vv-app-shell h3,
-.vv-app-shell h4,
-.vv-app-shell p,
-.vv-app-shell figure {
-  margin: 0;
-}
-
-.vv-app-shell,
-.vv-dark {
-  background: #08090B;
-  color: #F6F3EB;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-}
-
-.vv-dark h1,
-.vv-dark h2,
-.vv-dark h3,
-.vv-dark h4 {
-  letter-spacing: -0.01em;
-}
-
-.vv-dark,
-.vv-dark * {
-  scrollbar-color: #2D3037 transparent;
-  scrollbar-width: thin;
-}
-
-.vv-dark ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.vv-dark ::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.vv-dark ::-webkit-scrollbar-thumb {
-  background: #2D3037;
-  border-radius: 4px;
-}
-
-.vv-dark ::-webkit-scrollbar-thumb:hover {
-  background: #41454F;
-}
-
-.vv-dark input,
-.vv-dark textarea,
-.vv-dark select {
-  background-color: #0E1014;
-  color: #F6F3EB;
-  border-color: rgba(255, 255, 255, 0.1);
-}
-
-.vv-dark input::placeholder,
-.vv-dark textarea::placeholder {
-  color: #77736B;
-}
-
-.vv-dark option {
-  background-color: #171A21;
-  color: #F6F3EB;
-}
-
-/*
- * Light-utility neutraliser (abridged — GlobalStyles.tsx generates the full
- * class lists). Descendant selectors outrank a bare utility class, so none of
- * these need `!important`.
- */
-
-.vv-dark .bg-white,
-.vv-dark .bg-gray-50,
-.vv-dark .bg-slate-50 {
-  background-color: #111318;
-}
-
-.vv-dark .bg-gray-100,
-.vv-dark .bg-slate-100,
-.vv-dark .bg-gray-200,
-.vv-dark .bg-slate-200 {
-  background-color: #171A21;
-}
-
-.vv-dark .text-black,
-.vv-dark .text-gray-900,
-.vv-dark .text-slate-900 {
-  color: #F6F3EB;
-}
-
-.vv-dark .text-gray-700,
-.vv-dark .text-gray-600,
-.vv-dark .text-gray-500,
-.vv-dark .text-slate-600 {
-  color: #77736B;
-}
-
-.vv-dark .border-gray-200,
-.vv-dark .border-gray-300,
-.vv-dark .border-slate-200 {
-  border-color: rgba(255, 255, 255, 0.07);
-}
-
-@keyframes beamPulse {
-  0%,
-  100% {
-    opacity: 0;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.15);
-    opacity: 0.7;
-  }
-}
-
-@keyframes vvWave {
-  0%,
-  100% {
-    transform: scaleY(0.25);
-  }
-  50% {
-    transform: scaleY(1);
-  }
-}
-
-@keyframes vvSheen {
-  0% {
-    transform: translateX(-120%);
-  }
-  100% {
-    transform: translateX(220%);
-  }
-}
-
-@keyframes vvIndeterminate {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(300%);
-  }
-}
+.vv-app-shell,.vv-app-shell *{box-sizing:border-box}
+.vv-dark,.vv-app-shell{background:var(--vg-bg);color:var(--vg-text);font-family:'Manrope','Segoe UI',sans-serif;font-synthesis:none;color-scheme:dark}
+.vv-dark h1,.vv-dark h2,.vv-dark h3,.vv-dark h4,.vv-app-shell h1,.vv-app-shell h2,.vv-app-shell h3,.vv-app-shell h4{font-family:'Space Grotesk','Segoe UI',sans-serif;font-synthesis:none}
+.vv-dark,.vv-dark *{scrollbar-color:var(--vg-border) transparent;scrollbar-width:thin}
+.vv-dark ::-webkit-scrollbar{width:8px;height:8px}
+.vv-dark ::-webkit-scrollbar-thumb{background:var(--vg-border);border-radius:6px}
+.vv-dark input,.vv-dark textarea,.vv-dark select{background:var(--vg-bg);color:var(--vg-text);border-color:var(--vg-control-border)}
+.vv-dark input,.vv-dark select{min-height:44px;border-radius:10px}
+.vv-app-shell textarea{min-height:120px;border-radius:10px}
+.vv-dark input::placeholder,.vv-dark textarea::placeholder{color:var(--vg-muted)}
+.vv-dark :where(button,a,input,textarea,select,[tabindex]):focus-visible{outline:2px solid var(--vg-focus);outline-offset:3px;box-shadow:none}
+.vg-primary-action{min-height:44px;border:0;border-radius:10px;background:var(--vg-gradient-action);color:var(--vg-on-accent);font-weight:600}
+.vg-primary-action:hover:not(:disabled){background:var(--vg-gradient-action-hover)}
+.vg-primary-action:active:not(:disabled){background:var(--vg-accent-pressed);transform:translateY(1px)}
+.vg-primary-action:disabled{background:var(--vg-raised);color:var(--vg-muted)}
+.vg-panel{background:var(--vg-surface);border:1px solid var(--vg-border);border-radius:12px;padding:24px}
+.vg-featured-panel{background:var(--vg-gradient-surface);border:1px solid var(--vg-border);border-radius:12px;padding:24px}
+.vg-status{display:inline-flex;align-items:center;gap:8px;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:500}
+.vg-tabular{font-variant-numeric:tabular-nums}
+.vg-thumbnail-label{background:var(--vg-bg);color:var(--vg-text);padding:4px 8px;border-radius:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media(max-width:767px){.vv-dark button,.vv-dark a[role=button],.vv-app-shell button,.vv-app-shell a[role=button]{min-height:44px;min-width:44px}.vv-app-shell{overflow-x:hidden}}
+@media(max-width:480px){.vg-panel,.vg-featured-panel{padding:16px}}
+@media(prefers-reduced-motion:reduce){.vv-dark *,.vv-dark *::before,.vv-dark *::after,.vv-app-shell *,.vv-app-shell *::before,.vv-app-shell *::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}

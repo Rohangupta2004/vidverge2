@@ -18,19 +18,19 @@ import { computeTiming } from './lib/plan';
 import { waitForWorkspaceBridge } from './lib/platform';
 import VideoErrorCard from '../../components/video/VideoErrorCard';
 import { withBrandContext } from '../../components/BrandContextLayer';
+import { VideoHistory } from '../../components/VideoHistory';
+import { saveVideoToHistory } from '../../lib/videoHistory';
 
 const card: CSSProperties = {
-  background: 'color-mix(in srgb, var(--space-surface-card, #15120A) 74%, transparent)',
-  border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
+  background: 'var(--vg-surface)',
+  border: '1px solid var(--vg-border)',
   borderRadius: 12,
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-  transition: 'border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease',
+  transition: 'border-color 180ms cubic-bezier(.2,0,0,1), background 180ms cubic-bezier(.2,0,0,1)',
 };
 
-const accent = 'var(--space-brand-primary, #D4920A)';
-const textPrimary = 'var(--space-text-primary, #F5E9C8)';
-const textMuted = 'var(--space-text-muted, #9E8B55)';
+const accent = 'var(--vg-accent)';
+const textPrimary = 'var(--vg-text)';
+const textMuted = 'var(--vg-muted)';
 
 function fmtClock(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -59,10 +59,31 @@ function App() {
   useEffect(() => { refreshProjects(); }, [refreshProjects]);
   useEffect(() => () => { if (handleRef.current) handleRef.current.cancelled = true; }, []);
 
+  // SHARED CROSS-APP HISTORY. The finished cut arrives on the project row
+  // through the pipeline's onRow callback. Reopening a project that is already
+  // finished seeds the set below (see resumeRun), so an old film is never
+  // recorded a second time.
+  const recordedResultUrls = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const url = active?.status === 'done' ? String(active.result?.url || '') : '';
+    if (!url || recordedResultUrls.current.has(url)) return;
+    recordedResultUrls.current.add(url);
+    void saveVideoToHistory({
+      appId: 'cine-agent',
+      title: active?.plan?.title || active?.name || 'CineAgent edit',
+      videoUrl: url,
+      durationSec: active?.result?.durationSec ? Math.round(active.result.durationSec) : null,
+    });
+  }, [active?.status, active?.result?.url, active?.result?.durationSec, active?.plan?.title, active?.name]);
+
   const startRun = useCallback(async (file: File) => {
     setHomeError('');
     if (!/^video\//.test(file.type) && !/\.(mp4|mov|webm|m4v|mkv)$/i.test(file.name)) {
       setHomeError('Please choose a video file (MP4, MOV, WebM).');
+      return;
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      setHomeError('This file is over the 50 MB upload limit. Trim or compress it, then try again. Nothing was charged.');
       return;
     }
     if (runningRef.current) return;
@@ -97,6 +118,9 @@ function App() {
 
   const resumeRun = useCallback(async (row: ProjectRow) => {
     const fresh = (await loadProject(row.id)) || row;
+    if (fresh.status === 'done' && fresh.result?.url) {
+      recordedResultUrls.current.add(String(fresh.result.url));
+    }
     setActive(fresh);
     setView('run');
     if (fresh.status === 'running' && !runningRef.current) {
@@ -113,14 +137,14 @@ function App() {
   }, []);
 
   return (
-    <div style={{ minHeight: '100%', color: textPrimary, fontFamily: "'Inter', system-ui, sans-serif", padding: '32px clamp(18px, 4vw, 52px) 72px', background: 'radial-gradient(1100px 540px at 50% -140px, color-mix(in srgb, var(--space-brand-primary, #f59e0b) 16%, transparent), transparent 70%), linear-gradient(180deg, var(--space-surface-panel, #1C1808) 0%, var(--space-surface-page, #0D0B05) 48%, var(--space-surface-page-alt, #110E07) 100%)' }}>
+    <div style={{ minHeight: '100%', color: textPrimary, fontFamily: "'Manrope', 'Segoe UI', sans-serif", padding: '32px clamp(16px, 4vw, 52px) 72px', background: 'var(--vg-gradient-ambient), var(--vg-bg)' }}>
       <style>{cineCss}</style>
-      <header style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 30 }}>
-        <div style={{ width: 46, height: 46, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, rgba(212,146,10,0.28), rgba(240,180,41,0.16))', border: '1px solid var(--space-border-strong, rgba(255,255,255,0.18))' }}>
+      <header style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginBottom: 30 }}>
+        <div style={{ width: 46, height: 46, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'var(--vg-accent-soft)', border: '1px solid var(--vg-border)' }}>
           <Wand2 size={24} color={accent as string} />
         </div>
         <div style={{ flex: 1 }}>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--space-text-brand, #F0B429)' }}>CineAgent</h1>
+          <h1 style={{ margin: 0, fontFamily: "'Space Grotesk', 'Segoe UI', sans-serif", fontSize: 28, lineHeight: '36px', fontWeight: 600, letterSpacing: '-0.025em', color: 'var(--vg-text)' }}>CineAgent</h1>
           <p style={{ margin: 0, fontSize: 13, color: textMuted }}>Upload footage. The AI directs, edits, reviews — and hands you the finished film.</p>
         </div>
         {view === 'run' ? (
@@ -153,28 +177,33 @@ function App() {
         ref={fileInputRef} type="file" accept="video/*" style={{ display: 'none' }}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) startRun(f); e.currentTarget.value = ''; }}
       />
+
+      <div style={{ marginTop: 28, maxWidth: 1060, marginLeft: 'auto', marginRight: 'auto' }}>
+        <VideoHistory />
+      </div>
     </div>
   );
 }
 
 const btnGhost: CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px', fontSize: 13, fontWeight: 600,
-  background: 'color-mix(in srgb, var(--space-surface-panel, #1C1808) 55%, transparent)', color: textPrimary, border: '1px solid var(--space-border-default, rgba(255,255,255,0.07))',
-  borderRadius: 999, cursor: 'pointer',
+  display: 'inline-flex', minHeight: 44, alignItems: 'center', gap: 8, padding: '0 16px', fontSize: 14, fontWeight: 600,
+  background: 'var(--vg-surface)', color: textPrimary, border: '1px solid var(--vg-control-border)',
+  borderRadius: 10, cursor: 'pointer',
   transition: 'transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease',
 };
 
 const btnPrimary: CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 8, padding: '13px 26px', fontSize: 14, fontWeight: 700,
-  background: 'linear-gradient(135deg, var(--space-brand-primary, #D4920A), var(--space-brand-highlight, #F0B429))',
-  color: '#FFFFFF', border: 'none', borderRadius: 999, cursor: 'pointer',
-  boxShadow: '0 10px 30px color-mix(in srgb, var(--space-brand-primary, #D4920A) 30%, transparent)',
+  display: 'inline-flex', minHeight: 44, alignItems: 'center', gap: 8, padding: '0 20px', fontSize: 14, fontWeight: 600,
+  background: 'var(--vg-gradient-action)',
+  color: 'var(--vg-on-accent)', border: 'none', borderRadius: 10, cursor: 'pointer',
+  boxShadow: 'none',
   transition: 'transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease',
 };
 
 const cineCss = `
 @keyframes cine-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.cine-btn:hover { transform: translateY(-1px) scale(1.03); }
+.cine-btn:hover { background-color: var(--vg-hover); }
+.cine-btn:focus-visible { outline: 2px solid var(--vg-focus); outline-offset: 3px; }
 .cine-btn:active { transform: scale(0.98); }
 button.cine-btn:hover { border-color: var(--space-border-strong, rgba(245,158,11,0.45)); }
 .cine-input { transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease; }
@@ -208,7 +237,7 @@ function HomeView(props: {
         onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}
         className={'cine-upload' + (dragOver ? ' cine-drag' : '')}
         style={{
-          ...card, padding: '64px 32px', textAlign: 'center',
+          ...card, padding: 'clamp(36px, 10vw, 64px) clamp(16px, 6vw, 32px)', textAlign: 'center',
           border: 'none', borderRadius: 24,
           background: dragOver
             ? 'color-mix(in srgb, var(--space-brand-primary, #f59e0b) 9%, color-mix(in srgb, var(--space-surface-card, #15120A) 80%, transparent))'
@@ -264,7 +293,7 @@ function HomeView(props: {
       {projects.length ? (
         <section>
           <h3 style={{ margin: '4px 0 14px', fontSize: 15, fontWeight: 700, color: textMuted, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Your projects</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 16 }}>
             {projects.map((p) => <ProjectCard key={p.id} row={p} onOpen={() => onOpen(p)} onDelete={() => onDelete(p)} />)}
           </div>
         </section>

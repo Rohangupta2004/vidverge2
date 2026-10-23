@@ -9,7 +9,8 @@
 
 import { FFmpeg } from 'https://esm.sh/@ffmpeg/ffmpeg@0.12.10';
 import { fetchFile, toBlobURL } from 'https://esm.sh/@ffmpeg/util@0.12.1';
-import { Aspect, appId, uploadBlob, wsToken } from '../api';
+import { Aspect, OnScreenTextItem, uploadBlob } from '../api';
+import { WORKSPACE_ID, getWorkspaceToken, spaceId } from '../../../lib/workspace';
 
 // The ESM core build: the FFmpeg class always spawns a MODULE worker, and a
 // module worker cannot importScripts() the UMD build — it dynamic-imports the
@@ -26,6 +27,14 @@ const CORE = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
 const WORKER_ENTRY = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/worker.js';
 
 let instance: any = null;
+
+/** Stop an in-browser assembly immediately. Saved scenes and audio stay in
+ * WorkspaceDB; the next Retry loads a fresh FFmpeg instance and resumes. */
+export function interruptAssembly(): void {
+  if (!instance) return;
+  try { instance.terminate(); } catch { /* it may already be stopping */ }
+  instance = null;
+}
 
 export async function loadFFmpeg(onLog?: (line: string) => void): Promise<any> {
   if (instance) return instance;
@@ -58,14 +67,14 @@ export async function loadFFmpeg(onLog?: (line: string) => void): Promise<any> {
  * JSON: { success, stitchedUrl } on success and { error } on failure — both
  * are checked explicitly, including error bodies that arrive with HTTP 200.
  */
-const WORKSPACE_UUID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
 export async function platformStitch(urls: string[]): Promise<string> {
-  const res = await fetch(`/api/workspaces/${WORKSPACE_UUID}/videos/stitch`, {
+  const token = await getWorkspaceToken();
+  const res = await fetch(`/api/workspaces/${WORKSPACE_ID}/videos/stitch`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-App-Id': appId(),
-      ...(wsToken() ? { 'X-Workspace-DB-Token': wsToken() } : {}),
+      'X-App-Id': spaceId(),
+      ...(token ? { 'X-Workspace-DB-Token': token } : {}),
     },
     body: JSON.stringify({ videoUrls: urls }),
   });
@@ -81,7 +90,9 @@ export async function platformStitch(urls: string[]): Promise<string> {
 }
 
 function assemblySize(aspect: Aspect): { W: number; H: number } {
-  return aspect === '9:16' ? { W: 720, H: 1280 } : { W: 1280, H: 720 };
+  return aspect === '9:16' ? { W: 720, H: 1280 }
+    : aspect === '1:1' ? { W: 1080, H: 1080 }
+      : { W: 1280, H: 720 };
 }
 
 function videoExt(url: string): string {
@@ -120,8 +131,12 @@ export interface AssemblyFinish {
    * is automatic on top of this. */
   musicVolume?: number;
   captionsSrt?: string;
+  /** Exact display copy rendered after the clips are joined. */
+  textOverlays?: OnScreenTextItem[];
+  /** Audio-on exports must contain a measurable, non-silent stream. */
+  requireAudibleAudio?: boolean;
 }
-export interface AssemblyResult { url: string; durationS: number; via: 'ffmpeg_wasm' | 'platform_stitch' }
+export interface AssemblyResult { url: string; durationS: number; via: 'ffmpeg_wasm' | 'platform_stitch'; audioMeanDb?: number }
 
 async function writeNarration(ff: any, urls: string[], cleanup: string[]): Promise<string | null> {
   if (!urls.length) return null;
@@ -142,10 +157,46 @@ async function writeNarration(ff: any, urls: string[], cleanup: string[]): Promi
   return output;
 }
 
+function assTime(seconds: number): string {
+  const total = Math.max(0, Number(seconds) || 0);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = Math.floor(total % 60);
+  const cs = Math.floor((total - Math.floor(total)) * 100);
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+}
+
+function assText(value: string): string {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}').replace(/\r?\n/g, '\\N');
+}
+
+/** ASS is FFmpeg's deterministic timed-text format. FontSize 20 and Outline 2
+ * intentionally match the existing burned-caption settings in this file; only
+ * emphasis, backing and screen alignment vary by the user's style/position. */
+function buildTextOverlayAss(items: OnScreenTextItem[], aspect: Aspect): string {
+  const { W, H } = assemblySize(aspect);
+  const header = [
+    '[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${W}`, `PlayResY: ${H}`, 'ScaledBorderAndShadow: yes', '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    'Style: Clean,Arial,20,&H00FFFFFF,&H00FFFFFF,&H90000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,28,28,34,1',
+    'Style: Boxed,Arial,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,3,1,0,2,28,28,34,1',
+    'Style: Accent,Arial,20,&H0044B5F2,&H0044B5F2,&H90000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,28,28,34,1', '',
+    '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ];
+  const events = items.map((item) => {
+    const alignment = item.position === 'top' ? 8 : item.position === 'center' ? 5 : 2;
+    const style = item.style === 'boxed' ? 'Boxed' : item.style === 'accent' ? 'Accent' : 'Clean';
+    return `Dialogue: 1,${assTime(item.start_s)},${assTime(item.end_s)},${style},,0,0,0,,{\\an${alignment}}${assText(item.text)}`;
+  });
+  return [...header, ...events].join('\n');
+}
+
 async function applyFinish(
   ff: any,
   joinedName: string,
   finish: AssemblyFinish,
+  aspect: Aspect,
   cleanup: string[],
   say: (note: string, fraction: number) => void,
 ): Promise<string> {
@@ -161,6 +212,13 @@ async function applyFinish(
     captions = 'captions.srt';
     await ff.writeFile(captions, new TextEncoder().encode(finish.captionsSrt));
     cleanup.push(captions);
+  }
+  let overlays = '';
+  const textOverlays = (finish.textOverlays || []).filter((item) => item.text && item.end_s > item.start_s);
+  if (textOverlays.length) {
+    overlays = 'text-overlays.ass';
+    await ff.writeFile(overlays, new TextEncoder().encode(buildTextOverlayAss(textOverlays, aspect)));
+    cleanup.push(overlays);
   }
 
   const duration = Math.max(0.25, Number(finish.durationS) || 0).toFixed(3);
@@ -197,16 +255,19 @@ async function applyFinish(
 
   const output = 'final.mp4';
   args.push('-filter_complex', filters.join(';'), '-map', '0:v:0', '-map', '[outa]');
-  if (captions) {
-    args.push('-vf', `subtitles=${captions}:force_style='FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H90000000,BorderStyle=1,Outline=2,Shadow=0,MarginV=34'`);
+  const videoFilters: string[] = [];
+  if (overlays) videoFilters.push(`subtitles=${overlays}`);
+  if (captions) videoFilters.push(`subtitles=${captions}:force_style='FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H90000000,BorderStyle=1,Outline=2,Shadow=0,MarginV=34'`);
+  if (videoFilters.length) {
+    args.push('-vf', videoFilters.join(','));
     args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p');
   } else {
     args.push('-c:v', 'copy');
   }
   args.push('-c:a', 'aac', '-ar', '44100', '-ac', '2', '-movflags', '+faststart', '-shortest', output);
-  say(captions ? 'Mixing sound and burning captions…' : 'Mixing the finishing audio…', 0.95);
+  say(overlays ? 'Burning the approved on-screen text…' : captions ? 'Mixing sound and burning captions…' : 'Mixing the finishing audio…', 0.95);
   const rc = await ff.exec(args);
-  if (rc !== 0) throw new Error(captions ? 'FFmpeg could not burn the captions into this film.' : 'FFmpeg could not mix the finishing audio.');
+  if (rc !== 0) throw new Error(overlays ? 'FFmpeg could not burn the on-screen text into this film.' : captions ? 'FFmpeg could not burn the captions into this film.' : 'FFmpeg could not mix the finishing audio.');
   cleanup.push(output);
   return output;
 }
@@ -215,6 +276,24 @@ async function applyFinish(
  * in-memory FS would otherwise hold every downloaded clip and every normalized
  * copy until the end of the run — fine for a dozen scenes, fatal for a long
  * film of 60–120 clips. */
+async function verifyAudibleAudio(ff: any, fileName: string): Promise<number> {
+  const logs: string[] = [];
+  const listener = ({ message }: any) => logs.push(String(message || ''));
+  ff.on('log', listener);
+  let rc = 1;
+  try {
+    rc = await ff.exec(['-i', fileName, '-map', '0:a:0', '-af', 'volumedetect', '-f', 'null', '-']);
+  } finally {
+    try { ff.off('log', listener); } catch { /* older ffmpeg wrapper */ }
+  }
+  const joined = logs.join('\n');
+  const match = /mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/i.exec(joined);
+  if (rc !== 0 || !match) throw new Error('Audio is ON, but the assembled MP4 has no readable audio stream. The export was not accepted.');
+  const meanDb = Number(match[1]);
+  if (!Number.isFinite(meanDb) || meanDb <= -65) throw new Error(`Audio is ON, but the assembled track is effectively silent (${Number.isFinite(meanDb) ? meanDb.toFixed(1) : '-∞'} dB mean). The export was not accepted.`);
+  return meanDb;
+}
+
 async function drop(ff: any, cleanup: string[], ...names: string[]): Promise<void> {
   for (const name of names) {
     try { await ff.deleteFile(name); } catch { /* already gone */ }
@@ -235,7 +314,7 @@ export async function assembleFilm(
   // the FFmpeg path — the platform stitch fallback would silently drop it, so
   // any clip carrying audio layers makes FFmpeg mandatory.
   const sceneAudioRequested = clips.some((c) => c.narrationUrl || (c.sfx && c.sfx.length) || (typeof c.nativeVolume === 'number' && c.nativeVolume < 0.999) || c.strictAudio);
-  const finishRequested = !!(finish && ((finish.narrationUrls?.length || 0) > 0 || finish.musicUrl || finish.captionsSrt)) || sceneAudioRequested;
+  const finishRequested = !!(finish && ((finish.narrationUrls?.length || 0) > 0 || finish.musicUrl || finish.captionsSrt || (finish.textOverlays?.length || 0) > 0 || finish.requireAudibleAudio)) || sceneAudioRequested;
 
   try {
     const ff = await loadFFmpeg();
@@ -355,8 +434,9 @@ export async function assembleFilm(
     const joinRc = await ff.exec(['-y', '-f', 'concat', '-safe', '0', '-i', listName, '-c', 'copy', '-movflags', '+faststart', joinedName]);
     if (joinRc !== 0) throw new Error('The final join failed inside FFmpeg.');
 
-    const finishLayers = !!(finish && ((finish.narrationUrls?.length || 0) > 0 || finish.musicUrl || finish.captionsSrt));
-    const outputName = finishLayers ? await applyFinish(ff, joinedName, finish!, cleanup, say) : joinedName;
+    const finishLayers = !!(finish && ((finish.narrationUrls?.length || 0) > 0 || finish.musicUrl || finish.captionsSrt || (finish.textOverlays?.length || 0) > 0));
+    const outputName = finishLayers ? await applyFinish(ff, joinedName, finish!, aspect, cleanup, say) : joinedName;
+    const audioMeanDb = finish?.requireAudibleAudio ? await verifyAudibleAudio(ff, outputName) : undefined;
     const bytes = await ff.readFile(outputName);
     const blob = new Blob([bytes], { type: 'video/mp4' });
     for (const name of [...new Set(cleanup)]) { try { await ff.deleteFile(name); } catch { /* fs cleanup */ } }
@@ -364,7 +444,7 @@ export async function assembleFilm(
 
     say('Publishing the film…', 0.98);
     const url = await uploadBlob(blob, `s2v-film-${Date.now()}.mp4`);
-    return { url, durationS: Number(finish?.durationS) || 0, via: 'ffmpeg_wasm' };
+    return { url, durationS: Number(finish?.durationS) || 0, via: 'ffmpeg_wasm', audioMeanDb };
   } catch (wasmError: any) {
     // Finishing cannot silently disappear. The stitch fallback has no audio or
     // caption mixer, so an opted-in finish must fail clearly and preserve the

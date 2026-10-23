@@ -1,33 +1,27 @@
 /**
  * Video Enhancer — platform API core.
  *
- * Self-contained apart from the shared app-id registry and generation client
- * (imports NOTHING from Track A or Track B code). Covers the whole enhancement
+ * Self-contained apart from shared workspace and render clients (imports
+ * NOTHING from Track A or Track B code). Covers the whole enhancement
  * pipeline against documented platform integrations:
  *   1. Upload           → POST /api/upload/file            (file-storage)
  *   2. Transcription    → POST /api/workspaces/:id/audio/transcribe-timestamped
  *                         (deepgram-transcription; WAV extraction fallback)
  *   3. Enhancement plan → POST /proxy/anthropic/v1/messages (claude-sonnet-5)
- *   4. B-roll           → POST /api/veo/generate/video + /api/veo/status/:op
- *   5. Export           → POST /api/render/remotion + GET /api/render/remotion/:op
+ *   4. B-roll           → veh-broll-generate workspace hook
+ *   5. Export           → canonical Remotion submission and status helpers
  */
 
-import { APP_IDS, VEO_31_FAST_MODEL } from '../../lib/appIds';
-import { generationHeaders, postGeneration } from '../../lib/videoEngineClient';
+import { VEO_31_FAST_MODEL } from '../../lib/appIds';
+import { readRender, submitRender as submitCanonicalRender } from '../../lib/render/remotion';
+import { callHook, spaceId, workspaceTokenNow, WORKSPACE_ID } from '../../lib/workspace';
 
-export const WORKSPACE_UUID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
+export const WORKSPACE_UUID = WORKSPACE_ID;
 export const ACCENT = '#3B82F6';
 
-/** The visitor's workspace token — required by every platform proxy call. */
-export function workspaceToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
-
-function appId(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || '');
-}
+/** Backward-compatible aliases for modules that consume enhancer identity. */
+export const workspaceToken = workspaceTokenNow;
+const appId = spaceId;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -537,32 +531,30 @@ export function applyEmphasis(segments: CaptionSegment[], emphasis: string[]): C
 // ---------------------------------------------------------------------------
 
 export async function submitBroll(prompt: string, aspectRatio: '16:9' | '9:16', durationSec: number): Promise<string> {
-  const { res, data } = await postGeneration('/api/veo/generate/video', {
+  const data = await callHook('veh-broll-generate', {
     model: VEO_31_FAST_MODEL,
     prompt,
-    aspectRatio,
-    duration: Math.min(8, Math.max(4, Math.round(durationSec))),
-    generateAudio: false,
-    resolution: '1080p',
-  }, APP_IDS.videoEnhancer);
-  if (!res.ok || !data?.operationId) {
-    const detail = Array.isArray(data?.details) ? data.details.map((d: any) => d?.message).filter(Boolean).join('; ') : '';
-    throw new Error((detail || (data?.error as string)) || ('B-roll generation failed to start (HTTP ' + res.status + ').'));
+    aspect: aspectRatio,
+    durationS: Math.min(8, Math.max(4, Math.round(durationSec))),
+  });
+  if (data?.status === 'failed') {
+    throw new Error(String(data.error || data.errorMessage || 'B-roll generation failed to start.'));
+  }
+  if (!data?.operationId) {
+    throw new Error(String(data?.error || 'B-roll generation did not return an operation id.'));
   }
   return String(data.operationId);
 }
 
 export async function checkBroll(operationId: string): Promise<{ status: 'processing' | 'completed' | 'failed'; progress?: number; videoUrl?: string; errorMessage?: string }> {
-  const enc = encodeURIComponent(operationId);
-  const headers = generationHeaders(APP_IDS.videoEnhancer);
-  let res = await fetch('/api/veo/status/' + enc, { headers });
-  if (res.status === 404) {
-    res = await fetch('/api/generate/video/status/' + enc, { headers });
-  }
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) throw new Error('Could not check B-roll status (HTTP ' + res.status + ').');
-  const status = data.status === 'completed' ? 'completed' : data.status === 'failed' ? 'failed' : 'processing';
-  return { status, progress: Number(data.progress) || 0, videoUrl: data.videoUrl || undefined, errorMessage: data.errorMessage || undefined };
+  const data = await callHook('veh-broll-generate', { operationId });
+  const status = data?.status === 'completed' ? 'completed' : data?.status === 'failed' ? 'failed' : 'processing';
+  return {
+    status,
+    progress: Number(data?.progress) || 0,
+    videoUrl: data?.videoUrl || undefined,
+    errorMessage: data?.errorMessage || data?.error || undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -604,33 +596,22 @@ export interface RenderProps {
 }
 
 export async function submitRender(props: RenderProps, durationInFrames: number): Promise<string> {
-  const res = await fetch('/api/render/remotion', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
-    body: JSON.stringify({
-      workspaceId: WORKSPACE_UUID,
-      compositionTsx: ENHANCER_COMPOSITION_TSX,
-      props,
-      durationInFrames,
-      fps: 30,
-      width: 1920,
-      height: 1080,
-    }),
+  const submitted = await submitCanonicalRender({
+    compositionTsx: ENHANCER_COMPOSITION_TSX,
+    props,
+    durationInFrames,
+    aspect: '16:9',
   });
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.operationId) {
-    throw new Error((data?.error as string) || ('Render submission failed (HTTP ' + res.status + ').'));
-  }
-  return String(data.operationId);
+  return submitted.operationId;
 }
 
 export async function checkRender(operationId: string): Promise<{ status: 'pending' | 'rendering' | 'complete' | 'failed'; videoUrl?: string; error?: string }> {
-  const res = await fetch('/api/render/remotion/' + encodeURIComponent(operationId), {
-    headers: { 'X-Workspace-DB-Token': workspaceToken() },
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) throw new Error('Could not check render status (HTTP ' + res.status + ').');
-  return { status: data.status, videoUrl: data.videoUrl || undefined, error: data.error || undefined };
+  const status = await readRender(operationId);
+  return {
+    status: status.state,
+    videoUrl: status.videoUrl || undefined,
+    error: status.error || undefined,
+  };
 }
 
 /**

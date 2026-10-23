@@ -47,15 +47,26 @@ function rowFrom(result: any): any {
 const KNOWN_PIPELINES: PipelineId[] = ['CODE_ENGINEERED', 'HYBRID_DOCUMENTARY', 'RUNWAY_MULTI_SHOT'];
 
 /**
- * The live CHECK on vge_video_jobs.pipeline is still the two-value list the
- * table was created with — `CHECK (pipeline = ANY (ARRAY['CODE_ENGINEERED',
- * 'HYBRID_DOCUMENTARY']))` — so Postgres refuses every RUNWAY_MULTI_SHOT row
- * no matter who writes it. Widening it takes an ALTER TABLE, which no app,
- * hook or agent surface in this workspace can run. Until it is widened the
- * refusal is matched here and answered in words a customer can act on; the
- * raw "violates check constraint" text is not.
+ * The CHECK on vge_video_jobs.pipeline deliberately accepts only
+ * CODE_ENGINEERED and HYBRID_DOCUMENTARY — that is the table's intended shape
+ * (re-verified 18–19 Oct 2026), not a missing migration, and it must not be
+ * widened. The UI's third pipeline, RUNWAY_MULTI_SHOT, is therefore ENCODED:
+ * its rows are stored as pipeline = 'HYBRID_DOCUMENTARY' with
+ * provider = 'runway-native' (+ recipe_id). storedPipeline() maps the UI id on
+ * insert and toJob() derives it back from provider on read. The
+ * vidverge-orchestrator skips provider = 'runway-native' rows, so the encoding
+ * never hands a Runway job to the Pipeline A/B worker.
+ *
+ * The refusal guard below stays as a safety net: with the mapping in place it
+ * should never fire, but if it does the customer gets words they can act on
+ * instead of the raw "violates check constraint" text.
  */
 const PIPELINE_REFUSED_BY_DB = /check constraint "vge_video_jobs_pipeline_check"/i;
+
+/** UI pipeline id → the value the database CHECK accepts. */
+function storedPipeline(pipeline: PipelineId): PipelineId {
+  return pipeline === 'RUNWAY_MULTI_SHOT' ? 'HYBRID_DOCUMENTARY' : pipeline;
+}
 
 function toPipeline(raw: any): PipelineId {
   const value = String(raw || '');
@@ -68,7 +79,12 @@ function toJob(raw: any): VideoJob {
   return {
     id: String(raw?.id || ''),
     project_name: String(raw?.project_name || 'Untitled'),
-    pipeline: toPipeline(raw?.pipeline),
+    // provider = 'runway-native' is what marks a native Runway row; its stored
+    // pipeline is HYBRID_DOCUMENTARY only to satisfy the CHECK constraint.
+    pipeline:
+      String(raw?.provider || '') === 'runway-native'
+        ? 'RUNWAY_MULTI_SHOT'
+        : toPipeline(raw?.pipeline),
     status: String(raw?.status || 'QUEUED') as JobStatus,
     aspect_ratio: String(raw?.aspect_ratio || '9:16'),
     target_duration_sec: Number(raw?.target_duration_sec) || 60,
@@ -110,7 +126,10 @@ export async function createJob(input: CreateJobInput): Promise<VideoJob> {
   try {
     result = await db().from(JOBS_TABLE).insert({
       project_name: input.projectName.slice(0, 160),
-      pipeline: input.pipeline,
+      pipeline: storedPipeline(input.pipeline),
+      // Set at insert (not only after submit) so the orchestrator's orphan
+      // sweep can never adopt a native Runway row in the gap before hand-off.
+      provider: input.pipeline === 'RUNWAY_MULTI_SHOT' ? 'runway-native' : null,
       status: 'QUEUED',
       aspect_ratio: input.aspectRatio,
       target_duration_sec: Math.round(input.targetDurationSec),
@@ -121,9 +140,9 @@ export async function createJob(input: CreateJobInput): Promise<VideoJob> {
     });
   } catch (error: any) {
     if (PIPELINE_REFUSED_BY_DB.test(String(error?.message || error))) {
-      console.error('[vidverge] vge_video_jobs.pipeline CHECK does not include', input.pipeline, error);
+      console.error('[vidverge] vge_video_jobs.pipeline CHECK refused an insert', input.pipeline, error);
       throw new EngineStageError(
-        `This workspace cannot store ${input.pipeline} jobs yet, so the job was not opened — nothing was generated and nothing was charged. The vge_video_jobs pipeline constraint has to list ${input.pipeline} before these ads can run.`,
+        'The job could not be opened in the database, so nothing was generated and nothing was charged. Try again in a moment.',
         'database',
       );
     }

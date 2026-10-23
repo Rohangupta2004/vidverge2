@@ -193,6 +193,70 @@ export async function probeClipDuration(url: string): Promise<number> {
   return Number.isFinite(d) && d > 0 ? d : 0;
 }
 
+export interface ClipAudioProbe {
+  hasAudioTrack: boolean;
+  audible: boolean;
+  channels: number;
+  sampleRate: number;
+  durationS: number;
+  rms: number;
+  rmsDb: number;
+  peak: number;
+  peakDb: number;
+}
+
+/** Decode the actual media bytes and measure PCM energy. `loadedmetadata`
+ * only proves that a video container opened; it says nothing about whether an
+ * audio stream exists or contains sound. Call this from a player's
+ * onLoadedMetadata handler so every preview reports evidence, not a guess. */
+export async function probeClipAudio(url: string): Promise<ClipAudioProbe> {
+  if (typeof window === 'undefined') throw new Error('Audio inspection needs an open browser tab.');
+  const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextCtor) throw new Error('This browser cannot inspect clip audio.');
+  const response = await fetch(url, { mode: 'cors' });
+  if (!response.ok) throw new Error(`The clip could not be fetched for its sound check (HTTP ${response.status}).`);
+  const bytes = await response.arrayBuffer();
+  const context = new AudioContextCtor();
+  try {
+    let decoded: AudioBuffer;
+    try {
+      decoded = await context.decodeAudioData(bytes.slice(0));
+    } catch {
+      // A playable video-only MP4 has no decodable audio payload. This is the
+      // expected result for silent routes such as the connected Kling proxy.
+      return { hasAudioTrack: false, audible: false, channels: 0, sampleRate: 0, durationS: 0, rms: 0, rmsDb: -Infinity, peak: 0, peakDb: -Infinity };
+    }
+    let squares = 0;
+    let peak = 0;
+    let samples = 0;
+    for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+      const pcm = decoded.getChannelData(channel);
+      samples += pcm.length;
+      for (let i = 0; i < pcm.length; i += 1) {
+        const value = Math.abs(pcm[i]);
+        squares += value * value;
+        if (value > peak) peak = value;
+      }
+    }
+    const rms = samples ? Math.sqrt(squares / samples) : 0;
+    const rmsDb = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+    const peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+    return {
+      hasAudioTrack: decoded.numberOfChannels > 0,
+      audible: decoded.numberOfChannels > 0 && Number.isFinite(rmsDb) && rmsDb > -65,
+      channels: decoded.numberOfChannels,
+      sampleRate: decoded.sampleRate,
+      durationS: decoded.duration,
+      rms,
+      rmsDb,
+      peak,
+      peakDb,
+    };
+  } finally {
+    try { await context.close(); } catch { /* released */ }
+  }
+}
+
 /**
  * Photograph one frame of a clip and upload it as a durable PNG.
  * position: seconds from start, or 'end' for the final frame (mirrors

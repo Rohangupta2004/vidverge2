@@ -18,6 +18,8 @@
  * the render service, or the 15-minute budget running out are terminal and
  * are written to the row with a human-readable reason.
  */
+import { poll } from '../../lib/poll';
+import { getSessionId, spaceId } from '../../lib/workspace';
 import { checkRender } from './enhancerCore';
 
 export interface EnhancementRow {
@@ -36,32 +38,17 @@ export interface EnhancementRow {
 const TABLE = 'video_enhancements';
 export const RENDER_POLL_BUDGET_MS = 15 * 60 * 1000;
 const POLL_INTERVAL_MS = 4000;
-/** Consecutive failed status CALLS tolerated before the render is declared unreachable. */
-const MAX_POLL_FAILURES = 5;
 
 function msg(e: unknown): string { return e instanceof Error ? e.message : String(e); }
-function sleep(ms: number): Promise<void> { return new Promise((r) => { setTimeout(r, ms); }); }
 
 function wdb(): any {
   if (typeof window === 'undefined') return null;
   return (window as any).__workspaceDb || null;
 }
 
-/** The visitor session id — recorded on each row as user_id so a reload can find "my" renders. */
-export function veSessionId(): string {
-  if (typeof window === 'undefined') return '';
-  const w = window as any;
-  if (typeof w.__spaceSessionId === 'string' && w.__spaceSessionId) return w.__spaceSessionId;
-  const client = w.__workspaceDb;
-  return client && typeof client.sessionId === 'string' ? client.sessionId : '';
-}
-
-export function veWorkspaceId(): string {
-  if (typeof window === 'undefined') return '';
-  const w = window as any;
-  const id = w.__SPACE_ID__ || w.__APP_ID__ || (w.__SPACE_CONFIG__ && w.__SPACE_CONFIG__.id) || '';
-  return id ? (String(id).startsWith('workspace-') ? String(id) : 'workspace-' + id) : '';
-}
+/** Backward-compatible aliases for persisted render row identity. */
+export const veSessionId = getSessionId;
+export const veWorkspaceId = spaceId;
 
 /** Newest renders owned by the current signed-in visitor. Best-effort. */
 export async function fetchRenderRows(): Promise<EnhancementRow[]> {
@@ -144,45 +131,48 @@ export async function pollRenderToOutcome(
 ): Promise<RenderOutcome | null> {
   let progress = 8;
   let lastWrittenProgress = 0;
-  let failures = 0;
-  while (Date.now() - startedAt < RENDER_POLL_BUDGET_MS) {
-    // Transient poll failures grow the wait (4s → 7s → 10s…) instead of hammering.
-    await sleep(POLL_INTERVAL_MS + failures * 3000);
-    if (handlers.isAlive && !handlers.isAlive()) return null;
-    let st: Awaited<ReturnType<typeof checkRender>>;
-    try {
-      st = await checkRender(opId);
-    } catch (e) {
-      // A failed status CALL is not a failed render — but an unbroken run of
-      // them means nothing is coming back, so surface it instead of spinning
-      // silently until the budget runs out.
-      failures += 1;
-      if (failures >= MAX_POLL_FAILURES) {
-        const reason = 'Lost contact with the render service (' + msg(e) + '). The render may still finish server-side — reload this app in a minute to reconnect.';
-        await updateRenderRow(rowId, { status: 'failed', error_message: reason });
-        return { status: 'failed', error: reason };
-      }
-      continue;
-    }
-    failures = 0;
-    if (st.status === 'complete' && st.videoUrl) {
+  const remainingMs = Math.max(1, RENDER_POLL_BUDGET_MS - (Date.now() - startedAt));
+  try {
+    const final = await poll(async () => {
+      if (handlers.isAlive && !handlers.isAlive()) return { stopped: true as const, status: null };
+      return { stopped: false as const, status: await checkRender(opId) };
+    }, {
+      interval: POLL_INTERVAL_MS,
+      timeout: remainingMs,
+      backoff: 1.15,
+      maxInterval: 16_000,
+      tolerateErrors: 5,
+      until: (result) => Boolean(
+        result.stopped
+        || result.status?.status === 'complete'
+        || result.status?.status === 'failed',
+      ),
+      onTick: (result) => {
+        const st = result.status;
+        if (!st || st.status === 'complete' || st.status === 'failed') return;
+        progress = Math.min(92, progress + 3);
+        if (progress - lastWrittenProgress >= 9) {
+          lastWrittenProgress = progress;
+          void updateRenderRow(rowId, { progress });
+        }
+        handlers.onTick?.({ progress, status: st.status === 'rendering' ? 'rendering' : 'pending' });
+      },
+    });
+    if (final.stopped) return null;
+    const st = final.status;
+    if (st?.status === 'complete' && st.videoUrl) {
       await updateRenderRow(rowId, { status: 'completed', progress: 100, output_url: st.videoUrl });
       return { status: 'completed', url: st.videoUrl };
     }
-    if (st.status === 'failed') {
-      // Terminal: surface the provider's ACTUAL reason, not a generic error.
-      const reason = st.error || 'The render service reported a failure without a reason.';
-      await updateRenderRow(rowId, { status: 'failed', error_message: reason });
-      return { status: 'failed', error: reason };
-    }
-    progress = Math.min(92, progress + 3);
-    if (progress - lastWrittenProgress >= 9) {
-      lastWrittenProgress = progress;
-      void updateRenderRow(rowId, { progress });
-    }
-    if (handlers.onTick) handlers.onTick({ progress, status: st.status === 'rendering' ? 'rendering' : 'pending' });
+    const reason = st?.error || 'The render service reported a failure without a reason.';
+    await updateRenderRow(rowId, { status: 'failed', error_message: reason });
+    return { status: 'failed', error: reason };
+  } catch (e) {
+    const timedOut = (e as any)?.name === 'PollTimeoutError';
+    const reason = timedOut
+      ? 'The render timed out after 15 minutes — try the export again.'
+      : 'Lost contact with the render service (' + msg(e) + '). The render may still finish server-side — reload this app in a minute to reconnect.';
+    await updateRenderRow(rowId, { status: 'failed', error_message: reason });
+    return { status: 'failed', error: reason };
   }
-  const reason = 'The render timed out after 15 minutes — try the export again.';
-  await updateRenderRow(rowId, { status: 'failed', error_message: reason });
-  return { status: 'failed', error: reason };
 }

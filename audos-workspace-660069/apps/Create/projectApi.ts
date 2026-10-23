@@ -39,7 +39,6 @@ import {
   contentBlockReason,
   extractJson,
   isJobLostStatus,
-  scopedSpaceId,
   sessionId,
   type RenderStatus,
 } from './studioApi';
@@ -60,6 +59,8 @@ import {
   workspaceUuid,
   writeFailureNotice,
 } from '../../lib/reelioStudio';
+import { poll, PollTimeoutError } from '../../lib/poll';
+import { callHook } from '../../lib/workspace';
 
 // ---------------------------------------------------------------------------
 // Shape of a project
@@ -195,10 +196,6 @@ function sceneKey(): string {
 
 function isHttpUrl(value: unknown): boolean {
   return typeof value === 'string' && /^https?:\/\//.test(value);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ---------------------------------------------------------------------------
@@ -486,15 +483,6 @@ export function renumberScenes(scenes: PlannedScene[]): PlannedScene[] {
 // ---------------------------------------------------------------------------
 // Rendering one scene through the existing generate-video hook
 // ---------------------------------------------------------------------------
-function hookHeaders(sid: string | null = sessionId()): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (sid) headers['X-Session-Id'] = sid;
-  const workspaceClient = typeof window !== 'undefined' ? (window as any).__workspaceDb : null;
-  const token = workspaceClient && typeof workspaceClient.token === 'string' ? workspaceClient.token : '';
-  if (token) headers['X-Workspace-DB-Token'] = token;
-  return headers;
-}
-
 /**
  * The ~8s beats one scene is rendered as. The anchor's seed line leads EVERY
  * beat, and only the description tail is ever truncated, so the character
@@ -632,16 +620,15 @@ export async function submitSceneRender(input: {
 
   /** One submit attempt. Throws on anything that stopped the render starting. */
   const start = async (): Promise<SceneSubmitResult> => {
-    const res = await fetch(`/api/hooks/execute/${scopedSpaceId()}/generate-video`, {
-      method: 'POST',
-      headers: hookHeaders(sid),
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data || !data.success || !data.job_id) {
-      throw new Error(
-        (data && data.error) || `The scene render could not be started (HTTP ${res.status}).`,
-      );
+    const data = await callHook<{
+      success?: boolean;
+      job_id?: string;
+      notice?: string;
+      model_used?: string;
+      error?: string;
+    }>('generate-video', body);
+    if (!data || !data.success || !data.job_id) {
+      throw new Error(data?.error || 'The scene render could not be started.');
     }
     return {
       success: true,
@@ -738,65 +725,73 @@ export async function waitForSceneRender(
 ): Promise<SceneRenderResult> {
   const pollMaxMs = opts.pollMs || SCENE_POLL_MS;
   const timeoutMs = opts.timeoutMs || SCENE_TIMEOUT_MS;
-  const deadline = Date.now() + timeoutMs;
-  let pollMs = Math.min(SCENE_POLL_MIN_MS, pollMaxMs);
   let statusFailures = 0;
+  type PollOutcome = { result?: SceneRenderResult; terminalError?: string; status: RenderStatus };
 
-  while (Date.now() < deadline) {
-    if (opts.isAborted && opts.isAborted()) throw new Error('aborted');
-    const status = await checkVideoStatus(jobId);
-    if (opts.isAborted && opts.isAborted()) throw new Error('aborted');
+  try {
+    const outcome = await poll<PollOutcome>(async () => {
+      if (opts.isAborted?.()) return { terminalError: 'aborted', status: { success: false } as RenderStatus };
+      const status = await checkVideoStatus(jobId);
+      if (opts.isAborted?.()) return { terminalError: 'aborted', status };
 
-    if (!status.success) {
-      // HARD 404 / LOST-JOB FAILURE (Sep 12 2026): a job the render service no
-      // longer knows (provider 404 / "not found") can never complete — fail
-      // this scene NOW with a fresh-submit Retry instead of re-polling an
-      // answer that cannot change until the 16-minute ceiling.
-      if (isJobLostStatus(status.error)) {
-        throw new Error('The render service no longer recognises this scene’s render job — it was lost provider-side. Retry the scene to submit it fresh.');
+      if (!status.success) {
+        if (isJobLostStatus(status.error)) {
+          return {
+            terminalError: 'The render service no longer recognises this scene’s render job — it was lost provider-side. Retry the scene to submit it fresh.',
+            status,
+          };
+        }
+        statusFailures += 1;
+        if (statusFailures >= MAX_STATUS_POLL_FAILURES) {
+          return {
+            terminalError: 'We lost contact with the render service for this scene. It may still finish — retry it in a moment.',
+            status,
+          };
+        }
+      } else {
+        statusFailures = 0;
       }
-      statusFailures += 1;
-      if (statusFailures >= MAX_STATUS_POLL_FAILURES) {
-        throw new Error('We lost contact with the render service for this scene. It may still finish — retry it in a moment.');
+
+      const ready = status.success &&
+        (status.stage === 'ready' || status.status === 'completed' || status.status === 'partial');
+      if (ready) {
+        const clipUrls = clipsFromStatus(status);
+        if (clipUrls.length > 0) {
+          return { result: { clipUrls, workspaceUuid: status.workspace_uuid, audio: status.audio }, status };
+        }
+      } else {
+        const refusal = contentBlockReason(status);
+        if (refusal) return { terminalError: refusal, status };
+        if (status.success && (status.stage === 'failed' || status.status === 'failed')) {
+          return { terminalError: status.user_message || status.error || 'The scene render failed.', status };
+        }
       }
-    } else {
-      statusFailures = 0;
+
+      if (opts.onTick) {
+        const retried = (status as any).retried === true;
+        opts.onTick(
+          retried ? 'That render hiccuped — it restarted itself.' : status.user_message || 'Rendering this scene…',
+          status,
+        );
+      }
+      return { status };
+    }, {
+      interval: Math.min(SCENE_POLL_MIN_MS, pollMaxMs),
+      timeout: timeoutMs,
+      backoff: 1.5,
+      maxInterval: pollMaxMs,
+      until: (value) => Boolean(value.result || value.terminalError),
+    });
+
+    if (outcome.terminalError) throw new Error(outcome.terminalError);
+    if (outcome.result) return outcome.result;
+  } catch (error) {
+    if (error instanceof PollTimeoutError) {
+      throw new Error('This scene is taking unusually long. It keeps rendering — retry the scene to pick it back up.');
     }
-
-    const ready =
-      status.success && (status.stage === 'ready' || status.status === 'completed' || status.status === 'partial');
-    if (ready) {
-      const clipUrls = clipsFromStatus(status);
-      if (clipUrls.length > 0) {
-        return { clipUrls, workspaceUuid: status.workspace_uuid, audio: status.audio };
-      }
-      // Completed but the URLs have not landed yet — they usually land within
-      // a second or two, so drop back to the fast interval to catch them.
-      pollMs = Math.min(SCENE_POLL_MIN_MS, pollMaxMs);
-    } else {
-      // A content refusal is an ENDING: polling it for another sixteen
-      // minutes holds the whole run open on an answer that cannot change, and
-      // leaves this scene's row spinning as if it were still rendering.
-      const refusal = contentBlockReason(status);
-      if (refusal) throw new Error(refusal);
-      if (status.success && (status.stage === 'failed' || status.status === 'failed')) {
-        throw new Error(status.user_message || status.error || 'The scene render failed.');
-      }
-    }
-
-    if (opts.onTick) {
-      const retried = (status as any).retried === true;
-      opts.onTick(
-        retried
-          ? 'That render hiccuped — it restarted itself.'
-          : status.user_message || 'Rendering this scene…',
-        status,
-      );
-    }
-    await sleep(pollMs);
-    pollMs = Math.min(pollMaxMs, Math.round(pollMs * 1.5));
+    throw error;
   }
-  throw new Error('This scene is taking unusually long. It keeps rendering — retry the scene to pick it back up.');
+  throw new Error('This scene finished without usable clips.');
 }
 
 // ---------------------------------------------------------------------------

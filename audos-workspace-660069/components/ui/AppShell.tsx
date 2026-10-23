@@ -1,5 +1,5 @@
 import React from 'react';
-import { COLORS, CONTENT_MAX_WIDTH, FONT } from '../theme';
+import { COLORS, CONTENT_MAX_WIDTH, FONT, GRADIENT } from '../theme';
 import BeamBackground from '../BeamBackground';
 import GridOverlay from '../GridOverlay';
 import GlobalStyles from './GlobalStyles';
@@ -55,8 +55,8 @@ const AppShell: React.FC<AppShellProps> = function AppShell({
   actions,
   maxWidth = CONTENT_MAX_WIDTH,
   beamVariant = 'bottom',
-  beamIntensity = 0.12,
-  grid = true,
+  beamIntensity = 0,
+  grid = false,
   watermark = true,
   scroll = true,
   header = true,
@@ -70,7 +70,7 @@ const AppShell: React.FC<AppShellProps> = function AppShell({
 
   React.useEffect(function trackWidth() {
     if (typeof window === 'undefined') return undefined;
-    const query = window.matchMedia('(max-width: 640px)');
+    const query = window.matchMedia('(max-width: 767px)');
     function sync() {
       setNarrow(query.matches);
     }
@@ -87,7 +87,7 @@ const AppShell: React.FC<AppShellProps> = function AppShell({
     };
   }, []);
 
-  const pad = padding == null ? (narrow ? 16 : 28) : padding;
+  const pad = padding == null ? (narrow ? 16 : (typeof window !== 'undefined' && window.innerWidth < 1200 ? 24 : 32)) : padding;
 
   return (
     <div
@@ -97,7 +97,7 @@ const AppShell: React.FC<AppShellProps> = function AppShell({
         width: '100%',
         height: '100%',
         minHeight: '100%',
-        background: COLORS.bg,
+        background: `${GRADIENT.ambient}, ${COLORS.bg}`,
         color: COLORS.text,
         fontFamily: FONT.body,
         overflowX: 'hidden',
@@ -113,11 +113,9 @@ const AppShell: React.FC<AppShellProps> = function AppShell({
       {/* Absolutely positioned, never fixed: a fixed layer is laid out against
           the viewport, so it would spill out of the app window and across the
           dock and agent panel beside it. */}
-      <BeamBackground
-        variant={beamVariant}
-        intensity={beamIntensity}
-        count={beamVariant === 'center' ? 13 : 11}
-      />
+      {beamIntensity > 0 ? (
+        <BeamBackground variant={beamVariant} intensity={beamIntensity} count={beamVariant === 'center' ? 13 : 11} />
+      ) : null}
       {grid ? <GridOverlay /> : null}
 
       <div
@@ -145,7 +143,7 @@ const AppShell: React.FC<AppShellProps> = function AppShell({
           />
         ) : null}
 
-        <div style={{ flex: '1 1 auto', minHeight: 0, animation: 'fadeIn 320ms ease both' }}>
+        <div style={{ flex: '1 1 auto', minHeight: 0 }}>
           {children}
         </div>
       </div>

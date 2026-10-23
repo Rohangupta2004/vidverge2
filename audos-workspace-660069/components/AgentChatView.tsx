@@ -45,7 +45,7 @@ interface AgentChatViewProps {
  * "how can I help".
  */
 const VIDVERGE_HOME_WELCOME =
-  'Welcome to Vidverge — bring me an idea and leave with a video. Paste your product URL and I will read your brand, write you six different ad scripts, storyboard the one you pick and render it in your own colours. Want the whole launch film directed for you? Product Launch takes that same link and decides the concept, the shots and the cut itself. Describe what you are launching instead and I will write the script and build the video — teaser, reveal, demo, explainer, founder-led or social clip — in 16:9, 9:16 or square. Bring footage you already shot and I will transcribe it, hand you a cut plan you can accept edit by edit, then reframe, caption and export it for every platform; or hand the whole thing to CineAgent and it will edit, score and render it without asking you to configure anything. Just give me a topic and I will research, script and film a faceless explainer, documentary or true-crime video end to end. Need the voice rather than the whole film? Voice Studio clones your voice, reads a Hinglish script in it, dubs a finished video into Tamil or Telugu, scores a music bed and lip-syncs an avatar presenter to any of it.';
+  'What do you want to make? Describe the outcome, paste a URL, attach a script or bring footage you already shot. Verger will plan the work, ask only when a real decision is needed, and launch the right retained studio for the job.';
 
 /**
  * The one-line promise under the logo. The full welcome above is also the
@@ -54,6 +54,7 @@ const VIDVERGE_HOME_WELCOME =
  */
 const VIDVERGE_HOME_LEAD =
   'Bring me an idea and leave with a finished video — a product URL, a script, footage you already shot, or just a topic.';
+
 
 /** First sentence of `text`, or `fallback` when that is missing or too long. */
 function leadSentence(text: string, fallback: string): string {
@@ -68,16 +69,9 @@ function leadSentence(text: string, fallback: string): string {
 // config.json — a prompt that routes to a retired app is a dead end on the
 // first screen the customer sees.
 const VIDVERGE_STARTERS = [
-  'Make a 15-second launch video from my link',
-  'Turn my product URL into an ad',
-  'Write and build my product launch video',
-  'Compare my brand with my competitors',
-  'Make me a faceless documentary video',
-  'Cut, caption and reframe footage I already have',
-  'Turn my script into a film, scene by scene',
-  'Edit my raw footage into a finished cut for me',
-  'Clone my voice and make an avatar video',
-  'Dub my video into Hindi or Tamil',
+  'Make a launch video from my website',
+  'Turn my script into a cinematic film',
+  'Edit my footage into a sharp short',
 ];
 
 /**
@@ -284,7 +278,6 @@ const markdownComponents: Components = {
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log('[AgentChat] Button click - opening app:', appId);
             window.dispatchEvent(new CustomEvent('openApp', { detail: { appId } }));
           }}
           className={`inline-flex items-center gap-1 px-3 py-1 ${tw.button.primary} rounded-lg transition-colors text-xs font-medium mx-1`}
@@ -570,7 +563,7 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
                 <BrandLogo size={176} />
               </div>
               <h1 className="text-2xl font-semibold tracking-tight text-[var(--space-text-primary)] sm:text-[28px]">
-                What are we bringing to screen?
+                What do you want to make?
               </h1>
               <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-[var(--space-text-secondary)]">
                 {leadSentence(homeWelcomeText || VIDVERGE_HOME_WELCOME, VIDVERGE_HOME_LEAD)}
@@ -692,8 +685,8 @@ export default function AgentChatView({ runtime }: AgentChatViewProps) {
               <div className="mx-auto max-w-2xl text-center text-[var(--space-text-secondary)]">
                 <div className="mb-4 flex justify-center"><BrandLogo size={148} /></div>
                 <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--space-text-brand)]">VidVerge Director</p>
-                <h2 className="text-xl font-semibold text-[var(--space-text-primary)]">What are we bringing to screen?</h2>
-                <p className="mx-auto mt-2 max-w-md text-sm leading-6">Bring a product URL, a script, raw footage or a rough idea. I’ll route the brief and help direct it to a publish-ready video.</p>
+                <h2 className="text-xl font-semibold text-[var(--space-text-primary)]">What do you want to make?</h2>
+                <p className="mx-auto mt-2 max-w-md text-sm leading-6">Bring a product URL, a script, raw footage or a rough idea. Verger will plan it and run the right workflow.</p>
                 {homeStarters.length > 0 && (
                   <div className="mt-6 text-left">
                     <StarterGrid

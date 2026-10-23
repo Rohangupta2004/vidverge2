@@ -9,6 +9,7 @@
  * integration) so the render service can fetch it by URL.
  */
 import { INGEST_RULES, type IngestedScreen } from '../types';
+import { WORKSPACE_ID, workspaceTokenNow } from '../../../../lib/workspace';
 
 export class IngestError extends Error {}
 
@@ -31,16 +32,6 @@ export function validateFileSet(files: File[]): void {
       throw new IngestError(`"${file.name}" is ${file.type || 'an unknown type'} — only PNG and JPEG screenshots are accepted.`);
     }
   }
-}
-
-function workspaceToken(): string {
-  const token = (window as any).__workspaceDb?.token;
-  if (!token) throw new IngestError('Your workspace session is still loading. Wait a moment, then try again.');
-  return String(token);
-}
-
-function activeWorkspaceId(): string {
-  return String((window as any).__workspaceDb?.workspaceId || (window as any).__WORKSPACE_ID__ || '');
 }
 
 /** EXIF-strip + sRGB-normalise one screenshot and return canvas + dimensions. */
@@ -72,11 +63,13 @@ export async function uploadNormalized(canvas: HTMLCanvasElement, filename: stri
   const blob = await canvasToPng(canvas);
   const form = new FormData();
   form.append('file', blob, filename.replace(/\.[a-z]+$/i, '') + '.png');
-  form.append('workspaceId', activeWorkspaceId());
+  form.append('workspaceId', WORKSPACE_ID);
   form.append('folder', 'screens-to-motion');
+  const token = workspaceTokenNow();
+  if (!token) throw new IngestError('Your workspace session is still loading. Wait a moment, then try again.');
   const response = await fetch('/api/upload/file', {
     method: 'POST',
-    headers: { 'X-Workspace-DB-Token': workspaceToken() },
+    headers: { 'X-Workspace-DB-Token': token },
     body: form,
   });
   const body = await response.json().catch(() => null);

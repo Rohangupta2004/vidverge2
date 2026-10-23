@@ -75,14 +75,22 @@ export async function ops(op: string, payload: Record<string, any> = {}): Promis
   if (session) headers['X-Session-Id'] = session;
 
   let res: Response;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 120_000);
   try {
     res = await fetch(`/api/hooks/execute/${spaceRef()}/vergeye-ops`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ op, ownerKey: ownerKey(), ...payload }),
+      signal: controller.signal,
     });
   } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      throw new Error('Vergeye stopped waiting after two minutes. The server may still finish this step; reopen the saved campaign before retrying so work is not duplicated.');
+    }
     throw new Error(`Vergeye could not reach the server: ${String(e?.message || e)}`);
+  } finally {
+    window.clearTimeout(timeout);
   }
 
   const data = await readJson(res);

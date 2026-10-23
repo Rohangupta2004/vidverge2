@@ -30,8 +30,9 @@
 import { useEffect, useState } from 'react';
 import { stitchProject, waitForSceneRender } from './projectApi';
 import { clampText, DEFAULT_VIDEO_MODEL, getTone, getVideoModel, type AspectRatio } from './videoTypes';
-import { scopedSpaceId, sessionId, workspaceDbToken } from './studioApi';
+import { sessionId } from './studioApi';
 import { workspaceUuid } from '../../lib/reelioStudio';
+import { callHook } from '../../lib/workspace';
 import {
   briefImpliesPresenter,
   decideMode,
@@ -864,19 +865,9 @@ async function refreshShotFromServer(index: number, token: number): Promise<Shot
 }
 
 async function callAdvanceProduction(payload: Record<string, unknown>): Promise<any> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const sid = sessionId();
-  if (sid) headers['X-Session-Id'] = sid;
-  const token = workspaceDbToken();
-  if (token) headers['X-Workspace-DB-Token'] = token;
-  const response = await fetch(`/api/hooks/execute/${scopedSpaceId()}/advance-production`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json().catch(() => null);
-  if (!response.ok || !data || !data.success) {
-    throw new Error((data && data.error) || `Background production returned HTTP ${response.status}.`);
+  const data = await callHook<any>('advance-production', payload);
+  if (!data || !data.success) {
+    throw new Error((data && data.error) || 'Background production did not complete the request.');
   }
   return data;
 }

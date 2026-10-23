@@ -11,6 +11,7 @@
  * default for clip scenes is "strip" anyway).
  */
 import { CLIP_RULES, type IngestedClip } from '../types';
+import { poll } from '../../../../lib/poll';
 import { probeToClip } from './probe';
 import { screenGateCheck, type GateRejection } from './gate';
 
@@ -47,17 +48,34 @@ async function generateOnce(prompt: string, onProgress?: (message: string) => vo
     throw new Error(body?.error || `Atmosphere generation could not be started (${response.status}).`);
   }
   const operationId = String(body.operationId);
-  for (let attempt = 0; attempt < 80; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+  const status = await poll(async () => {
     const statusResponse = await fetch(`/api/veo/status/${encodeURIComponent(operationId)}`);
-    const status = await statusResponse.json().catch(() => null);
-    if (!statusResponse.ok) throw new Error(status?.error || `Atmosphere generation status check failed (${statusResponse.status}).`);
-    const state = String(status?.status || '').toLowerCase();
-    onProgress?.(`Atmosphere clip ${state}${status?.progress ? ` — ${status.progress}%` : '…'}`);
-    if (state === 'completed' && status?.videoUrl) return String(status.videoUrl);
-    if (state === 'failed') throw new Error(status?.errorMessage || 'Atmosphere generation failed.');
-  }
-  throw new Error('Atmosphere generation timed out.');
+    const result = await statusResponse.json().catch(() => null);
+    if (!statusResponse.ok) {
+      throw new Error(result?.error || `Atmosphere generation status check failed (${statusResponse.status}).`);
+    }
+    return result;
+  }, {
+    interval: 5_000,
+    timeout: 80 * 5_000,
+    tolerateErrors: 1,
+    until: (result) => {
+      const state = String(result?.status || '').toLowerCase();
+      return state === 'completed' || state === 'failed';
+    },
+    onTick: (result) => {
+      const state = String(result?.status || '').toLowerCase();
+      onProgress?.(`Atmosphere clip ${state}${result?.progress ? ` — ${result.progress}%` : '…'}`);
+    },
+  }).catch((error) => {
+    if (error instanceof Error && error.name === 'PollTimeoutError') {
+      throw new Error('Atmosphere generation timed out.');
+    }
+    throw error;
+  });
+  const state = String(status?.status || '').toLowerCase();
+  if (state === 'completed' && status?.videoUrl) return String(status.videoUrl);
+  throw new Error(status?.errorMessage || 'Atmosphere generation failed.');
 }
 
 /**

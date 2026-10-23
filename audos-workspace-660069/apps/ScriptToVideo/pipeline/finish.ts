@@ -7,9 +7,8 @@
  * pass can rewrite the words or drift the timing.
  */
 
-import { Film, FilmScene, fingerprint, wsToken } from '../api';
-
-const WORKSPACE_ID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
+import { WORKSPACE_ID, getWorkspaceToken } from '../../../lib/workspace';
+import { Film, FilmScene, fingerprint } from '../api';
 
 export const MUSIC_PRESETS = ['corporate', 'tech', 'uplifting', 'calm', 'energetic', 'playful', 'cinematic', 'lofi'] as const;
 export type MusicPreset = typeof MUSIC_PRESETS[number];
@@ -46,14 +45,14 @@ export interface PreparedFinish {
   captionsSrt?: string;
 }
 
-function audioHeaders(): Record<string, string> {
-  const token = wsToken();
+async function audioHeaders(): Promise<Record<string, string>> {
+  const token = await getWorkspaceToken();
   if (!token) throw new Error('Workspace session is still loading — audio generation cannot start yet.');
   return { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token };
 }
 
 async function audioPost(path: string, body: unknown): Promise<any> {
-  const res = await fetch(path, { method: 'POST', headers: audioHeaders(), body: JSON.stringify(body) });
+  const res = await fetch(path, { method: 'POST', headers: await audioHeaders(), body: JSON.stringify(body) });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(String(data?.error || data?.message || `Audio generation failed (HTTP ${res.status}).`));
   return data;
@@ -160,7 +159,10 @@ export function buildCaptions(scenes: FilmScene[]): { srt: string; durationS: nu
   const blocks: string[] = [];
   for (const scene of ordered) {
     const duration = Math.max(0.25, Number(scene.duration_s) || 0);
-    const chunks = captionChunks(scene.script_segment);
+    // Captions are speech, not the production script: visual directions,
+    // camera notes and scene headings must never be burned into the film.
+    const spokenText = String(scene.dialogue?.line || scene.narration?.text || '');
+    const chunks = captionChunks(spokenText);
     const slice = chunks.length ? duration / chunks.length : duration;
     chunks.forEach((text, i) => {
       const start = cursor + (i * slice);

@@ -23,6 +23,7 @@
  */
 import { useEffect, useState } from 'react';
 import { remuxAndAttachAudio } from '../../lib/client-stitch';
+import { poll, PollTimeoutError } from '../../lib/poll';
 import {
   approveAndFinalizeJob,
   checkVideoStatus,
@@ -548,7 +549,6 @@ function endJob(outcome: { message: string; error: string; blocked?: boolean }):
  */
 const POLL_MIN_MS = 1500;
 const POLL_MAX_MS = 6000;
-let pollDelayMs = POLL_MIN_MS;
 
 /**
  * NOTHING HERE RUNS FOREVER.
@@ -629,7 +629,6 @@ export function stillWorkingLine(job: RenderJob | null): string | null {
   return 'Still working… the engine has your scenes.';
 }
 
-let pollTimer: number | null = null;
 /** The job the loop is currently watching; guards against double-starting. */
 let watchedJobId: string | null = null;
 /** One automatic audio remux attempt per job per page load. */
@@ -637,31 +636,8 @@ let remuxedJobId: string | null = null;
 /** One automatic review-window approval per job per page load. */
 let autoApprovedJobId: string | null = null;
 
-function clearPollTimer(): void {
-  if (pollTimer !== null && typeof window !== 'undefined') {
-    window.clearTimeout(pollTimer);
-  }
-  pollTimer = null;
-}
-
 function stopWatching(): void {
-  clearPollTimer();
   watchedJobId = null;
-}
-
-function schedule(jobId: string): void {
-  if (typeof window === 'undefined') return;
-  clearPollTimer();
-  const wait = pollDelayMs;
-  pollDelayMs = Math.min(POLL_MAX_MS, pollDelayMs * 2);
-  pollTimer = window.setTimeout(() => {
-    pollTimer = null;
-    void tick(jobId).catch((e) => {
-      // Never let a poll take the loop down with it — see watchJob.
-      console.warn('[Studio] status poll threw, retrying on the next tick:', e);
-      if (watchedJobId === jobId) schedule(jobId);
-    });
-  }, wait);
 }
 
 async function tick(jobId: string): Promise<void> {
@@ -721,7 +697,6 @@ async function tick(jobId: string): Promise<void> {
           ? 'Reconnecting to the render service…'
           : state.job?.message || 'Generating your video…',
     });
-    schedule(jobId);
     return;
   }
   pollFailures = 0;
@@ -821,7 +796,6 @@ async function tick(jobId: string): Promise<void> {
         : 'rendering',
     message: status.user_message || 'Generating your video…',
   });
-  schedule(jobId);
 }
 
 function finish(jobId: string, downloadUrl: string): void {
@@ -916,13 +890,30 @@ export function watchJob(jobId: string): void {
   stopWatching();
   watchedJobId = jobId;
   pollFailures = 0;
-  pollDelayMs = POLL_MIN_MS;
-  // EVERY poll is caught here as well as inside tick(): an unhandled rejection
-  // in the loop used to kill the watcher outright, which is what left the
-  // progress screen frozen on its last message with no way forward.
-  void tick(jobId).catch((e) => {
-    console.warn('[Studio] status poll threw, retrying on the next tick:', e);
-    if (watchedJobId === jobId) schedule(jobId);
+  void poll(async () => {
+    await tick(jobId);
+    return watchedJobId !== jobId;
+  }, {
+    interval: POLL_MIN_MS,
+    timeout: MAX_POLL_MS,
+    backoff: 2,
+    maxInterval: POLL_MAX_MS,
+    tolerateErrors: MAX_POLL_FAILURES,
+    until: (done) => done,
+  }).catch((error) => {
+    if (watchedJobId !== jobId) return;
+    if (error instanceof PollTimeoutError) {
+      endJob({
+        message: 'We lost track of this render',
+        error: 'The render engine stopped answering for this video. Your brief is safe — try it again, or start over with a new one.',
+      });
+      return;
+    }
+    console.warn('[Studio] status polling stopped after repeated errors:', error);
+    endJob({
+      message: 'We lost contact with the render',
+      error: 'We could not reach the render service for several minutes. Your brief is safe — check My Videos in a moment, or try it again.',
+    });
   });
 }
 

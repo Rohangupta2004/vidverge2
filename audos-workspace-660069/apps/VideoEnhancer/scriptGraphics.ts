@@ -3,8 +3,7 @@
  * (gpt-5.6-terra via POST /proxy/openai/v1/chat/completions) splits it into
  * timed scenes, and a self-contained Remotion composition renders matching
  * overlays (title cards, lower-thirds, callouts) on top of the base video
- * through the existing render pipeline (POST /api/render/remotion — the same
- * contract enhancerCore/enhancerRender already use).
+ * through the canonical Remotion render pipeline shared by the enhancer.
  *
  * Overlay design rules (enforced BOTH in the LLM prompt and in the
  * composition itself, so a wayward AI answer can never break them):
@@ -16,7 +15,8 @@
  * - Typography is clean white sans-serif on a semi-transparent dark backdrop
  *   with a drop shadow for legibility — enhancing, never covering, the video.
  */
-import { workspaceToken, WORKSPACE_UUID } from './enhancerCore';
+import { submitRender } from '../../lib/render/remotion';
+import { workspaceToken } from './enhancerCore';
 
 export type SceneOverlayType = 'title' | 'lowerthird' | 'callout' | 'none';
 export type SceneOverlayPos = 'left' | 'center' | 'right';
@@ -173,28 +173,14 @@ export function probeVideoDuration(url: string, timeoutMs = 12000): Promise<numb
 export async function submitScriptGraphicsRender(scenes: ScriptScene[], videoUrl: string, durationInFrames: number): Promise<string> {
   const token = workspaceToken();
   if (!token) throw new Error('Your workspace session is still loading — try again in a moment.');
-  const res = await fetch('/api/render/remotion', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
-    body: JSON.stringify({
-      workspaceId: WORKSPACE_UUID,
-      compositionTsx: SCRIPT_GRAPHICS_COMPOSITION,
-      props: { scenes, videoUrl },
-      durationInFrames,
-      fps: 30,
-      // The platform's Remotion service only accepts fixed landscape geometry
-      // (width 1920 / height 1080 — anything else is rejected server-side).
-      // The composition designs at a 1280x720 reference and scales up.
-      width: 1920,
-      height: 1080,
-    }),
-  });
-  const data = (await res.json().catch(() => null)) as { operationId?: unknown; error?: unknown } | null;
-  if (!res.ok || !data || typeof data.operationId !== 'string' || !data.operationId) {
-    const err = data && typeof data.error === 'string' ? data.error : '';
-    throw new Error(err || ('Render submission failed (HTTP ' + res.status + ').'));
-  }
-  return data.operationId;
+  const submitted = await submitRender({
+    compositionTsx: SCRIPT_GRAPHICS_COMPOSITION,
+    props: { scenes, videoUrl },
+    durationInFrames,
+    // Canonical 16:9 preserves the platform's fixed 1920x1080 geometry.
+    aspect: '16:9',
+  }, token);
+  return submitted.operationId;
 }
 
 /**

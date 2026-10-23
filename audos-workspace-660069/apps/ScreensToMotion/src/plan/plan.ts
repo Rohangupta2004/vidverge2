@@ -13,6 +13,7 @@ import { assertValid } from './jsonSchema';
 import { validateAndRepairPlan, type PlanIssue } from './validate';
 import { applyBeatGrid, settleUiOnBeats } from '../sync/grid';
 import type { VideoPlan, ScreenAnalysis, IngestedScreen, IngestedClip, SyncSpec } from '../types';
+import { workspaceTokenNow } from '../../../../lib/workspace';
 
 /** Presenter Mix context (Phase 2): conformed clips + the beat grid. */
 export interface PlanMix {
@@ -20,12 +21,6 @@ export interface PlanMix {
   sync: SyncSpec | null;
   /** Optional extra directive, e.g. which clip is the presenter. */
   presenterNote?: string;
-}
-
-function workspaceToken(): string {
-  const token = (window as any).__workspaceDb?.token;
-  if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
-  return String(token);
 }
 
 const PLANNER_SYSTEM = [
@@ -65,9 +60,11 @@ const MIX_RULES = [
 ].join('\n');
 
 async function callPlanner(brief: string, analyses: ScreenAnalysis[], screens: IngestedScreen[], feedback: PlanIssue[] | null, mix?: PlanMix | null): Promise<VideoPlan> {
+  const token = workspaceTokenNow();
+  if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
   const response = await fetch('/proxy/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
+    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
     body: JSON.stringify({
       model: 'gpt-5.6-sol',
       reasoning_effort: 'medium',

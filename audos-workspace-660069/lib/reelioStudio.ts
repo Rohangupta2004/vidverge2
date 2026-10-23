@@ -21,6 +21,13 @@
 import { DEFAULT_VIDEO_MODEL, getVideoModel } from '../apps/Create/videoTypes';
 import { postGeneration } from './videoEngineClient';
 import type { AppId } from './appIds';
+import {
+  callHook,
+  getSessionId,
+  spaceId as canonicalSpaceId,
+  WORKSPACE_ID,
+  workspaceTokenNow,
+} from './workspace';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -154,9 +161,7 @@ function storeFor(key: string): Storage | null {
 // Runtime identity helpers
 // ---------------------------------------------------------------------------
 export function spaceId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  const w = window as any;
-  return w.__SPACE_ID__ || w.__APP_ID__ || w.__SPACE_CONFIG__?.id || 'workspace-660069';
+  return canonicalSpaceId();
 }
 
 export function scopedSpaceId(): string {
@@ -165,17 +170,11 @@ export function scopedSpaceId(): string {
 }
 
 export function workspaceUuid(): string | null {
-  if (typeof window === 'undefined') return null;
-  return (window as any).__WORKSPACE_ID__ || null;
+  return WORKSPACE_ID;
 }
 
 export function studioSessionId(): string | null {
-  if (typeof window === 'undefined') return null;
-  const injected = (window as any).__spaceSessionId;
-  if (typeof injected === 'string' && injected) return injected;
-  const db = (window as any).__workspaceDb;
-  if (db && typeof db.sessionId === 'string' && db.sessionId) return db.sessionId;
-  return null;
+  return getSessionId() || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -983,8 +982,7 @@ export interface ExpandFieldOptions {
  */
 export function aiProxyHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const client = typeof window !== 'undefined' ? (window as any).__workspaceDb : null;
-  const token = client && typeof client.token === 'string' ? client.token : '';
+  const token = workspaceTokenNow();
   if (token) headers['X-Workspace-DB-Token'] = token;
   return headers;
 }
@@ -1288,17 +1286,15 @@ export async function submitVideo(input: SubmitVideoInput): Promise<SubmitVideoR
     body.dialogues = input.dialogues.map((d) => (d || '').trim());
   }
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (sessionId) headers['X-Session-Id'] = sessionId;
-
   const start = async (): Promise<{ jobId: string; notice?: string; modelUsed?: string }> => {
-    const res = await fetch(`/api/hooks/execute/${scopedSpaceId()}/generate-video`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data?.success || !data.job_id) {
+    const data = await callHook<{
+      success?: boolean;
+      job_id?: string;
+      notice?: string;
+      model_used?: string;
+      error?: unknown;
+    }>('generate-video', body);
+    if (!data?.success || !data.job_id) {
       throw new Error(
         safeRenderFailure(data?.error, 'The render could not be started. Please try again.'),
       );

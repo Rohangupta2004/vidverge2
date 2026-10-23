@@ -12,6 +12,9 @@ export interface AppConfig {
   // When true, the EmailGate is bypassed for direct deep-link access via ?app=<id>.
   // Used for tokenised entrypoints where the app component itself validates the token.
   public?: boolean;
+  // Navigation-only visibility switch. Hidden apps remain registered and can
+  // still be opened by an existing deep link; removing this flag restores them.
+  hidden?: boolean;
 }
 
 export interface TerminologyConfig {

@@ -5,8 +5,9 @@
  * provider, no exceptions. Which engine a shot is routed to is a backend
  * decision the customer never sees and never pays differently for.
  *
- * FREE: scripting, briefing, storyboards, brand reads, and every word of
- * conversation with the agent. Only a video GENERATION spends credits.
+ * FREE: every new verified user receives 60 starter credits; scripting,
+ * briefing, storyboards, brand reads, and agent conversation remain free.
+ * Only video GENERATION spends credits.
  *
  * The balance itself is server-owned. This module never computes it — it asks
  * the `vv-credits` server function, which is the only writer of
@@ -18,17 +19,18 @@
  * across devices and sessions rather than dying with a tab.
  */
 import { useEffect, useState } from 'react';
-import { openPricing, spaceSessionId } from './plans';
+import { openPricing } from './plans';
 import type { PlanId } from './plans';
+import { callHook, getSessionId, hookUrl, spaceId } from './workspace';
 
-export const CREDITS_HOOK_ENDPOINT = '/api/hooks/execute/workspace-660069/vv-credits';
+export const CREDITS_HOOK_ENDPOINT = hookUrl('vv-credits');
 
 /** Fired whenever the cached balance moves, so every surface re-renders. */
 export const CREDITS_EVENT = 'vidverge:credits';
 
 /** The locked meter. */
 export const SECONDS_PER_CREDIT = 1;
-export const FREE_TRIAL_CREDITS = 30;
+export const FREE_TRIAL_CREDITS = 60;
 export const PAYG_BLOCK_PRICE_CENTS = 900;
 export const PAYG_BLOCK_CREDITS = 60;
 
@@ -82,6 +84,22 @@ export function isInsufficientCreditsError(e: unknown): e is InsufficientCredits
   return e instanceof InsufficientCreditsError;
 }
 
+/** A wallet authorization failure that is not a balance shortfall. */
+export class CreditAuthorizationError extends Error {
+  code: string;
+  status: number;
+  constructor(message: string, opts: { code?: string; status?: number } = {}) {
+    super(message);
+    this.name = 'CreditAuthorizationError';
+    this.code = opts.code || 'credit_authorization_failed';
+    this.status = opts.status || 0;
+  }
+}
+
+export function isCreditAuthorizationError(e: unknown): e is CreditAuthorizationError {
+  return e instanceof CreditAuthorizationError;
+}
+
 /** A part-second still costs a whole credit — the meter never bills fractions. */
 export function creditsForSeconds(seconds: number): number {
   const s = Number(seconds);
@@ -105,11 +123,6 @@ export function describeCost(seconds: number): string {
 export function paygBlocksFor(credits: number): number {
   const needed = Math.max(1, Math.ceil(Number(credits) || 0));
   return Math.max(1, Math.ceil(needed / PAYG_BLOCK_CREDITS));
-}
-
-function appId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
 }
 
 function normalizePlan(value: unknown): PlanId {
@@ -157,30 +170,13 @@ function publish(state: CreditState | null): CreditState | null {
  */
 async function callCredits(payload: Record<string, unknown>): Promise<any | null> {
   if (typeof window === 'undefined') return null;
-  const sessionId = spaceSessionId();
-  if (!sessionId) return null;
-  let res: Response;
+  if (!getSessionId()) return null;
   try {
-    res = await fetch(CREDITS_HOOK_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-Id': sessionId,
-        'X-App-Id': appId(),
-      },
-      body: JSON.stringify(payload),
-    });
+    return await callHook('vv-credits', payload);
   } catch (e) {
     console.warn('[VidVerge] credit wallet unreachable:', e);
     return null;
   }
-  const raw = await res.json().catch(() => null);
-  if (!raw || typeof raw !== 'object') return null;
-  // Hook answers arrive either at the top level or wrapped under `response`,
-  // depending on which execute path served them.
-  const data = 'ok' in raw || 'code' in raw ? raw : ((raw as any).response ?? raw);
-  if (!data || typeof data !== 'object') return null;
-  return data;
 }
 
 let refreshInFlight: Promise<CreditState | null> | null = null;
@@ -236,6 +232,47 @@ export interface ChargeResult {
  *     the generation proceeds unmetered. A ledger outage must never be the
  *     reason a paying customer cannot make their video; the miss is logged.
  */
+export async function authorizeCredits(request: ChargeRequest): Promise<ChargeResult> {
+  const cost = creditsForSeconds(request.seconds);
+  if (!cost) return { metered: false, charged: 0, state: cached };
+  if (typeof window === 'undefined' || !getSessionId()) {
+    throw new CreditAuthorizationError('Sign-in session expired — refresh and retry.', { code: 'session_expired', status: 401 });
+  }
+
+  let data: any;
+  try {
+    data = await callHook('vv-credits', {
+      op: 'charge',
+      entryKey: request.entryKey,
+      seconds: Math.round(request.seconds),
+      source: request.source || 'app',
+      note: request.note,
+    });
+  } catch (e: any) {
+    const status = Math.round(Number(e?.status) || 0);
+    const auth = status === 401 || status === 403;
+    throw new CreditAuthorizationError(
+      auth ? 'Sign-in session expired — refresh and retry.' : `Credit authorization could not be confirmed${e?.message ? `: ${String(e.message)}` : '.'}`,
+      { code: auth ? 'session_expired' : 'credit_authorization_unavailable', status },
+    );
+  }
+
+  const state = toState(data);
+  if (state) publish(state);
+  if (data?.code === 'insufficient_credits') {
+    const balance = state ? state.balance : 0;
+    const plan = state ? state.plan : 'free';
+    openPricing('credits', { required: cost, balance, seconds: Math.round(request.seconds) });
+    throw new InsufficientCreditsError({ required: cost, balance, seconds: Math.round(request.seconds), plan });
+  }
+  if (data?.ok !== true) {
+    throw new CreditAuthorizationError(String(data?.error || 'Credit authorization was refused.'), {
+      code: String(data?.code || 'credit_authorization_refused'),
+    });
+  }
+  return { metered: true, charged: Math.max(0, Math.round(Number(data.charged) || 0)), state };
+}
+
 export async function chargeCredits(request: ChargeRequest): Promise<ChargeResult> {
   const cost = creditsForSeconds(request.seconds);
   if (!cost) return { metered: false, charged: 0, state: cached };
@@ -277,6 +314,26 @@ export async function refundCredits(entryKey: string, note?: string): Promise<vo
   const data = await callCredits({ op: 'refund', entryKey, note });
   const state = toState(data);
   if (state) publish(state);
+}
+
+/** Authenticated refund variant for flows that must prove reconciliation. */
+export async function refundCreditsStrict(entryKey: string, note?: string): Promise<void> {
+  if (typeof window === 'undefined' || !getSessionId()) {
+    throw new CreditAuthorizationError('Sign-in session expired — refresh and retry.', { code: 'session_expired', status: 401 });
+  }
+  let data: any;
+  try {
+    data = await callHook('vv-credits', { op: 'refund', entryKey, note });
+  } catch (e: any) {
+    const status = Math.round(Number(e?.status) || 0);
+    throw new CreditAuthorizationError(
+      status === 401 || status === 403 ? 'Sign-in session expired — refresh and retry.' : `Credit refund could not be confirmed${e?.message ? `: ${String(e.message)}` : '.'}`,
+      { code: status === 401 || status === 403 ? 'session_expired' : 'credit_refund_unavailable', status },
+    );
+  }
+  const state = toState(data);
+  if (state) publish(state);
+  if (data?.ok !== true) throw new CreditAuthorizationError(String(data?.error || 'Credit refund was refused.'), { code: String(data?.code || 'credit_refund_refused') });
 }
 
 /**
@@ -381,7 +438,7 @@ export async function startSubscriptionCheckout(plan: 'creator' | 'pro', email: 
   try {
     const res = await fetch('/api/payments/subscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-App-Id': appId() },
+      headers: { 'Content-Type': 'application/json', 'X-App-Id': spaceId() },
       body: JSON.stringify({
         billingPlanId,
         customerEmail: email,
@@ -390,7 +447,7 @@ export async function startSubscriptionCheckout(plan: 'creator' | 'pro', email: 
         // Stamped onto the subscription so the `subscription-events` function
         // can find this wallet again on a renewal or a cancellation made on
         // the provider's own billing page.
-        metadata: { vvEmail: email, vvPlan: plan, spaceId: appId() },
+        metadata: { vvEmail: email, vvPlan: plan, spaceId: spaceId() },
       }),
     });
     const data = await res.json().catch(() => null);
@@ -415,7 +472,7 @@ export async function startCreditPackCheckout(blocks: number, email: string): Pr
   try {
     const res = await fetch('/api/payments/checkout', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-App-Id': appId() },
+      headers: { 'Content-Type': 'application/json', 'X-App-Id': spaceId() },
       body: JSON.stringify({
         amount,
         productName: `VidVerge — ${credits} credits`,

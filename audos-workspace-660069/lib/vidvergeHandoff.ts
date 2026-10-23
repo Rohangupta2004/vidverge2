@@ -6,8 +6,29 @@ export interface VidvergeAttachment {
   type: string;
 }
 
+export interface ScriptToVideoHandoff {
+  schemaVersion: 'vergeye.s2v-handoff.v1';
+  source: 'vergeye-ads-studio';
+  campaignId: string;
+  originatingAngleId: string;
+  creativeBrief: unknown;
+  generatedScript: string;
+  styleId: string;
+  styleConfiguration: Record<string, unknown>;
+  brandKit: Record<string, unknown>;
+  campaignReferences: string[];
+  routerMode: 'automatic' | 'manual' | 'hybrid';
+  recommendedModel: string;
+  routingReason: string;
+  aspectRatio: '16:9' | '9:16';
+  durationSeconds: number;
+  storyboardRequired: boolean;
+  claimReview: 'clear' | 'needs_human_review';
+  productionNotes: string[];
+}
+
 export interface VidvergeHandoff {
-  version: 1;
+  version: 1 | 2;
   appId: string;
   prompt?: string;
   attachment?: VidvergeAttachment | null;
@@ -18,6 +39,8 @@ export interface VidvergeHandoff {
   videoIntegration?: string;
   /** Model id within that integration (Group A string, kling-*, runway id, etc.). */
   videoModel?: string;
+  /** Structured Vergeye Phase 3 intake for the shared five-stage engine. */
+  scriptToVideo?: ScriptToVideoHandoff;
   ts: number;
 }
 
@@ -25,7 +48,7 @@ const MAX_AGE_MS = 30 * 60 * 1000;
 
 export function saveVidvergeHandoff(handoff: Omit<VidvergeHandoff, 'version' | 'ts'>): void {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(VIDVERGE_HANDOFF_KEY, JSON.stringify({ ...handoff, version: 1, ts: Date.now() }));
+  window.localStorage.setItem(VIDVERGE_HANDOFF_KEY, JSON.stringify({ ...handoff, version: 2, ts: Date.now() }));
 }
 
 export function consumeVidvergeHandoff(appId: string): VidvergeHandoff | null {
@@ -34,7 +57,7 @@ export function consumeVidvergeHandoff(appId: string): VidvergeHandoff | null {
     const raw = window.localStorage.getItem(VIDVERGE_HANDOFF_KEY);
     if (!raw) return null;
     const value = JSON.parse(raw) as VidvergeHandoff;
-    if (!value || value.version !== 1 || value.appId !== appId || !value.ts || Date.now() - value.ts > MAX_AGE_MS) {
+    if (!value || (value.version !== 1 && value.version !== 2) || value.appId !== appId || !value.ts || Date.now() - value.ts > MAX_AGE_MS) {
       if (!value?.ts || Date.now() - Number(value.ts) > MAX_AGE_MS) window.localStorage.removeItem(VIDVERGE_HANDOFF_KEY);
       return null;
     }

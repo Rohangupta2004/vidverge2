@@ -25,6 +25,8 @@
 import { EngineError, describeHttpError, generationHeaders, postGeneration } from '../../lib/videoEngineClient';
 import { chargeCredits, newChargeKey, refundCredits } from '../../lib/credits';
 import { APP_IDS, OMNI_FLASH_MODEL, VEO_31_FAST_MODEL, safeModelFor } from '../../lib/appIds';
+import { poll, PollTimeoutError } from '../../lib/poll';
+import { spaceId, workspaceTokenNow, WORKSPACE_ID } from '../../lib/workspace';
 
 /**
  * The registered app id every VFX Drop generation is recorded against.
@@ -100,28 +102,8 @@ export function vfxCreditCost(seconds: number): number {
   return duration <= OUTPUT_SECONDS ? Math.max(4, Math.ceil(duration)) : Math.ceil(duration);
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Upload, clip, frame and stitch are SPACE-scoped routes: they resolve the
- * caller from the space id, so this stays the window value. Only the two
- * generation proxies key a row to an app, and those name VFX_APP_ID instead.
- */
-function appId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__APP_ID__ || (window as any).__SPACE_ID__ || 'workspace-660069');
-}
-
-/** Stitching is workspace-scoped; prefer the space id over a surface app id. */
-function workspaceId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  return String((window as any).__SPACE_ID__ || 'workspace-660069');
-}
-
-function wsToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as any).__workspaceDb?.token || '');
-}
+const appId = spaceId;
+const wsToken = workspaceTokenNow;
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = { 'X-App-Id': appId(), ...extra };
@@ -317,68 +299,76 @@ async function submitEdit(params: VfxRenderParams): Promise<Kickoff> {
  */
 async function pollEdit(kickoff: Kickoff, params: VfxRenderParams): Promise<string> {
   const startedAt = Date.now();
-  const deadline = startedAt + 10 * 60 * 1000;
   let misses = 0;
 
   const refund = (reason: string) => {
     if (kickoff.metered) void refundCredits(kickoff.creditKey, reason);
   };
 
-  while (Date.now() < deadline) {
-    if (params.isCancelled?.()) {
-      refund('The VFX render was cancelled before it produced a clip');
-      throw new EngineError('This VFX render was cancelled.', { code: 'cancelled' });
-    }
+  try {
+    const final = await poll(async () => {
+      if (params.isCancelled?.()) {
+        throw new EngineError('This VFX render was cancelled.', { code: 'cancelled' });
+      }
 
-    let res: Response | null = null;
-    let data: any = null;
-    try {
-      res = await fetch(`/api/veo/status/${encodeURIComponent(kickoff.operationId)}`, {
-        headers: generationHeaders(VFX_APP_ID),
-      });
-      data = await res.json().catch(() => null);
-    } catch {
-      res = null;
-    }
+      let res: Response | null = null;
+      let data: any = null;
+      try {
+        res = await fetch(`/api/veo/status/${encodeURIComponent(kickoff.operationId)}`, {
+          headers: generationHeaders(VFX_APP_ID),
+        });
+        data = await res.json().catch(() => null);
+      } catch {
+        res = null;
+      }
 
-    if (res && res.status === 404) {
+      if (res?.status === 404) return { kind: 'not_found' as const, data };
+      if (!res?.ok) {
+        misses += 1;
+        return { kind: misses >= 6 ? 'lost' as const : 'pending' as const, data: null };
+      }
+
+      misses = 0;
+      const status = String(data?.status || '').toLowerCase();
+      if (status === 'completed' && data?.videoUrl) return { kind: 'complete' as const, data };
+      if (status === 'failed' || status === 'error') return { kind: 'failed' as const, data };
+      return { kind: 'pending' as const, data };
+    }, {
+      interval: 5_000,
+      timeout: 10 * 60 * 1_000,
+      tolerateErrors: 1,
+      until: (result) => result.kind !== 'pending',
+      onTick: (result) => {
+        if (result.kind !== 'pending' || !result.data) return;
+        const reported = Number(result.data.progress);
+        const elapsed = (Date.now() - startedAt) / 1000;
+        const estimated = Math.min(90, Math.round(100 * (1 - Math.exp(-elapsed / 55))));
+        params.onProgress?.(Math.min(95, Math.max(Number.isFinite(reported) ? reported : 0, estimated)));
+      },
+    });
+
+    if (final.kind === 'complete') return String(final.data.videoUrl);
+    if (final.kind === 'not_found') {
       refund('The VFX service lost the render');
       throw new EngineError('The VFX service has no record of this render. Start it again.', { code: 'not_found' });
     }
-
-    if (res && res.ok) {
-      misses = 0;
-      const status = String(data?.status || '').toLowerCase();
-      if (status === 'completed' && data?.videoUrl) return String(data.videoUrl);
-      if (status === 'failed' || status === 'error') {
-        refund('The VFX render failed at the provider');
-        throw new EngineError(
-          String(data?.errorMessage || data?.error || 'The VFX render failed at the provider.'),
-          { code: 'render_failed', retryable: true },
-        );
-      }
-      const reported = Number(data?.progress);
-      // A two-minute ease toward 90%, so a provider that reports nothing still
-      // reads as working rather than stuck.
-      const elapsed = (Date.now() - startedAt) / 1000;
-      const estimated = Math.min(90, Math.round(100 * (1 - Math.exp(-elapsed / 55))));
-      params.onProgress?.(Math.min(95, Math.max(Number.isFinite(reported) ? reported : 0, estimated)));
-    } else {
-      misses += 1;
-      if (misses >= 6) {
-        refund('The VFX service stopped answering before a clip was delivered');
-        throw new EngineError('The VFX service stopped answering. Start the render again to retry.', {
-          code: 'poll_lost',
-          retryable: true,
-        });
-      }
+    if (final.kind === 'lost') {
+      refund('The VFX service stopped answering before a clip was delivered');
+      throw new EngineError('The VFX service stopped answering. Start the render again to retry.', { code: 'poll_lost', retryable: true });
     }
-
-    await sleep(5000);
+    refund('The VFX render failed at the provider');
+    throw new EngineError(
+      String(final.data?.errorMessage || final.data?.error || 'The VFX render failed at the provider.'),
+      { code: 'render_failed', retryable: true },
+    );
+  } catch (error) {
+    if (error instanceof PollTimeoutError) {
+      refund('The VFX render timed out before a clip was delivered');
+      throw new EngineError('This render took too long. Start it again to retry.', { code: 'timeout', retryable: true });
+    }
+    if (params.isCancelled?.()) refund('The VFX render was cancelled before it produced a clip');
+    throw error;
   }
-
-  refund('The VFX render timed out before a clip was delivered');
-  throw new EngineError('This render took too long. Start it again to retry.', { code: 'timeout', retryable: true });
 }
 
 interface SourceSegment {
@@ -453,7 +443,7 @@ async function extractContinuationFrame(videoUrl: string, timestamp: number): Pr
 }
 
 async function stitchSegments(videoUrls: string[]): Promise<string> {
-  const res = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId())}/videos/stitch`, {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(WORKSPACE_ID)}/videos/stitch`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ videoUrls }),

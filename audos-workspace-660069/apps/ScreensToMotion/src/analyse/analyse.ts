@@ -14,15 +14,10 @@ import screenAnalysisSchema from '../../schema/screen-analysis.schema.json';
 import { assertValid } from '../plan/jsonSchema';
 import type { IngestResult } from './ingest';
 import type { ScreenAnalysis, Region, BBox } from '../types';
+import { workspaceTokenNow } from '../../../../lib/workspace';
 
 const MAX_REGIONS = 8;
 const RING_LUMINANCE_TOLERANCE = 0.06;
-
-function workspaceToken(): string {
-  const token = (window as any).__workspaceDb?.token;
-  if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
-  return String(token);
-}
 
 /** Downscale for the vision call — analysis geometry is normalised anyway. */
 function visionDataUrl(canvas: HTMLCanvasElement): string {
@@ -90,7 +85,8 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 export async function analyseScreen(item: IngestResult): Promise<ScreenAnalysis> {
-  const token = workspaceToken();
+  const token = workspaceTokenNow();
+  if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
   const response = await fetch('/proxy/openai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },

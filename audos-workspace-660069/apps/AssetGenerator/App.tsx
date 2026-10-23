@@ -13,6 +13,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, ImageIcon, Loader2, Play, RefreshCw, Sparkles, X } from 'lucide-react';
+import { callHook } from '../../lib/workspace';
 
 const T = {
   canvas: '#FFFDF4',
@@ -104,10 +105,6 @@ const SCENES: Scene[] = [
 
 const STORE_KEY = 'asset_generator_netflix_v1';
 
-// The platform-only generation endpoint — a server function, like every other
-// pipeline in this space (browser code never calls provider proxies directly).
-const GEN_HOOK = '/api/hooks/execute/workspace-660069/asset-image-gen';
-
 export default function App() {
   const [status, setStatus] = useState<Record<string, SceneStatus>>({});
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -134,21 +131,9 @@ export default function App() {
   }
 
   async function generateImage(prompt: string): Promise<string> {
-    const ws = (window as any).__workspaceDb;
-    const sid = String((window as any).__spaceSessionId || '');
-    const res = await fetch(GEN_HOOK, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(ws?.token ? { 'X-Workspace-DB-Token': ws.token } : {}),
-        ...(sid ? { 'X-Session-Id': sid } : {}),
-      },
-      body: JSON.stringify({ op: 'generate', prompt, aspect: '9:16', session_id: sid }),
-    });
-    const raw = await res.json().catch(() => null);
-    const data = raw && typeof raw === 'object' && raw.response !== undefined && raw._meta !== undefined ? raw.response : raw;
+    const data = await callHook<any>('asset-image-gen', { op: 'generate', prompt, aspect: '9:16' });
     const url = data?.imageUrl;
-    if (!res.ok || !url) throw new Error(String(data?.error || `Image generation failed (HTTP ${res.status}).`));
+    if (!url) throw new Error(String(data?.error || 'Image generation returned no image.'));
     return String(url);
   }
 

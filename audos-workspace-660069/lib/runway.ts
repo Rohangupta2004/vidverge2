@@ -26,6 +26,8 @@ import {
   RUNWAY_DISABLED_MESSAGE, RUNWAY_LOCALIZATION_LANGUAGES, RUNWAY_MODELS as RUNWAY_ENGINE_CATALOG,
   RUNWAY_RATIOS, RUNWAY_RECIPES, RUNWAY_VIDEO_MODELS,
 } from './videoEngines';
+import { poll } from './poll';
+import { spaceId, workspaceTokenNow } from './workspace';
 
 const BASE = '/api/generate/runway';
 
@@ -37,11 +39,11 @@ function win(): any {
 }
 
 export function runwayToken(): string {
-  return String(win().__workspaceDb?.token || '');
+  return workspaceTokenNow();
 }
 
 export function runwayAppId(): string {
-  return String(win().__APP_ID__ || win().__SPACE_ID__ || '');
+  return spaceId();
 }
 
 function idempotencyKey(): string {
@@ -666,10 +668,12 @@ export interface RunwayPollOptions {
   maxMs?: number;
 }
 
-const BACKOFF = [500, 1000, 2000, 4000, 8000];
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+interface RunwayPollState {
+  response?: Response;
+  data?: any;
+  networkError?: any;
+  cancelled?: boolean;
+  elapsedMs: number;
 }
 
 /**
@@ -680,59 +684,83 @@ function wait(ms: number): Promise<void> {
 export async function runwayPoll(taskId: string, opts: RunwayPollOptions = {}): Promise<RunwayResult> {
   const started = Date.now();
   const maxMs = opts.maxMs ?? 15 * 60 * 1000;
-  let attempt = 0;
   let lastStatus = '';
+  let callbackFailed = false;
+  let callbackError: unknown;
 
-  for (;;) {
-    if (opts.signal?.cancelled) return fail('Generation was cancelled in the app — the Runway task may still finish.', 'cancelled_locally', 0);
+  const state = await poll<RunwayPollState>(async () => {
+    if (opts.signal?.cancelled) return { cancelled: true, elapsedMs: Date.now() - started };
 
-    let res: Response;
     try {
-      res = await fetch(`${BASE}/status/${encodeURIComponent(taskId)}`, {
+      const response = await fetch(`${BASE}/status/${encodeURIComponent(taskId)}`, {
         headers: { 'X-Workspace-DB-Token': runwayToken() },
       });
-    } catch (e: any) {
+      const data = await readJson(response);
+      return { response, data, elapsedMs: Date.now() - started };
+    } catch (networkError: any) {
       // A dropped poll is not a dead task — back off and ask again.
-      if (Date.now() - started > maxMs) return fail(String(e?.message || 'Lost contact with the Runway service.'), 'network', 0);
-      await wait(BACKOFF[Math.min(attempt++, BACKOFF.length - 1)]);
-      continue;
+      return { networkError, elapsedMs: Date.now() - started };
     }
+  }, {
+    interval: 500,
+    backoff: 2,
+    maxInterval: 8000,
+    // runwayPoll owns its exact timeout messages and network-error mapping.
+    timeout: Number.POSITIVE_INFINITY,
+    onTick: (current) => {
+      if (!current.response?.ok) return;
+      const status = String(current.data?.status || '');
+      if (status && status !== lastStatus) {
+        lastStatus = status;
+        try {
+          opts.onStatus?.(status, current.elapsedMs);
+        } catch (error) {
+          callbackFailed = true;
+          callbackError = error;
+        }
+      }
+    },
+    until: (current) => {
+      if (callbackFailed || current.cancelled) return true;
+      if (current.networkError) return current.elapsedMs > maxMs;
+      if (!current.response?.ok) return true;
+      const status = String(current.data?.status || '');
+      return status === 'succeeded'
+        || DEAD_STATUSES.indexOf(status) >= 0
+        || current.elapsedMs > maxMs;
+    },
+  });
 
-    const data = await readJson(res);
-    if (!res.ok) {
-      const { message, code } = messageFrom(data, res.status);
-      return fail(message, code, res.status);
-    }
+  if (callbackFailed) throw callbackError;
+  if (state.cancelled) return fail('Generation was cancelled in the app — the Runway task may still finish.', 'cancelled_locally', 0);
+  if (state.networkError) return fail(String(state.networkError?.message || 'Lost contact with the Runway service.'), 'network', 0);
 
-    const status = String(data?.status || '');
-    if (status && status !== lastStatus) {
-      lastStatus = status;
-      opts.onStatus?.(status, Date.now() - started);
-    }
-
-    if (status === 'succeeded') {
-      const result = resultFrom(taskId, data);
-      if (!result.mediaUrls.length) return fail('Runway reported success but returned no media.', 'no_media', 200);
-      return result;
-    }
-
-    if (DEAD_STATUSES.indexOf(status) >= 0) {
-      const detail = String(data?.error?.message || data?.error || '');
-      return fail(`Runway ${status === 'failed' ? 'could not finish this generation' : 'cancelled this generation'}${detail ? `: ${detail}` : '.'}`, status, 200);
-    }
-
-    if (Date.now() - started > maxMs) {
-      const patient = PATIENT_STATUSES.indexOf(status) >= 0;
-      return fail(
-        patient
-          ? `This generation is taking longer than expected (still ${status}). It has NOT been charged twice — check back shortly rather than submitting again.`
-          : `This generation is still ${status || 'running'} after ${Math.round(maxMs / 60000)} minutes. Check back shortly.`,
-        'timeout', 0,
-      );
-    }
-
-    await wait(BACKOFF[Math.min(attempt++, BACKOFF.length - 1)]);
+  const res = state.response as Response;
+  const data = state.data;
+  if (!res.ok) {
+    const { message, code } = messageFrom(data, res.status);
+    return fail(message, code, res.status);
   }
+
+  const status = String(data?.status || '');
+  if (status === 'succeeded') {
+    const result = resultFrom(taskId, data);
+    if (!result.mediaUrls.length) return fail('Runway reported success but returned no media.', 'no_media', 200);
+    return result;
+  }
+
+  if (DEAD_STATUSES.indexOf(status) >= 0) {
+    const detail = String(data?.error?.message || data?.error || '');
+    return fail(`Runway ${status === 'failed' ? 'could not finish this generation' : 'cancelled this generation'}${detail ? `: ${detail}` : '.'}`, status, 200);
+  }
+
+  const patient = PATIENT_STATUSES.indexOf(status) >= 0;
+  return fail(
+    patient
+      ? `This generation is taking longer than expected (still ${status}). It has NOT been charged twice — check back shortly rather than submitting again.`
+      : `This generation is still ${status || 'running'} after ${Math.round(maxMs / 60000)} minutes. Check back shortly.`,
+    'timeout', 0,
+  );
 }
 
 /** Human wording for the proxy's task statuses. */

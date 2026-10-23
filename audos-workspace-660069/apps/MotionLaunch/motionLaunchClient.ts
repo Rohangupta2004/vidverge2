@@ -4,9 +4,16 @@
  * video model. User-supplied references are opt-in and remain scene-scoped.
  */
 import { chargeCredits, newChargeKey, refundCredits } from '../../lib/credits';
-import { resolveSessionId } from '../../lib/trackB/api';
+import { poll } from '../../lib/poll';
+import { finishPortrait, readRender, submitRender } from '../../lib/render/remotion';
+import {
+  WORKSPACE_ID as CANONICAL_WORKSPACE_ID,
+  callHook as callWorkspaceHook,
+  spaceId,
+  workspaceTokenNow,
+} from '../../lib/workspace';
 
-export const WORKSPACE_ID = 'f24710e5-7c6d-4db4-92b4-c2c235877575';
+export const WORKSPACE_ID = CANONICAL_WORKSPACE_ID;
 export const MIN_SCENES = 1;
 export const MAX_SCENES = 8;
 export const MIN_SCENE_SECONDS = 4;
@@ -133,16 +140,8 @@ function isRecord(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function workspaceToken(): string {
-  if (typeof window === 'undefined') return '';
-  return String((window as unknown as { __workspaceDb?: { token?: string } }).__workspaceDb?.token || '');
-}
-
-function appId(): string {
-  if (typeof window === 'undefined') return 'workspace-660069';
-  const scope = window as unknown as { __APP_ID__?: string; __SPACE_ID__?: string };
-  return String(scope.__APP_ID__ || scope.__SPACE_ID__ || 'workspace-660069');
-}
+const workspaceToken = workspaceTokenNow;
+const appId = spaceId;
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -160,14 +159,6 @@ function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw new AbortedError();
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { signal.removeEventListener('abort', stop); resolve(); }, ms);
-    const stop = () => { clearTimeout(timer); reject(new AbortedError()); };
-    signal.addEventListener('abort', stop, { once: true });
-  });
-}
-
 function clean(value: unknown, max = 1000): string {
   const text = String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
   return text.length > max ? text.slice(0, max).trim() : text;
@@ -175,48 +166,12 @@ function clean(value: unknown, max = 1000): string {
 
 async function callHook<T>(name: string, body: Json, signal: AbortSignal): Promise<T> {
   throwIfAborted(signal);
-  let response: Response;
   try {
-    const token = workspaceToken();
-    const sessionId = resolveSessionId();
-    response = await fetch('/api/hooks/execute/' + WORKSPACE_ID + '/' + name, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-App-Id': appId(),
-        ...(token ? { 'X-Workspace-DB-Token': token } : {}),
-        ...(sessionId ? { 'X-Session-Id': sessionId } : {}),
-      },
-      body: JSON.stringify(body),
-      signal,
-    });
+    return await callWorkspaceHook<T>(name, body, { signal });
   } catch (error) {
     if (signal.aborted) throw new AbortedError();
     throw new Error(name + ' could not be reached: ' + errorMessage(error));
   }
-  const raw: unknown = await response.json().catch(() => null);
-  const payload = isRecord(raw) && isRecord(raw.response) ? raw.response : raw;
-  if (!isRecord(payload)) throw new Error(name + ' answered HTTP ' + response.status + ' with no readable body.');
-  if (typeof payload.error === 'string' && payload.error) throw new Error(payload.error);
-  if (!response.ok) throw new Error(name + ' answered HTTP ' + response.status + '.');
-  return payload as unknown as T;
-}
-
-async function callPlatform<T>(path: string, body: Json, signal: AbortSignal): Promise<{ ok: boolean; status: number; data: T | null }> {
-  throwIfAborted(signal);
-  let response: Response;
-  try {
-    response = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-App-Id': appId() },
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (error) {
-    if (signal.aborted) throw new AbortedError();
-    throw new Error(path + ' could not be reached: ' + errorMessage(error));
-  }
-  return { ok: response.ok, status: response.status, data: await response.json().catch(() => null) as T | null };
 }
 
 export function normalizeUrl(value: string): string {
@@ -567,20 +522,32 @@ async function renderSceneClip(
   }
 
   const startedAt = Date.now();
-  const deadline = startedAt + 12 * 60 * 1000;
-  let interval = 4000;
-  for (;;) {
-    await sleep(interval, signal);
-    interval = Math.min(12000, Math.round(interval * 1.2));
-    const status = await callHook<ClipStatusAnswer>('motionlaunch-create-motion-clip', {
-      op: 'status', operationId: run.operationId,
-    }, signal);
-    if (status.status === 'completed' && status.clipUrl) return status.clipUrl;
-    if (status.status === 'failed') throw new ProviderGenerationError(status.error || 'Seedance failed this scene.');
-    run.progress = Math.max(0, Math.min(99, Number(status.progress) || 0));
-    onTick(run.progress, Math.round((Date.now() - startedAt) / 1000));
-    if (Date.now() > deadline) throw new Error('Seedance is still processing this scene. Retry will resume the same provider job.');
+  let status: ClipStatusAnswer;
+  try {
+    status = await poll(
+      () => callHook<ClipStatusAnswer>('motionlaunch-create-motion-clip', {
+        op: 'status', operationId: run.operationId,
+      }, signal),
+      {
+        interval: 4_000,
+        timeout: 12 * 60 * 1_000,
+        backoff: 1.2,
+        maxInterval: 12_000,
+        signal,
+        until: (value) => value.status === 'completed' || value.status === 'failed',
+        onTick: (value) => {
+          if (value.status !== 'processing') return;
+          run.progress = Math.max(0, Math.min(99, Number(value.progress) || 0));
+          onTick(run.progress, Math.round((Date.now() - startedAt) / 1000));
+        },
+      },
+    );
+  } catch (error) {
+    if (signal.aborted) throw new AbortedError();
+    throw error;
   }
+  if (status.status === 'completed' && status.clipUrl) return status.clipUrl;
+  throw new ProviderGenerationError(status.error || 'Seedance failed this scene.');
 }
 
 const REMOTION_COMPOSITION = `
@@ -595,16 +562,19 @@ export const calculateDemoVideoDuration=(props)=>Math.max(1,Math.round((props.sc
 `;
 
 async function pollRemotion(operationId: string, signal: AbortSignal): Promise<string> {
-  const deadline = Date.now() + 60 * 60 * 1000;
-  while (Date.now() < deadline) {
-    await sleep(3000, signal);
-    const response = await fetch('/api/render/remotion/' + encodeURIComponent(operationId), { signal });
-    const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(String(data?.error || 'The composition status check failed.'));
-    if (data?.status === 'complete' && data?.videoUrl) return String(data.videoUrl);
-    if (data?.status === 'failed') throw new Error(String(data?.error || 'The deterministic composition failed.'));
+  try {
+    const status = await poll(() => readRender(operationId), {
+      interval: 3_000,
+      timeout: 60 * 60 * 1_000,
+      signal,
+      until: (value) => value.state === 'complete' || value.state === 'failed',
+    });
+    if (status.state === 'complete' && status.videoUrl) return status.videoUrl;
+    throw new Error(status.error || 'The deterministic composition failed.');
+  } catch (error) {
+    if (signal.aborted) throw new AbortedError();
+    throw error;
   }
-  throw new Error('The composition is still rendering. Retry export to check it again.');
 }
 
 async function composeFilm(state: RunState, signal: AbortSignal): Promise<{ url: string; geometry: string }> {
@@ -612,27 +582,22 @@ async function composeFilm(state: RunState, signal: AbortSignal): Promise<{ url:
   const scenes = state.plan.scenes.map((scene) => ({ ...scene, clipUrl: state.sceneRuns[scene.id]?.clipUrl || '' }));
   if (scenes.some((scene) => !scene.clipUrl)) throw new Error('Every selected scene needs a completed clip before export.');
   const durationInFrames = Math.max(1, Math.round(plannedSeconds(state.plan) * 30));
-  const response = await callPlatform<{ success?: boolean; operationId?: string; error?: string }>('/api/render/remotion', {
-    workspaceId: WORKSPACE_ID,
+  const aspect = state.input.orientation === 'portrait' ? '9:16' : '16:9';
+  const submitted = await submitRender({
     compositionTsx: REMOTION_COMPOSITION,
     props: { scenes, palette: state.plan.palette, aspectRatio: state.plan.aspectRatio, voiceoverUrl: state.input.voiceoverUrl },
     durationInFrames,
-    fps: 30,
-    width: 1920,
-    height: 1080,
-  }, signal);
-  if (!response.ok || !response.data?.operationId) throw new Error(String(response.data?.error || 'The Remotion render could not be started.'));
-  const rendered = await pollRemotion(String(response.data.operationId), signal);
+    aspect,
+  }, workspaceToken());
+  const rendered = await pollRemotion(submitted.operationId, signal);
   if (state.input.orientation !== 'portrait') return { url: rendered, geometry: '1920×1080 (16:9)' };
 
-  const crop = await callPlatform<{ success?: boolean; overlayUrl?: string; video?: { videoUrl?: string }; error?: string }>(
-    '/api/workspaces/' + WORKSPACE_ID + '/videos/overlay',
-    { base_video_url: rendered, overlays: [], dimensions: { width: 1080, height: 1920 }, output_format: 'mp4' },
-    signal,
+  const portraitUrl = await finishPortrait(
+    rendered,
+    { durationSeconds: durationInFrames / 30 },
+    workspaceToken(),
   );
-  const portraitUrl = crop.data?.overlayUrl || crop.data?.video?.videoUrl;
-  if (!crop.ok || !crop.data?.success || !portraitUrl) throw new Error(String(crop.data?.error || 'The portrait master could not be encoded.'));
-  return { url: String(portraitUrl), geometry: '1080×1920 (9:16)' };
+  return { url: portraitUrl, geometry: '1080×1920 (9:16)' };
 }
 
 async function probeVideo(url: string, signal: AbortSignal): Promise<number> {

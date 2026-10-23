@@ -15,6 +15,7 @@
  * frame and the reason.
  */
 import { CLIP_RULES } from '../types';
+import { workspaceTokenNow } from '../../../../lib/workspace';
 import { extractFrames } from './grade';
 
 export interface GateRejection { timestamp: number; frameUrl: string; reason: string; }
@@ -22,21 +23,17 @@ export interface GateResult { passed: boolean; framesChecked: number; rejections
 
 const GATE_QUESTION = 'Does this frame contain a screen displaying an interface, or any legible text, logo or signage?';
 
-function workspaceToken(): string {
-  const token = (window as any).__workspaceDb?.token;
-  if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
-  return String(token);
-}
-
 /** Run the gate on one generated clip URL. Throws only on infrastructure failure. */
 export async function screenGateCheck(clipUrl: string, durationSeconds: number, workspaceId: string): Promise<GateResult> {
   const n = CLIP_RULES.gateFrameSamples;
   const timestamps = Array.from({ length: n }, (_, i) => Math.max(0.05, Math.min(durationSeconds - 0.05, durationSeconds * (0.05 + (0.9 * i) / (n - 1)))));
   const frames = await extractFrames(clipUrl, timestamps, workspaceId);
 
+  const token = workspaceTokenNow();
+  if (!token) throw new Error('Your workspace session is still loading. Wait a moment, then try again.');
   const response = await fetch('/proxy/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': workspaceToken() },
+    headers: { 'Content-Type': 'application/json', 'X-Workspace-DB-Token': token },
     body: JSON.stringify({
       model: 'gpt-4o',
       max_completion_tokens: 700,

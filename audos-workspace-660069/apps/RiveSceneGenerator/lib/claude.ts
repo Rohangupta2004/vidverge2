@@ -14,6 +14,7 @@
 //     with output_config.effort. Sending temperature/top_p/top_k is a 400.
 //   * The reply is content[].text (Anthropic shape), never choices[0].message.
 
+import { getWorkspaceToken } from '../../../lib/workspace';
 import {
   MACHINES,
   describeInput,
@@ -81,7 +82,7 @@ export async function generateAnimationScript(
   userPrompt: string,
   durationSec: number,
 ): Promise<ScriptResult> {
-  const token = (window as any).__workspaceDb?.token;
+  const token = await getWorkspaceToken();
   if (!token) {
     return {
       steps: null,
